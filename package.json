@@ -1,0 +1,46 @@
+{
+  "name": "lumora-app",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "dev:api": "tsx backend/src/index.ts",
+    "seed": "tsx backend/src/scripts/seed.ts",
+    "worker": "tsx backend/src/workers/generationWorker.ts",
+    "check": "tsc --noEmit",
+    "start:api": "node --enable-source-maps backend/dist/index.js",
+    "start:worker": "node --enable-source-maps backend/dist/workers/generationWorker.js",
+    "build:api": "tsc -p backend/tsconfig.json",
+    "verify:deploy": "node scripts/verify-deploy.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.56.0",
+    "framer-motion": "^12.6.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.4.0",
+    "zustand": "^5.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "openai": "^5.20.1",
+    "pg": "^8.16.3",
+    "stripe": "^18.5.0",
+    "zod": "^4.1.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tsx": "^4.20.5",
+    "typescript": "~5.7.2",
+    "vite": "^6.2.0",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/pg": "^8.15.5"
+  }
+}
