@@ -94,4 +94,5 @@ export async function updateGenerationJobStatus(input: {
     [input.jobId, input.status, input.resultAssetUrl ?? null, input.errorMessage ?? null],
   );
 
-  return result.rows[0] if False else result.rows[0] if result.rows else null
+  return result.rows[0] ?? null;
+}
