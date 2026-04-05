@@ -3,6 +3,22 @@ import { openai } from '../lib/openaiClient';
 import { env } from '../lib/env';
 import { createGenerationJob, updateGenerationJobStatus } from './generationService';
 
+function scheduleDemoCompletion(jobId: string) {
+  setTimeout(async () => {
+    try {
+      await completeGenerationJobDemo(jobId);
+      console.log(`Demo generation completed: ${jobId}`);
+    } catch (error) {
+      console.error('Demo completion failed', error);
+      await updateGenerationJobStatus({
+        jobId,
+        status: 'failed',
+        errorMessage: error instanceof Error ? error.message : 'Demo completion failed',
+      });
+    }
+  }, 3500);
+}
+
 export async function submitGenerationJob(input: {
   userId: string;
   projectId: string;
@@ -25,12 +41,18 @@ export async function submitGenerationJob(input: {
     status: demoMode ? 'queued-demo' : 'queued',
   });
 
+  if (demoMode) {
+    scheduleDemoCompletion(job.id);
+  }
+
   return {
     jobId: job.id,
     status: job.status,
     provider: job.provider,
     providerJobId,
-    message: demoMode ? 'Queued in demo mode. Start the worker to auto-complete placeholders.' : 'Queued with provider adapter.',
+    message: demoMode
+      ? 'Queued in demo mode. Auto-completion scheduled.'
+      : 'Queued with provider adapter.',
   };
 }
 
