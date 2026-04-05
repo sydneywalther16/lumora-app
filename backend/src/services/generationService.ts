@@ -3,6 +3,7 @@ import { query } from './db';
 export type GenerationRecord = {
   id: string;
   projectId: string | null;
+  title: string;
   status: string;
   outputType: string;
   provider: string;
@@ -27,6 +28,7 @@ export async function createGenerationJob(input: {
      returning
        id,
        project_id as "projectId",
+       '' as title,
        status,
        output_type as "outputType",
        provider,
@@ -43,18 +45,20 @@ export async function createGenerationJob(input: {
 export async function listGenerationJobsForUser(userId: string) {
   const result = await query<GenerationRecord>(
     `select
-       id,
-       project_id as "projectId",
-       status,
-       output_type as "outputType",
-       provider,
-       result_asset_url as "resultAssetUrl",
-       error_message as "errorMessage",
-       created_at as "createdAt",
-       updated_at as "updatedAt"
-     from generation_jobs
-     where user_id = $1
-     order by created_at desc
+       gj.id,
+       gj.project_id as "projectId",
+       coalesce(p.title, 'Untitled concept') as title,
+       gj.status,
+       gj.output_type as "outputType",
+       gj.provider,
+       gj.result_asset_url as "resultAssetUrl",
+       gj.error_message as "errorMessage",
+       gj.created_at as "createdAt",
+       gj.updated_at as "updatedAt"
+     from generation_jobs gj
+     left join projects p on p.id = gj.project_id
+     where gj.user_id = $1
+     order by gj.created_at desc
      limit 50`,
     [userId],
   );
@@ -69,7 +73,7 @@ export async function updateGenerationJobStatus(input: {
   errorMessage?: string | null;
 }) {
   const result = await query<GenerationRecord>(
-    `update generation_jobs
+    `update generation_jobs gj
      set
        status = $2,
        result_asset_url = coalesce($3, result_asset_url),
@@ -77,43 +81,17 @@ export async function updateGenerationJobStatus(input: {
        updated_at = now()
      where id = $1
      returning
-       id,
-       project_id as "projectId",
-       status,
-       output_type as "outputType",
-       provider,
-       result_asset_url as "resultAssetUrl",
-       error_message as "errorMessage",
-       created_at as "createdAt",
-       updated_at as "updatedAt"`,
+       gj.id,
+       gj.project_id as "projectId",
+       '' as title,
+       gj.status,
+       gj.output_type as "outputType",
+       gj.provider,
+       gj.result_asset_url as "resultAssetUrl",
+       gj.error_message as "errorMessage",
+       gj.created_at as "createdAt",
+       gj.updated_at as "updatedAt"`,
     [input.jobId, input.status, input.resultAssetUrl ?? null, input.errorMessage ?? null],
   );
 
-  return result.rows[0] ?? null;
-}
-
-export async function claimQueuedGenerationJob() {
-  const result = await query<GenerationRecord>(
-    `update generation_jobs
-     set status = 'processing', updated_at = now()
-     where id = (
-       select id from generation_jobs
-       where status in ('queued', 'queued-demo')
-       order by created_at asc
-       for update skip locked
-       limit 1
-     )
-     returning
-       id,
-       project_id as "projectId",
-       status,
-       output_type as "outputType",
-       provider,
-       result_asset_url as "resultAssetUrl",
-       error_message as "errorMessage",
-       created_at as "createdAt",
-       updated_at as "updatedAt"`,
-  );
-
-  return result.rows[0] ?? null;
-}
+  return result.rows[0] if False else result.rows[0] if result.rows else null
