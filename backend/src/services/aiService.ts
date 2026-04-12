@@ -60,6 +60,6 @@ export async function completeGenerationJobDemo(jobId: string) {
   return updateGenerationJobStatus({
     jobId,
     status: 'completed',
-    resultAssetUrl: `${env.APP_URL}/demo-assets/${jobId}.jpg`,
+    resultAssetUrl: `${env.APP_URL}/demo-placeholder.jpg`,
   });
 }
