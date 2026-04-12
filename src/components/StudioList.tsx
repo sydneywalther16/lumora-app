@@ -1,46 +1,63 @@
-import { useEffect, useState } from 'react';
-import StudioList from '../components/StudioList';
-import { api, type GenerationJob } from '../lib/api';
+import type { GenerationJob } from '../lib/api';
 
-export default function StudioPage() {
-  const [jobs, setJobs] = useState<GenerationJob[]>([]);
-  const [status, setStatus] = useState('Loading studio…');
+type Props = {
+  jobs: GenerationJob[];
+};
 
-  useEffect(() => {
-    let cancelled = false;
+function formatStatus(status: string) {
+  if (status === 'queued-demo') return 'Queued';
+  if (status === 'processing') return 'Rendering';
+  if (status === 'completed') return 'Completed';
+  if (status === 'failed') return 'Failed';
+  return status;
+}
 
-    async function loadJobs() {
-      try {
-        const result = await api.listGenerationJobs();
-        if (cancelled) return;
-        setJobs(result.jobs);
-        setStatus(result.jobs.length ? '' : 'No jobs yet');
-      } catch (error) {
-        if (cancelled) return;
-        setStatus(error instanceof Error ? error.message : 'Unable to load studio');
-      }
-    }
+function formatUpdated(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString();
+}
 
-    void loadJobs();
-    const interval = window.setInterval(loadJobs, 3000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, []);
+export default function StudioList({ jobs }: Props) {
+  if (!jobs.length) {
+    return (
+      <section className="list-stack">
+        <article className="list-card">
+          <div className="row-between">
+            <h3>No projects yet</h3>
+            <span className="tiny-pill status-drafting">Ready</span>
+          </div>
+          <p>Your generated concepts will appear here once you queue one from Create.</p>
+        </article>
+      </section>
+    );
+  }
 
   return (
-    <div className="page">
-      <section className="headline-card">
-        <div>
-          <span className="eyebrow">projects</span>
-          <h2>Your content factory</h2>
-        </div>
-        <p>Everything in one place: drafts, renders, queued exports, and published concepts.</p>
-      </section>
-      {status ? <p className="muted">{status}</p> : null}
-      <StudioList jobs={jobs} />
-    </div>
+    <section className="list-stack">
+      {jobs.map((job) => (
+        <article className="list-card" key={job.id}>
+          <div className="row-between">
+            <h3>{job.title}</h3>
+            <span className={`tiny-pill status-${formatStatus(job.status).toLowerCase()}`}>
+              {formatStatus(job.status)}
+            </span>
+          </div>
+          <p>
+            {job.errorMessage
+              ? job.errorMessage
+              : job.resultAssetUrl
+                ? 'Your concept has finished processing and is ready for the next step.'
+                : 'Smart clips, AI sequences, and export variations are processing.'}
+          </p>
+          <div className="row-between muted-line">
+            <span>Updated {formatUpdated(job.updatedAt)}</span>
+            <button type="button" className="text-btn" disabled>
+              {job.resultAssetUrl ? 'Ready' : 'Processing'}
+            </button>
+          </div>
+        </article>
+      ))}
+    </section>
   );
 }
