@@ -35,29 +35,47 @@ export default function StudioList({ jobs }: Props) {
 
   return (
     <section className="list-stack">
-      {jobs.map((job) => (
-        <article className="list-card" key={job.id}>
-          <div className="row-between">
-            <h3>{job.title}</h3>
-            <span className={`tiny-pill status-${formatStatus(job.status).toLowerCase()}`}>
-              {formatStatus(job.status)}
-            </span>
-          </div>
-          <p>
-            {job.errorMessage
-              ? job.errorMessage
-              : job.resultAssetUrl
-                ? 'Your concept has finished processing and is ready for the next step.'
-                : 'Smart clips, AI sequences, and export variations are processing.'}
-          </p>
-          <div className="row-between muted-line">
-            <span>Updated {formatUpdated(job.updatedAt)}</span>
-            <button type="button" className="text-btn" disabled>
-              {job.resultAssetUrl ? 'Ready' : 'Processing'}
-            </button>
-          </div>
-        </article>
-      ))}
+      {jobs.map((job) => {
+        const label = job.resultAssetUrl ? 'Open concept' : 'Processing';
+
+        return (
+          <article className="list-card" key={job.id}>
+            <div className="row-between">
+              <h3>{job.title}</h3>
+              <span className={`tiny-pill status-${formatStatus(job.status).toLowerCase()}`}>
+                {formatStatus(job.status)}
+              </span>
+            </div>
+
+            <p>
+              {job.errorMessage
+                ? job.errorMessage
+                : job.resultAssetUrl
+                  ? 'Your concept has finished processing and is ready for the next step.'
+                  : 'Smart clips, AI sequences, and export variations are processing.'}
+            </p>
+
+            <div className="row-between muted-line">
+              <span>Updated {formatUpdated(job.updatedAt)}</span>
+
+              {job.resultAssetUrl ? (
+                <a
+                  href={job.resultAssetUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-btn"
+                >
+                  {label}
+                </a>
+              ) : (
+                <button type="button" className="text-btn" disabled>
+                  {label}
+                </button>
+              )}
+            </div>
+          </article>
+        );
+      })}
     </section>
   );
 }
