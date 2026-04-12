@@ -9,7 +9,12 @@ import { notificationsRouter } from './routes/notifications';
 
 const app = express();
 
-app.use(cors({ origin: env.APP_URL, credentials: true }));
+app.use(
+  cors({
+    origin: true,
+    credentials: true,
+  }),
+);
 app.use('/api/billing/webhook', express.raw({ type: 'application/json' }));
 app.use((req, res, next) => {
   if (req.originalUrl === '/api/billing/webhook') return next();
