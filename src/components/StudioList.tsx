@@ -1,25 +1,46 @@
-import { useAppStore } from '../store/useAppStore';
+import { useEffect, useState } from 'react';
+import StudioList from '../components/StudioList';
+import { api, type GenerationJob } from '../lib/api';
 
-export default function StudioList() {
-  const { projects } = useAppStore();
+export default function StudioPage() {
+  const [jobs, setJobs] = useState<GenerationJob[]>([]);
+  const [status, setStatus] = useState('Loading studio…');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadJobs() {
+      try {
+        const result = await api.listGenerationJobs();
+        if (cancelled) return;
+        setJobs(result.jobs);
+        setStatus(result.jobs.length ? '' : 'No jobs yet');
+      } catch (error) {
+        if (cancelled) return;
+        setStatus(error instanceof Error ? error.message : 'Unable to load studio');
+      }
+    }
+
+    void loadJobs();
+    const interval = window.setInterval(loadJobs, 3000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
 
   return (
-    <section className="list-stack">
-      {projects.map((project) => (
-        <article className="list-card" key={project.id}>
-          <div className="row-between">
-            <h3>{project.title}</h3>
-            <span className={`tiny-pill status-${project.status.toLowerCase()}`}>{project.status}</span>
-          </div>
-          <p>Smart clips, AI sequences, and export variations ready for publishing flow.</p>
-          <div className="row-between muted-line">
-            <span>Updated {project.updatedAt}</span>
-            <button type="button" className="text-btn">
-              Open project
-            </button>
-          </div>
-        </article>
-      ))}
-    </section>
+    <div className="page">
+      <section className="headline-card">
+        <div>
+          <span className="eyebrow">projects</span>
+          <h2>Your content factory</h2>
+        </div>
+        <p>Everything in one place: drafts, renders, queued exports, and published concepts.</p>
+      </section>
+      {status ? <p className="muted">{status}</p> : null}
+      <StudioList jobs={jobs} />
+    </div>
   );
 }
