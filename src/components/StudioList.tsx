@@ -37,13 +37,35 @@ export default function StudioList({ jobs }: Props) {
     <section className="list-stack">
       {jobs.map((job) => {
         const label = job.resultAssetUrl ? 'Open concept' : 'Processing';
+        const statusLabel = formatStatus(job.status);
 
         return (
           <article className="list-card" key={job.id}>
+            {job.resultAssetUrl ? (
+              <a
+                href={job.resultAssetUrl}
+                target="_blank"
+                rel="noreferrer"
+                style={{ display: 'block', marginBottom: '12px' }}
+              >
+                <img
+                  src={job.resultAssetUrl}
+                  alt={job.title}
+                  style={{
+                    width: '100%',
+                    height: '220px',
+                    objectFit: 'cover',
+                    borderRadius: '16px',
+                    display: 'block',
+                  }}
+                />
+              </a>
+            ) : null}
+
             <div className="row-between">
               <h3>{job.title}</h3>
-              <span className={`tiny-pill status-${formatStatus(job.status).toLowerCase()}`}>
-                {formatStatus(job.status)}
+              <span className={`tiny-pill status-${statusLabel.toLowerCase()}`}>
+                {statusLabel}
               </span>
             </div>
 
