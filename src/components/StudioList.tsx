@@ -36,7 +36,6 @@ export default function StudioList({ jobs }: Props) {
   return (
     <section className="list-stack">
       {jobs.map((job) => {
-        const label = job.resultAssetUrl ? 'Open concept' : 'Processing';
         const statusLabel = formatStatus(job.status);
 
         return (
@@ -77,35 +76,42 @@ export default function StudioList({ jobs }: Props) {
                   : 'Smart clips, AI sequences, and export variations are processing.'}
             </p>
 
-     <div className="row-between muted-line">
-  <span>Updated {formatUpdated(job.updatedAt)}</span>
+            <div className="row-between muted-line">
+              <span>Updated {formatUpdated(job.updatedAt)}</span>
 
-  <div style={{ display: 'flex', gap: '10px' }}>
-    {job.resultAssetUrl ? (
-      <>
-        <a
-          href={job.resultAssetUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="text-btn"
-        >
-          Open
-        </a>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                {job.resultAssetUrl ? (
+                  <>
+                    <a
+                      href={job.resultAssetUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-btn"
+                    >
+                      Open
+                    </a>
 
-        <button
-          className="text-btn"
-          onClick={() => {
-            localStorage.setItem('remixPrompt', job.prompt || '');
-            window.location.href = '/create';
-          }}
-        >
-          Remix
-        </button>
-      </>
-    ) : (
-      <button type="button" className="text-btn" disabled>
-        Processing
-      </button>
-    )}
-  </div>
-</div>
+                    <button
+                      type="button"
+                      className="text-btn"
+                      onClick={() => {
+                        localStorage.setItem('remixTitle', job.title || '');
+                        window.location.href = '/create';
+                      }}
+                    >
+                      Remix
+                    </button>
+                  </>
+                ) : (
+                  <button type="button" className="text-btn" disabled>
+                    Processing
+                  </button>
+                )}
+              </div>
+            </div>
+          </article>
+        );
+      })}
+    </section>
+  );
+}
