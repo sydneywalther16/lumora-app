@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
 
@@ -13,8 +13,18 @@ export default function PromptEditor() {
     setSelectedStyle,
     setDraftTitle,
   } = useAppStore();
+
   const [status, setStatus] = useState<string>('');
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('remixTitle');
+    if (saved) {
+      setActivePrompt(saved);
+      setDraftTitle(`Remix of ${saved.slice(0, 40)}`);
+      localStorage.removeItem('remixTitle');
+    }
+  }, [setActivePrompt, setDraftTitle]);
 
   async function handleGenerate() {
     setBusy(true);
