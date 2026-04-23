@@ -96,7 +96,7 @@ export default function StudioList({ jobs }: Props) {
                       className="text-btn"
                       onClick={() => {
                         localStorage.setItem('remixTitle', job.title || '');
-                        window.location.href = '/create';
+                        window.location.href = 'https://lumora-app-topaz.vercel.app/create';
                       }}
                     >
                       Remix
