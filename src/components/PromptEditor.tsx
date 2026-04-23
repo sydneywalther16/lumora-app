@@ -18,10 +18,16 @@ export default function PromptEditor() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem('remixTitle');
-    if (saved) {
-      setActivePrompt(saved);
-      setDraftTitle(`Remix of ${saved.slice(0, 40)}`);
+    const savedPrompt = localStorage.getItem('remixPrompt');
+    const savedTitle = localStorage.getItem('remixTitle');
+
+    if (savedPrompt) {
+      setActivePrompt(savedPrompt);
+      localStorage.removeItem('remixPrompt');
+    }
+
+    if (savedTitle) {
+      setDraftTitle(savedTitle);
       localStorage.removeItem('remixTitle');
     }
   }, [setActivePrompt, setDraftTitle]);
