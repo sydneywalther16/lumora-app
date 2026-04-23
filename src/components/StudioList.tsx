@@ -201,12 +201,37 @@ export default function StudioList({ jobs }: Props) {
                 flexWrap: 'wrap',
               }}
             >
-              {/* PRIMARY */}
+              {/* 🌟 POST (REAL) */}
               <button
                 type="button"
                 className="primary-btn"
                 onClick={() => {
-                  alert('Posted! (next step: real feed 👀)');
+                  const existingPosts = JSON.parse(
+                    localStorage.getItem('lumoraPosts') || '[]'
+                  );
+
+                  const newPost = {
+                    id: selectedJob.id,
+                    title: selectedJob.title,
+                    prompt: selectedJob.prompt,
+                    imageUrl: selectedJob.resultAssetUrl,
+                    createdAt: new Date().toISOString(),
+                  };
+
+                  const alreadyPosted = existingPosts.some(
+                    (post: { id: string }) => post.id === selectedJob.id
+                  );
+
+                  const updatedPosts = alreadyPosted
+                    ? existingPosts
+                    : [newPost, ...existingPosts];
+
+                  localStorage.setItem(
+                    'lumoraPosts',
+                    JSON.stringify(updatedPosts)
+                  );
+
+                  alert('Posted to your Lumora feed ✨');
                 }}
               >
                 Post
@@ -217,12 +242,16 @@ export default function StudioList({ jobs }: Props) {
                 type="button"
                 className="ghost-btn"
                 onClick={() => {
-                  localStorage.setItem('remixPrompt', selectedJob.prompt || selectedJob.title || '');
+                  localStorage.setItem(
+                    'remixPrompt',
+                    selectedJob.prompt || selectedJob.title || ''
+                  );
                   localStorage.setItem(
                     'remixTitle',
                     `Remix of ${selectedJob.title || 'Untitled concept'}`
                   );
-                  window.location.href = 'https://lumora-app-topaz.vercel.app/create';
+                  window.location.href =
+                    'https://lumora-app-topaz.vercel.app/create';
                 }}
               >
                 Remix This
@@ -243,7 +272,9 @@ export default function StudioList({ jobs }: Props) {
                 className="ghost-btn"
                 onClick={() => {
                   if (selectedJob.resultAssetUrl) {
-                    navigator.clipboard.writeText(selectedJob.resultAssetUrl);
+                    navigator.clipboard.writeText(
+                      selectedJob.resultAssetUrl
+                    );
                     alert('Link copied ✨');
                   }
                 }}
