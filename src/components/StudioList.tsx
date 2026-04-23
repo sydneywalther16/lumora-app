@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { GenerationJob } from '../lib/api';
 
 type Props = {
@@ -19,6 +20,8 @@ function formatUpdated(iso: string) {
 }
 
 export default function StudioList({ jobs }: Props) {
+  const [selectedJob, setSelectedJob] = useState<GenerationJob | null>(null);
+
   if (!jobs.length) {
     return (
       <section className="list-stack">
@@ -34,88 +37,187 @@ export default function StudioList({ jobs }: Props) {
   }
 
   return (
-    <section className="list-stack">
-      {jobs.map((job) => {
-        const statusLabel = formatStatus(job.status);
+    <>
+      <section className="list-stack">
+        {jobs.map((job) => {
+          const statusLabel = formatStatus(job.status);
 
-        return (
-          <article className="list-card" key={job.id}>
-            {job.resultAssetUrl ? (
-              <a
-                href={job.resultAssetUrl}
-                target="_blank"
-                rel="noreferrer"
-                style={{ display: 'block', marginBottom: '12px' }}
-              >
-                <img
-                  src={job.resultAssetUrl}
-                  alt={job.title}
+          return (
+            <article className="list-card" key={job.id}>
+              {job.resultAssetUrl ? (
+                <button
+                  type="button"
+                  onClick={() => setSelectedJob(job)}
                   style={{
-                    width: '100%',
-                    height: '220px',
-                    objectFit: 'cover',
-                    borderRadius: '16px',
                     display: 'block',
+                    width: '100%',
+                    marginBottom: '12px',
+                    padding: 0,
+                    border: 0,
+                    background: 'transparent',
+                    cursor: 'pointer',
                   }}
-                />
-              </a>
+                >
+                  <img
+                    src={job.resultAssetUrl}
+                    alt={job.title}
+                    style={{
+                      width: '100%',
+                      height: '220px',
+                      objectFit: 'cover',
+                      borderRadius: '16px',
+                      display: 'block',
+                    }}
+                  />
+                </button>
+              ) : null}
+
+              <div className="row-between">
+                <h3>{job.title}</h3>
+                <span className={`tiny-pill status-${statusLabel.toLowerCase()}`}>
+                  {statusLabel}
+                </span>
+              </div>
+
+              <p>
+                {job.errorMessage
+                  ? job.errorMessage
+                  : job.resultAssetUrl
+                    ? 'Your concept has finished processing and is ready for the next step.'
+                    : 'Smart clips, AI sequences, and export variations are processing.'}
+              </p>
+
+              <div className="row-between muted-line">
+                <span>Updated {formatUpdated(job.updatedAt)}</span>
+
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  {job.resultAssetUrl ? (
+                    <>
+                      <button
+                        type="button"
+                        className="text-btn"
+                        onClick={() => setSelectedJob(job)}
+                      >
+                        Open
+                      </button>
+
+                      <button
+                        type="button"
+                        className="text-btn"
+                        onClick={() => {
+                          localStorage.setItem('remixPrompt', job.prompt || job.title || '');
+                          localStorage.setItem(
+                            'remixTitle',
+                            `Remix of ${job.title || 'Untitled concept'}`,
+                          );
+                          window.location.href = 'https://lumora-app-topaz.vercel.app/create';
+                        }}
+                      >
+                        Remix
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" className="text-btn" disabled>
+                      Processing
+                    </button>
+                  )}
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </section>
+
+      {selectedJob ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setSelectedJob(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            background: 'rgba(0, 0, 0, 0.72)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '18px',
+          }}
+        >
+          <div
+            onClick={(event) => event.stopPropagation()}
+            style={{
+              width: 'min(920px, 100%)',
+              maxHeight: '92vh',
+              overflow: 'auto',
+              borderRadius: '24px',
+              background: '#141018',
+              boxShadow: '0 24px 80px rgba(0,0,0,0.45)',
+              padding: '18px',
+              color: 'white',
+            }}
+          >
+            <div className="row-between" style={{ marginBottom: '14px' }}>
+              <div>
+                <span className="eyebrow">concept preview</span>
+                <h2 style={{ margin: '4px 0 0' }}>{selectedJob.title}</h2>
+              </div>
+
+              <button
+                type="button"
+                className="text-btn"
+                onClick={() => setSelectedJob(null)}
+              >
+                Close
+              </button>
+            </div>
+
+            {selectedJob.resultAssetUrl ? (
+              <img
+                src={selectedJob.resultAssetUrl}
+                alt={selectedJob.title}
+                style={{
+                  width: '100%',
+                  maxHeight: '62vh',
+                  objectFit: 'contain',
+                  borderRadius: '18px',
+                  display: 'block',
+                  background: '#000',
+                }}
+              />
             ) : null}
 
-            <div className="row-between">
-              <h3>{job.title}</h3>
-              <span className={`tiny-pill status-${statusLabel.toLowerCase()}`}>
-                {statusLabel}
-              </span>
-            </div>
-
-            <p>
-              {job.errorMessage
-                ? job.errorMessage
-                : job.resultAssetUrl
-                  ? 'Your concept has finished processing and is ready for the next step.'
-                  : 'Smart clips, AI sequences, and export variations are processing.'}
+            <p style={{ marginTop: '14px', opacity: 0.8 }}>
+              {selectedJob.prompt || 'No prompt saved for this concept yet.'}
             </p>
 
-            <div className="row-between muted-line">
-              <span>Updated {formatUpdated(job.updatedAt)}</span>
+            <div style={{ display: 'flex', gap: '10px', marginTop: '16px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={() => {
+                  localStorage.setItem('remixPrompt', selectedJob.prompt || selectedJob.title || '');
+                  localStorage.setItem(
+                    'remixTitle',
+                    `Remix of ${selectedJob.title || 'Untitled concept'}`,
+                  );
+                  window.location.href = 'https://lumora-app-topaz.vercel.app/create';
+                }}
+              >
+                Remix this
+              </button>
 
-              <div style={{ display: 'flex', gap: '10px' }}>
-                {job.resultAssetUrl ? (
-                  <>
-                    <a
-                      href={job.resultAssetUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-btn"
-                    >
-                      Open
-                    </a>
-
-                    <button
-                      type="button"
-                      className="text-btn"
-                      onClick={() => {
-                        localStorage.setItem('remixPrompt', job.prompt || job.title || '');
-                        localStorage.setItem(
-                          'remixTitle',
-                          `Remix of ${job.title || 'Untitled concept'}`,
-                        );
-                        window.location.href = 'https://lumora-app-topaz.vercel.app/create';
-                      }}
-                    >
-                      Remix
-                    </button>
-                  </>
-                ) : (
-                  <button type="button" className="text-btn" disabled>
-                    Processing
-                  </button>
-                )}
-              </div>
+              <a
+                href={selectedJob.resultAssetUrl || '#'}
+                download
+                className="ghost-btn"
+              >
+                Download
+              </a>
             </div>
-          </article>
-        );
-      })}
-    </section>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
