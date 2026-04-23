@@ -4,6 +4,7 @@ export type GenerationRecord = {
   id: string;
   projectId: string | null;
   title: string;
+  prompt: string;
   status: string;
   outputType: string;
   provider: string;
@@ -29,6 +30,7 @@ export async function createGenerationJob(input: {
        id,
        project_id as "projectId",
        '' as title,
+       prompt,
        status,
        output_type as "outputType",
        provider,
@@ -48,6 +50,7 @@ export async function listGenerationJobsForUser(userId: string) {
        gj.id,
        gj.project_id as "projectId",
        coalesce(p.title, 'Untitled concept') as title,
+       gj.prompt,
        gj.status,
        gj.output_type as "outputType",
        gj.provider,
@@ -84,6 +87,7 @@ export async function updateGenerationJobStatus(input: {
        gj.id,
        gj.project_id as "projectId",
        '' as title,
+       gj.prompt,
        gj.status,
        gj.output_type as "outputType",
        gj.provider,
