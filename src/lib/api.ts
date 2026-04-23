@@ -28,6 +28,7 @@ export type GenerationJob = {
   id: string;
   projectId: string | null;
   title: string;
+  prompt: string;
   status: string;
   outputType: string;
   provider: string;
@@ -39,18 +40,23 @@ export type GenerationJob = {
 
 export const api = {
   health: () => request<{ ok: boolean; service: string }>('/health'),
+
   createGeneration: (payload: GenerationPayload) =>
     request<{ jobId: string; status: string }>('/api/generations', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+
   listGenerationJobs: () => request<{ jobs: GenerationJob[] }>('/api/generations'),
+
   listProjects: () => request<{ projects: Array<Record<string, unknown>> }>('/api/projects'),
+
   createCheckoutSession: (priceId: string) =>
     request<{ url: string }>('/api/billing/checkout', {
       method: 'POST',
       body: JSON.stringify({ priceId }),
     }),
+
   subscribePush: (subscription: unknown) =>
     request<{ success: boolean }>('/api/notifications/push/subscribe', {
       method: 'POST',
