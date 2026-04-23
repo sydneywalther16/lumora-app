@@ -83,8 +83,8 @@ export default function StudioList({ jobs }: Props) {
                 {job.errorMessage
                   ? job.errorMessage
                   : job.resultAssetUrl
-                    ? 'Your concept has finished processing and is ready for the next step.'
-                    : 'Smart clips, AI sequences, and export variations are processing.'}
+                  ? 'Your concept has finished processing and is ready for the next step.'
+                  : 'Smart clips, AI sequences, and export variations are processing.'}
               </p>
 
               <div className="row-between muted-line">
@@ -108,7 +108,7 @@ export default function StudioList({ jobs }: Props) {
                           localStorage.setItem('remixPrompt', job.prompt || job.title || '');
                           localStorage.setItem(
                             'remixTitle',
-                            `Remix of ${job.title || 'Untitled concept'}`,
+                            `Remix of ${job.title || 'Untitled concept'}`
                           );
                           window.location.href = 'https://lumora-app-topaz.vercel.app/create';
                         }}
@@ -128,6 +128,7 @@ export default function StudioList({ jobs }: Props) {
         })}
       </section>
 
+      {/* 🔥 MODAL VIEWER */}
       {selectedJob ? (
         <div
           role="dialog"
@@ -191,22 +192,43 @@ export default function StudioList({ jobs }: Props) {
               {selectedJob.prompt || 'No prompt saved for this concept yet.'}
             </p>
 
-            <div style={{ display: 'flex', gap: '10px', marginTop: '16px', flexWrap: 'wrap' }}>
+            {/* 🚀 ACTION BAR */}
+            <div
+              style={{
+                display: 'flex',
+                gap: '10px',
+                marginTop: '16px',
+                flexWrap: 'wrap',
+              }}
+            >
+              {/* PRIMARY */}
               <button
                 type="button"
                 className="primary-btn"
                 onClick={() => {
+                  alert('Posted! (next step: real feed 👀)');
+                }}
+              >
+                Post
+              </button>
+
+              {/* Remix */}
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={() => {
                   localStorage.setItem('remixPrompt', selectedJob.prompt || selectedJob.title || '');
                   localStorage.setItem(
                     'remixTitle',
-                    `Remix of ${selectedJob.title || 'Untitled concept'}`,
+                    `Remix of ${selectedJob.title || 'Untitled concept'}`
                   );
                   window.location.href = 'https://lumora-app-topaz.vercel.app/create';
                 }}
               >
-                Remix this
+                Remix This
               </button>
 
+              {/* Download */}
               <a
                 href={selectedJob.resultAssetUrl || '#'}
                 download
@@ -214,6 +236,20 @@ export default function StudioList({ jobs }: Props) {
               >
                 Download
               </a>
+
+              {/* Share */}
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={() => {
+                  if (selectedJob.resultAssetUrl) {
+                    navigator.clipboard.writeText(selectedJob.resultAssetUrl);
+                    alert('Link copied ✨');
+                  }
+                }}
+              >
+                Share
+              </button>
             </div>
           </div>
         </div>
