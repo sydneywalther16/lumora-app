@@ -95,7 +95,11 @@ export default function StudioList({ jobs }: Props) {
                       type="button"
                       className="text-btn"
                       onClick={() => {
-                        localStorage.setItem('remixTitle', job.title || '');
+                        localStorage.setItem('remixPrompt', job.prompt || job.title || '');
+                        localStorage.setItem(
+                          'remixTitle',
+                          `Remix of ${job.title || 'Untitled concept'}`,
+                        );
                         window.location.href = 'https://lumora-app-topaz.vercel.app/create';
                       }}
                     >
