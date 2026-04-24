@@ -21,8 +21,7 @@ function formatPostedDate(iso: string) {
 
 function getPostStats(postId: string) {
   let total = 0;
-
-  for (let i = 0; i < postId.length; i += 1) {
+  for (let i = 0; i < postId.length; i++) {
     total += postId.charCodeAt(i);
   }
 
@@ -38,20 +37,17 @@ export default function HomePage() {
   useEffect(() => {
     const loadPosts = () => {
       try {
-        const savedPosts = JSON.parse(localStorage.getItem('lumoraPosts') || '[]');
-        setPostedConcepts(Array.isArray(savedPosts) ? savedPosts : []);
+        const saved = JSON.parse(localStorage.getItem('lumoraPosts') || '[]');
+        setPostedConcepts(Array.isArray(saved) ? saved : []);
       } catch {
         setPostedConcepts([]);
       }
     };
 
     loadPosts();
-
     window.addEventListener('storage', loadPosts);
 
-    return () => {
-      window.removeEventListener('storage', loadPosts);
-    };
+    return () => window.removeEventListener('storage', loadPosts);
   }, []);
 
   return (
@@ -77,45 +73,50 @@ export default function HomePage() {
             const stats = getPostStats(post.id);
 
             return (
-              <article className="list-card" key={post.id}>
-                {post.imageUrl ? (
+              <article
+                key={post.id}
+                className="list-card"
+                style={{
+                  boxShadow:
+                    stats.likes > 700
+                      ? '0 0 40px rgba(168,85,247,0.25)'
+                      : '0 12px 40px rgba(0,0,0,0.25)',
+                }}
+              >
+                {post.imageUrl && (
                   <img
                     src={post.imageUrl}
                     alt={post.title}
                     style={{
                       width: '100%',
-                      height: '340px',
+                      height: '420px',
                       objectFit: 'cover',
-                      borderRadius: '18px',
-                      display: 'block',
-                      marginBottom: '14px',
+                      borderRadius: '22px',
+                      marginBottom: '12px',
                     }}
                   />
-                ) : null}
+                )}
 
-                <div className="row-between">
-                  <h3>{post.title || 'Untitled Lumora post'}</h3>
-                  <span className="tiny-pill">Posted</span>
-                </div>
-
-                <div
-                  style={{
-                    display: 'flex',
-                    gap: '12px',
-                    marginTop: '8px',
-                    marginBottom: '10px',
-                    opacity: 0.82,
-                    flexWrap: 'wrap',
-                  }}
-                >
+                <div style={{ display: 'flex', gap: '12px', marginBottom: '10px' }}>
                   <span>❤️ {stats.likes}</span>
                   <span>🔥 Trending</span>
                   <span>💬 {stats.comments}</span>
                 </div>
 
-                <p>{post.prompt || 'Posted from Studio'}</p>
+                <div className="row-between">
+                  <h3>{post.title || 'Untitled Lumora post'}</h3>
+                  <span className="tiny-pill" style={{ background: '#2a1f3d' }}>
+                    Live
+                  </span>
+                </div>
 
-                <p className="muted">Posted {formatPostedDate(post.createdAt)}</p>
+                <p style={{ opacity: 0.9, lineHeight: 1.5 }}>
+                  {post.prompt || 'Posted from Studio'}
+                </p>
+
+                <p className="muted">
+                  Posted {formatPostedDate(post.createdAt)}
+                </p>
               </article>
             );
           })}
@@ -128,7 +129,7 @@ export default function HomePage() {
         <p>
           {postedConcepts.length
             ? 'Your posted concepts are now showing in Home.'
-            : 'Your best-performing concepts this week all share a stronger first-frame hook and a more direct face reveal.'}
+            : 'Your best-performing concepts this week all share a stronger first-frame hook.'}
         </p>
       </BottomSheet>
     </div>
