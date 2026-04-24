@@ -5,6 +5,14 @@ type Props = {
   jobs: GenerationJob[];
 };
 
+type LumoraPost = {
+  id: string;
+  title: string;
+  prompt?: string;
+  imageUrl?: string | null;
+  createdAt: string;
+};
+
 function formatStatus(status: string) {
   if (status === 'queued-demo') return 'Queued';
   if (status === 'processing') return 'Rendering';
@@ -19,25 +27,67 @@ function formatUpdated(iso: string) {
   return date.toLocaleString();
 }
 
+function getStoredPosts(): LumoraPost[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem('lumoraPosts') || '[]');
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function StudioList({ jobs }: Props) {
   const [selectedJob, setSelectedJob] = useState<GenerationJob | null>(null);
+  const [postedIds, setPostedIds] = useState<string[]>(
+    getStoredPosts().map((p) => p.id)
+  );
+
+  function isPosted(id: string) {
+    return postedIds.includes(id);
+  }
 
   function postToFeed(job: GenerationJob) {
-    const existingPosts = JSON.parse(localStorage.getItem('lumoraPosts') || '[]');
+    const existingPosts = getStoredPosts();
 
-    const newPost = {
+    const alreadyPosted = existingPosts.some((post) => post.id === job.id);
+
+    const newPost: LumoraPost = {
       id: job.id,
       title: job.title,
       prompt: job.prompt,
-      imageUrl: job.resultAssetUrl,
+      imageUrl: job.resultAssetUrl || null,
       createdAt: new Date().toISOString(),
     };
 
-    const alreadyPosted = existingPosts.some((post: { id: string }) => post.id === job.id);
-    const updatedPosts = alreadyPosted ? existingPosts : [newPost, ...existingPosts];
+    const updatedPosts = alreadyPosted
+      ? existingPosts
+      : [newPost, ...existingPosts];
 
     localStorage.setItem('lumoraPosts', JSON.stringify(updatedPosts));
+
+    setPostedIds(updatedPosts.map((p) => p.id));
+
+    window.dispatchEvent(new Event('lumoraPostsUpdated'));
+
     alert(alreadyPosted ? 'Already posted ✨' : 'Posted to your Lumora feed ✨');
+  }
+
+  async function shareAsset(job: GenerationJob) {
+    if (!job.resultAssetUrl) return;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: job.title || 'Lumora concept',
+          text: job.prompt || '',
+          url: job.resultAssetUrl,
+        });
+        return;
+      } catch {}
+    }
+
+    navigator.clipboard.writeText(job.resultAssetUrl);
+    alert('Link copied ✨');
   }
 
   if (!jobs.length) {
@@ -62,7 +112,7 @@ export default function StudioList({ jobs }: Props) {
 
           return (
             <article className="list-card" key={job.id}>
-              {job.resultAssetUrl ? (
+              {job.resultAssetUrl && (
                 <button
                   type="button"
                   onClick={() => setSelectedJob(job)}
@@ -84,11 +134,10 @@ export default function StudioList({ jobs }: Props) {
                       height: '220px',
                       objectFit: 'cover',
                       borderRadius: '16px',
-                      display: 'block',
                     }}
                   />
                 </button>
-              ) : null}
+              )}
 
               <div className="row-between">
                 <h3>{job.title}</h3>
@@ -101,8 +150,8 @@ export default function StudioList({ jobs }: Props) {
                 {job.errorMessage
                   ? job.errorMessage
                   : job.resultAssetUrl
-                    ? 'Your concept has finished processing and is ready for the next step.'
-                    : 'Smart clips, AI sequences, and export variations are processing.'}
+                  ? 'Your concept has finished processing and is ready for the next step.'
+                  : 'Smart clips, AI sequences, and export variations are processing.'}
               </p>
 
               <div className="row-between muted-line">
@@ -111,7 +160,11 @@ export default function StudioList({ jobs }: Props) {
                 <div style={{ display: 'flex', gap: '10px' }}>
                   {job.resultAssetUrl ? (
                     <>
-                      <button type="button" className="text-btn" onClick={() => setSelectedJob(job)}>
+                      <button
+                        type="button"
+                        className="text-btn"
+                        onClick={() => setSelectedJob(job)}
+                      >
                         Open
                       </button>
 
@@ -124,7 +177,7 @@ export default function StudioList({ jobs }: Props) {
                             'remixTitle',
                             `Remix of ${job.title || 'Untitled concept'}`
                           );
-                          window.location.href = 'https://lumora-app-topaz.vercel.app/create';
+                          window.location.href = '/create';
                         }}
                       >
                         Remix
@@ -142,7 +195,7 @@ export default function StudioList({ jobs }: Props) {
         })}
       </section>
 
-      {selectedJob ? (
+      {selectedJob && (
         <div
           role="dialog"
           aria-modal="true"
@@ -159,7 +212,7 @@ export default function StudioList({ jobs }: Props) {
           }}
         >
           <div
-            onClick={(event) => event.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
             style={{
               width: 'min(920px, 100%)',
               maxHeight: '92vh',
@@ -174,15 +227,15 @@ export default function StudioList({ jobs }: Props) {
             <div className="row-between" style={{ marginBottom: '14px' }}>
               <div>
                 <span className="eyebrow">concept preview</span>
-                <h2 style={{ margin: '4px 0 0' }}>{selectedJob.title}</h2>
+                <h2>{selectedJob.title}</h2>
               </div>
 
-              <button type="button" className="text-btn" onClick={() => setSelectedJob(null)}>
+              <button className="text-btn" onClick={() => setSelectedJob(null)}>
                 Close
               </button>
             </div>
 
-            {selectedJob.resultAssetUrl ? (
+            {selectedJob.resultAssetUrl && (
               <img
                 src={selectedJob.resultAssetUrl}
                 alt={selectedJob.title}
@@ -191,23 +244,26 @@ export default function StudioList({ jobs }: Props) {
                   maxHeight: '62vh',
                   objectFit: 'contain',
                   borderRadius: '18px',
-                  display: 'block',
                   background: '#000',
                 }}
               />
-            ) : null}
+            )}
 
             <p style={{ marginTop: '14px', opacity: 0.8 }}>
               {selectedJob.prompt || 'No prompt saved for this concept yet.'}
             </p>
 
             <div style={{ display: 'flex', gap: '10px', marginTop: '16px', flexWrap: 'wrap' }}>
-              <button type="button" className="primary-btn" onClick={() => postToFeed(selectedJob)}>
-                Post
+              
+              <button
+                className="primary-btn"
+                onClick={() => postToFeed(selectedJob)}
+                disabled={isPosted(selectedJob.id)}
+              >
+                {isPosted(selectedJob.id) ? 'Posted' : 'Post'}
               </button>
 
               <button
-                type="button"
                 className="ghost-btn"
                 onClick={() => {
                   localStorage.setItem('remixPrompt', selectedJob.prompt || selectedJob.title || '');
@@ -215,32 +271,31 @@ export default function StudioList({ jobs }: Props) {
                     'remixTitle',
                     `Remix of ${selectedJob.title || 'Untitled concept'}`
                   );
-                  window.location.href = 'https://lumora-app-topaz.vercel.app/create';
+                  window.location.href = '/create';
                 }}
               >
                 Remix This
               </button>
 
-              <a href={selectedJob.resultAssetUrl || '#'} download className="ghost-btn">
+              <a
+                href={selectedJob.resultAssetUrl || '#'}
+                download
+                className="ghost-btn"
+              >
                 Download
               </a>
 
               <button
-                type="button"
                 className="ghost-btn"
-                onClick={() => {
-                  if (selectedJob.resultAssetUrl) {
-                    navigator.clipboard.writeText(selectedJob.resultAssetUrl);
-                    alert('Link copied ✨');
-                  }
-                }}
+                onClick={() => shareAsset(selectedJob)}
               >
                 Share
               </button>
+
             </div>
           </div>
         </div>
-      ) : null}
+      )}
     </>
   );
 }
