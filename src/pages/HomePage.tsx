@@ -19,16 +19,39 @@ function formatPostedDate(iso: string) {
   return date.toLocaleString();
 }
 
+function getPostStats(postId: string) {
+  let total = 0;
+
+  for (let i = 0; i < postId.length; i += 1) {
+    total += postId.charCodeAt(i);
+  }
+
+  return {
+    likes: 100 + (total % 900),
+    comments: 5 + (total % 120),
+  };
+}
+
 export default function HomePage() {
   const [postedConcepts, setPostedConcepts] = useState<LumoraPost[]>([]);
 
   useEffect(() => {
-    try {
-      const savedPosts = JSON.parse(localStorage.getItem('lumoraPosts') || '[]');
-      setPostedConcepts(Array.isArray(savedPosts) ? savedPosts : []);
-    } catch {
-      setPostedConcepts([]);
-    }
+    const loadPosts = () => {
+      try {
+        const savedPosts = JSON.parse(localStorage.getItem('lumoraPosts') || '[]');
+        setPostedConcepts(Array.isArray(savedPosts) ? savedPosts : []);
+      } catch {
+        setPostedConcepts([]);
+      }
+    };
+
+    loadPosts();
+
+    window.addEventListener('storage', loadPosts);
+
+    return () => {
+      window.removeEventListener('storage', loadPosts);
+    };
   }, []);
 
   return (
@@ -50,33 +73,52 @@ export default function HomePage() {
 
       {postedConcepts.length ? (
         <section className="list-stack">
-          {postedConcepts.map((post) => (
-            <article className="list-card" key={post.id}>
-              {post.imageUrl ? (
-                <img
-                  src={post.imageUrl}
-                  alt={post.title}
+          {postedConcepts.map((post) => {
+            const stats = getPostStats(post.id);
+
+            return (
+              <article className="list-card" key={post.id}>
+                {post.imageUrl ? (
+                  <img
+                    src={post.imageUrl}
+                    alt={post.title}
+                    style={{
+                      width: '100%',
+                      height: '340px',
+                      objectFit: 'cover',
+                      borderRadius: '18px',
+                      display: 'block',
+                      marginBottom: '14px',
+                    }}
+                  />
+                ) : null}
+
+                <div className="row-between">
+                  <h3>{post.title || 'Untitled Lumora post'}</h3>
+                  <span className="tiny-pill">Posted</span>
+                </div>
+
+                <div
                   style={{
-                    width: '100%',
-                    height: '340px',
-                    objectFit: 'cover',
-                    borderRadius: '18px',
-                    display: 'block',
-                    marginBottom: '14px',
+                    display: 'flex',
+                    gap: '12px',
+                    marginTop: '8px',
+                    marginBottom: '10px',
+                    opacity: 0.82,
+                    flexWrap: 'wrap',
                   }}
-                />
-              ) : null}
+                >
+                  <span>❤️ {stats.likes}</span>
+                  <span>🔥 Trending</span>
+                  <span>💬 {stats.comments}</span>
+                </div>
 
-              <div className="row-between">
-                <h3>{post.title || 'Untitled Lumora post'}</h3>
-                <span className="tiny-pill">Posted</span>
-              </div>
+                <p>{post.prompt || 'Posted from Studio'}</p>
 
-              <p>{post.prompt || 'Posted from Studio'}</p>
-
-              <p className="muted">Posted {formatPostedDate(post.createdAt)}</p>
-            </article>
-          ))}
+                <p className="muted">Posted {formatPostedDate(post.createdAt)}</p>
+              </article>
+            );
+          })}
         </section>
       ) : (
         <SwipeFeed posts={posts} />
