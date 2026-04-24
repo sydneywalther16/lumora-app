@@ -14,17 +14,10 @@ type LumoraPost = {
 };
 
 function formatStatus(status: string) {
-  if (status === 'queued-demo') return 'Queued';
+  if (status === 'queued' || status === 'queued-demo') return 'Queued';
   if (status === 'processing') return 'Rendering';
-  if (status === 'completed') return 'Completed';
-  if (status === 'failed') return 'Failed';
+  if (status === 'completed') return 'Done';
   return status;
-}
-
-function formatUpdated(iso: string) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString();
 }
 
 function getStoredPosts(): LumoraPost[] {
@@ -38,12 +31,12 @@ function getStoredPosts(): LumoraPost[] {
 
 export default function StudioList({ jobs }: Props) {
   const [selectedJob, setSelectedJob] = useState<GenerationJob | null>(null);
-  const [postedIds, setPostedIds] = useState<string[]>(
-    getStoredPosts().map((p) => p.id)
+  const [postedJobIds, setPostedJobIds] = useState<string[]>(
+    () => getStoredPosts().map((post) => post.id)
   );
 
-  function isPosted(id: string) {
-    return postedIds.includes(id);
+  function isPosted(jobId: string) {
+    return postedJobIds.includes(jobId);
   }
 
   function postToFeed(job: GenerationJob) {
@@ -53,7 +46,7 @@ export default function StudioList({ jobs }: Props) {
 
     const newPost: LumoraPost = {
       id: job.id,
-      title: job.title,
+      title: job.title || 'Untitled concept',
       prompt: job.prompt,
       imageUrl: job.resultAssetUrl || null,
       createdAt: new Date().toISOString(),
@@ -65,7 +58,7 @@ export default function StudioList({ jobs }: Props) {
 
     localStorage.setItem('lumoraPosts', JSON.stringify(updatedPosts));
 
-    setPostedIds(updatedPosts.map((p) => p.id));
+    setPostedJobIds(updatedPosts.map((post) => post.id));
 
     window.dispatchEvent(new Event('lumoraPostsUpdated'));
 
@@ -75,31 +68,32 @@ export default function StudioList({ jobs }: Props) {
   async function shareAsset(job: GenerationJob) {
     if (!job.resultAssetUrl) return;
 
-    if (navigator.share) {
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         await navigator.share({
           title: job.title || 'Lumora concept',
-          text: job.prompt || '',
+          text: job.prompt || undefined,
           url: job.resultAssetUrl,
         });
         return;
-      } catch {}
+      } catch {
+        // fallback
+      }
     }
 
-    navigator.clipboard.writeText(job.resultAssetUrl);
-    alert('Link copied ✨');
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(job.resultAssetUrl);
+      alert('Link copied ✨');
+      return;
+    }
+
+    alert(job.resultAssetUrl);
   }
 
   if (!jobs.length) {
     return (
       <section className="list-stack">
-        <article className="list-card">
-          <div className="row-between">
-            <h3>No projects yet</h3>
-            <span className="tiny-pill status-drafting">Ready</span>
-          </div>
-          <p>Your generated concepts will appear here once you queue one from Create.</p>
-        </article>
+        <p>No generations yet.</p>
       </section>
     );
   }
@@ -107,155 +101,63 @@ export default function StudioList({ jobs }: Props) {
   return (
     <>
       <section className="list-stack">
-        {jobs.map((job) => {
-          const statusLabel = formatStatus(job.status);
+        {jobs.map((job) => (
+          <article
+            key={job.id}
+            className="list-card"
+            onClick={() => setSelectedJob(job)}
+            style={{ cursor: 'pointer' }}
+          >
+            {job.resultAssetUrl && (
+              <img
+                src={job.resultAssetUrl}
+                alt={job.title}
+                style={{
+                  width: '100%',
+                  height: '260px',
+                  objectFit: 'cover',
+                  borderRadius: '16px',
+                  marginBottom: '10px',
+                }}
+              />
+            )}
 
-          return (
-            <article className="list-card" key={job.id}>
-              {job.resultAssetUrl && (
-                <button
-                  type="button"
-                  onClick={() => setSelectedJob(job)}
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    marginBottom: '12px',
-                    padding: 0,
-                    border: 0,
-                    background: 'transparent',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <img
-                    src={job.resultAssetUrl}
-                    alt={job.title}
-                    style={{
-                      width: '100%',
-                      height: '220px',
-                      objectFit: 'cover',
-                      borderRadius: '16px',
-                    }}
-                  />
-                </button>
-              )}
-
-              <div className="row-between">
-                <h3>{job.title}</h3>
-                <span className={`tiny-pill status-${statusLabel.toLowerCase()}`}>
-                  {statusLabel}
-                </span>
-              </div>
-
-              <p>
-                {job.errorMessage
-                  ? job.errorMessage
-                  : job.resultAssetUrl
-                  ? 'Your concept has finished processing and is ready for the next step.'
-                  : 'Smart clips, AI sequences, and export variations are processing.'}
-              </p>
-
-              <div className="row-between muted-line">
-                <span>Updated {formatUpdated(job.updatedAt)}</span>
-
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  {job.resultAssetUrl ? (
-                    <>
-                      <button
-                        type="button"
-                        className="text-btn"
-                        onClick={() => setSelectedJob(job)}
-                      >
-                        Open
-                      </button>
-
-                      <button
-                        type="button"
-                        className="text-btn"
-                        onClick={() => {
-                          localStorage.setItem('remixPrompt', job.prompt || job.title || '');
-                          localStorage.setItem(
-                            'remixTitle',
-                            `Remix of ${job.title || 'Untitled concept'}`
-                          );
-                          window.location.href = '/create';
-                        }}
-                      >
-                        Remix
-                      </button>
-                    </>
-                  ) : (
-                    <button type="button" className="text-btn" disabled>
-                      Processing
-                    </button>
-                  )}
-                </div>
-              </div>
-            </article>
-          );
-        })}
+            <div className="row-between">
+              <h3>{job.title || 'Untitled concept'}</h3>
+              <span className="tiny-pill">{formatStatus(job.status)}</span>
+            </div>
+          </article>
+        ))}
       </section>
 
       {selectedJob && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setSelectedJob(null)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 9999,
-            background: 'rgba(0, 0, 0, 0.72)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '18px',
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: 'min(920px, 100%)',
-              maxHeight: '92vh',
-              overflow: 'auto',
-              borderRadius: '24px',
-              background: '#141018',
-              boxShadow: '0 24px 80px rgba(0,0,0,0.45)',
-              padding: '18px',
-              color: 'white',
-            }}
-          >
-            <div className="row-between" style={{ marginBottom: '14px' }}>
-              <div>
-                <span className="eyebrow">concept preview</span>
-                <h2>{selectedJob.title}</h2>
-              </div>
-
-              <button className="text-btn" onClick={() => setSelectedJob(null)}>
-                Close
-              </button>
-            </div>
-
+        <div className="modal-overlay" onClick={() => setSelectedJob(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             {selectedJob.resultAssetUrl && (
               <img
                 src={selectedJob.resultAssetUrl}
                 alt={selectedJob.title}
                 style={{
                   width: '100%',
-                  maxHeight: '62vh',
-                  objectFit: 'contain',
-                  borderRadius: '18px',
-                  background: '#000',
+                  borderRadius: '16px',
+                  marginBottom: '16px',
                 }}
               />
             )}
 
-            <p style={{ marginTop: '14px', opacity: 0.8 }}>
-              {selectedJob.prompt || 'No prompt saved for this concept yet.'}
-            </p>
+            <h2>{selectedJob.title || 'Untitled concept'}</h2>
+            <p style={{ opacity: 0.8 }}>{selectedJob.prompt}</p>
 
-            <div style={{ display: 'flex', gap: '10px', marginTop: '16px', flexWrap: 'wrap' }}>
-              
+            <div
+              style={{
+                display: 'flex',
+                gap: '10px',
+                marginTop: '16px',
+                flexWrap: 'wrap',
+              }}
+            >
               <button
+                type="button"
                 className="primary-btn"
                 onClick={() => postToFeed(selectedJob)}
                 disabled={isPosted(selectedJob.id)}
@@ -264,9 +166,13 @@ export default function StudioList({ jobs }: Props) {
               </button>
 
               <button
+                type="button"
                 className="ghost-btn"
                 onClick={() => {
-                  localStorage.setItem('remixPrompt', selectedJob.prompt || selectedJob.title || '');
+                  localStorage.setItem(
+                    'remixPrompt',
+                    selectedJob.prompt || selectedJob.title || ''
+                  );
                   localStorage.setItem(
                     'remixTitle',
                     `Remix of ${selectedJob.title || 'Untitled concept'}`
@@ -286,12 +192,12 @@ export default function StudioList({ jobs }: Props) {
               </a>
 
               <button
+                type="button"
                 className="ghost-btn"
                 onClick={() => shareAsset(selectedJob)}
               >
                 Share
               </button>
-
             </div>
           </div>
         </div>
