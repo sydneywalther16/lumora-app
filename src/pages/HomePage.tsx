@@ -13,24 +13,23 @@ type LumoraPost = {
   createdAt: string;
 };
 
+function formatPostedDate(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return 'Just now';
+  return date.toLocaleString();
+}
+
 export default function HomePage() {
   const [postedConcepts, setPostedConcepts] = useState<LumoraPost[]>([]);
 
   useEffect(() => {
-    const savedPosts = JSON.parse(localStorage.getItem('lumoraPosts') || '[]');
-    setPostedConcepts(savedPosts);
+    try {
+      const savedPosts = JSON.parse(localStorage.getItem('lumoraPosts') || '[]');
+      setPostedConcepts(Array.isArray(savedPosts) ? savedPosts : []);
+    } catch {
+      setPostedConcepts([]);
+    }
   }, []);
-
-  const homePosts = postedConcepts.length
-    ? postedConcepts.map((post) => ({
-        id: post.id,
-        title: post.title || 'Untitled Lumora post',
-        subtitle: post.prompt || 'Posted from Studio',
-        imageUrl: post.imageUrl || '/demo-placeholder.jpg',
-        creator: '@you',
-        stats: 'Posted',
-      }))
-    : posts;
 
   return (
     <div className="page">
@@ -47,23 +46,46 @@ export default function HomePage() {
         </div>
       </div>
 
-      {postedConcepts.length ? (
-        <section className="headline-card">
-          <div>
-            <span className="eyebrow">live feed</span>
-            <h2>Your posted Lumora concepts</h2>
-          </div>
-          <p>Your Studio posts now appear here as your personal creator feed.</p>
-        </section>
-      ) : null}
-
       <ActionRail />
-      <SwipeFeed posts={homePosts} />
+
+      {postedConcepts.length ? (
+        <section className="list-stack">
+          {postedConcepts.map((post) => (
+            <article className="list-card" key={post.id}>
+              {post.imageUrl ? (
+                <img
+                  src={post.imageUrl}
+                  alt={post.title}
+                  style={{
+                    width: '100%',
+                    height: '340px',
+                    objectFit: 'cover',
+                    borderRadius: '18px',
+                    display: 'block',
+                    marginBottom: '14px',
+                  }}
+                />
+              ) : null}
+
+              <div className="row-between">
+                <h3>{post.title || 'Untitled Lumora post'}</h3>
+                <span className="tiny-pill">Posted</span>
+              </div>
+
+              <p>{post.prompt || 'Posted from Studio'}</p>
+
+              <p className="muted">Posted {formatPostedDate(post.createdAt)}</p>
+            </article>
+          ))}
+        </section>
+      ) : (
+        <SwipeFeed posts={posts} />
+      )}
 
       <BottomSheet title={postedConcepts.length ? 'Feed is live' : 'Quick studio note'}>
         <p>
           {postedConcepts.length
-            ? 'Your posted concepts are now feeding into Home. Next step: make Post save to the real database so everyone can see it.'
+            ? 'Your posted concepts are now showing in Home.'
             : 'Your best-performing concepts this week all share a stronger first-frame hook and a more direct face reveal.'}
         </p>
       </BottomSheet>
