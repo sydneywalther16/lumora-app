@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import type { GenerationJob } from '../lib/api';
+import { isSelfReady, loadProfile } from '../lib/localProfile';
 
 type Props = {
-  jobs: GenerationJob[];
+  jobs?: GenerationJob[];
 };
 
 type LumoraPost = {
@@ -11,6 +12,15 @@ type LumoraPost = {
   prompt?: string;
   imageUrl?: string | null;
   createdAt: string;
+
+  creatorName?: string;
+  creatorUsername?: string;
+  creatorAvatar?: string;
+
+  characterName?: string;
+  characterAvatar?: string;
+  characterId?: string;
+  isDefaultSelfCharacter?: boolean;
 };
 
 function formatStatus(status: string) {
@@ -36,7 +46,7 @@ function getStoredPosts(): LumoraPost[] {
   }
 }
 
-export default function StudioList({ jobs }: Props) {
+export default function StudioList({ jobs = [] }: Props) {
   const [selectedJob, setSelectedJob] = useState<GenerationJob | null>(null);
   const [postedJobIds, setPostedJobIds] = useState<string[]>(
     () => getStoredPosts().map((post) => post.id)
@@ -49,6 +59,8 @@ export default function StudioList({ jobs }: Props) {
   function postToFeed(job: GenerationJob) {
     const existingPosts = getStoredPosts();
     const alreadyPosted = existingPosts.some((post) => post.id === job.id);
+    const profile = loadProfile();
+    const useDefaultSelf = isSelfReady(profile);
 
     const newPost: LumoraPost = {
       id: job.id,
@@ -56,6 +68,15 @@ export default function StudioList({ jobs }: Props) {
       prompt: job.prompt,
       imageUrl: job.resultAssetUrl || null,
       createdAt: new Date().toISOString(),
+
+      creatorName: profile.displayName,
+      creatorUsername: profile.username,
+      creatorAvatar: profile.avatar,
+
+      characterName: useDefaultSelf ? profile.defaultSelfCharacterName : undefined,
+      characterAvatar: useDefaultSelf ? profile.defaultSelfCharacterAvatar : undefined,
+      characterId: useDefaultSelf ? profile.defaultSelfCharacterId : undefined,
+      isDefaultSelfCharacter: useDefaultSelf,
     };
 
     const updatedPosts = alreadyPosted ? existingPosts : [newPost, ...existingPosts];
