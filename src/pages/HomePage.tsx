@@ -1,8 +1,23 @@
 import { useEffect, useState } from 'react';
 import TopChips from '../components/TopChips';
-import SwipeFeed from '../components/SwipeFeed';
 import { posts, topChips, type Post, type TopChip } from '../data/mockData';
-import type { LumoraPost } from '../lib/api';
+
+type LocalLumoraPost = {
+  id: string;
+  title: string;
+  prompt?: string;
+  imageUrl?: string | null;
+  createdAt: string;
+
+  creatorName?: string;
+  creatorUsername?: string;
+  creatorAvatar?: string;
+
+  characterName?: string;
+  characterAvatar?: string;
+  characterId?: string;
+  isDefaultSelfCharacter?: boolean;
+};
 
 const categoryKeywords: Record<Exclude<TopChip, 'For You'>, string[]> = {
   Cinematic: ['cinematic', 'dramatic', 'film', 'scene', 'editorial', 'sunset', 'movie'],
@@ -32,11 +47,7 @@ function getPostStats(postId: string): { likes: number; comments: number } {
   };
 }
 
-function getCombinedPostText(post: LumoraPost): string {
-  return `${post.title} ${post.prompt || ''}`;
-}
-
-function getCombinedDemoPostText(post: Post): string {
+function getCombinedPostText(post: LocalLumoraPost | Post): string {
   return `${post.title} ${post.prompt || ''}`;
 }
 
@@ -49,22 +60,89 @@ function matchesCategory(category: TopChip, text: string): boolean {
   return keywords.some((word) => lower.includes(word));
 }
 
-function getPostImage(post: LumoraPost): string | null {
-  return post.imageUrl || null;
+function getStoredPosts(): LocalLumoraPost[] {
+  try {
+    const savedPosts = JSON.parse(window.localStorage.getItem('lumoraPosts') || '[]');
+    return Array.isArray(savedPosts) ? savedPosts : [];
+  } catch {
+    return [];
+  }
+}
+
+function PostCard({ post, isDemo = false }: { post: LocalLumoraPost | Post; isDemo?: boolean }) {
+  const stats = getPostStats(post.id);
+  const imageUrl = post.imageUrl || null;
+  const localPost = post as LocalLumoraPost;
+
+  return (
+    <article className="list-card">
+      {imageUrl ? (
+        <img
+          src={imageUrl}
+          alt={post.title}
+          style={{
+            width: '100%',
+            height: '340px',
+            objectFit: 'cover',
+            borderRadius: '18px',
+            display: 'block',
+            marginBottom: '14px',
+          }}
+        />
+      ) : null}
+
+      <div
+        style={{
+          display: 'flex',
+          gap: '12px',
+          marginTop: '8px',
+          marginBottom: '10px',
+          opacity: 0.82,
+          flexWrap: 'wrap',
+        }}
+      >
+        <span>💖 {stats.likes}</span>
+        <span>🔥 Trending</span>
+        <span>💬 {stats.comments}</span>
+      </div>
+
+      <div className="row-between">
+        <h3>{post.title || 'Untitled concept'}</h3>
+        <span className="tiny-pill" style={{ background: isDemo ? '#2a1f3d' : '#214331' }}>
+          {isDemo ? 'Demo' : 'Live'}
+        </span>
+      </div>
+
+      {!isDemo && localPost.creatorUsername ? (
+        <p className="muted">
+          Posted by {localPost.creatorName || 'Lumora Creator'} {localPost.creatorUsername}
+        </p>
+      ) : null}
+
+      {!isDemo && localPost.characterName ? (
+        <p className="muted">
+          {localPost.isDefaultSelfCharacter
+            ? 'Created as self'
+            : `Featuring ${localPost.characterName}`}
+        </p>
+      ) : null}
+
+      <p style={{ opacity: 0.9, lineHeight: 1.5 }}>
+        {post.prompt || 'Posted from Studio'}
+      </p>
+
+      <p className="muted">Posted {formatPostedDate(post.createdAt)}</p>
+    </article>
+  );
 }
 
 export default function HomePage() {
   const [activeCategory, setActiveCategory] = useState<TopChip>('For You');
-  const [postedConcepts, setPostedConcepts] = useState<LumoraPost[]>([]);
+  const [postedConcepts, setPostedConcepts] = useState<LocalLumoraPost[]>([]);
 
   useEffect(() => {
     const loadPosts = () => {
-      try {
-        const savedPosts = JSON.parse(localStorage.getItem('lumoraPosts') || '[]');
-        setPostedConcepts(Array.isArray(savedPosts) ? savedPosts : []);
-      } catch {
-        setPostedConcepts([]);
-      }
+      setPostedConcepts(getStoredPosts());
     };
 
     loadPosts();
@@ -89,8 +167,11 @@ export default function HomePage() {
     activeCategory === 'For You'
       ? posts
       : posts.filter((post) =>
-          matchesCategory(activeCategory, getCombinedDemoPostText(post)),
+          matchesCategory(activeCategory, getCombinedPostText(post)),
         );
+
+  const visiblePosts = postedConcepts.length ? filteredPostedConcepts : filteredDemoPosts;
+  const showingDemos = !postedConcepts.length;
 
   return (
     <div className="page">
@@ -127,76 +208,17 @@ export default function HomePage() {
         </button>
       </div>
 
-      {postedConcepts.length ? (
-        filteredPostedConcepts.length ? (
-          <section className="list-stack">
-            {filteredPostedConcepts.map((post) => {
-              const stats = getPostStats(post.id);
-              const imageUrl = getPostImage(post);
-
-              return (
-                <article className="list-card" key={post.id}>
-                  {imageUrl ? (
-                    <img
-                      src={imageUrl}
-                      alt={post.title}
-                      style={{
-                        width: '100%',
-                        height: '340px',
-                        objectFit: 'cover',
-                        borderRadius: '18px',
-                        display: 'block',
-                        marginBottom: '14px',
-                      }}
-                    />
-                  ) : null}
-
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: '12px',
-                      marginTop: '8px',
-                      marginBottom: '10px',
-                      opacity: 0.82,
-                      flexWrap: 'wrap',
-                    }}
-                  >
-                    <span>💖 {stats.likes}</span>
-                    <span>🔥 Trending</span>
-                    <span>💬 {stats.comments}</span>
-                  </div>
-
-                  <div className="row-between">
-                    <h3>{post.title || 'Untitled concept'}</h3>
-                    <span className="tiny-pill" style={{ background: '#2a1f3d' }}>
-                      Live
-                    </span>
-                  </div>
-
-                  <p style={{ opacity: 0.9, lineHeight: 1.5 }}>
-                    {post.prompt || 'Posted from Studio'}
-                  </p>
-
-                  <p className="muted">Posted {formatPostedDate(post.createdAt)}</p>
-                </article>
-              );
-            })}
-          </section>
-        ) : (
-          <section className="list-stack">
-            <article className="list-card">
-              <h3>No {activeCategory.toLowerCase()} posts yet</h3>
-              <p>Try another category, or post a concept from Studio that matches this lane.</p>
-            </article>
-          </section>
-        )
-      ) : filteredDemoPosts.length ? (
-        <SwipeFeed posts={filteredDemoPosts} />
+      {visiblePosts.length ? (
+        <section className="list-stack">
+          {visiblePosts.map((post) => (
+            <PostCard key={post.id} post={post} isDemo={showingDemos} />
+          ))}
+        </section>
       ) : (
         <section className="list-stack">
           <article className="list-card">
-            <h3>No {activeCategory.toLowerCase()} demos yet</h3>
-            <p>The demo feed does not have a match for this category yet.</p>
+            <h3>No {activeCategory.toLowerCase()} posts yet</h3>
+            <p>Try another category, or post a concept from Studio that matches this lane.</p>
           </article>
         </section>
       )}
