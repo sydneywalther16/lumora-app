@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { isSelfReady, loadProfile } from '../lib/localProfile';
 import { useAppStore } from '../store/useAppStore';
 
 const stylePresets = ['Editorial Drama', 'Virtual Sitcom', 'Luxury POV', 'Cinematic Sunset'];
@@ -16,6 +17,7 @@ export default function PromptEditor() {
 
   const [status, setStatus] = useState<string>('');
   const [busy, setBusy] = useState(false);
+  const [selfReady, setSelfReady] = useState(() => isSelfReady(loadProfile()));
 
   useEffect(() => {
     const saved = localStorage.getItem('remixTitle');
@@ -26,9 +28,37 @@ export default function PromptEditor() {
     }
   }, [setActivePrompt, setDraftTitle]);
 
+  useEffect(() => {
+    const refreshSelfStatus = () => {
+      setSelfReady(isSelfReady(loadProfile()));
+    };
+
+    refreshSelfStatus();
+
+    window.addEventListener('storage', refreshSelfStatus);
+    window.addEventListener('lumoraProfileUpdated', refreshSelfStatus);
+
+    return () => {
+      window.removeEventListener('storage', refreshSelfStatus);
+      window.removeEventListener('lumoraProfileUpdated', refreshSelfStatus);
+    };
+  }, []);
+
   async function handleGenerate() {
+    const profile = loadProfile();
+
+    if (!isSelfReady(profile)) {
+      setStatus('Set up your default self character in Profile to create as yourself.');
+      return;
+    }
+
     setBusy(true);
-    setStatus('Submitting generation job…');
+    setStatus(
+      profile.defaultSelfCharacterName
+        ? `Using default self character: ${profile.defaultSelfCharacterName}`
+        : 'Using default self character'
+    );
+
     try {
       const result = await api.createGeneration({
         title: draftTitle,
@@ -36,6 +66,7 @@ export default function PromptEditor() {
         stylePreset: selectedStyle,
         outputType: 'video',
       });
+
       setStatus(`Queued: ${result.jobId}`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Unable to queue generation');
@@ -76,6 +107,25 @@ export default function PromptEditor() {
         </div>
       </div>
 
+      <div className="list-card" style={{ marginBottom: '14px' }}>
+        <div className="row-between">
+          <div>
+            <span className="eyebrow">self character</span>
+            <h3>{selfReady ? 'Ready to create as yourself' : 'Default self setup needed'}</h3>
+          </div>
+
+          <span className="tiny-pill" style={{ background: selfReady ? '#214331' : '#4b2f21' }}>
+            {selfReady ? 'Ready' : 'Not ready'}
+          </span>
+        </div>
+
+        <p className="muted">
+          {selfReady
+            ? 'No manual character selected, so Lumora will use your ready default self character.'
+            : 'Set up your default self character in Profile to create as yourself.'}
+        </p>
+      </div>
+
       <div className="button-row">
         <button type="button" className="primary-btn" onClick={handleGenerate} disabled={busy}>
           {busy ? 'Submitting…' : 'Generate concept'}
@@ -84,6 +134,7 @@ export default function PromptEditor() {
           Save draft
         </button>
       </div>
+
       {status ? <p className="muted">{status}</p> : null}
     </section>
   );
