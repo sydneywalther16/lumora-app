@@ -108,3 +108,26 @@ export const trends: Trend[] = [
     prompt: 'Create a funny virtual sitcom persona scene with awkward timing, expressive reactions, and a punchy social-media ending.',
   },
 ];
+export const inboxThreads = [
+  {
+    id: 'inbox-1',
+    subject: 'Brand collab request',
+    from: 'Lumora Studio',
+    preview: 'A potential brand partner is interested in your latest creator concept.',
+    unread: true,
+  },
+  {
+    id: 'inbox-2',
+    subject: 'Generation update',
+    from: 'Lumora',
+    preview: 'Your recent AI video concept is ready to review in Studio.',
+    unread: false,
+  },
+  {
+    id: 'inbox-3',
+    subject: 'Trend alert',
+    from: 'Lumora Trends',
+    preview: 'Cinematic creator prompts are performing well this week.',
+    unread: true,
+  },
+];
