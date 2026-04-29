@@ -61,11 +61,11 @@ export function saveProfile(profile: LumoraProfile) {
   window.dispatchEvent(new Event("lumoraProfileUpdated"));
 }
 
-export function isSelfReady(profile: LumoraProfile) {
-  return (
+export function isSelfReady(profile: LumoraProfile): boolean {
+  return Boolean(
     profile.defaultSelfCharacterId &&
-    profile.selfCapture.videoUrl &&
-    profile.selfCapture.consent &&
-    profile.selfCapture.completed
+      profile.selfCapture.videoUrl &&
+      profile.selfCapture.consent &&
+      profile.selfCapture.completed
   );
 }
