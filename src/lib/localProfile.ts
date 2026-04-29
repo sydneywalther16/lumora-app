@@ -28,36 +28,42 @@ export type LumoraProfile = {
 const PROFILE_KEY = "lumora_profile";
 const CHAR_KEY = "lumora_characters";
 
+const defaultProfile: LumoraProfile = {
+  displayName: "Lumora Creator",
+  username: "@lumora",
+  bio: "",
+  avatar: "L",
+  selfCapture: { completed: false, consent: false }
+};
+
+function canUseBrowserStorage() {
+  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+}
+
 export function loadCharacters(): LumoraCharacter[] {
+  if (!canUseBrowserStorage()) return [];
+
   try {
-    return JSON.parse(localStorage.getItem(CHAR_KEY) || "[]");
+    return JSON.parse(window.localStorage.getItem(CHAR_KEY) || "[]");
   } catch {
     return [];
   }
 }
 
 export function loadProfile(): LumoraProfile {
+  if (!canUseBrowserStorage()) return defaultProfile;
+
   try {
-    return JSON.parse(localStorage.getItem(PROFILE_KEY) || "null") || {
-      displayName: "Lumora Creator",
-      username: "@lumora",
-      bio: "",
-      avatar: "L",
-      selfCapture: { completed: false, consent: false }
-    };
+    return JSON.parse(window.localStorage.getItem(PROFILE_KEY) || "null") || defaultProfile;
   } catch {
-    return {
-      displayName: "Lumora Creator",
-      username: "@lumora",
-      bio: "",
-      avatar: "L",
-      selfCapture: { completed: false, consent: false }
-    };
+    return defaultProfile;
   }
 }
 
 export function saveProfile(profile: LumoraProfile) {
-  localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+  if (!canUseBrowserStorage()) return;
+
+  window.localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
   window.dispatchEvent(new Event("lumoraProfileUpdated"));
 }
 
