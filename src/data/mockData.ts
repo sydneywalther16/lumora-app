@@ -26,6 +26,17 @@ export type Trend = {
   prompt: string;
 };
 
+export const user = {
+  handle: '@lumora',
+  bio: 'Building cinematic AI persona moments, creator tools, and viral video concepts.',
+  stats: {
+    followers: '12.8K',
+    following: '384',
+    likes: '248K',
+  },
+  signatureDNA: ['Cinematic', 'Beauty', 'Luxury POV', 'NPC Core'],
+};
+
 export const posts: Post[] = [
   {
     id: '1',
@@ -108,6 +119,7 @@ export const trends: Trend[] = [
     prompt: 'Create a funny virtual sitcom persona scene with awkward timing, expressive reactions, and a punchy social-media ending.',
   },
 ];
+
 export const inboxThreads = [
   {
     id: 'inbox-1',
