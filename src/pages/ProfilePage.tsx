@@ -1110,6 +1110,9 @@ export default function ProfilePage() {
 
           {saveMessage ? <p style={{ color: '#8bc34a', margin: 0 }}>{saveMessage}</p> : null}
           <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
+            Lumora current build
+          </p>
+          <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
             creatorSelfLoaded: {creatorSelfLoadedLabel} · creatorSelfId: {creatorSelfIdLabel} · lumoraCharactersCount: {lumoraCharactersCount} · draftExists: {draftExistsLabel}
           </p>
         </div>
