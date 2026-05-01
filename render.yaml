@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: lumora-api
+    runtime: node
+    plan: starter
+    rootDir: .
+    buildCommand: npm install
+    startCommand: npm run dev:api
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+
+  - type: worker
+    name: lumora-generation-worker
+    runtime: node
+    plan: starter
+    rootDir: .
+    buildCommand: npm install
+    startCommand: npx tsx backend/src/workers/generationWorker.ts
