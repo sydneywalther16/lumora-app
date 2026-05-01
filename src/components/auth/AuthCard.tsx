@@ -7,7 +7,7 @@ export default function AuthCard() {
   async function signIn() {
     if (!supabase) return;
     await supabase.auth.signInWithOtp({
-      email: 'creator@lumora.app',
+      email: 'creator@example.com',
       options: { emailRedirectTo: window.location.origin },
     });
   }
@@ -37,11 +37,11 @@ export default function AuthCard() {
       <section className="headline-card">
         <div>
           <span className="eyebrow">creator access</span>
-          <h2>Sign in to sync your studio</h2>
+          <h2>Local profile data is ready</h2>
         </div>
-        <p>Email magic-link auth is wired. Replace the placeholder email with your own UX flow.</p>
+        <p>Profile, projects, and self character data are stored locally for this build.</p>
         <div className="button-row">
-          <button type="button" className="primary-btn" onClick={signIn}>Try magic-link sign in</button>
+          <button type="button" className="primary-btn" onClick={signIn}>Send sign-in link</button>
         </div>
       </section>
     );

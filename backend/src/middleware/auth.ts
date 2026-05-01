@@ -7,6 +7,6 @@ export type AuthedRequest = Request & {
 
 export async function requireAuth(req: AuthedRequest, _res: Response, next: NextFunction) {
   req.userId = '00000000-0000-4000-8000-000000000001';
-  req.userEmail = 'demo@lumora.app';
+  req.userEmail = 'demo@example.com';
   next();
 }

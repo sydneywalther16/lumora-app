@@ -24,7 +24,7 @@ export type Project = {
 };
 
 export const user = {
-  handle: '@lumora.labs',
+  handle: 'lumora.creator',
   bio: 'AI influencer studio for trend-native creators, soft chaos, and cinematic loops.',
   stats: {
     followers: '228K',

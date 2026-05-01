@@ -17,7 +17,7 @@ const envSchema = z.object({
   GOOGLE_API_KEY: z.string().min(1).optional(),
   RUNWAY_API_KEY: z.string().min(1).optional(),
   RESEND_API_KEY: z.string().min(1).optional(),
-  NOTIFICATION_FROM: z.string().email().default('alerts@lumora.app'),
+  NOTIFICATION_FROM: z.string().email().default('alerts@example.com'),
 });
 
 export const env = envSchema.parse(process.env);

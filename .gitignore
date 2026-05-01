@@ -1,0 +1,4 @@
+dist
+.vercel
+build
+node_modules
