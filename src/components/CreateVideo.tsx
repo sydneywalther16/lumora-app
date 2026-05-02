@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { type GenerationResponse, type VideoAspectRatio, type VideoEngine } from '../lib/api';
 import { saveStudioProject } from '../lib/projectStorage';
 import { loadLumoraProfile } from '../lib/profileStorage';
+import { saveSupabaseDraft, saveSupabaseProject } from '../lib/supabaseAppData';
+import { useSession } from '../hooks/useSession';
 import { useAppStore } from '../store/useAppStore';
 
 type CreateVideoProps = {
@@ -22,7 +24,26 @@ function createLocalGenerationId() {
     return crypto.randomUUID();
   }
 
-  return `local-generation-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, (character) =>
+    (
+      Number(character) ^
+      (Math.random() * 16) >> (Number(character) / 4)
+    ).toString(16),
+  );
+}
+
+function saveLocalDraft(title: string, prompt: string) {
+  const draft = {
+    id: createLocalGenerationId(),
+    title,
+    prompt,
+    createdAt: new Date().toISOString(),
+  };
+  const raw = localStorage.getItem('lumora_drafts');
+  const parsed = raw ? JSON.parse(raw) : [];
+  const existing = Array.isArray(parsed) ? parsed : [];
+  localStorage.setItem('lumora_drafts', JSON.stringify([draft, ...existing]));
+  return draft;
 }
 
 export default function CreateVideo({
@@ -32,6 +53,7 @@ export default function CreateVideo({
   characterAvatar,
   isDefaultSelfCharacter,
 }: CreateVideoProps) {
+  const { user } = useSession();
   const {
     activePrompt,
     selectedStyle,
@@ -72,7 +94,7 @@ export default function CreateVideo({
       setGenerationResult(result);
 
       if (result.status === 'completed' && result.outputUrl) {
-        saveStudioProject({
+        const studioProject = {
           id: result.jobId,
           title: draftTitle,
           prompt: result.prompt,
@@ -87,12 +109,51 @@ export default function CreateVideo({
           creatorUsername: profile.username || 'lumora.creator',
           creatorAvatar: profile.avatar || null,
           createdAt: result.createdAt,
-        });
+        };
+
+        if (user) {
+          await saveSupabaseProject(user.id, studioProject);
+        }
+
+        saveStudioProject(studioProject);
       }
 
       setStatus('Draft render ready');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Unable to create draft render');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSaveDraft() {
+    setBusy(true);
+    setStatus('Saving draft...');
+
+    try {
+      if (user) {
+        await saveSupabaseDraft({
+          userId: user.id,
+          title: draftTitle,
+          prompt: activePrompt,
+          payload: {
+            selectedStyle,
+            duration,
+            aspectRatio,
+            engine,
+            characterId,
+            characterName,
+            characterAvatar,
+            isDefaultSelfCharacter,
+          },
+        });
+        setStatus('Draft saved to your account.');
+      } else {
+        saveLocalDraft(draftTitle, activePrompt);
+        setStatus('Draft saved locally.');
+      }
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Unable to save draft.');
     } finally {
       setBusy(false);
     }
@@ -191,7 +252,7 @@ export default function CreateVideo({
           <button type="button" className="primary-btn" onClick={handleGenerate} disabled={busy}>
             {busy ? 'Submitting...' : 'Generate video'}
           </button>
-          <button type="button" className="ghost-btn">
+          <button type="button" className="ghost-btn" onClick={() => void handleSaveDraft()} disabled={busy}>
             Save draft
           </button>
         </div>

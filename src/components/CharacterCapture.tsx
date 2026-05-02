@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import { type PrivacySetting, type ReferenceImageUrls } from '../lib/api';
 import { saveLocalCharacter } from '../lib/characterStorage';
+import {
+  saveSupabaseCharacter,
+  uploadLumoraMedia,
+} from '../lib/supabaseAppData';
+import { useSession } from '../hooks/useSession';
 
 type CharacterCaptureProps = {
   onCreated?: () => void;
@@ -30,6 +35,7 @@ function compactPreferences(preferences: Record<string, string>) {
 }
 
 export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
+  const { user } = useSession();
   const [name, setName] = useState('');
   const [visibility, setVisibility] = useState<PrivacySetting>('private');
   const [consentConfirmed, setConsentConfirmed] = useState(false);
@@ -64,29 +70,99 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
     setStatus('Saving character...');
 
     try {
-      const referenceImageUrls: ReferenceImageUrls = {
-        frontFace: await readFileAsDataUrl(frontFace),
-        leftAngle: await readFileAsDataUrl(leftAngle),
-        rightAngle: await readFileAsDataUrl(rightAngle),
-        expressive: null,
-      };
-
-      const sourceCaptureVideoUrl = selfieVideo ? await readFileAsDataUrl(selfieVideo) : null;
-      const voiceSampleUrl = voiceSample ? await readFileAsDataUrl(voiceSample) : null;
-
-      saveLocalCharacter({
-        name: name.trim(),
-        consentConfirmed,
-        visibility,
-        stylePreferences: compactPreferences({
-          characterVibe,
-          fashionStyle,
-          voicePersonality,
-        }),
-        referenceImageUrls,
-        sourceCaptureVideoUrl,
-        voiceSampleUrl,
+      const stylePreferences = compactPreferences({
+        characterVibe,
+        fashionStyle,
+        voicePersonality,
       });
+
+      if (user) {
+        const [frontUpload, leftUpload, rightUpload] = await Promise.all([
+          uploadLumoraMedia({
+            userId: user.id,
+            bucket: 'character-reference-images',
+            file: frontFace,
+            folder: 'fictional/front',
+            usage: 'character-front-reference',
+          }),
+          uploadLumoraMedia({
+            userId: user.id,
+            bucket: 'character-reference-images',
+            file: leftAngle,
+            folder: 'fictional/left',
+            usage: 'character-left-reference',
+          }),
+          uploadLumoraMedia({
+            userId: user.id,
+            bucket: 'character-reference-images',
+            file: rightAngle,
+            folder: 'fictional/right',
+            usage: 'character-right-reference',
+          }),
+        ]);
+
+        const videoUpload = selfieVideo
+          ? await uploadLumoraMedia({
+              userId: user.id,
+              bucket: 'self-capture-videos',
+              file: selfieVideo,
+              folder: 'fictional/capture',
+              usage: 'character-capture-video',
+            })
+          : null;
+        const voiceUpload = voiceSample
+          ? await uploadLumoraMedia({
+              userId: user.id,
+              bucket: 'voice-samples',
+              file: voiceSample,
+              folder: 'fictional/voice',
+              usage: 'character-voice-sample',
+            })
+          : null;
+
+        await saveSupabaseCharacter({
+          userId: user.id,
+          name: name.trim(),
+          consentConfirmed,
+          visibility,
+          stylePreferences,
+          referenceImageUrls: {
+            frontFace: frontUpload.url,
+            leftAngle: leftUpload.url,
+            rightAngle: rightUpload.url,
+            expressive: null,
+          },
+          referencePhotoNames: {
+            frontFace: frontUpload.fileName,
+            leftAngle: leftUpload.fileName,
+            rightAngle: rightUpload.fileName,
+          },
+          sourceCaptureVideoUrl: videoUpload?.url ?? null,
+          sourceCaptureVideoName: videoUpload?.fileName ?? null,
+          voiceSampleUrl: voiceUpload?.url ?? null,
+          voiceSampleName: voiceUpload?.fileName ?? null,
+        });
+      } else {
+        const referenceImageUrls: ReferenceImageUrls = {
+          frontFace: await readFileAsDataUrl(frontFace),
+          leftAngle: await readFileAsDataUrl(leftAngle),
+          rightAngle: await readFileAsDataUrl(rightAngle),
+          expressive: null,
+        };
+
+        const sourceCaptureVideoUrl = selfieVideo ? await readFileAsDataUrl(selfieVideo) : null;
+        const voiceSampleUrl = voiceSample ? await readFileAsDataUrl(voiceSample) : null;
+
+        saveLocalCharacter({
+          name: name.trim(),
+          consentConfirmed,
+          visibility,
+          stylePreferences,
+          referenceImageUrls,
+          sourceCaptureVideoUrl,
+          voiceSampleUrl,
+        });
+      }
 
       setName('');
       setVisibility('private');
@@ -99,7 +175,7 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
       setRightAngle(null);
       setSelfieVideo(null);
       setVoiceSample(null);
-      setStatus('Character saved to local storage.');
+      setStatus(user ? 'Character saved to your account.' : 'Character saved locally.');
       onCreated?.();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Unable to save character.');

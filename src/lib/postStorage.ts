@@ -2,6 +2,11 @@ import type { LumoraPost } from './api';
 
 const STORAGE_KEY = 'lumora_posts';
 
+function cleanMediaUrl(value?: string | null): string | null {
+  if (!value) return null;
+  return value.startsWith('data:') ? null : value;
+}
+
 export function loadPostedPublications(): LumoraPost[] {
   if (typeof window === 'undefined') return [];
 
@@ -32,7 +37,17 @@ export function savePostedItem(post: LumoraPost) {
   if (typeof window === 'undefined') return;
 
   const existing = loadPostedPublications();
-  const next = [...existing, post];
+  const next = [
+    ...existing,
+    {
+      ...post,
+      imageUrl: cleanMediaUrl(post.imageUrl),
+      videoUrl: cleanMediaUrl(post.videoUrl),
+      characterAvatar: cleanMediaUrl(post.characterAvatar),
+      creatorAvatar: cleanMediaUrl(post.creatorAvatar),
+      avatar: cleanMediaUrl(post.avatar),
+    },
+  ];
 
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));

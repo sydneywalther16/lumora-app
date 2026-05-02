@@ -19,6 +19,10 @@ export type StudioProject = {
 
 const STORAGE_KEY = 'lumora_projects';
 
+function cleanMediaUrl(value: string): string {
+  return value.startsWith('data:') ? '' : value;
+}
+
 export function loadStudioProjects(): StudioProject[] {
   if (typeof window === 'undefined') return [];
 
@@ -65,7 +69,7 @@ export function saveStudioProject(project: StudioProject) {
   if (typeof window === 'undefined') return;
 
   const existing = loadStudioProjects().filter((item) => item.id !== project.id);
-  const nextProjects = [project, ...existing];
+  const nextProjects = [{ ...project, videoUrl: cleanMediaUrl(project.videoUrl) }, ...existing];
 
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(nextProjects));

@@ -7,6 +7,8 @@ import TopChips from '../components/TopChips';
 import { posts, topChips, type Post, type TopChip } from '../data/mockData';
 import { type LumoraPost } from '../lib/api';
 import { loadPostedPublications } from '../lib/postStorage';
+import { useSession } from '../hooks/useSession';
+import { loadSupabasePublicPosts } from '../lib/supabaseAppData';
 
 function formatPostedDate(iso: string): string {
   const date = new Date(iso);
@@ -270,15 +272,36 @@ function HomeFeedCard({ post }: HomeFeedCardProps) {
 }
 
 export default function HomePage() {
+  const { configured } = useSession();
   const [activeCategory, setActiveCategory] = useState<TopChip>('For You');
   const [localPosts, setLocalPosts] = useState<LumoraPost[]>([]);
   const [feedMessage, setFeedMessage] = useState('');
 
   useEffect(() => {
-    const savedPosts = loadPostedPublications();
-    setLocalPosts(savedPosts);
-    setFeedMessage(savedPosts.length ? '' : 'Post a concept from Studio to add it to your local Home feed.');
-  }, []);
+    let active = true;
+
+    async function loadFeed() {
+      try {
+        const savedPosts = configured
+          ? await loadSupabasePublicPosts()
+          : loadPostedPublications();
+        if (!active) return;
+        setLocalPosts(savedPosts);
+        setFeedMessage(savedPosts.length ? '' : 'Post a public concept from Studio to add it to Home.');
+      } catch {
+        const savedPosts = loadPostedPublications();
+        if (!active) return;
+        setLocalPosts(savedPosts);
+        setFeedMessage(savedPosts.length ? '' : 'Post a concept from Studio to add it to Home.');
+      }
+    }
+
+    void loadFeed();
+
+    return () => {
+      active = false;
+    };
+  }, [configured]);
 
   const filteredLocalPosts =
     activeCategory === 'For You'
@@ -362,10 +385,10 @@ export default function HomePage() {
         </section>
       ) : null}
 
-      <BottomSheet title={localPosts.length ? 'Feed is local' : 'Quick studio note'}>
+      <BottomSheet title={localPosts.length ? 'Feed is live' : 'Quick studio note'}>
         <p>
           {localPosts.length
-            ? 'Your posted concepts are stored locally and showing in Home.'
+            ? 'Your posted concepts are showing in Home.'
             : 'Your best-performing concepts this week all share a stronger first-frame hook.'}
         </p>
       </BottomSheet>

@@ -5,9 +5,12 @@ import CreateVideo from '../components/CreateVideo';
 import {
   CREATOR_SELF_CHARACTER_ID,
   getCreatorSelfCharacter,
+  isCreatorSelfCharacter,
 } from '../lib/characterStorage';
-import { loadLumoraProfile, type LumoraProfile } from '../lib/profileStorage';
+import { loadLumoraProfile, saveLumoraProfile, type LumoraProfile } from '../lib/profileStorage';
 import { type CharacterProfile } from '../lib/api';
+import { useSession } from '../hooks/useSession';
+import { loadSupabaseCharacters, loadSupabaseProfile } from '../lib/supabaseAppData';
 
 function buildDefaultSelfCharacter(profile: LumoraProfile): CharacterProfile {
   return {
@@ -35,6 +38,7 @@ function buildDefaultSelfCharacter(profile: LumoraProfile): CharacterProfile {
 }
 
 export default function CreatePage() {
+  const { user } = useSession();
   const [characterRefreshKey, setCharacterRefreshKey] = useState(0);
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterProfile | null>(null);
   const [defaultSelfCharacter, setDefaultSelfCharacter] = useState<CharacterProfile | null>(null);
@@ -45,22 +49,56 @@ export default function CreatePage() {
   });
 
   useEffect(() => {
-    const loadedProfile = loadLumoraProfile();
-    setProfile(loadedProfile);
-    const storedSelfCharacter = getCreatorSelfCharacter();
-    const hasDefaultSelfCharacter = loadedProfile.defaultSelfCharacterId === CREATOR_SELF_CHARACTER_ID;
+    let active = true;
 
-    if (!storedSelfCharacter && !hasDefaultSelfCharacter) {
-      setDefaultSelfCharacter(null);
-      return;
+    async function loadDefaultSelfCharacter() {
+      if (user) {
+        try {
+          const [remoteProfile, remoteCharacters] = await Promise.all([
+            loadSupabaseProfile(user.id),
+            loadSupabaseCharacters(user.id),
+          ]);
+          const remoteSelfCharacter = remoteCharacters.find(isCreatorSelfCharacter) ?? null;
+          const nextProfile: LumoraProfile = remoteSelfCharacter
+            ? {
+                ...remoteProfile,
+                defaultSelfCharacterId: CREATOR_SELF_CHARACTER_ID,
+                defaultSelfCharacterName: remoteSelfCharacter.name,
+                defaultSelfCharacterAvatar: remoteSelfCharacter.referenceImageUrls.frontFace || remoteProfile.avatar || null,
+              }
+            : remoteProfile;
+
+          if (!active) return;
+          setProfile(nextProfile);
+          saveLumoraProfile(nextProfile);
+          setDefaultSelfCharacter(remoteSelfCharacter);
+          return;
+        } catch {
+          // Fall through to the local emergency cache.
+        }
+      }
+
+      const loadedProfile = loadLumoraProfile();
+      const storedSelfCharacter = getCreatorSelfCharacter();
+      const hasDefaultSelfCharacter =
+        loadedProfile.defaultSelfCharacterId === CREATOR_SELF_CHARACTER_ID || Boolean(storedSelfCharacter);
+
+      if (!active) return;
+      setProfile(loadedProfile);
+      setDefaultSelfCharacter(
+        hasDefaultSelfCharacter ? storedSelfCharacter ?? buildDefaultSelfCharacter(loadedProfile) : null,
+      );
     }
 
-    setDefaultSelfCharacter(storedSelfCharacter ?? buildDefaultSelfCharacter(loadedProfile));
-  }, [characterRefreshKey]);
+    void loadDefaultSelfCharacter();
+
+    return () => {
+      active = false;
+    };
+  }, [characterRefreshKey, user]);
 
   const usingDefaultSelf =
     !selectedCharacter &&
-    profile.defaultSelfCharacterId === CREATOR_SELF_CHARACTER_ID &&
     Boolean(defaultSelfCharacter);
 
   const characterId = usingDefaultSelf ? CREATOR_SELF_CHARACTER_ID : selectedCharacter?.id ?? null;

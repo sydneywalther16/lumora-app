@@ -307,9 +307,14 @@ export function saveLocalCharacter(payload: {
     consentConfirmed: payload.consentConfirmed,
     visibility: payload.visibility,
     stylePreferences: payload.stylePreferences,
-    referenceImageUrls: payload.referenceImageUrls,
-    sourceCaptureVideoUrl: payload.sourceCaptureVideoUrl,
-    voiceSampleUrl: payload.voiceSampleUrl,
+    referenceImageUrls: {
+      frontFace: cleanMediaUrl(payload.referenceImageUrls.frontFace) || '',
+      leftAngle: cleanMediaUrl(payload.referenceImageUrls.leftAngle) || '',
+      rightAngle: cleanMediaUrl(payload.referenceImageUrls.rightAngle) || '',
+      expressive: cleanMediaUrl(payload.referenceImageUrls.expressive),
+    },
+    sourceCaptureVideoUrl: cleanMediaUrl(payload.sourceCaptureVideoUrl),
+    voiceSampleUrl: cleanMediaUrl(payload.voiceSampleUrl),
     createdAt: now,
     updatedAt: now,
   };

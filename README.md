@@ -1,6 +1,6 @@
 # Lumora Full-Stack MVP Plus
 
-This version pushes the starter closer to a real launch build. In addition to the original mobile UI and backend scaffold, it now includes deployment, worker, PWA, richer notification flows, billing sync scaffolding, and a second Supabase migration for RLS and storage.
+This version pushes the starter closer to a real launch build. In addition to the original mobile UI and backend scaffold, it now includes deployment, worker, PWA, richer notification flows, billing sync scaffolding, and Supabase persistence for creator profiles, self characters, fictional characters, projects, drafts, posts, media metadata, RLS, and storage buckets.
 
 ## What was added in this pass
 
@@ -12,9 +12,10 @@ This version pushes the starter closer to a real launch build. In addition to th
 
 ### Backend / data
 - persisted generation jobs in Postgres
+- creator app persistence tables for profiles, characters, self_characters, projects, drafts, posts, and media_assets
 - billing customer upsert helper for Stripe webhook events
 - Supabase RLS migration
-- storage bucket migration
+- storage bucket migrations for avatars, reference images, self-capture videos, voice samples, generated videos, and post thumbnails
 - demo seed script refresh
 
 ### Ops / deployment
@@ -28,7 +29,7 @@ This version pushes the starter closer to a real launch build. In addition to th
 ## New quick-start deployment helpers
 
 - `docs/DEPLOY_FAST.md` – exact deploy order and where each key goes
-- `.env.frontend.example` – frontend-only env template for Vercel
+- `.env.example` - frontend env template for Vercel/local Vite
 - `backend/.env.example` – backend-only env template for Render/local API
 - `npm run verify:deploy` – checks for required env vars before deploy
 - `npm run build:api` – compiles backend TypeScript to `backend/dist`
@@ -55,13 +56,28 @@ docker compose up postgres redis api
 ## Almost-launch checklist
 
 1. Add real Supabase project keys
-2. Run both SQL migrations in Supabase
-3. Create the `lumora-assets` storage bucket if migration permissions require manual setup
+2. Run all SQL migrations in `backend/supabase/migrations` in Supabase
+3. Confirm the six Lumora storage buckets exist if migration permissions require manual setup
 4. Add Stripe product + price IDs
 5. Point frontend env to deployed API URL
 6. Replace the demo generation worker with a true provider queue
 7. Add real push delivery with web-push or native mobile notifications
 8. Add App Store assets, legal docs, and analytics
+
+## Supabase Setup
+
+1. Go to Supabase dashboard
+2. Open SQL Editor
+3. Run:
+   `backend/supabase/migrations/20260430_creator_app_persistence.sql`
+4. Go to Project Settings → API
+5. Copy:
+   - Project URL
+   - anon public key
+6. Add to Vercel:
+   `VITE_SUPABASE_URL`
+   `VITE_SUPABASE_ANON_KEY`
+7. Redeploy project
 
 ## Honest status
 

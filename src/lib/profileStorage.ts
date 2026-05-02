@@ -43,6 +43,24 @@ export type LumoraProfile = {
 
 const STORAGE_KEY = 'lumora_profile';
 
+function stripBase64Media(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return value.startsWith('data:') ? null : value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(stripBase64Media);
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, stripBase64Media(entry)]),
+    );
+  }
+
+  return value;
+}
+
 function readObjectRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -151,7 +169,7 @@ export function saveLumoraProfile(profile: LumoraProfile) {
   if (typeof window === 'undefined') return;
 
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stripBase64Media(profile)));
   } catch {
     // ignore storage failures
   }

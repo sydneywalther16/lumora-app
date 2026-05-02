@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { type CharacterProfile } from '../lib/api';
 import { getStoredCharacters, isCreatorSelfCharacter } from '../lib/characterStorage';
+import { useSession } from '../hooks/useSession';
+import { loadSupabaseCharacters } from '../lib/supabaseAppData';
 
 type CharacterLibraryProps = {
   selectedCharacterId?: string | null;
@@ -17,14 +19,36 @@ export default function CharacterLibrary({
   onSelect,
   refreshKey = 0,
 }: CharacterLibraryProps) {
+  const { user } = useSession();
   const [characters, setCharacters] = useState<CharacterProfile[]>([]);
   const [status, setStatus] = useState('Loading characters...');
 
   useEffect(() => {
-    const loaded = getStoredCharacters().filter((character) => !isCreatorSelfCharacter(character));
-    setCharacters(loaded);
-    setStatus(loaded.length ? '' : 'No fictional characters saved yet');
-  }, [refreshKey]);
+    let active = true;
+
+    async function loadCharacters() {
+      try {
+        const loaded = user
+          ? await loadSupabaseCharacters(user.id)
+          : getStoredCharacters();
+        const fictionalCharacters = loaded.filter((character) => !isCreatorSelfCharacter(character));
+
+        if (!active) return;
+        setCharacters(fictionalCharacters);
+        setStatus(fictionalCharacters.length ? '' : 'No fictional characters saved yet');
+      } catch (error) {
+        if (!active) return;
+        setCharacters([]);
+        setStatus(error instanceof Error ? error.message : 'Unable to load characters.');
+      }
+    }
+
+    void loadCharacters();
+
+    return () => {
+      active = false;
+    };
+  }, [refreshKey, user]);
 
   return (
     <section className="editor-card character-library">

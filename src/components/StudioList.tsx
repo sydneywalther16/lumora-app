@@ -2,6 +2,13 @@ import { useEffect, useState } from 'react';
 import { loadLumoraProfile } from '../lib/profileStorage';
 import { CREATOR_SELF_CHARACTER_ID, getStoredCharacters } from '../lib/characterStorage';
 import { savePostedItem } from '../lib/postStorage';
+import { useSession } from '../hooks/useSession';
+import {
+  loadSupabaseCharacters,
+  loadSupabaseProfile,
+  loadSupabaseProfilePosts,
+  saveSupabasePost,
+} from '../lib/supabaseAppData';
 import type { GenerationJob, LumoraPost, PrivacySetting } from '../lib/api';
 
 type Props = {
@@ -66,6 +73,7 @@ function getJobCharacterLabel(job: GenerationJob) {
 }
 
 export default function StudioList({ jobs }: Props) {
+  const { user } = useSession();
   const [selectedJob, setSelectedJob] = useState<GenerationJob | null>(null);
   const [postedProjectIds, setPostedProjectIds] = useState<string[]>([]);
   const [publishMessage, setPublishMessage] = useState<string | null>(null);
@@ -74,8 +82,27 @@ export default function StudioList({ jobs }: Props) {
   const [failedVideoIds, setFailedVideoIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    setPostedProjectIds(getPostedProjectIds());
-  }, []);
+    let active = true;
+
+    async function loadPostedState() {
+      try {
+        const postedIds = user
+          ? (await loadSupabaseProfilePosts(user.id))
+              .map((post) => post.sourceGenerationId ?? post.id)
+              .filter((value): value is string => Boolean(value))
+          : getPostedProjectIds();
+        if (active) setPostedProjectIds(postedIds);
+      } catch {
+        if (active) setPostedProjectIds(getPostedProjectIds());
+      }
+    }
+
+    void loadPostedState();
+
+    return () => {
+      active = false;
+    };
+  }, [user]);
 
   function isPosted(projectId: string) {
     return postedProjectIds.includes(projectId);
@@ -92,8 +119,12 @@ export default function StudioList({ jobs }: Props) {
     setPublishMessage(null);
     setPublishError(null);
 
-    const profile = loadLumoraProfile();
-    const storedCharacters = getStoredCharacters();
+    const profile = user
+      ? await loadSupabaseProfile(user.id).catch(() => loadLumoraProfile())
+      : loadLumoraProfile();
+    const storedCharacters = user
+      ? await loadSupabaseCharacters(user.id).catch(() => getStoredCharacters())
+      : getStoredCharacters();
     const currentCharacter = job.characterId
       ? storedCharacters.find((character) => character.id === job.characterId) ?? null
       : null;
@@ -143,7 +174,11 @@ export default function StudioList({ jobs }: Props) {
     }
 
     try {
-      savePostedItem(post);
+      if (user) {
+        await saveSupabasePost(user.id, post);
+      } else {
+        savePostedItem(post);
+      }
 
       setPostedProjectIds((current) =>
         current.includes(job.id) ? current : [job.id, ...current]

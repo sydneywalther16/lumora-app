@@ -2,26 +2,44 @@ import { useEffect, useState } from 'react';
 import StudioList from '../components/StudioList';
 import { type GenerationJob } from '../lib/api';
 import { loadStudioProjects, type StudioProject } from '../lib/projectStorage';
+import { useSession } from '../hooks/useSession';
+import { loadSupabaseProjects } from '../lib/supabaseAppData';
 
 export default function StudioPage() {
+  const { user } = useSession();
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
-  const [status, setStatus] = useState('Loading studio…');
+  const [status, setStatus] = useState('Loading studio...');
 
   useEffect(() => {
-    function loadJobs() {
-      const projects = loadStudioProjects();
-      const mappedJobs = mapProjectsToJobs(projects);
-      setJobs(mappedJobs);
-      setStatus(mappedJobs.length ? '' : 'No projects yet');
+    let active = true;
+
+    async function loadJobs() {
+      try {
+        const projects = user
+          ? await loadSupabaseProjects(user.id)
+          : loadStudioProjects();
+        if (!active) return;
+        const mappedJobs = mapProjectsToJobs(projects);
+        setJobs(mappedJobs);
+        setStatus(mappedJobs.length ? '' : 'No projects yet');
+      } catch (error) {
+        if (!active) return;
+        setJobs([]);
+        setStatus(error instanceof Error ? error.message : 'Unable to load studio projects.');
+      }
     }
 
-    loadJobs();
-  }, []);
+    void loadJobs();
+
+    return () => {
+      active = false;
+    };
+  }, [user]);
 
   function mapProjectsToJobs(projects: StudioProject[]): GenerationJob[] {
     return projects.map((project) => ({
       id: project.id,
-      projectId: null,
+      projectId: project.id,
       characterId: project.characterId,
       characterName: project.characterName,
       characterAvatar: project.characterAvatar ?? null,

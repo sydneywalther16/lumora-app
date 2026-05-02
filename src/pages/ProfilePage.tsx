@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import AuthCard from '../components/auth/AuthCard';
 import {
   CREATOR_SELF_CHARACTER_ID,
   cleanupCreatorSelfMetadata,
@@ -15,6 +16,17 @@ import {
 } from '../lib/profileStorage';
 import type { CharacterProfile, CreatorSelfStylePreferences, LumoraPost } from '../lib/api';
 import type { StudioProject } from '../lib/projectStorage';
+import { useSession } from '../hooks/useSession';
+import {
+  loadSupabaseCharacters,
+  loadSupabaseDrafts,
+  loadSupabaseProfile,
+  loadSupabaseProfilePosts,
+  loadSupabaseProjects,
+  saveSupabaseCreatorSelfCharacter,
+  saveSupabaseProfile,
+  uploadLumoraMedia,
+} from '../lib/supabaseAppData';
 
 type Draft = { id: string; title: string; prompt: string; createdAt: string };
 
@@ -375,7 +387,6 @@ function saveSelfCharacterEditorDraft(form: SelfCharacterForm): SelfCharacterEdi
 
   try {
     localStorage.setItem(SELF_CHARACTER_EDITOR_DRAFT_KEY, JSON.stringify(cleanedDraft));
-    console.log('AUTOSAVED SELF CHARACTER DRAFT (media cleaned)', cleanedDraft);
     return cleanedDraft;
   } catch (error) {
     console.error('FAILED TO AUTOSAVE DRAFT:', error);
@@ -519,10 +530,6 @@ function mergeSelfCharacterFormSources(...sources: SelfCharacterFormSource[]): S
       ),
     },
   };
-}
-
-function hasSavedSelfDetails(form: SelfCharacterForm) {
-  return [...Object.values(form.features), ...Object.values(form.style)].some((value) => value.trim().length > 0);
 }
 
 function buildSelfCharacterEditorState(
@@ -736,6 +743,7 @@ function DraftCard({ draft }: { draft: Draft }) {
 }
 
 export default function ProfilePage() {
+  const { user } = useSession();
   const [profile, setProfile] = useState<LumoraProfile>(() => loadLumoraProfile());
   const [profileDraft, setProfileDraft] = useState<LumoraProfile>(() => loadLumoraProfile());
   const [characters, setCharacters] = useState<CharacterProfile[]>([]);
@@ -755,32 +763,64 @@ export default function ProfilePage() {
   const [showSelfCaptureRedo, setShowSelfCaptureRedo] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [selfCharacterStatus, setSelfCharacterStatus] = useState<string | null>(null);
-  const [loadedSavedSelfDetails, setLoadedSavedSelfDetails] = useState(false);
   const selfCharacterEditorRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    refreshProfileData();
-  }, []);
+    void refreshProfileData();
+  }, [user]);
 
   useEffect(() => {
     if (!editingSelfCharacter) return;
     saveSelfCharacterEditorDraft(selfForm);
   }, [editingSelfCharacter, selfForm]);
 
-  function refreshProfileData() {
+  async function refreshProfileData() {
+    if (user) {
+      try {
+        const [
+          loadedProfile,
+          loadedCharacters,
+          loadedPosts,
+          loadedProjects,
+          loadedDrafts,
+        ] = await Promise.all([
+          loadSupabaseProfile(user.id),
+          loadSupabaseCharacters(user.id),
+          loadSupabaseProfilePosts(user.id),
+          loadSupabaseProjects(user.id),
+          loadSupabaseDrafts(user.id),
+        ]);
+        const loadedCreatorSelf = findCreatorSelfCharacter(loadedCharacters);
+        const normalizedProfile: LumoraProfile = loadedCreatorSelf
+          ? {
+              ...loadedProfile,
+              defaultSelfCharacterId: CREATOR_SELF_CHARACTER_ID,
+              defaultSelfCharacterName: loadedCreatorSelf.name,
+              defaultSelfCharacterAvatar:
+                loadedProfile.defaultSelfCharacterAvatar ||
+                loadedCreatorSelf.referenceImageUrls.frontFace ||
+                loadedProfile.avatar ||
+                null,
+            }
+          : loadedProfile;
+
+        saveLumoraProfile(normalizedProfile);
+        setProfile(normalizedProfile);
+        setProfileDraft(normalizedProfile);
+        setCharacters(loadedCharacters);
+        setPosts(loadedPosts);
+        setCastIn(loadedProjects.filter((item) => Boolean(item.isDefaultSelfCharacter || item.characterName)));
+        setDrafts(loadedDrafts);
+        return;
+      } catch (error) {
+        console.error('Unable to load Supabase profile data, falling back to local recovery cache:', error);
+      }
+    }
+
     const loadedProfile = loadLumoraProfile();
     cleanupCreatorSelfMetadata(loadedProfile);
     const loadedCharacters = getStoredCharacters();
     const loadedCreatorSelf = findCreatorSelfCharacter(loadedCharacters);
-    const localDraft = loadSelfCharacterEditorDraft();
-
-    console.log('=== refreshProfileData ===');
-    console.log('LOADED CREATOR SELF FROM lumora_characters', loadedCreatorSelf?.id ?? 'NOT FOUND', loadedCreatorSelf?.name ?? '');
-    console.log('lumoraCharactersCount:', loadedCharacters.length);
-    console.log('draftExists:', Boolean(localDraft));
-    console.log('creatorSelfLoaded:', loadedCreatorSelf ? 'yes' : 'no');
-    console.log('creatorSelfId:', loadedCreatorSelf?.id ?? 'none');
-
     setProfile(loadedProfile);
     setProfileDraft(loadedProfile);
     setCharacters(loadedCharacters);
@@ -795,30 +835,38 @@ export default function ProfilePage() {
   ).length;
   const selfCharacterFormTitle = creatorSelfCharacter ? 'Edit self character' : 'Create self character';
   const selfCharacterActionLabel = creatorSelfCharacter ? 'Save self character' : 'Create self character';
-  const creatorSelfLoadedLabel = creatorSelfCharacter ? 'yes' : 'no';
-  const creatorSelfIdLabel = creatorSelfCharacter?.id ?? 'none';
-  const lumoraCharactersCount = characters.length;
-  const localDraft = loadSelfCharacterEditorDraft();
-  const draftExistsLabel = localDraft ? 'yes' : 'no';
-
   function openProfileEditor() {
     setProfileDraft(profile);
     setSaveMessage(null);
     setEditingProfile(true);
   }
 
-  function openSelfCharacterEditor() {
-    const latestProfile = loadLumoraProfile();
-    const latestSelfCharacter = findCreatorSelfCharacter(getStoredCharacters());
+  async function openSelfCharacterEditor() {
+    let latestProfile = loadLumoraProfile();
+    let latestCharacters = getStoredCharacters();
+
+    if (user) {
+      try {
+        const [remoteProfile, remoteCharacters] = await Promise.all([
+          loadSupabaseProfile(user.id),
+          loadSupabaseCharacters(user.id),
+        ]);
+        latestProfile = remoteProfile;
+        latestCharacters = remoteCharacters;
+        setProfile(remoteProfile);
+        setProfileDraft(remoteProfile);
+        setCharacters(remoteCharacters);
+        saveLumoraProfile(remoteProfile);
+      } catch (error) {
+        console.error('Unable to preload self character from Supabase:', error);
+      }
+    }
+
+    const latestSelfCharacter = findCreatorSelfCharacter(latestCharacters);
     const localDraft = loadSelfCharacterEditorDraft();
     const initialSelfForm = buildSelfCharacterEditorState(latestProfile, latestSelfCharacter, localDraft);
 
-    console.log('OPEN SELF EDITOR creatorSelf:', latestSelfCharacter);
-    console.log('SELF EDITOR INITIAL STATE:', initialSelfForm);
-    console.log('LOADED SELF CHARACTER EDITOR STATE', initialSelfForm);
-
     setSelfForm(initialSelfForm);
-    setLoadedSavedSelfDetails(hasSavedSelfDetails(initialSelfForm));
     setCaptureChecklist({
       readNumbers: Boolean(initialSelfForm.selfCaptureCompleted),
       faceForward: Boolean(initialSelfForm.selfCaptureCompleted),
@@ -839,11 +887,23 @@ export default function ProfilePage() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const avatar = await readFileAsDataUrl(file);
-    setProfileDraft((current) => ({ ...current, avatar }));
+    try {
+      const avatar = user
+        ? (await uploadLumoraMedia({
+            userId: user.id,
+            bucket: 'avatars',
+            file,
+            folder: 'profile',
+            usage: 'profile-avatar',
+          })).url
+        : await readFileAsDataUrl(file);
+      setProfileDraft((current) => ({ ...current, avatar }));
+    } catch (error) {
+      setSaveMessage(error instanceof Error ? error.message : 'Unable to upload avatar.');
+    }
   }
 
-  function handleSaveProfile() {
+  async function handleSaveProfile() {
     const nextProfile: LumoraProfile = {
       ...profileDraft,
       displayName: profileDraft.displayName.trim() || 'Creator',
@@ -854,13 +914,23 @@ export default function ProfilePage() {
         : profileDraft.defaultSelfCharacterName ?? null,
     };
 
-    saveLumoraProfile(nextProfile);
-    cleanupCreatorSelfMetadata(nextProfile);
-    setProfile(nextProfile);
-    setProfileDraft(nextProfile);
-    setCharacters(getStoredCharacters());
-    setSaveMessage('Profile saved.');
-    setEditingProfile(false);
+    try {
+      const savedProfile = user
+        ? await saveSupabaseProfile(user.id, nextProfile)
+        : nextProfile;
+
+      saveLumoraProfile(savedProfile);
+      if (!user) {
+        cleanupCreatorSelfMetadata(savedProfile);
+      }
+      setProfile(savedProfile);
+      setProfileDraft(savedProfile);
+      setCharacters(user ? await loadSupabaseCharacters(user.id) : getStoredCharacters());
+      setSaveMessage('Profile saved.');
+      setEditingProfile(false);
+    } catch (error) {
+      setSaveMessage(error instanceof Error ? error.message : 'Unable to save profile.');
+    }
   }
 
   async function handleSelfImageUpload(
@@ -870,35 +940,71 @@ export default function ProfilePage() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const dataUrl = await readFileAsDataUrl(file);
-    const nameField = referencePhotoNameFields[field];
-    setSelfForm((current) => ({ ...current, [field]: dataUrl, [nameField]: file.name }));
+    try {
+      const dataUrl = user
+        ? (await uploadLumoraMedia({
+            userId: user.id,
+            bucket: 'character-reference-images',
+            file,
+            folder: `self/${field}`,
+            usage: `self-${field}-reference`,
+          })).url
+        : await readFileAsDataUrl(file);
+      const nameField = referencePhotoNameFields[field];
+      setSelfForm((current) => ({ ...current, [field]: dataUrl, [nameField]: file.name }));
+    } catch (error) {
+      setSelfCharacterStatus(error instanceof Error ? error.message : 'Unable to upload reference photo.');
+    }
   }
 
   async function handleSelfVideoUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const dataUrl = await readFileAsDataUrl(file);
-    setSelfForm((current) => ({
-      ...current,
-      selfieVideoName: file.name,
-      selfieVideoUrl: dataUrl,
-      selfCaptureCompleted: Boolean(current.selfCaptureConsent),
-    }));
+    try {
+      const dataUrl = user
+        ? (await uploadLumoraMedia({
+            userId: user.id,
+            bucket: 'self-capture-videos',
+            file,
+            folder: 'self/capture',
+            usage: 'self-capture-video',
+          })).url
+        : await readFileAsDataUrl(file);
+      setSelfForm((current) => ({
+        ...current,
+        selfieVideoName: file.name,
+        selfieVideoUrl: dataUrl,
+        selfCaptureCompleted: Boolean(current.selfCaptureConsent),
+      }));
+    } catch (error) {
+      setSelfCharacterStatus(error instanceof Error ? error.message : 'Unable to upload self capture video.');
+    }
   }
 
   async function handleVoiceSampleUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const dataUrl = await readFileAsDataUrl(file);
-    setSelfForm((current) => ({
-      ...current,
-      voiceSampleName: file.name,
-      voiceSampleUrl: dataUrl,
-      voiceSampleNumbers: current.voiceSampleNumbers || generateSelfVoiceSampleNumbers(),
-    }));
+    try {
+      const dataUrl = user
+        ? (await uploadLumoraMedia({
+            userId: user.id,
+            bucket: 'voice-samples',
+            file,
+            folder: 'self/voice',
+            usage: 'self-voice-sample',
+          })).url
+        : await readFileAsDataUrl(file);
+      setSelfForm((current) => ({
+        ...current,
+        voiceSampleName: file.name,
+        voiceSampleUrl: dataUrl,
+        voiceSampleNumbers: current.voiceSampleNumbers || generateSelfVoiceSampleNumbers(),
+      }));
+    } catch (error) {
+      setSelfCharacterStatus(error instanceof Error ? error.message : 'Unable to upload voice sample.');
+    }
   }
 
   function handleStartSelfCapture() {
@@ -950,7 +1056,7 @@ export default function ProfilePage() {
     }));
   }
 
-  function handleSaveSelfCharacter() {
+  async function handleSaveSelfCharacter() {
     if (!selfForm.frontFace || !selfForm.leftAngle || !selfForm.rightAngle) {
       setSelfCharacterStatus('Add front, left, and right photos to save your self character.');
       return;
@@ -960,10 +1066,68 @@ export default function ProfilePage() {
     const compactStyle = compactStringRecord(selfForm.style);
     const finalEditorDraft = saveSelfCharacterEditorDraft(selfForm) ?? createSelfCharacterEditorDraft(selfForm);
     const displayName = profile.displayName.trim() || 'Creator';
+
+    if (user) {
+      try {
+        const referenceImageUrls = {
+          frontFace: selfForm.frontFace,
+          leftAngle: selfForm.leftAngle,
+          rightAngle: selfForm.rightAngle,
+        };
+        const stylePreferences = {
+          creatorSelfFeatures: compactFeatures,
+          creatorSelfStylePreferences: compactStyle,
+          creatorSelfEditorDraft: finalEditorDraft,
+          selfCaptureNumbers: selfForm.selfCaptureNumbers || null,
+          selfCaptureConsent: selfForm.selfCaptureConsent,
+          selfCaptureCompleted: selfForm.selfCaptureCompleted,
+          selfVoiceSampleConsent: Boolean(selfForm.voiceSampleConsent),
+        };
+
+        const saved = await saveSupabaseCreatorSelfCharacter({
+          userId: user.id,
+          profile,
+          name: displayName,
+          referenceImageUrls,
+          referencePhotoNames: {
+            frontFace: selfForm.frontFaceName || null,
+            leftAngle: selfForm.leftAngleName || null,
+            rightAngle: selfForm.rightAngleName || null,
+          },
+          sourceCaptureVideoUrl: selfForm.selfieVideoUrl,
+          sourceCaptureVideoName: selfForm.selfieVideoName || null,
+          selfCaptureNumbers: selfForm.selfCaptureNumbers || null,
+          selfCaptureConsent: selfForm.selfCaptureConsent,
+          selfCaptureCompleted: selfForm.selfCaptureCompleted,
+          voiceSampleUrl: selfForm.voiceSampleUrl,
+          voiceSampleName: selfForm.voiceSampleName || null,
+          voiceSampleNumbers: selfForm.voiceSampleNumbers || null,
+          voiceSampleConsent: selfForm.voiceSampleConsent,
+          creatorSelfFeatures: compactFeatures,
+          creatorSelfStylePreferences: compactStyle,
+          stylePreferences,
+          editorDraft: finalEditorDraft,
+        });
+        const remoteCharacters = await loadSupabaseCharacters(user.id);
+
+        saveLumoraProfile(saved.profile);
+        setProfile(saved.profile);
+        setProfileDraft(saved.profile);
+        setCharacters(remoteCharacters.length ? remoteCharacters : [saved.character]);
+        setSaveMessage('Self character saved.');
+        setSelfCharacterStatus(null);
+        setEditingSelfCharacter(false);
+      } catch (error) {
+        console.error('[handleSaveSelfCharacter] Supabase save error:', error);
+        setSelfCharacterStatus(`Save failed: ${error instanceof Error ? error.message : 'Unknown error'}. Your draft is still autosaved.`);
+        setSaveMessage(null);
+      }
+
+      return;
+    }
     
     try {
       // Save to character storage
-      console.log('[handleSaveSelfCharacter] Starting save...');
       const selfCharacter = saveCreatorSelfCharacter({
         name: displayName,
         referenceImageUrls: {
@@ -987,8 +1151,6 @@ export default function ProfilePage() {
         creatorSelfFeatures: compactFeatures,
         creatorSelfStylePreferences: compactStyle,
       });
-
-      console.log('[handleSaveSelfCharacter] Character save succeeded');
 
       // Save profile with self character metadata
       const nextProfile: LumoraProfile = {
@@ -1025,30 +1187,22 @@ export default function ProfilePage() {
       };
 
       saveLumoraProfile(nextProfile);
-      console.log('[handleSaveSelfCharacter] Profile save succeeded');
-
       // Verify that creator-self was actually saved to localStorage
       const verificationCharacters = getStoredCharacters();
       const verifiedCreatorSelf = findCreatorSelfCharacter(verificationCharacters);
       
       if (verifiedCreatorSelf && verifiedCreatorSelf.id === CREATOR_SELF_CHARACTER_ID) {
         // SUCCESS: Creator-self persisted to localStorage
-        console.log('[handleSaveSelfCharacter] ✓ VERIFIED: creator-self saved to localStorage');
-        
         // Update React state from localStorage to ensure consistency
         setProfile(nextProfile);
         setProfileDraft(nextProfile);
         setCharacters(verificationCharacters);
-        setLoadedSavedSelfDetails(hasSavedSelfDetails(selfForm));
-        
         setSaveMessage('Self character saved and verified.');
         setSelfCharacterStatus(null);
         setEditingSelfCharacter(false);
       } else {
         // FAILURE: Creator-self did not persist
         console.error('[handleSaveSelfCharacter] ✗ VERIFICATION FAILED: creator-self not found in localStorage after save');
-        console.log('[handleSaveSelfCharacter] Stored characters:', verificationCharacters.map(c => ({ id: c.id, name: c.name })));
-        
         setSelfCharacterStatus('Save failed. Your draft is still autosaved.');
         setSaveMessage(null);
         // Keep editingSelfCharacter = true so user stays in editor
@@ -1103,20 +1257,16 @@ export default function ProfilePage() {
             <button type="button" className="primary-btn" onClick={openProfileEditor}>
               Edit profile
             </button>
-            <button type="button" className="ghost-btn" onClick={openSelfCharacterEditor}>
+            <button type="button" className="ghost-btn" onClick={() => void openSelfCharacterEditor()}>
               {creatorSelfCharacter ? 'Edit self character' : 'Create self character'}
             </button>
           </div>
 
           {saveMessage ? <p style={{ color: '#8bc34a', margin: 0 }}>{saveMessage}</p> : null}
-          <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
-            Lumora current build
-          </p>
-          <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
-            creatorSelfLoaded: {creatorSelfLoadedLabel} · creatorSelfId: {creatorSelfIdLabel} · lumoraCharactersCount: {lumoraCharactersCount} · draftExists: {draftExistsLabel}
-          </p>
         </div>
       </section>
+
+      <AuthCard />
 
       {editingProfile ? (
         <section className="headline-card compact" style={{ marginTop: '18px', padding: '22px', borderRadius: '30px' }}>
@@ -1172,7 +1322,7 @@ export default function ProfilePage() {
               onChange={(value) => setProfileDraft((current) => ({ ...current, bio: value }))}
             />
 
-            <button type="button" className="primary-btn full-width" onClick={handleSaveProfile}>
+            <button type="button" className="primary-btn full-width" onClick={() => void handleSaveProfile()}>
               Save profile
             </button>
           </div>
@@ -1389,10 +1539,7 @@ export default function ProfilePage() {
             <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
               Draft autosaved locally
             </p>
-            <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
-              Loaded saved details: {loadedSavedSelfDetails ? 'yes' : 'no'}
-            </p>
-            <button type="button" className="primary-btn full-width" onClick={handleSaveSelfCharacter}>
+            <button type="button" className="primary-btn full-width" onClick={() => void handleSaveSelfCharacter()}>
               {selfCharacterActionLabel}
             </button>
             {selfCharacterStatus ? <p className="muted">{selfCharacterStatus}</p> : null}
