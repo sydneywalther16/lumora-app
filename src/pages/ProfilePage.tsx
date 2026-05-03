@@ -981,25 +981,148 @@ function ProfilePostPreviewModal({
   );
 }
 
-const profileMenuItems = [
-  'Settings',
-  'Account',
-  'About Lumora',
-  'Help',
-  'Contact',
-  'Privacy',
-  'Terms',
+type ProfileMenuPanelId =
+  | 'account'
+  | 'about'
+  | 'contact'
+  | 'help'
+  | 'privacy'
+  | 'settings'
+  | 'terms';
+
+type ProfileMenuItem = {
+  id: ProfileMenuPanelId;
+  label: string;
+  title: string;
+  body: string[];
+};
+
+const profileMenuItems: ProfileMenuItem[] = [
+  {
+    id: 'settings',
+    label: 'Settings',
+    title: 'Settings',
+    body: ['Settings are coming soon. Your creator workspace preferences will live here.'],
+  },
+  {
+    id: 'account',
+    label: 'Account',
+    title: 'Account',
+    body: ['Manage your Lumora sign-in, profile, and creator workspace from this page.'],
+  },
+  {
+    id: 'about',
+    label: 'About Lumora',
+    title: 'About Lumora',
+    body: ['Lumora is a creator workspace for character-led short video concepts, self-character creation, and social publishing.'],
+  },
+  {
+    id: 'help',
+    label: 'Help',
+    title: 'Help',
+    body: ['Need a hand? Start with Create, capture or select a character, generate a concept, then post from Studio.'],
+  },
+  {
+    id: 'contact',
+    label: 'Contact',
+    title: 'Contact',
+    body: ['Contact options are coming soon. For now, keep feedback and support notes with your Lumora project owner.'],
+  },
+  {
+    id: 'privacy',
+    label: 'Privacy',
+    title: 'Privacy',
+    body: ['Your profile, self character, drafts, and private posts are intended to stay private unless you choose a public post privacy setting.'],
+  },
+  {
+    id: 'terms',
+    label: 'Terms',
+    title: 'Terms',
+    body: ['Terms are coming soon. Continue using Lumora responsibly with permission for any people or characters you create.'],
+  },
 ];
+
+function ProfileMenuPanel({
+  panel,
+  signedIn,
+  userEmail,
+  onClose,
+}: {
+  panel: ProfileMenuItem | null;
+  signedIn: boolean;
+  userEmail?: string | null;
+  onClose: () => void;
+}) {
+  if (!panel) return null;
+
+  const body =
+    panel.id === 'account'
+      ? [
+          signedIn
+            ? `Signed in as ${userEmail || 'your Lumora account'}.`
+            : 'You are not signed in. Use the creator access form on Profile to save your workspace to Supabase.',
+          ...panel.body,
+        ]
+      : panel.body;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 10001,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '18px',
+        background: 'rgba(0,0,0,0.66)',
+      }}
+    >
+      <section
+        className="headline-card"
+        onClick={(event) => event.stopPropagation()}
+        style={{
+          width: 'min(100%, 360px)',
+          borderRadius: '28px',
+          background: 'linear-gradient(180deg, rgba(20,16,24,0.98), rgba(9,8,20,0.98))',
+          boxShadow: '0 24px 80px rgba(0,0,0,0.45)',
+        }}
+      >
+        <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start' }}>
+          <div>
+            <span className="eyebrow">profile menu</span>
+            <h2 style={{ margin: '8px 0 0' }}>{panel.title}</h2>
+          </div>
+          <button type="button" className="text-btn" onClick={onClose}>
+            Close
+          </button>
+        </div>
+        <div style={{ display: 'grid', gap: '10px', marginTop: '16px' }}>
+          {body.map((paragraph) => (
+            <p key={paragraph} className="muted" style={{ margin: 0 }}>
+              {paragraph}
+            </p>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
 
 function ProfileMenuSidebar({
   open,
   signedIn,
   onClose,
+  onSelect,
   onSignOut,
 }: {
   open: boolean;
   signedIn: boolean;
   onClose: () => void;
+  onSelect: (item: ProfileMenuItem) => void;
   onSignOut: () => void;
 }) {
   if (!open) return null;
@@ -1045,24 +1168,27 @@ function ProfileMenuSidebar({
         <nav style={{ display: 'grid', gap: '10px', alignContent: 'start' }}>
           {profileMenuItems.map((item) => (
             <button
-              key={item}
+              key={item.id}
               type="button"
               className="ghost-btn"
+              onClick={() => onSelect(item)}
               style={{
                 width: '100%',
                 justifyContent: 'flex-start',
                 textAlign: 'left',
                 borderRadius: '18px',
                 flex: 'unset',
+                cursor: 'pointer',
+                touchAction: 'manipulation',
               }}
             >
-              {item}
+              {item.label}
             </button>
           ))}
           <button
             type="button"
             className="ghost-btn"
-            onClick={onSignOut}
+            onClick={signedIn ? onSignOut : undefined}
             disabled={!signedIn}
             style={{
               width: '100%',
@@ -1071,9 +1197,11 @@ function ProfileMenuSidebar({
               borderRadius: '18px',
               flex: 'unset',
               opacity: signedIn ? 1 : 0.55,
+              cursor: signedIn ? 'pointer' : 'not-allowed',
+              touchAction: 'manipulation',
             }}
           >
-            Sign out
+            {signedIn ? 'Sign out' : 'Sign out (not signed in)'}
           </button>
         </nav>
       </aside>
@@ -1155,6 +1283,7 @@ export default function ProfilePage() {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [selectedPost, setSelectedPost] = useState<LumoraPost | null>(null);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [activeProfileMenuPanel, setActiveProfileMenuPanel] = useState<ProfileMenuItem | null>(null);
   const [editingProfile, setEditingProfile] = useState(false);
   const [editingSelfCharacter, setEditingSelfCharacter] = useState(false);
   const [selfForm, setSelfForm] = useState<SelfCharacterForm>(() => buildSelfCharacterForm(loadLumoraProfile(), null));
@@ -1326,6 +1455,12 @@ export default function ProfilePage() {
 
   async function handleProfileMenuSignOut() {
     await supabase?.auth.signOut();
+    setProfileMenuOpen(false);
+    setActiveProfileMenuPanel(null);
+  }
+
+  function handleProfileMenuSelect(item: ProfileMenuItem) {
+    setActiveProfileMenuPanel(item);
     setProfileMenuOpen(false);
   }
 
@@ -2391,7 +2526,15 @@ export default function ProfilePage() {
         open={profileMenuOpen}
         signedIn={signedIn}
         onClose={() => setProfileMenuOpen(false)}
+        onSelect={handleProfileMenuSelect}
         onSignOut={() => void handleProfileMenuSignOut()}
+      />
+
+      <ProfileMenuPanel
+        panel={activeProfileMenuPanel}
+        signedIn={signedIn}
+        userEmail={authUser?.email}
+        onClose={() => setActiveProfileMenuPanel(null)}
       />
     </div>
   );
