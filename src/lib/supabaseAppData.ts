@@ -238,6 +238,42 @@ export async function loadSupabaseProfile(userId: string): Promise<LumoraProfile
   return mapProfileRow(result.data);
 }
 
+export async function hasSupabaseProfile(userId: string): Promise<boolean> {
+  const client = getClient();
+  let result = await client
+    .from('profiles')
+    .select('id,user_id')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (
+    result.error &&
+    (isMissingColumnError(result.error, 'user_id') ||
+      (isObject(result.error) && result.error.code === '42P10'))
+  ) {
+    result = await client
+      .from('profiles')
+      .select('id,user_id')
+      .eq('id', userId)
+      .maybeSingle();
+  }
+
+  if (!result.data && !result.error) {
+    const legacyResult = await client
+      .from('profiles')
+      .select('id,user_id')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (legacyResult.data || legacyResult.error) {
+      result = legacyResult;
+    }
+  }
+
+  if (result.error) throw result.error;
+  return Boolean(result.data);
+}
+
 export async function saveSupabaseProfile(userId: string, profile: LumoraProfile): Promise<LumoraProfile> {
   const client = getClient();
   const requestedUsername = profile.username.trim();
