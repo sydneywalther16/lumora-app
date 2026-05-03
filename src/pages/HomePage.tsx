@@ -136,6 +136,8 @@ type HomeFeedCardProps = {
 
 function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
   const [videoFailed, setVideoFailed] = useState(false);
+  const [liked, setLiked] = useState(false);
+  const [saved, setSaved] = useState(false);
   const stats = getPostStats(post.id);
 
   const videoUrl = post.videoUrl || post.imageUrl;
@@ -147,55 +149,83 @@ function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
   const featuring = !post.isDefaultSelfCharacter && post.characterName ? `Featuring ${post.characterName}` : undefined;
   const defaultSelfLabel = post.isDefaultSelfCharacter ? 'Created as self' : undefined;
   const hasVideo = Boolean(post.videoUrl);
+  const likeCount = stats.likes + (liked ? 1 : 0);
+
+  function handleRemix() {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem('remixPrompt', post.prompt || post.caption || post.title || '');
+    localStorage.setItem('remixTitle', `Remix of ${post.title || post.caption || 'Lumora post'}`);
+    window.location.href = '/create';
+  }
+
+  async function handleShare() {
+    const shareUrl = post.videoUrl || post.imageUrl || window.location.href;
+
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        await navigator.share({
+          title,
+          text: bodyText,
+          url: shareUrl,
+        });
+        return;
+      } catch {
+        // Fall back to copying below when native sharing is cancelled or unavailable.
+      }
+    }
+
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(shareUrl);
+    }
+  }
+
+  const actionButtons = [
+    {
+      label: liked ? 'Liked' : 'Like',
+      meta: likeCount.toLocaleString(),
+      onClick: () => setLiked((current) => !current),
+      active: liked,
+    },
+    {
+      label: 'Comment',
+      meta: stats.comments.toLocaleString(),
+      onClick: () => undefined,
+      active: false,
+    },
+    {
+      label: 'Remix',
+      meta: 'Create',
+      onClick: handleRemix,
+      active: false,
+    },
+    {
+      label: saved ? 'Saved' : 'Save',
+      meta: saved ? 'Kept' : 'Keep',
+      onClick: () => setSaved((current) => !current),
+      active: saved,
+    },
+    {
+      label: 'Share',
+      meta: 'Send',
+      onClick: () => void handleShare(),
+      active: false,
+    },
+  ];
 
   return (
     <article
       key={post.id}
       className="list-card"
       style={{
-        boxShadow:
-          stats.likes > 700
-            ? '0 0 40px rgba(168,85,247,0.25)'
-            : '0 12px 40px rgba(0,0,0,0.25)',
+        position: 'relative',
+        overflow: 'hidden',
+        padding: 0,
+        borderRadius: '30px',
+        minHeight: '560px',
+        background: '#05040b',
+        boxShadow: stats.likes > 700 ? '0 0 42px rgba(255,105,212,0.18)' : '0 20px 70px rgba(0,0,0,0.42)',
       }}
     >
-      <div className="row-between" style={{ marginBottom: '14px', alignItems: 'center', gap: '12px' }}>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <div
-            style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '50%',
-              overflow: 'hidden',
-              background: 'rgba(255,255,255,0.08)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            {authorAvatar ? (
-              <img src={authorAvatar} alt={authorName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            ) : (
-              <span style={{ color: '#d3cdf3', fontSize: '0.9rem' }}>U</span>
-            )}
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <strong style={{ display: 'block' }}>{authorName}</strong>
-            <span className="muted">@{authorUsername}</span>
-            {featuring ? (
-              <div className="muted" style={{ marginTop: '4px', fontSize: '0.95rem' }}>
-                {featuring}
-              </div>
-            ) : null}
-            {defaultSelfLabel ? (
-              <span className="tiny-pill" style={{ marginTop: '8px', display: 'inline-block', background: '#3f2f5f' }}>
-                {defaultSelfLabel}
-              </span>
-            ) : null}
-          </div>
-        </div>
-      </div>
-
       {hasVideo && !videoFailed && post.videoUrl ? (
         <video
           src={post.videoUrl}
@@ -206,10 +236,11 @@ function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
           onError={() => setVideoFailed(true)}
           style={{
             width: '100%',
-            height: '420px',
+            minHeight: '560px',
+            maxHeight: '680px',
+            aspectRatio: '9 / 16',
             objectFit: 'cover',
-            borderRadius: '22px',
-            marginBottom: '12px',
+            display: 'block',
             background: '#000',
           }}
         />
@@ -219,20 +250,21 @@ function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
           alt={title}
           style={{
             width: '100%',
-            height: '420px',
+            minHeight: '560px',
+            maxHeight: '680px',
+            aspectRatio: '9 / 16',
             objectFit: 'cover',
-            borderRadius: '22px',
-            marginBottom: '12px',
+            display: 'block',
           }}
         />
       ) : (
         <div
           style={{
             width: '100%',
-            height: '420px',
-            borderRadius: '22px',
-            marginBottom: '12px',
-            background: 'linear-gradient(180deg, #0f0c18 0%, #1c1730 100%)',
+            minHeight: '560px',
+            aspectRatio: '9 / 16',
+            background:
+              'linear-gradient(180deg, rgba(7,6,18,0.2), rgba(7,6,18,0.92)), linear-gradient(135deg, #25163f 0%, #071224 100%)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -250,26 +282,108 @@ function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '10px' }}>
-        <span>Likes {stats.likes}</span>
-        <span>Trending</span>
-        <span>Comments {stats.comments}</span>
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          pointerEvents: 'none',
+          background: 'linear-gradient(180deg, rgba(5,4,11,0.1) 35%, rgba(5,4,11,0.86) 100%)',
+        }}
+      />
+
+      <div
+        style={{
+          position: 'absolute',
+          left: '14px',
+          right: '76px',
+          bottom: '16px',
+          display: 'grid',
+          gap: '10px',
+        }}
+      >
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', minWidth: 0 }}>
+          <div
+            style={{
+              width: '44px',
+              height: '44px',
+              borderRadius: '50%',
+              overflow: 'hidden',
+              background: 'rgba(255,255,255,0.12)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flex: '0 0 auto',
+              border: '1px solid rgba(255,255,255,0.2)',
+            }}
+          >
+            {authorAvatar ? (
+              <img src={authorAvatar} alt={authorName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <span style={{ color: '#f7f4ff', fontSize: '0.9rem' }}>U</span>
+            )}
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <strong style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {authorName}
+            </strong>
+            <span style={{ color: '#d8d2ef', fontSize: '0.88rem' }}>@{authorUsername}</span>
+          </div>
+        </div>
+
+        <p style={{ margin: 0, color: '#f8f5ff', lineHeight: 1.45, overflowWrap: 'anywhere' }}>
+          {bodyText}
+        </p>
+
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {defaultSelfLabel ? (
+            <span className="tiny-pill" style={{ background: 'rgba(255,105,212,0.22)' }}>
+              {defaultSelfLabel}
+            </span>
+          ) : null}
+          {featuring ? (
+            <span className="tiny-pill" style={{ background: 'rgba(139,123,255,0.22)' }}>
+              {featuring}
+            </span>
+          ) : null}
+          <span className="tiny-pill" style={{ background: 'rgba(255,255,255,0.12)' }}>
+            {formatPostedDate(post.createdAt)}
+          </span>
+        </div>
       </div>
 
-      <div className="row-between">
-        <h3>{title}</h3>
-        <span className="tiny-pill" style={{ background: '#2a1f3d' }}>
-          Live
-        </span>
+      <div
+        style={{
+          position: 'absolute',
+          right: '12px',
+          bottom: '18px',
+          display: 'grid',
+          gap: '10px',
+          width: '54px',
+        }}
+      >
+        {actionButtons.map((action) => (
+          <button
+            key={action.label}
+            type="button"
+            onClick={action.onClick}
+            title={action.label}
+            style={{
+              display: 'grid',
+              gap: '4px',
+              justifyItems: 'center',
+              padding: '8px 4px',
+              borderRadius: '18px',
+              background: action.active ? 'rgba(255,105,212,0.28)' : 'rgba(10,8,22,0.58)',
+              color: '#fff',
+              border: '1px solid rgba(255,255,255,0.14)',
+              backdropFilter: 'blur(12px)',
+            }}
+          >
+            <strong style={{ fontSize: '0.72rem', lineHeight: 1 }}>{action.label}</strong>
+            <span style={{ color: '#d8d2ef', fontSize: '0.68rem', lineHeight: 1 }}>{action.meta}</span>
+          </button>
+        ))}
       </div>
-
-      <p style={{ opacity: 0.9, lineHeight: 1.5 }}>
-        {bodyText}
-      </p>
-
-      <p className="muted">
-        Posted {formatPostedDate(post.createdAt)}
-      </p>
     </article>
   );
 }

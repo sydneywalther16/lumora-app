@@ -17,6 +17,7 @@ import {
 import type { CharacterProfile, CreatorSelfStylePreferences, LumoraPost } from '../lib/api';
 import type { StudioProject } from '../lib/projectStorage';
 import { useSession } from '../hooks/useSession';
+import { supabase } from '../lib/supabase';
 import {
   hasSupabaseProfile,
   loadSupabaseCharacters,
@@ -751,10 +752,127 @@ function ImagePreview({ src, fallback }: { src?: string | null; fallback: string
   );
 }
 
-function PostCard({ post, fallbackAvatar }: { post: LumoraPost; fallbackAvatar?: string | null }) {
+function ProfilePostTile({
+  post,
+  onSelect,
+}: {
+  post: LumoraPost;
+  onSelect: (post: LumoraPost) => void;
+}) {
   const title = post.title || post.caption || 'Untitled post';
   const bodyText = post.caption || post.prompt || 'No prompt available';
-  const videoUrl = post.videoUrl || post.imageUrl || '/demo-video.mp4';
+  const mediaUrl = post.videoUrl || post.imageUrl;
+  const authorName = post.creatorName || post.displayName || 'Lumora Creator';
+  const characterLabel = post.isDefaultSelfCharacter
+    ? 'Created as self'
+    : post.characterName
+      ? `Featuring ${post.characterName}`
+      : null;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(post)}
+      title={title}
+      style={{
+        position: 'relative',
+        width: '100%',
+        aspectRatio: '1',
+        overflow: 'hidden',
+        padding: 0,
+        borderRadius: '18px',
+        color: '#fff',
+        textAlign: 'left',
+        background: 'linear-gradient(135deg, #160f25, #071224)',
+        border: '1px solid rgba(255,255,255,0.08)',
+      }}
+    >
+      {post.videoUrl ? (
+        <video
+          src={post.videoUrl}
+          muted
+          loop
+          playsInline
+          preload="metadata"
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', background: '#000' }}
+          onError={(event) => {
+            event.currentTarget.style.display = 'none';
+          }}
+        />
+      ) : mediaUrl ? (
+        <img
+          src={mediaUrl}
+          alt={title}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+        />
+      ) : (
+        <div
+          style={{
+            width: '100%',
+            height: '100%',
+            display: 'grid',
+            placeItems: 'center',
+            padding: '12px',
+            background:
+              'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)), linear-gradient(135deg, #25163f, #071224)',
+          }}
+        >
+          <span style={{ color: '#d3cdf3', fontWeight: 700 }}>Lumora</span>
+        </div>
+      )}
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'linear-gradient(180deg, transparent 40%, rgba(5,4,11,0.84) 100%)',
+        }}
+      />
+      <div
+        style={{
+          position: 'absolute',
+          left: '10px',
+          right: '10px',
+          bottom: '10px',
+          display: 'grid',
+          gap: '5px',
+        }}
+      >
+        {characterLabel ? (
+          <span className="tiny-pill" style={{ width: 'fit-content', background: 'rgba(63,47,95,0.82)' }}>
+            {characterLabel}
+          </span>
+        ) : null}
+        <strong
+          style={{
+            display: 'block',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            fontSize: '0.88rem',
+          }}
+        >
+          {bodyText}
+        </strong>
+        <span style={{ color: '#d3cdf3', fontSize: '0.74rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {authorName}
+        </span>
+      </div>
+    </button>
+  );
+}
+
+function ProfilePostPreviewModal({
+  post,
+  fallbackAvatar,
+  onClose,
+}: {
+  post: LumoraPost;
+  fallbackAvatar?: string | null;
+  onClose: () => void;
+}) {
+  const title = post.title || post.caption || 'Untitled post';
+  const bodyText = post.caption || post.prompt || 'No prompt available';
+  const mediaUrl = post.videoUrl || post.imageUrl;
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
   const authorUsername = post.creatorUsername || post.username || 'lumora.creator';
   const authorAvatar = post.creatorAvatar || post.avatar || fallbackAvatar;
@@ -765,54 +883,201 @@ function PostCard({ post, fallbackAvatar }: { post: LumoraPost; fallbackAvatar?:
       : null;
 
   return (
-    <article className="list-card" style={{ borderRadius: '28px', overflow: 'hidden', background: 'rgba(20,16,24,0.9)' }}>
-      <div style={{ padding: '18px', display: 'flex', gap: '12px', alignItems: 'center' }}>
-        <div
-          style={{
-            width: '44px',
-            height: '44px',
-            borderRadius: '50%',
-            overflow: 'hidden',
-            background: 'rgba(255,255,255,0.08)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flex: '0 0 auto',
-          }}
-        >
-          <ImagePreview src={authorAvatar} fallback="U" />
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <strong style={{ display: 'block' }}>{authorName}</strong>
-          <span className="muted">@{authorUsername}</span>
-          {characterLabel ? (
-            <span className="tiny-pill" style={{ marginTop: '8px', display: 'inline-block', background: '#3f2f5f' }}>
-              {characterLabel}
-            </span>
-          ) : null}
-        </div>
-      </div>
-      <video
-        src={videoUrl}
-        controls
-        muted
-        loop
-        playsInline
-        style={{ width: '100%', height: '240px', objectFit: 'cover', display: 'block', background: '#000' }}
-        onError={(event) => {
-          event.currentTarget.style.display = 'none';
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '18px',
+        background: 'rgba(0,0,0,0.72)',
+      }}
+    >
+      <div
+        onClick={(event) => event.stopPropagation()}
+        style={{
+          width: 'min(900px, 100%)',
+          maxHeight: '92vh',
+          overflow: 'auto',
+          borderRadius: '24px',
+          background: '#141018',
+          boxShadow: '0 24px 80px rgba(0,0,0,0.45)',
+          color: 'white',
         }}
-      />
-      <div style={{ padding: '18px' }}>
-        <h3>{title}</h3>
-        <p className="muted" style={{ marginTop: '10px' }}>
-          {bodyText}
-        </p>
-        <p className="muted" style={{ marginTop: '8px', fontSize: '0.95rem' }}>
-          Posted {formatPostedDate(post.createdAt)}
-        </p>
+      >
+        <div className="row-between" style={{ padding: '16px', gap: '12px' }}>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', minWidth: 0 }}>
+            <div
+              style={{
+                width: '44px',
+                height: '44px',
+                borderRadius: '50%',
+                overflow: 'hidden',
+                background: 'rgba(255,255,255,0.08)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flex: '0 0 auto',
+              }}
+            >
+              <ImagePreview src={authorAvatar} fallback="U" />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <strong style={{ display: 'block' }}>{authorName}</strong>
+              <span className="muted">@{authorUsername}</span>
+            </div>
+          </div>
+          <button type="button" className="text-btn" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        {post.videoUrl ? (
+          <video
+            src={post.videoUrl}
+            controls
+            autoPlay
+            muted
+            loop
+            playsInline
+            style={{ width: '100%', maxHeight: '62vh', objectFit: 'contain', display: 'block', background: '#000' }}
+          />
+        ) : mediaUrl ? (
+          <img src={mediaUrl} alt={title} style={{ width: '100%', maxHeight: '62vh', objectFit: 'contain', display: 'block' }} />
+        ) : (
+          <div
+            style={{
+              minHeight: '340px',
+              display: 'grid',
+              placeItems: 'center',
+              background: 'linear-gradient(135deg, #25163f, #071224)',
+            }}
+          >
+            <strong>Preview unavailable</strong>
+          </div>
+        )}
+
+        <div style={{ padding: '18px', display: 'grid', gap: '10px' }}>
+          <div className="row-between" style={{ gap: '10px', alignItems: 'flex-start' }}>
+            <h3>{title}</h3>
+            {characterLabel ? (
+              <span className="tiny-pill" style={{ background: '#3f2f5f' }}>
+                {characterLabel}
+              </span>
+            ) : null}
+          </div>
+          <p className="muted" style={{ margin: 0 }}>{bodyText}</p>
+          <p className="muted" style={{ margin: 0, fontSize: '0.95rem' }}>
+            Posted {formatPostedDate(post.createdAt)}
+          </p>
+        </div>
       </div>
-    </article>
+    </div>
+  );
+}
+
+const profileMenuItems = [
+  'Settings',
+  'Account',
+  'About Lumora',
+  'Help',
+  'Contact',
+  'Privacy',
+  'Terms',
+];
+
+function ProfileMenuSidebar({
+  open,
+  signedIn,
+  onClose,
+  onSignOut,
+}: {
+  open: boolean;
+  signedIn: boolean;
+  onClose: () => void;
+  onSignOut: () => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 10000,
+        background: 'rgba(0,0,0,0.58)',
+        display: 'flex',
+        justifyContent: 'flex-end',
+      }}
+    >
+      <aside
+        onClick={(event) => event.stopPropagation()}
+        style={{
+          width: 'min(86vw, 320px)',
+          height: '100%',
+          padding: '18px',
+          background: 'linear-gradient(180deg, rgba(20,16,24,0.98), rgba(9,8,20,0.98))',
+          borderLeft: '1px solid rgba(255,255,255,0.1)',
+          boxShadow: '-24px 0 80px rgba(0,0,0,0.42)',
+          display: 'grid',
+          gridTemplateRows: 'auto 1fr',
+          gap: '18px',
+        }}
+      >
+        <div className="row-between" style={{ gap: '10px' }}>
+          <div>
+            <span className="eyebrow">menu</span>
+            <h2 style={{ margin: '6px 0 0' }}>Lumora</h2>
+          </div>
+          <button type="button" className="text-btn" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        <nav style={{ display: 'grid', gap: '10px', alignContent: 'start' }}>
+          {profileMenuItems.map((item) => (
+            <button
+              key={item}
+              type="button"
+              className="ghost-btn"
+              style={{
+                width: '100%',
+                justifyContent: 'flex-start',
+                textAlign: 'left',
+                borderRadius: '18px',
+                flex: 'unset',
+              }}
+            >
+              {item}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={onSignOut}
+            disabled={!signedIn}
+            style={{
+              width: '100%',
+              justifyContent: 'flex-start',
+              textAlign: 'left',
+              borderRadius: '18px',
+              flex: 'unset',
+              opacity: signedIn ? 1 : 0.55,
+            }}
+          >
+            Sign out
+          </button>
+        </nav>
+      </aside>
+    </div>
   );
 }
 
@@ -888,6 +1153,8 @@ export default function ProfilePage() {
   const [posts, setPosts] = useState<LumoraPost[]>([]);
   const [castIn, setCastIn] = useState<StudioProject[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [selectedPost, setSelectedPost] = useState<LumoraPost | null>(null);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
   const [editingSelfCharacter, setEditingSelfCharacter] = useState(false);
   const [selfForm, setSelfForm] = useState<SelfCharacterForm>(() => buildSelfCharacterForm(loadLumoraProfile(), null));
@@ -1055,6 +1322,11 @@ export default function ProfilePage() {
     setProfileDraft(profile);
     setSaveMessage(null);
     setEditingProfile(true);
+  }
+
+  async function handleProfileMenuSignOut() {
+    await supabase?.auth.signOut();
+    setProfileMenuOpen(false);
   }
 
   async function openSelfCharacterEditor() {
@@ -1611,6 +1883,31 @@ export default function ProfilePage() {
     <div className="page" style={{ paddingBottom: '40px' }}>
       <section className="list-card" style={{ borderRadius: '30px', padding: '22px', background: 'rgba(20,16,24,0.95)' }}>
         <div style={{ display: 'grid', gap: '18px', justifyItems: 'center', textAlign: 'center' }}>
+          <div className="row-between" style={{ width: '100%', alignItems: 'center' }}>
+            <span className="eyebrow">creator profile</span>
+            <button
+              type="button"
+              aria-label="Open profile menu"
+              onClick={() => setProfileMenuOpen(true)}
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '50%',
+                display: 'grid',
+                placeItems: 'center',
+                background: 'rgba(255,255,255,0.08)',
+                color: '#f7f4ff',
+                border: '1px solid rgba(255,255,255,0.1)',
+              }}
+            >
+              <span style={{ display: 'grid', gap: '4px', width: '16px' }} aria-hidden="true">
+                <span style={{ display: 'block', height: '2px', borderRadius: '999px', background: '#f7f4ff' }} />
+                <span style={{ display: 'block', height: '2px', borderRadius: '999px', background: '#f7f4ff' }} />
+                <span style={{ display: 'block', height: '2px', borderRadius: '999px', background: '#f7f4ff' }} />
+              </span>
+            </button>
+          </div>
+
           <div
             style={{
               width: '108px',
@@ -1627,7 +1924,6 @@ export default function ProfilePage() {
           </div>
 
           <div style={{ minWidth: 0 }}>
-            <span className="eyebrow">creator profile</span>
             <h1 style={{ marginTop: '8px' }}>{profile.displayName}</h1>
             <p className="muted" style={{ marginTop: '4px' }}>
               @{profile.username}
@@ -2031,9 +2327,15 @@ export default function ProfilePage() {
 
       <SectionCard title="Published videos">
         {posts.length ? (
-          <div className="list-stack">
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+              gap: '8px',
+            }}
+          >
             {posts.map((post) => (
-              <PostCard key={post.id} post={post} fallbackAvatar={profile.avatar} />
+              <ProfilePostTile key={post.id} post={post} onSelect={setSelectedPost} />
             ))}
           </div>
         ) : (
@@ -2076,6 +2378,21 @@ export default function ProfilePage() {
           </article>
         )}
       </SectionCard>
+
+      {selectedPost ? (
+        <ProfilePostPreviewModal
+          post={selectedPost}
+          fallbackAvatar={profile.avatar}
+          onClose={() => setSelectedPost(null)}
+        />
+      ) : null}
+
+      <ProfileMenuSidebar
+        open={profileMenuOpen}
+        signedIn={signedIn}
+        onClose={() => setProfileMenuOpen(false)}
+        onSignOut={() => void handleProfileMenuSignOut()}
+      />
     </div>
   );
 }
