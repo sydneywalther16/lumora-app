@@ -2,15 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { hasSupabaseConfig, supabase } from '../lib/supabase';
 
-type SessionSource =
-  | 'auth-state-change'
-  | 'initial'
-  | 'refresh'
-  | 'unconfigured'
-  | 'url-code'
-  | 'url-token'
-  | 'url-token-hash';
-type EmailOtpType = 'email' | 'email_change' | 'invite' | 'magiclink' | 'recovery' | 'signup';
+type SessionSource = 'auth-state-change' | 'initial' | 'refresh' | 'unconfigured' | 'url-redirect';
 
 type SessionState = {
   loading: boolean;
@@ -25,7 +17,18 @@ type SessionSnapshot = Omit<SessionState, 'refreshSession'>;
 type SupabaseClient = NonNullable<typeof supabase>;
 
 const AUTH_REDIRECT_STORAGE_KEY = 'lumora_auth_redirect_path';
-const validOtpTypes: EmailOtpType[] = ['email', 'email_change', 'invite', 'magiclink', 'recovery', 'signup'];
+const authParamNames = [
+  'access_token',
+  'code',
+  'expires_at',
+  'expires_in',
+  'provider_refresh_token',
+  'provider_token',
+  'refresh_token',
+  'token_hash',
+  'token_type',
+  'type',
+];
 
 const emptySnapshot: SessionSnapshot = {
   loading: hasSupabaseConfig,
@@ -47,19 +50,6 @@ function emitSessionState(snapshot: SessionSnapshot) {
 }
 
 function routeWithoutAuthParams(url: URL): string {
-  const authParamNames = [
-    'access_token',
-    'code',
-    'expires_at',
-    'expires_in',
-    'provider_refresh_token',
-    'provider_token',
-    'refresh_token',
-    'token_hash',
-    'token_type',
-    'type',
-  ];
-
   const nextUrl = new URL(url.href);
   authParamNames.forEach((paramName) => nextUrl.searchParams.delete(paramName));
   return `${nextUrl.pathname}${nextUrl.search ? nextUrl.search : ''}`;
@@ -94,37 +84,18 @@ function consumeRememberedRedirectPath(fallbackPath: string): string {
   if (typeof window === 'undefined') return fallbackPath;
 
   const rememberedPath = sanitizeRedirectPath(localStorage.getItem(AUTH_REDIRECT_STORAGE_KEY));
-  localStorage.removeItem(AUTH_REDIRECT_STORAGE_KEY);
   return rememberedPath ?? fallbackPath;
 }
 
-function getAuthParams() {
-  if (typeof window === 'undefined') {
-    return {
-      code: null,
-      accessToken: null,
-      refreshToken: null,
-      tokenHash: null,
-      type: null,
-    };
-  }
+function hasAuthRedirectParams(): boolean {
+  if (typeof window === 'undefined') return false;
 
   const searchParams = new URLSearchParams(window.location.search);
   const hashParams = new URLSearchParams(
     window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash,
   );
 
-  return {
-    code: searchParams.get('code'),
-    accessToken: hashParams.get('access_token') ?? searchParams.get('access_token'),
-    refreshToken: hashParams.get('refresh_token') ?? searchParams.get('refresh_token'),
-    tokenHash: hashParams.get('token_hash') ?? searchParams.get('token_hash'),
-    type: hashParams.get('type') ?? searchParams.get('type'),
-  };
-}
-
-function normalizeEmailOtpType(value: string | null): EmailOtpType {
-  return validOtpTypes.includes(value as EmailOtpType) ? (value as EmailOtpType) : 'magiclink';
+  return authParamNames.some((paramName) => searchParams.has(paramName) || hashParams.has(paramName));
 }
 
 function cleanAuthUrl() {
@@ -136,15 +107,65 @@ function cleanAuthUrl() {
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 
-function logAuthUserId(source: SessionSource, session: Session | null) {
-  console.log('AUTH USER ID', {
-    authUserId: session?.user?.id ?? null,
-    source,
-  });
+function delay(milliseconds: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
-async function readSession(client: SupabaseClient, source: SessionSource): Promise<SessionSnapshot> {
-  const { data, error } = await client.auth.getSession();
+async function getSessionAfterRedirect(client: SupabaseClient, hasRedirectParams: boolean) {
+  let lastResult = await client.auth.getSession();
+
+  if (!hasRedirectParams || lastResult.data.session) {
+    return lastResult;
+  }
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await delay(100);
+    lastResult = await client.auth.getSession();
+    if (lastResult.data.session) {
+      return lastResult;
+    }
+  }
+
+  return lastResult;
+}
+
+function logSessionResult(input: {
+  session: Session | null;
+  source: SessionSource;
+  foundOnLoad: boolean;
+  restoredFromStorage: boolean;
+  savedFromRedirect: boolean;
+}) {
+  const authUserId = input.session?.user?.id ?? null;
+
+  console.log('AUTH USER ID', {
+    authUserId,
+    source: input.source,
+  });
+
+  if (input.foundOnLoad && input.session) {
+    console.log('SESSION FOUND ON LOAD', { authUserId });
+  }
+
+  if (input.savedFromRedirect && input.session) {
+    console.log('SESSION SAVED', { authUserId });
+  }
+
+  if (input.restoredFromStorage && input.session) {
+    console.log('SESSION RESTORED', { authUserId });
+  }
+
+  if (!input.session) {
+    console.log('SESSION MISSING', { source: input.source });
+  }
+}
+
+async function readSession(
+  client: SupabaseClient,
+  source: SessionSource,
+  hasRedirectParams: boolean,
+): Promise<SessionSnapshot> {
+  const { data, error } = await getSessionAfterRedirect(client, hasRedirectParams);
   if (error) {
     console.error('Unable to load Supabase session:', error);
   }
@@ -154,7 +175,13 @@ async function readSession(client: SupabaseClient, source: SessionSource): Promi
     authUserId: session?.user?.id ?? null,
     source,
   });
-  logAuthUserId(source, session);
+  logSessionResult({
+    session,
+    source,
+    foundOnLoad: source === 'initial',
+    restoredFromStorage: source === 'initial' || source === 'refresh',
+    savedFromRedirect: hasRedirectParams,
+  });
 
   return {
     loading: false,
@@ -163,60 +190,6 @@ async function readSession(client: SupabaseClient, source: SessionSource): Promi
     configured: true,
     source,
   };
-}
-
-async function consumeUrlSession(client: SupabaseClient): Promise<SessionSource | null> {
-  const { code, accessToken, refreshToken, tokenHash, type } = getAuthParams();
-
-  if (code) {
-    const { data, error } = await client.auth.exchangeCodeForSession(code);
-    if (error) {
-      console.error('Unable to exchange Supabase magic-link code:', error);
-    } else if (data.session) {
-      console.log('AUTH CODE EXCHANGED', {
-        authUserId: data.session.user.id,
-        source: 'url-code',
-      });
-      cleanAuthUrl();
-      return 'url-code';
-    }
-  }
-
-  if (tokenHash) {
-    const { data, error } = await client.auth.verifyOtp({
-      token_hash: tokenHash,
-      type: normalizeEmailOtpType(type),
-    });
-    if (error) {
-      console.error('Unable to verify Supabase magic-link token hash:', error);
-    } else if (data.session) {
-      console.log('AUTH CODE EXCHANGED', {
-        authUserId: data.session.user.id,
-        source: 'url-token-hash',
-      });
-      cleanAuthUrl();
-      return 'url-token-hash';
-    }
-  }
-
-  if (accessToken && refreshToken) {
-    const { data, error } = await client.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
-    if (error) {
-      console.error('Unable to consume Supabase magic-link tokens:', error);
-    } else if (data.session) {
-      console.log('AUTH CODE EXCHANGED', {
-        authUserId: data.session.user.id,
-        source: 'url-token',
-      });
-      cleanAuthUrl();
-      return 'url-token';
-    }
-  }
-
-  return null;
 }
 
 async function hydrateSession(source: SessionSource = 'refresh'): Promise<Session | null> {
@@ -232,12 +205,18 @@ async function hydrateSession(source: SessionSource = 'refresh'): Promise<Sessio
     return null;
   }
 
+  const redirectParamsPresent = hasAuthRedirectParams();
   emitSessionState({ ...currentSnapshot, loading: true });
 
-  const urlSource = await consumeUrlSession(supabase);
-  const nextSnapshot = await readSession(supabase, urlSource ?? source);
+  const nextSource: SessionSource = redirectParamsPresent ? 'url-redirect' : source;
+  const nextSnapshot = await readSession(supabase, nextSource, redirectParamsPresent);
   initialHydrated = true;
   emitSessionState(nextSnapshot);
+
+  if (redirectParamsPresent && nextSnapshot.session) {
+    cleanAuthUrl();
+  }
+
   return nextSnapshot.session;
 }
 
@@ -266,7 +245,21 @@ function ensureAuthSubscription() {
         authUserId: session?.user?.id ?? null,
         event,
       });
-      logAuthUserId('auth-state-change', session ?? null);
+
+      if (session) {
+        console.log('SESSION SAVED', {
+          authUserId: session.user.id,
+          event,
+        });
+      } else {
+        console.log('SESSION MISSING', { source: 'auth-state-change', event });
+      }
+
+      console.log('AUTH USER ID', {
+        authUserId: session?.user?.id ?? null,
+        source: 'auth-state-change',
+      });
+
       emitSessionState({
         loading: false,
         user: session?.user ?? null,
