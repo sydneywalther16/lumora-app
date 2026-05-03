@@ -768,7 +768,8 @@ function DraftCard({ draft }: { draft: Draft }) {
 }
 
 export default function ProfilePage() {
-  const { user, loading: sessionLoading, configured: supabaseConfigured } = useSession();
+  const { user, session, loading: sessionLoading, configured: supabaseConfigured } = useSession();
+  const sessionUser = session?.user ?? user;
   const [profile, setProfile] = useState<LumoraProfile>(() => loadLumoraProfile());
   const [profileDraft, setProfileDraft] = useState<LumoraProfile>(() => loadLumoraProfile());
   const [characters, setCharacters] = useState<CharacterProfile[]>([]);
@@ -800,7 +801,7 @@ export default function ProfilePage() {
 
   useEffect(() => {
     void refreshProfileData();
-  }, [user, sessionLoading, supabaseConfigured]);
+  }, [sessionUser?.id, sessionLoading, supabaseConfigured]);
 
   useEffect(() => {
     if (!editingSelfCharacter) return;
@@ -811,13 +812,13 @@ export default function ProfilePage() {
     if (supabaseConfigured && sessionLoading) {
       setDebugInfo((current) => ({
         ...current,
-        authUserId: user?.id ?? null,
+        authUserId: sessionUser?.id ?? null,
         source: 'default',
       }));
       return;
     }
 
-    if (user) {
+    if (sessionUser) {
       try {
         const [
           loadedProfile,
@@ -826,11 +827,11 @@ export default function ProfilePage() {
           loadedProjects,
           loadedDrafts,
         ] = await Promise.all([
-          loadSupabaseProfile(user.id),
-          loadSupabaseCharacters(user.id),
-          loadSupabaseProfilePosts(user.id),
-          loadSupabaseProjects(user.id),
-          loadSupabaseDrafts(user.id),
+          loadSupabaseProfile(sessionUser.id),
+          loadSupabaseCharacters(sessionUser.id),
+          loadSupabaseProfilePosts(sessionUser.id),
+          loadSupabaseProjects(sessionUser.id),
+          loadSupabaseDrafts(sessionUser.id),
         ]);
         const loadedCreatorSelf = findCreatorSelfCharacter(loadedCharacters);
         const normalizedProfile: LumoraProfile = loadedCreatorSelf
@@ -853,7 +854,7 @@ export default function ProfilePage() {
         setCastIn(loadedProjects.filter((item) => Boolean(item.isDefaultSelfCharacter || item.characterName)));
         setDrafts(loadedDrafts);
         setDebugInfo({
-          authUserId: user.id,
+          authUserId: sessionUser.id,
           loadedProfileId: normalizedProfile.userId || normalizedProfile.id || null,
           profileAvatarUrlExists: Boolean(normalizedProfile.avatar),
           selfCharacterLoaded: Boolean(loadedCreatorSelf),
@@ -866,7 +867,7 @@ export default function ProfilePage() {
         setSaveMessage(error instanceof Error ? error.message : 'Unable to load Supabase profile data.');
         setDebugInfo((current) => ({
           ...current,
-          authUserId: user.id,
+          authUserId: sessionUser.id,
           source: 'default',
         }));
         return;
@@ -909,11 +910,11 @@ export default function ProfilePage() {
     let latestProfile = await hydrateLocalProfileAvatar(loadLumoraProfile());
     let latestCharacters = getStoredCharacters();
 
-    if (user) {
+    if (sessionUser) {
       try {
         const [remoteProfile, remoteCharacters] = await Promise.all([
-          loadSupabaseProfile(user.id),
-          loadSupabaseCharacters(user.id),
+          loadSupabaseProfile(sessionUser.id),
+          loadSupabaseCharacters(sessionUser.id),
         ]);
         latestProfile = remoteProfile;
         latestCharacters = remoteCharacters;
@@ -951,16 +952,16 @@ export default function ProfilePage() {
     if (!file) return;
 
     try {
-      if (user) {
+      if (sessionUser) {
         const avatar = (await uploadLumoraMedia({
-            userId: user.id,
+            userId: sessionUser.id,
             bucket: 'avatars',
             file,
             folder: 'profile',
             usage: 'profile-avatar',
           })).url;
         console.log('UPLOADED AVATAR URL', {
-          authUserId: user.id,
+          authUserId: sessionUser.id,
           avatarUrl: avatar,
         });
         setProfileDraft((current) => ({
@@ -996,11 +997,11 @@ export default function ProfilePage() {
     };
 
     try {
-      if (user && isTransientMediaUrl(nextProfile.avatar) && nextProfile.avatarStorageKey) {
+      if (sessionUser && isTransientMediaUrl(nextProfile.avatar) && nextProfile.avatarStorageKey) {
         const avatarFile = await loadLocalProfileAvatarFile(nextProfile.avatarStorageKey);
         if (avatarFile) {
           const uploadedAvatar = await uploadLumoraMedia({
-            userId: user.id,
+            userId: sessionUser.id,
             bucket: 'avatars',
             file: avatarFile,
             folder: 'profile',
@@ -1015,23 +1016,23 @@ export default function ProfilePage() {
         }
       }
 
-      const savedProfile = user
-        ? await saveSupabaseProfile(user.id, nextProfile)
+      const savedProfile = sessionUser
+        ? await saveSupabaseProfile(sessionUser.id, nextProfile)
         : nextProfile;
 
-      if (!user) {
+      if (!sessionUser) {
         saveLumoraProfile(savedProfile);
         cleanupCreatorSelfMetadata(savedProfile);
       }
       setProfile(savedProfile);
       setProfileDraft(savedProfile);
-      setCharacters(user ? await loadSupabaseCharacters(user.id) : getStoredCharacters());
+      setCharacters(sessionUser ? await loadSupabaseCharacters(sessionUser.id) : getStoredCharacters());
       setDebugInfo((current) => ({
         ...current,
-        authUserId: user?.id ?? null,
-        loadedProfileId: savedProfile.userId || savedProfile.id || user?.id || null,
+        authUserId: sessionUser?.id ?? null,
+        loadedProfileId: savedProfile.userId || savedProfile.id || sessionUser?.id || null,
         profileAvatarUrlExists: Boolean(savedProfile.avatar),
-        source: user ? 'supabase' : current.source,
+        source: sessionUser ? 'supabase' : current.source,
       }));
       setSaveMessage('Profile saved.');
       setEditingProfile(false);
@@ -1048,9 +1049,9 @@ export default function ProfilePage() {
     if (!file) return;
 
     try {
-      const dataUrl = user
+      const dataUrl = sessionUser
         ? (await uploadLumoraMedia({
-            userId: user.id,
+            userId: sessionUser.id,
             bucket: 'character-reference-images',
             file,
             folder: `self/${field}`,
@@ -1069,9 +1070,9 @@ export default function ProfilePage() {
     if (!file) return;
 
     try {
-      const dataUrl = user
+      const dataUrl = sessionUser
         ? (await uploadLumoraMedia({
-            userId: user.id,
+            userId: sessionUser.id,
             bucket: 'self-capture-videos',
             file,
             folder: 'self/capture',
@@ -1094,9 +1095,9 @@ export default function ProfilePage() {
     if (!file) return;
 
     try {
-      const dataUrl = user
+      const dataUrl = sessionUser
         ? (await uploadLumoraMedia({
-            userId: user.id,
+            userId: sessionUser.id,
             bucket: 'voice-samples',
             file,
             folder: 'self/voice',
@@ -1174,7 +1175,7 @@ export default function ProfilePage() {
     const finalEditorDraft = saveSelfCharacterEditorDraft(selfForm) ?? createSelfCharacterEditorDraft(selfForm);
     const displayName = profile.displayName.trim() || 'Creator';
 
-    if (user) {
+    if (sessionUser) {
       try {
         const referenceImageUrls = {
           frontFace: selfForm.frontFace,
@@ -1192,7 +1193,7 @@ export default function ProfilePage() {
         };
 
         const saved = await saveSupabaseCreatorSelfCharacter({
-          userId: user.id,
+          userId: sessionUser.id,
           profile,
           name: displayName,
           referenceImageUrls,
@@ -1215,14 +1216,14 @@ export default function ProfilePage() {
           stylePreferences,
           editorDraft: finalEditorDraft,
         });
-        const remoteCharacters = await loadSupabaseCharacters(user.id);
+        const remoteCharacters = await loadSupabaseCharacters(sessionUser.id);
 
         setProfile(saved.profile);
         setProfileDraft(saved.profile);
         setCharacters(remoteCharacters.length ? remoteCharacters : [saved.character]);
         setDebugInfo({
-          authUserId: user.id,
-          loadedProfileId: saved.profile.userId || saved.profile.id || user.id,
+          authUserId: sessionUser.id,
+          loadedProfileId: saved.profile.userId || saved.profile.id || sessionUser.id,
           profileAvatarUrlExists: Boolean(saved.profile.avatar),
           selfCharacterLoaded: true,
           selfCharacterUserId: saved.character.ownerUserId,
@@ -1380,7 +1381,12 @@ export default function ProfilePage() {
         </div>
       </section>
 
-      <AuthCard />
+      <AuthCard
+        configured={supabaseConfigured}
+        loading={sessionLoading}
+        user={sessionUser}
+        session={session}
+      />
 
       <section className="headline-card compact" style={{ borderRadius: '24px', padding: '14px' }}>
         <span className="eyebrow">profile debug</span>

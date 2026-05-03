@@ -1,9 +1,18 @@
 import { useState } from 'react';
+import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../../lib/supabase';
-import { useSession } from '../../hooks/useSession';
 
-export default function AuthCard() {
-  const { configured, loading, user } = useSession();
+type Props = {
+  configured?: boolean;
+  loading?: boolean;
+  user?: User | null;
+  session?: Session | null;
+};
+
+export default function AuthCard(props: Props = {}) {
+  const configured = props.configured ?? Boolean(supabase);
+  const loading = props.loading ?? false;
+  const user = props.session?.user ?? props.user ?? null;
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
 
@@ -16,7 +25,7 @@ export default function AuthCard() {
 
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
-      options: { emailRedirectTo: window.location.origin },
+      options: { emailRedirectTo: `${window.location.origin}/profile` },
     });
     setMessage(error ? error.message : 'Check your email for a sign-in link.');
   }
@@ -37,7 +46,7 @@ export default function AuthCard() {
     );
   }
 
-  if (loading) {
+  if (loading && !user) {
     return <section className="headline-card"><p>Checking session…</p></section>;
   }
 
@@ -70,7 +79,7 @@ export default function AuthCard() {
     <section className="headline-card">
       <div>
         <span className="eyebrow">signed in</span>
-        <h2>{user.email}</h2>
+        <h2>Signed in as {user.email}</h2>
       </div>
       <p>Your account session is connected.</p>
       <div className="button-row">

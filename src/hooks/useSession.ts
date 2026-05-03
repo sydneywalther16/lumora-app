@@ -22,22 +22,40 @@ export function useSession(): SessionState {
       setState({ loading: false, user: null, session: null, configured: false });
       return;
     }
+    const client = supabase;
 
-    supabase.auth.getSession().then(({ data }) => {
+    async function loadInitialSession() {
+      const { data } = await client.auth.getSession();
+      let session = data.session ?? null;
+
+      if (!session) {
+        const code = new URLSearchParams(window.location.search).get('code');
+        if (code) {
+          const exchangeResult = await client.auth.exchangeCodeForSession(code).catch(() => null);
+          session = exchangeResult?.data.session ?? null;
+
+          if (session) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+          }
+        }
+      }
+
       console.log('LOADED SUPABASE USER', {
-        authUserId: data.session?.user?.id ?? null,
+        authUserId: session?.user?.id ?? null,
       });
       setState({
         loading: false,
-        user: data.session?.user ?? null,
-        session: data.session ?? null,
+        user: session?.user ?? null,
+        session,
         configured: true,
       });
-    });
+    }
+
+    void loadInitialSession();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = client.auth.onAuthStateChange((_event, session) => {
       console.log('LOADED SUPABASE USER', {
         authUserId: session?.user?.id ?? null,
       });
