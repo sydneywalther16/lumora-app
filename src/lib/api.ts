@@ -63,6 +63,7 @@ export type GenerationJob = {
   creatorUsername?: string | null;
   creatorAvatar?: string | null;
   title: string;
+  caption?: string | null;
   prompt: string;
   status: string;
   outputType: string;

@@ -79,6 +79,7 @@ export default function StudioList({ jobs }: Props) {
   const [publishMessage, setPublishMessage] = useState<string | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishPrivacy, setPublishPrivacy] = useState<PrivacySetting>('private');
+  const [captionDraft, setCaptionDraft] = useState('');
   const [failedVideoIds, setFailedVideoIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -112,10 +113,11 @@ export default function StudioList({ jobs }: Props) {
     setPublishMessage(null);
     setPublishError(null);
     setPublishPrivacy('private');
+    setCaptionDraft(job.caption || job.prompt || '');
     setSelectedJob(job);
   }
 
-  async function postToFeed(job: GenerationJob) {
+  async function postToFeed(job: GenerationJob, captionText: string) {
     setPublishMessage(null);
     setPublishError(null);
 
@@ -144,7 +146,7 @@ export default function StudioList({ jobs }: Props) {
       id: createLocalPostId(),
       sourceGenerationId: job.id,
       title: job.title || null,
-      caption: job.prompt || 'Generated video',
+      caption: captionText,
       prompt: job.prompt || '',
       videoUrl: job.resultAssetUrl || '/demo-video.mp4',
       characterId: isDefaultSelfCharacter ? CREATOR_SELF_CHARACTER_ID : job.characterId || null,
@@ -163,7 +165,7 @@ export default function StudioList({ jobs }: Props) {
       isDefaultSelfCharacter,
     };
 
-    if (!post.id || !post.videoUrl || !post.caption) {
+    if (!post.id || !post.videoUrl) {
       setPublishError('Missing required data to post.');
       return;
     }
@@ -457,9 +459,16 @@ export default function StudioList({ jobs }: Props) {
               </video>
             ) : null}
 
-            <p style={{ marginTop: '14px', opacity: 0.8 }}>
-              {selectedJob.prompt || 'No prompt saved for this concept yet.'}
-            </p>
+            <label className="field-block" style={{ marginTop: '14px' }}>
+              <span>Post caption</span>
+              <textarea
+                value={captionDraft}
+                onChange={(event) => setCaptionDraft(event.target.value)}
+                rows={4}
+                aria-label="Post caption"
+                style={{ minHeight: '112px' }}
+              />
+            </label>
 
             <div style={{ display: 'flex', gap: '10px', marginTop: '16px', flexWrap: 'wrap' }}>
               <label className="field-block" style={{ minWidth: '180px', margin: 0 }}>
@@ -480,7 +489,7 @@ export default function StudioList({ jobs }: Props) {
                 type="button"
                 className="primary-btn"
                 onClick={() => {
-                  void postToFeed(selectedJob);
+                  void postToFeed(selectedJob, captionDraft);
                 }}
                 disabled={isPosted(selectedJob.id)}
               >

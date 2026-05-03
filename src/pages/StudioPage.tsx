@@ -54,6 +54,7 @@ export default function StudioPage() {
           : project.characterName
             ? `Character: ${project.characterName}`
             : 'Generated video'),
+      caption: project.caption || project.prompt || '',
       prompt: project.prompt,
       status: project.status,
       outputType: 'video',

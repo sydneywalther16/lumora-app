@@ -115,7 +115,7 @@ function inferCategoriesFromText(text: string): TopChip[] {
 }
 
 function getCombinedPostText(post: LumoraPost): string {
-  return `${post.title ?? ''} ${post.prompt ?? ''}`;
+  return `${post.title ?? ''} ${post.caption ?? ''} ${post.prompt ?? ''}`;
 }
 
 function getCombinedDemoPostText(post: Post): string {
@@ -137,7 +137,7 @@ function HomeFeedCard({ post }: HomeFeedCardProps) {
 
   const videoUrl = post.videoUrl || post.imageUrl;
   const title = post.title || post.caption || 'Untitled Lumora post';
-  const bodyText = post.prompt || post.caption || 'Posted from Studio';
+  const bodyText = post.caption || post.prompt || 'Posted from Studio';
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
   const authorUsername = post.creatorUsername || post.username || 'lumora.creator';
   const authorAvatar = post.creatorAvatar || post.avatar;

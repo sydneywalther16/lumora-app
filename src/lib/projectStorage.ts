@@ -3,6 +3,7 @@ import type { VideoEngine } from './api';
 export type StudioProject = {
   id: string;
   title?: string | null;
+  caption?: string | null;
   prompt: string;
   videoUrl: string;
   status: string;
@@ -51,6 +52,7 @@ export function loadStudioProjects(): StudioProject[] {
       .map((project) => ({
         ...project,
         title: typeof project.title === 'string' ? project.title : null,
+        caption: typeof project.caption === 'string' ? project.caption : null,
         characterId: typeof project.characterId === 'string' ? project.characterId : null,
         characterAvatar: typeof project.characterAvatar === 'string' ? project.characterAvatar : null,
         isDefaultSelfCharacter:

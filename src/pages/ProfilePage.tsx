@@ -626,6 +626,7 @@ function ImagePreview({ src, fallback }: { src?: string | null; fallback: string
 
 function PostCard({ post }: { post: LumoraPost }) {
   const title = post.title || post.caption || 'Untitled post';
+  const bodyText = post.caption || post.prompt || 'No prompt available';
   const videoUrl = post.videoUrl || post.imageUrl || '/demo-video.mp4';
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
   const authorUsername = post.creatorUsername || post.username || 'lumora.creator';
@@ -678,7 +679,7 @@ function PostCard({ post }: { post: LumoraPost }) {
       <div style={{ padding: '18px' }}>
         <h3>{title}</h3>
         <p className="muted" style={{ marginTop: '10px' }}>
-          {post.prompt || 'No prompt available'}
+          {bodyText}
         </p>
         <p className="muted" style={{ marginTop: '8px', fontSize: '0.95rem' }}>
           Posted {formatPostedDate(post.createdAt)}

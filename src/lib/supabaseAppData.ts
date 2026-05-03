@@ -579,6 +579,7 @@ function mapProjectRow(row: DbRow): StudioProject {
   return {
     id: stringValue(row.id),
     title: nullableString(row.title),
+    caption: nullableString(row.caption),
     prompt: stringValue(row.prompt),
     videoUrl: stringValue(row.video_url) || stringValue(row.cover_asset_url),
     status: stringValue(row.status) || 'draft',
@@ -665,29 +666,53 @@ export async function loadSupabasePublicPosts(): Promise<LumoraPost[]> {
 
 export async function saveSupabasePost(userId: string, post: LumoraPost): Promise<LumoraPost> {
   const client = getClient();
-  const { data, error } = await client
-    .from('posts')
-    .insert({
-      user_id: userId,
-      title: post.title || post.caption || 'Lumora post',
-      caption: post.caption ?? null,
-      prompt: post.prompt ?? null,
-      image_url: storageUrl(post.imageUrl, 'Post image'),
-      video_url: storageUrl(post.videoUrl, 'Post video'),
-      source_generation_id: post.sourceGenerationId ?? null,
-      privacy: post.privacy ?? 'private',
-      character_id: post.characterId ?? null,
-      character_name: post.characterName ?? null,
-      character_avatar: storageUrl(post.characterAvatar, 'Post character avatar'),
-      is_default_self_character: Boolean(post.isDefaultSelfCharacter),
-      creator_name: post.creatorName ?? post.displayName ?? null,
-      creator_username: post.creatorUsername ?? post.username ?? null,
-      creator_avatar: storageUrl(post.creatorAvatar ?? post.avatar, 'Post creator avatar'),
-      provider: post.provider ?? null,
-      status: post.status ?? 'published',
-    })
-    .select('*')
-    .single();
+  const payload = {
+    user_id: userId,
+    title: post.title || post.caption || 'Lumora post',
+    caption: post.caption ?? null,
+    prompt: post.prompt ?? null,
+    image_url: storageUrl(post.imageUrl, 'Post image'),
+    video_url: storageUrl(post.videoUrl, 'Post video'),
+    source_generation_id: post.sourceGenerationId ?? null,
+    privacy: post.privacy ?? 'private',
+    character_id: post.characterId ?? null,
+    character_name: post.characterName ?? null,
+    character_avatar: storageUrl(post.characterAvatar, 'Post character avatar'),
+    is_default_self_character: Boolean(post.isDefaultSelfCharacter),
+    creator_name: post.creatorName ?? post.displayName ?? null,
+    creator_username: post.creatorUsername ?? post.username ?? null,
+    creator_avatar: storageUrl(post.creatorAvatar ?? post.avatar, 'Post creator avatar'),
+    provider: post.provider ?? null,
+    status: post.status ?? 'published',
+    updated_at: new Date().toISOString(),
+  };
+
+  const existingPost = post.sourceGenerationId
+    ? await client
+        .from('posts')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('source_generation_id', post.sourceGenerationId)
+        .maybeSingle()
+    : null;
+
+  if (existingPost?.error) throw existingPost.error;
+
+  const result = existingPost?.data
+    ? await client
+        .from('posts')
+        .update(payload)
+        .eq('id', stringValue(existingPost.data.id))
+        .eq('user_id', userId)
+        .select('*')
+        .single()
+    : await client
+        .from('posts')
+        .insert(payload)
+        .select('*')
+        .single();
+
+  const { data, error } = result;
 
   if (error) throw error;
 
