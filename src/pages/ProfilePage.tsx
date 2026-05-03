@@ -228,6 +228,26 @@ function hasLocalAccountRecoveryData(): boolean {
   return hasLocalProfileDetails(localProfile) || Boolean(localCreatorSelf);
 }
 
+function getLocalRecoveryAvailability(options: {
+  supabaseProfileExists: boolean;
+  loadedCreatorSelf: CharacterProfile | null;
+}) {
+  if (typeof window === 'undefined') {
+    return {
+      profile: false,
+      selfCharacter: false,
+    };
+  }
+
+  const localProfile = loadLumoraProfile();
+  const localCreatorSelf = findCreatorSelfCharacter(getStoredCharacters());
+
+  return {
+    profile: hasLocalProfileDetails(localProfile) && !options.supabaseProfileExists,
+    selfCharacter: Boolean(localCreatorSelf) && !options.loadedCreatorSelf,
+  };
+}
+
 async function prepareLocalProfileForAccountSync(
   userId: string,
   localProfile: LumoraProfile,
@@ -851,7 +871,14 @@ function DraftCard({ draft }: { draft: Draft }) {
 }
 
 export default function ProfilePage() {
-  const { user, session, loading: sessionLoading, configured: supabaseConfigured } = useSession();
+  const {
+    user,
+    session,
+    loading: sessionLoading,
+    configured: supabaseConfigured,
+    source: sessionSource,
+    refreshSession,
+  } = useSession();
   const authUser = session?.user ?? user;
   const authUserId = session?.user?.id || user?.id || null;
   const signedIn = Boolean(authUserId);
@@ -874,7 +901,8 @@ export default function ProfilePage() {
   const [showSelfCaptureRedo, setShowSelfCaptureRedo] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [selfCharacterStatus, setSelfCharacterStatus] = useState<string | null>(null);
-  const [syncLocalAvailable, setSyncLocalAvailable] = useState(false);
+  const [syncLocalProfileAvailable, setSyncLocalProfileAvailable] = useState(false);
+  const [syncLocalSelfAvailable, setSyncLocalSelfAvailable] = useState(false);
   const [syncingLocal, setSyncingLocal] = useState(false);
   const [debugInfo, setDebugInfo] = useState<ProfileDebugInfo>({
     authUserId: null,
@@ -885,6 +913,26 @@ export default function ProfilePage() {
     source: 'default',
   });
   const selfCharacterEditorRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    console.log('PROFILE AUTH USER ID', { authUserId });
+  }, [authUserId]);
+
+  useEffect(() => {
+    console.log('PROFILE SESSION SOURCE', {
+      authUserId,
+      configured: supabaseConfigured,
+      loading: sessionLoading,
+      source: sessionSource,
+    });
+  }, [authUserId, sessionLoading, sessionSource, supabaseConfigured]);
+
+  useEffect(() => {
+    console.log('PROFILE HIDING AUTH CARD', {
+      authUserId,
+      hidden: signedIn,
+    });
+  }, [authUserId, signedIn]);
 
   useEffect(() => {
     void refreshProfileData();
@@ -942,9 +990,12 @@ export default function ProfilePage() {
         setPosts(loadedPosts);
         setCastIn(loadedProjects.filter((item) => Boolean(item.isDefaultSelfCharacter || item.characterName)));
         setDrafts(loadedDrafts);
-        setSyncLocalAvailable(
-          hasLocalAccountRecoveryData() && (!supabaseProfileExists || !loadedCreatorSelf)
-        );
+        const localRecovery = getLocalRecoveryAvailability({
+          supabaseProfileExists,
+          loadedCreatorSelf,
+        });
+        setSyncLocalProfileAvailable(localRecovery.profile);
+        setSyncLocalSelfAvailable(localRecovery.selfCharacter);
         setDebugInfo({
           authUserId,
           loadedProfileId: normalizedProfile.userId || normalizedProfile.id || null,
@@ -957,7 +1008,12 @@ export default function ProfilePage() {
       } catch (error) {
         console.error('Unable to load Supabase profile data:', error);
         setSaveMessage(error instanceof Error ? error.message : 'Unable to load Supabase profile data.');
-        setSyncLocalAvailable(hasLocalAccountRecoveryData());
+        const localRecovery = getLocalRecoveryAvailability({
+          supabaseProfileExists: false,
+          loadedCreatorSelf: null,
+        });
+        setSyncLocalProfileAvailable(localRecovery.profile);
+        setSyncLocalSelfAvailable(localRecovery.selfCharacter);
         setDebugInfo((current) => ({
           ...current,
           authUserId,
@@ -967,7 +1023,8 @@ export default function ProfilePage() {
       }
     }
 
-    setSyncLocalAvailable(false);
+    setSyncLocalProfileAvailable(false);
+    setSyncLocalSelfAvailable(false);
     const loadedProfile = await hydrateLocalProfileAvatar(loadLumoraProfile());
     cleanupCreatorSelfMetadata(loadedProfile);
     const loadedCharacters = getStoredCharacters();
@@ -1106,6 +1163,10 @@ export default function ProfilePage() {
             folder: 'profile',
             usage: 'profile-avatar',
           });
+          console.log('UPLOADED AVATAR URL', {
+            authUserId,
+            avatarUrl: uploadedAvatar.url,
+          });
           nextProfile = {
             ...nextProfile,
             avatar: uploadedAvatar.url,
@@ -1126,6 +1187,9 @@ export default function ProfilePage() {
       setProfile(savedProfile);
       setProfileDraft(savedProfile);
       setCharacters(authUserId ? await loadSupabaseCharacters(authUserId) : getStoredCharacters());
+      if (authUserId) {
+        setSyncLocalProfileAvailable(false);
+      }
       setDebugInfo((current) => ({
         ...current,
         authUserId,
@@ -1320,7 +1384,8 @@ export default function ProfilePage() {
         setProfile(saved.profile);
         setProfileDraft(saved.profile);
         setCharacters(remoteCharacters.length ? remoteCharacters : [saved.character]);
-        setSyncLocalAvailable(false);
+        setSyncLocalProfileAvailable(false);
+        setSyncLocalSelfAvailable(false);
         setDebugInfo({
           authUserId,
           loadedProfileId: saved.profile.userId || saved.profile.id || authUserId,
@@ -1517,7 +1582,8 @@ export default function ProfilePage() {
       setProfile(savedProfile);
       setProfileDraft(savedProfile);
       setCharacters(remoteCharacters);
-      setSyncLocalAvailable(false);
+      setSyncLocalProfileAvailable(false);
+      setSyncLocalSelfAvailable(false);
       setDebugInfo({
         authUserId,
         loadedProfileId: savedProfile.userId || savedProfile.id || authUserId,
@@ -1597,23 +1663,37 @@ export default function ProfilePage() {
         session={session}
       />
 
-      {signedIn && syncLocalAvailable ? (
+      {signedIn && (syncLocalProfileAvailable || syncLocalSelfAvailable) ? (
         <section className="headline-card compact" style={{ borderRadius: '24px', padding: '14px' }}>
           <div className="row-between" style={{ gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
             <div>
               <span className="eyebrow">account sync</span>
               <p className="muted" style={{ margin: '8px 0 0' }}>
-                Local profile data exists on this device but is not saved to this account yet.
+                Local creator data exists on this device but is not saved to this account yet.
               </p>
             </div>
-            <button
-              type="button"
-              className="ghost-btn"
-              onClick={() => void handleSyncLocalProfileToAccount()}
-              disabled={syncingLocal}
-            >
-              {syncingLocal ? 'Syncing...' : 'Sync local profile to account'}
-            </button>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              {syncLocalProfileAvailable ? (
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => void handleSyncLocalProfileToAccount()}
+                  disabled={syncingLocal}
+                >
+                  {syncingLocal ? 'Syncing...' : 'Sync local profile to account'}
+                </button>
+              ) : null}
+              {syncLocalSelfAvailable ? (
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => void handleSyncLocalProfileToAccount()}
+                  disabled={syncingLocal}
+                >
+                  {syncingLocal ? 'Syncing...' : 'Sync local self character to account'}
+                </button>
+              ) : null}
+            </div>
           </div>
         </section>
       ) : null}
@@ -1626,8 +1706,17 @@ export default function ProfilePage() {
           <span>profileAvatarUrl: {debugInfo.profileAvatarUrlExists ? 'yes' : 'no'}</span>
           <span>selfCharacterLoaded: {debugInfo.selfCharacterLoaded ? 'yes' : 'no'}</span>
           <span>selfCharacterUserId: {debugInfo.selfCharacterUserId || 'none'}</span>
+          <span>sessionSource: {sessionSource}</span>
           <span>source: {debugSource}</span>
         </div>
+        <button
+          type="button"
+          className="ghost-btn"
+          style={{ marginTop: '12px', padding: '8px 12px' }}
+          onClick={() => void refreshSession()}
+        >
+          Refresh session
+        </button>
       </section>
 
       {editingProfile ? (

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
+import { rememberAuthRedirectPath } from '../../hooks/useSession';
 import { supabase } from '../../lib/supabase';
 
 type Props = {
@@ -25,7 +26,7 @@ export default function AuthCard(props: Props = {}) {
 
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
-      options: { emailRedirectTo: `${window.location.origin}/profile` },
+      options: { emailRedirectTo: `${window.location.origin}${rememberAuthRedirectPath()}` },
     });
     setMessage(error ? error.message : 'Check your email for a sign-in link.');
   }

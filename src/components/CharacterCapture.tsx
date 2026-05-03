@@ -35,7 +35,8 @@ function compactPreferences(preferences: Record<string, string>) {
 }
 
 export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
-  const { user } = useSession();
+  const { user, session, loading, configured } = useSession();
+  const authUser = session?.user ?? user;
   const [name, setName] = useState('');
   const [visibility, setVisibility] = useState<PrivacySetting>('private');
   const [consentConfirmed, setConsentConfirmed] = useState(false);
@@ -66,6 +67,11 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
       return;
     }
 
+    if (configured && loading && !authUser) {
+      setStatus('Checking your account session. Try again in a moment.');
+      return;
+    }
+
     setBusy(true);
     setStatus('Saving character...');
 
@@ -76,24 +82,24 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
         voicePersonality,
       });
 
-      if (user) {
+      if (authUser) {
         const [frontUpload, leftUpload, rightUpload] = await Promise.all([
           uploadLumoraMedia({
-            userId: user.id,
+            userId: authUser.id,
             bucket: 'character-reference-images',
             file: frontFace,
             folder: 'fictional/front',
             usage: 'character-front-reference',
           }),
           uploadLumoraMedia({
-            userId: user.id,
+            userId: authUser.id,
             bucket: 'character-reference-images',
             file: leftAngle,
             folder: 'fictional/left',
             usage: 'character-left-reference',
           }),
           uploadLumoraMedia({
-            userId: user.id,
+            userId: authUser.id,
             bucket: 'character-reference-images',
             file: rightAngle,
             folder: 'fictional/right',
@@ -103,7 +109,7 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
 
         const videoUpload = selfieVideo
           ? await uploadLumoraMedia({
-              userId: user.id,
+              userId: authUser.id,
               bucket: 'self-capture-videos',
               file: selfieVideo,
               folder: 'fictional/capture',
@@ -112,7 +118,7 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
           : null;
         const voiceUpload = voiceSample
           ? await uploadLumoraMedia({
-              userId: user.id,
+              userId: authUser.id,
               bucket: 'voice-samples',
               file: voiceSample,
               folder: 'fictional/voice',
@@ -121,7 +127,7 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
           : null;
 
         await saveSupabaseCharacter({
-          userId: user.id,
+          userId: authUser.id,
           name: name.trim(),
           consentConfirmed,
           visibility,
@@ -175,7 +181,7 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
       setRightAngle(null);
       setSelfieVideo(null);
       setVoiceSample(null);
-      setStatus(user ? 'Character saved to your account.' : 'Character saved locally.');
+      setStatus(authUser ? 'Character saved to your account.' : 'Character saved locally.');
       onCreated?.();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Unable to save character.');

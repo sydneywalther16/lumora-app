@@ -9,5 +9,13 @@ export const supabase = hasSupabaseConfig
   ? createClient(
       import.meta.env.VITE_SUPABASE_URL,
       import.meta.env.VITE_SUPABASE_ANON_KEY,
+      {
+        auth: {
+          autoRefreshToken: true,
+          detectSessionInUrl: false,
+          flowType: 'pkce',
+          persistSession: true,
+        },
+      },
     )
   : null;

@@ -38,7 +38,8 @@ function buildDefaultSelfCharacter(profile: LumoraProfile): CharacterProfile {
 }
 
 export default function CreatePage() {
-  const { user } = useSession();
+  const { user, session, loading, configured } = useSession();
+  const authUser = session?.user ?? user;
   const [characterRefreshKey, setCharacterRefreshKey] = useState(0);
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterProfile | null>(null);
   const [defaultSelfCharacter, setDefaultSelfCharacter] = useState<CharacterProfile | null>(null);
@@ -52,11 +53,15 @@ export default function CreatePage() {
     let active = true;
 
     async function loadDefaultSelfCharacter() {
-      if (user) {
+      if (configured && loading && !authUser) {
+        return;
+      }
+
+      if (authUser) {
         try {
           const [remoteProfile, remoteCharacters] = await Promise.all([
-            loadSupabaseProfile(user.id),
-            loadSupabaseCharacters(user.id),
+            loadSupabaseProfile(authUser.id),
+            loadSupabaseCharacters(authUser.id),
           ]);
           const remoteSelfCharacter = remoteCharacters.find(isCreatorSelfCharacter) ?? null;
           const nextProfile: LumoraProfile = remoteSelfCharacter
@@ -95,7 +100,7 @@ export default function CreatePage() {
     return () => {
       active = false;
     };
-  }, [characterRefreshKey, user]);
+  }, [authUser, characterRefreshKey, configured, loading]);
 
   const usingDefaultSelf =
     !selectedCharacter &&

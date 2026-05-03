@@ -24,6 +24,11 @@ function cleanMediaUrl(value: string): string {
   return value.startsWith('data:') || value.startsWith('blob:') ? '' : value;
 }
 
+function cleanOptionalMediaUrl(value?: string | null): string | null {
+  if (!value) return null;
+  return value.startsWith('data:') || value.startsWith('blob:') ? null : value;
+}
+
 export function loadStudioProjects(): StudioProject[] {
   if (typeof window === 'undefined') return [];
 
@@ -71,7 +76,15 @@ export function saveStudioProject(project: StudioProject) {
   if (typeof window === 'undefined') return;
 
   const existing = loadStudioProjects().filter((item) => item.id !== project.id);
-  const nextProjects = [{ ...project, videoUrl: cleanMediaUrl(project.videoUrl) }, ...existing];
+  const nextProjects = [
+    {
+      ...project,
+      videoUrl: cleanMediaUrl(project.videoUrl),
+      characterAvatar: cleanOptionalMediaUrl(project.characterAvatar),
+      creatorAvatar: cleanOptionalMediaUrl(project.creatorAvatar),
+    },
+    ...existing,
+  ];
 
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(nextProjects));

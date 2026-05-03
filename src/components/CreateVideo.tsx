@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { type GenerationResponse, type VideoAspectRatio, type VideoEngine } from '../lib/api';
 import { saveStudioProject } from '../lib/projectStorage';
 import { loadLumoraProfile } from '../lib/profileStorage';
-import { saveSupabaseDraft, saveSupabaseProject } from '../lib/supabaseAppData';
+import { loadSupabaseProfile, saveSupabaseDraft, saveSupabaseProject } from '../lib/supabaseAppData';
 import { useSession } from '../hooks/useSession';
 import { useAppStore } from '../store/useAppStore';
 
@@ -53,7 +53,8 @@ export default function CreateVideo({
   characterAvatar,
   isDefaultSelfCharacter,
 }: CreateVideoProps) {
-  const { user } = useSession();
+  const { user, session, loading, configured } = useSession();
+  const authUser = session?.user ?? user;
   const {
     activePrompt,
     selectedStyle,
@@ -71,10 +72,15 @@ export default function CreateVideo({
   const [generationResult, setGenerationResult] = useState<GenerationResponse | null>(null);
 
   async function handleGenerate() {
+    if (configured && loading && !authUser) {
+      setStatus('Checking your account session. Try again in a moment.');
+      return;
+    }
+
     setBusy(true);
     setStatus('Generating draft render...');
     try {
-      const profile = loadLumoraProfile();
+      const profile = authUser ? await loadSupabaseProfile(authUser.id) : loadLumoraProfile();
       const now = new Date().toISOString();
       const generationId = createLocalGenerationId();
       const result: GenerationResponse = {
@@ -111,11 +117,13 @@ export default function CreateVideo({
           createdAt: result.createdAt,
         };
 
-        if (user) {
-          await saveSupabaseProject(user.id, studioProject);
+        if (authUser) {
+          await saveSupabaseProject(authUser.id, studioProject);
         }
 
-        saveStudioProject(studioProject);
+        if (!authUser) {
+          saveStudioProject(studioProject);
+        }
       }
 
       setStatus('Draft render ready');
@@ -127,13 +135,18 @@ export default function CreateVideo({
   }
 
   async function handleSaveDraft() {
+    if (configured && loading && !authUser) {
+      setStatus('Checking your account session. Try again in a moment.');
+      return;
+    }
+
     setBusy(true);
     setStatus('Saving draft...');
 
     try {
-      if (user) {
+      if (authUser) {
         await saveSupabaseDraft({
-          userId: user.id,
+          userId: authUser.id,
           title: draftTitle,
           prompt: activePrompt,
           payload: {

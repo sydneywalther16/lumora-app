@@ -19,7 +19,8 @@ export default function CharacterLibrary({
   onSelect,
   refreshKey = 0,
 }: CharacterLibraryProps) {
-  const { user } = useSession();
+  const { user, session, loading, configured } = useSession();
+  const authUser = session?.user ?? user;
   const [characters, setCharacters] = useState<CharacterProfile[]>([]);
   const [status, setStatus] = useState('Loading characters...');
 
@@ -27,9 +28,14 @@ export default function CharacterLibrary({
     let active = true;
 
     async function loadCharacters() {
+      if (configured && loading && !authUser) {
+        setStatus('Loading characters...');
+        return;
+      }
+
       try {
-        const loaded = user
-          ? await loadSupabaseCharacters(user.id)
+        const loaded = authUser
+          ? await loadSupabaseCharacters(authUser.id)
           : getStoredCharacters();
         const fictionalCharacters = loaded.filter((character) => !isCreatorSelfCharacter(character));
 
@@ -48,7 +54,7 @@ export default function CharacterLibrary({
     return () => {
       active = false;
     };
-  }, [refreshKey, user]);
+  }, [authUser, configured, loading, refreshKey]);
 
   return (
     <section className="editor-card character-library">

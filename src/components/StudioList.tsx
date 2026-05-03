@@ -73,7 +73,8 @@ function getJobCharacterLabel(job: GenerationJob) {
 }
 
 export default function StudioList({ jobs }: Props) {
-  const { user } = useSession();
+  const { user, session, loading, configured } = useSession();
+  const authUser = session?.user ?? user;
   const [selectedJob, setSelectedJob] = useState<GenerationJob | null>(null);
   const [postedProjectIds, setPostedProjectIds] = useState<string[]>([]);
   const [publishMessage, setPublishMessage] = useState<string | null>(null);
@@ -86,9 +87,13 @@ export default function StudioList({ jobs }: Props) {
     let active = true;
 
     async function loadPostedState() {
+      if (configured && loading && !authUser) {
+        return;
+      }
+
       try {
-        const postedIds = user
-          ? (await loadSupabaseProfilePosts(user.id))
+        const postedIds = authUser
+          ? (await loadSupabaseProfilePosts(authUser.id))
               .map((post) => post.sourceGenerationId ?? post.id)
               .filter((value): value is string => Boolean(value))
           : getPostedProjectIds();
@@ -103,7 +108,7 @@ export default function StudioList({ jobs }: Props) {
     return () => {
       active = false;
     };
-  }, [user]);
+  }, [authUser, configured, loading]);
 
   function isPosted(projectId: string) {
     return postedProjectIds.includes(projectId);
@@ -121,12 +126,29 @@ export default function StudioList({ jobs }: Props) {
     setPublishMessage(null);
     setPublishError(null);
 
-    const profile = user
-      ? await loadSupabaseProfile(user.id).catch(() => loadLumoraProfile())
-      : loadLumoraProfile();
-    const storedCharacters = user
-      ? await loadSupabaseCharacters(user.id).catch(() => getStoredCharacters())
-      : getStoredCharacters();
+    if (configured && loading && !authUser) {
+      setPublishError('Checking your account session. Try posting again in a moment.');
+      return;
+    }
+
+    let profile;
+    let storedCharacters;
+
+    try {
+      profile = authUser
+        ? await loadSupabaseProfile(authUser.id)
+        : loadLumoraProfile();
+      storedCharacters = authUser
+        ? await loadSupabaseCharacters(authUser.id)
+        : getStoredCharacters();
+    } catch (error) {
+      setPublishError(
+        error instanceof Error
+          ? `Unable to load your account profile before posting: ${error.message}`
+          : 'Unable to load your account profile before posting.'
+      );
+      return;
+    }
     const currentCharacter = job.characterId
       ? storedCharacters.find((character) => character.id === job.characterId) ?? null
       : null;
@@ -176,8 +198,8 @@ export default function StudioList({ jobs }: Props) {
     }
 
     try {
-      if (user) {
-        await saveSupabasePost(user.id, post);
+      if (authUser) {
+        await saveSupabasePost(authUser.id, post);
       } else {
         savePostedItem(post);
       }

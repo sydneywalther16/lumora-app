@@ -6,7 +6,8 @@ import { useSession } from '../hooks/useSession';
 import { loadSupabaseProjects } from '../lib/supabaseAppData';
 
 export default function StudioPage() {
-  const { user } = useSession();
+  const { user, session, loading, configured } = useSession();
+  const authUser = session?.user ?? user;
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
   const [status, setStatus] = useState('Loading studio...');
 
@@ -14,9 +15,14 @@ export default function StudioPage() {
     let active = true;
 
     async function loadJobs() {
+      if (configured && loading && !authUser) {
+        setStatus('Loading studio...');
+        return;
+      }
+
       try {
-        const projects = user
-          ? await loadSupabaseProjects(user.id)
+        const projects = authUser
+          ? await loadSupabaseProjects(authUser.id)
           : loadStudioProjects();
         if (!active) return;
         const mappedJobs = mapProjectsToJobs(projects);
@@ -34,7 +40,7 @@ export default function StudioPage() {
     return () => {
       active = false;
     };
-  }, [user]);
+  }, [authUser, configured, loading]);
 
   function mapProjectsToJobs(projects: StudioProject[]): GenerationJob[] {
     return projects.map((project) => ({
