@@ -63,6 +63,14 @@ function booleanValue(value: unknown): boolean {
   return value === true;
 }
 
+function isMissingColumnError(error: unknown, columnName: string): boolean {
+  if (!isObject(error)) return false;
+
+  const code = error.code;
+  const message = `${error.message ?? ''} ${error.details ?? ''} ${error.hint ?? ''}`;
+  return code === '42703' || message.includes(columnName);
+}
+
 function jsonRecord(value: unknown): Record<string, unknown> {
   return isObject(value) ? value : {};
 }
@@ -178,23 +186,56 @@ export async function uploadLumoraMedia(input: {
 
 export async function loadSupabaseProfile(userId: string): Promise<LumoraProfile> {
   const client = getClient();
-  const { data, error } = await client
+  let result = await client
     .from('profiles')
     .select('*')
-    .eq('id', userId)
+    .eq('user_id', userId)
     .maybeSingle();
 
-  if (error) throw error;
+  if (
+    result.error &&
+    (isMissingColumnError(result.error, 'user_id') ||
+      (isObject(result.error) && result.error.code === '42P10'))
+  ) {
+    result = await client
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+  }
 
-  if (!data) {
+  if (!result.data && !result.error) {
+    const legacyResult = await client
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (legacyResult.data || legacyResult.error) {
+      result = legacyResult;
+    }
+  }
+
+  if (result.error) throw result.error;
+
+  console.log('LOADED SUPABASE PROFILE', {
+    authUserId: userId,
+    loadedProfileId: result.data ? stringValue(result.data.id) : null,
+    loadedProfileUserId: result.data ? nullableString(result.data.user_id) : null,
+    avatarUrlExists: Boolean(result.data?.avatar_url),
+  });
+
+  if (!result.data) {
     return {
+      id: userId,
+      userId,
       displayName: 'Creator',
       username: `creator-${userId.slice(0, 8)}`,
       bio: '',
     };
   }
 
-  return mapProfileRow(data);
+  return mapProfileRow(result.data);
 }
 
 export async function saveSupabaseProfile(userId: string, profile: LumoraProfile): Promise<LumoraProfile> {
@@ -205,49 +246,89 @@ export async function saveSupabaseProfile(userId: string, profile: LumoraProfile
       ? requestedUsername
       : `creator-${userId.slice(0, 8)}`;
   const displayName = profile.displayName.trim() || 'Creator';
+  const profileAvatarUrl = storageUrl(profile.avatar, 'Profile avatar');
+  const payload = {
+    id: userId,
+    user_id: userId,
+    handle: username,
+    username,
+    display_name: displayName,
+    bio: profile.bio ?? '',
+    avatar_url: profileAvatarUrl,
+    default_self_character_id: profile.defaultSelfCharacterId ?? null,
+    default_self_character_name: profile.defaultSelfCharacterName ?? null,
+    default_self_character_avatar: storageUrl(profile.defaultSelfCharacterAvatar, 'Default self character avatar'),
+    self_reference_image_urls: cleanJsonRecord(profile.selfReferenceImageUrls),
+    self_reference_photo_names: cleanJsonRecord(profile.selfReferencePhotoNames),
+    self_capture_video_name: profile.selfCaptureVideoName ?? null,
+    self_capture_video_url: storageUrl(profile.selfCaptureVideoUrl, 'Self capture video'),
+    self_capture_numbers: profile.selfCaptureNumbers ?? null,
+    self_capture_completed: Boolean(profile.selfCaptureCompleted),
+    self_capture_consent: Boolean(profile.selfCaptureConsent),
+    self_capture_captured_at: profile.selfCaptureCapturedAt ?? null,
+    self_voice_sample_name: profile.selfVoiceSampleName ?? null,
+    self_voice_sample_url: storageUrl(profile.selfVoiceSampleUrl, 'Self voice sample'),
+    self_voice_sample_numbers: profile.selfVoiceSampleNumbers ?? null,
+    self_voice_sample_captured_at: profile.selfVoiceSampleCapturedAt ?? null,
+    self_voice_sample_consent: Boolean(profile.selfVoiceSampleConsent),
+    creator_self_features: cleanJsonRecord(profile.creatorSelfFeatures),
+    creator_self_style_preferences: cleanJsonRecord(profile.creatorSelfStylePreferences),
+    self_character_editor_draft: stripBase64Media(profile.selfCharacterEditorDraft) ?? null,
+    updated_at: new Date().toISOString(),
+  };
 
-  const { data, error } = await client
+  console.log('SAVING SUPABASE PROFILE', {
+    authUserId: userId,
+    profileUserId: userId,
+    avatarUrlExists: Boolean(profileAvatarUrl),
+  });
+
+  let result = await client
     .from('profiles')
     .upsert(
-      {
-        id: userId,
-        handle: username,
-        username,
-        display_name: displayName,
-        bio: profile.bio ?? '',
-        avatar_url: storageUrl(profile.avatar, 'Profile avatar'),
-        default_self_character_id: profile.defaultSelfCharacterId ?? null,
-        default_self_character_name: profile.defaultSelfCharacterName ?? null,
-        default_self_character_avatar: storageUrl(profile.defaultSelfCharacterAvatar, 'Default self character avatar'),
-        self_reference_image_urls: cleanJsonRecord(profile.selfReferenceImageUrls),
-        self_reference_photo_names: cleanJsonRecord(profile.selfReferencePhotoNames),
-        self_capture_video_name: profile.selfCaptureVideoName ?? null,
-        self_capture_video_url: storageUrl(profile.selfCaptureVideoUrl, 'Self capture video'),
-        self_capture_numbers: profile.selfCaptureNumbers ?? null,
-        self_capture_completed: Boolean(profile.selfCaptureCompleted),
-        self_capture_consent: Boolean(profile.selfCaptureConsent),
-        self_capture_captured_at: profile.selfCaptureCapturedAt ?? null,
-        self_voice_sample_name: profile.selfVoiceSampleName ?? null,
-        self_voice_sample_url: storageUrl(profile.selfVoiceSampleUrl, 'Self voice sample'),
-        self_voice_sample_numbers: profile.selfVoiceSampleNumbers ?? null,
-        self_voice_sample_captured_at: profile.selfVoiceSampleCapturedAt ?? null,
-        self_voice_sample_consent: Boolean(profile.selfVoiceSampleConsent),
-        creator_self_features: cleanJsonRecord(profile.creatorSelfFeatures),
-        creator_self_style_preferences: cleanJsonRecord(profile.creatorSelfStylePreferences),
-        self_character_editor_draft: stripBase64Media(profile.selfCharacterEditorDraft) ?? null,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'id' },
+      payload,
+      { onConflict: 'user_id' },
     )
     .select('*')
     .single();
 
-  if (error) throw error;
-  return mapProfileRow(data);
+  if (
+    result.error &&
+    (isMissingColumnError(result.error, 'user_id') ||
+      (isObject(result.error) && result.error.code === '42P10'))
+  ) {
+    const { user_id: _userId, ...legacyPayload } = payload;
+    result = await client
+      .from('profiles')
+      .upsert(
+        legacyPayload,
+        { onConflict: 'id' },
+      )
+      .select('*')
+      .single();
+  }
+
+  if (result.error) throw result.error;
+
+  await client
+    .from('posts')
+    .update({
+      creator_name: displayName,
+      creator_username: username,
+      creator_avatar: profileAvatarUrl,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('user_id', userId);
+
+  return mapProfileRow(result.data);
 }
 
 function mapProfileRow(row: DbRow): LumoraProfile {
+  const userId = nullableString(row.user_id) || stringValue(row.id) || null;
+
   return {
+    id: nullableString(row.id),
+    userId,
     avatar: stringValue(row.avatar_url) || undefined,
     displayName: stringValue(row.display_name) || 'Creator',
     username: stringValue(row.username) || stringValue(row.handle) || 'lumora.creator',
@@ -381,6 +462,12 @@ export async function loadSupabaseCharacters(userId: string): Promise<CharacterP
   if (charactersResult.error) throw charactersResult.error;
   if (selfResult.error) throw selfResult.error;
 
+  console.log('LOADED SUPABASE SELF CHARACTER', {
+    authUserId: userId,
+    loaded: Boolean(selfResult.data),
+    selfCharacterUserId: selfResult.data ? stringValue(selfResult.data.user_id) : null,
+  });
+
   const fictionalCharacters = (charactersResult.data ?? []).map(mapCharacterRow);
   const selfCharacter = selfResult.data ? [mapSelfCharacterRow(selfResult.data)] : [];
   return [...selfCharacter, ...fictionalCharacters];
@@ -495,6 +582,12 @@ export async function saveSupabaseCreatorSelfCharacter(input: {
     .single();
 
   if (selfError) throw selfError;
+
+  console.log('SAVING SUPABASE SELF CHARACTER', {
+    authUserId: input.userId,
+    selfCharacterUserId: stringValue(selfData.user_id),
+    avatarUrlExists: Boolean(jsonRecord(selfData.reference_image_urls).frontFace),
+  });
 
   const nextProfile: LumoraProfile = {
     ...input.profile,
@@ -734,6 +827,7 @@ export async function saveSupabasePost(userId: string, post: LumoraPost): Promis
 function mapPostRow(row: DbRow): LumoraPost {
   return {
     id: stringValue(row.id),
+    userId: nullableString(row.user_id),
     title: nullableString(row.title),
     caption: nullableString(row.caption),
     prompt: nullableString(row.prompt),

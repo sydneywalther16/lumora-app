@@ -14,6 +14,8 @@ type SelfReferencePhotoNames = {
 };
 
 export type LumoraProfile = {
+  id?: string | null;
+  userId?: string | null;
   avatar?: string;
   avatarStorageKey?: string | null;
   avatarFileName?: string | null;
@@ -120,6 +122,8 @@ export function loadLumoraProfile(): LumoraProfile {
         typeof parsed.avatar === 'string' && !isTransientMediaUrl(parsed.avatar)
           ? parsed.avatar
           : undefined,
+      id: typeof parsed.id === 'string' ? parsed.id : null,
+      userId: typeof parsed.userId === 'string' ? parsed.userId : null,
       avatarStorageKey: typeof parsed.avatarStorageKey === 'string' ? parsed.avatarStorageKey : null,
       avatarFileName: typeof parsed.avatarFileName === 'string' ? parsed.avatarFileName : null,
       displayName:

@@ -24,6 +24,9 @@ export function useSession(): SessionState {
     }
 
     supabase.auth.getSession().then(({ data }) => {
+      console.log('LOADED SUPABASE USER', {
+        authUserId: data.session?.user?.id ?? null,
+      });
       setState({
         loading: false,
         user: data.session?.user ?? null,
@@ -35,6 +38,9 @@ export function useSession(): SessionState {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      console.log('LOADED SUPABASE USER', {
+        authUserId: session?.user?.id ?? null,
+      });
       setState({
         loading: false,
         user: session?.user ?? null,

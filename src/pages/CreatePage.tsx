@@ -7,7 +7,7 @@ import {
   getCreatorSelfCharacter,
   isCreatorSelfCharacter,
 } from '../lib/characterStorage';
-import { loadLumoraProfile, saveLumoraProfile, type LumoraProfile } from '../lib/profileStorage';
+import { loadLumoraProfile, type LumoraProfile } from '../lib/profileStorage';
 import { type CharacterProfile } from '../lib/api';
 import { useSession } from '../hooks/useSession';
 import { loadSupabaseCharacters, loadSupabaseProfile } from '../lib/supabaseAppData';
@@ -70,11 +70,11 @@ export default function CreatePage() {
 
           if (!active) return;
           setProfile(nextProfile);
-          saveLumoraProfile(nextProfile);
           setDefaultSelfCharacter(remoteSelfCharacter);
           return;
-        } catch {
-          // Fall through to the local emergency cache.
+        } catch (error) {
+          console.error('Unable to load Supabase creator self for Create:', error);
+          return;
         }
       }
 

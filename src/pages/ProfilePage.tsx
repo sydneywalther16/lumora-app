@@ -34,6 +34,14 @@ import {
 } from '../lib/localAvatarStorage';
 
 type Draft = { id: string; title: string; prompt: string; createdAt: string };
+type ProfileDebugInfo = {
+  authUserId: string | null;
+  loadedProfileId: string | null;
+  profileAvatarUrlExists: boolean;
+  selfCharacterLoaded: boolean;
+  selfCharacterUserId: string | null;
+  source: 'supabase' | 'local' | 'default';
+};
 
 type CreatorSelfFeatures = {
   hairColorStyle: string;
@@ -760,7 +768,7 @@ function DraftCard({ draft }: { draft: Draft }) {
 }
 
 export default function ProfilePage() {
-  const { user } = useSession();
+  const { user, loading: sessionLoading, configured: supabaseConfigured } = useSession();
   const [profile, setProfile] = useState<LumoraProfile>(() => loadLumoraProfile());
   const [profileDraft, setProfileDraft] = useState<LumoraProfile>(() => loadLumoraProfile());
   const [characters, setCharacters] = useState<CharacterProfile[]>([]);
@@ -780,11 +788,19 @@ export default function ProfilePage() {
   const [showSelfCaptureRedo, setShowSelfCaptureRedo] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [selfCharacterStatus, setSelfCharacterStatus] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<ProfileDebugInfo>({
+    authUserId: null,
+    loadedProfileId: null,
+    profileAvatarUrlExists: false,
+    selfCharacterLoaded: false,
+    selfCharacterUserId: null,
+    source: 'default',
+  });
   const selfCharacterEditorRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     void refreshProfileData();
-  }, [user]);
+  }, [user, sessionLoading, supabaseConfigured]);
 
   useEffect(() => {
     if (!editingSelfCharacter) return;
@@ -792,6 +808,15 @@ export default function ProfilePage() {
   }, [editingSelfCharacter, selfForm]);
 
   async function refreshProfileData() {
+    if (supabaseConfigured && sessionLoading) {
+      setDebugInfo((current) => ({
+        ...current,
+        authUserId: user?.id ?? null,
+        source: 'default',
+      }));
+      return;
+    }
+
     if (user) {
       try {
         const [
@@ -821,16 +846,30 @@ export default function ProfilePage() {
             }
           : loadedProfile;
 
-        saveLumoraProfile(normalizedProfile);
         setProfile(normalizedProfile);
         setProfileDraft(normalizedProfile);
         setCharacters(loadedCharacters);
         setPosts(loadedPosts);
         setCastIn(loadedProjects.filter((item) => Boolean(item.isDefaultSelfCharacter || item.characterName)));
         setDrafts(loadedDrafts);
+        setDebugInfo({
+          authUserId: user.id,
+          loadedProfileId: normalizedProfile.userId || normalizedProfile.id || null,
+          profileAvatarUrlExists: Boolean(normalizedProfile.avatar),
+          selfCharacterLoaded: Boolean(loadedCreatorSelf),
+          selfCharacterUserId: loadedCreatorSelf?.ownerUserId ?? null,
+          source: 'supabase',
+        });
         return;
       } catch (error) {
-        console.error('Unable to load Supabase profile data, falling back to local recovery cache:', error);
+        console.error('Unable to load Supabase profile data:', error);
+        setSaveMessage(error instanceof Error ? error.message : 'Unable to load Supabase profile data.');
+        setDebugInfo((current) => ({
+          ...current,
+          authUserId: user.id,
+          source: 'default',
+        }));
+        return;
       }
     }
 
@@ -844,6 +883,14 @@ export default function ProfilePage() {
     setPosts(loadProfilePosts());
     setCastIn(loadCastInProjects());
     setDrafts(loadDrafts());
+    setDebugInfo({
+      authUserId: null,
+      loadedProfileId: loadedProfile.userId || loadedProfile.id || null,
+      profileAvatarUrlExists: Boolean(loadedProfile.avatar),
+      selfCharacterLoaded: Boolean(loadedCreatorSelf),
+      selfCharacterUserId: loadedCreatorSelf?.ownerUserId ?? null,
+      source: typeof window !== 'undefined' && localStorage.getItem('lumora_profile') ? 'local' : 'default',
+    });
   }
 
   const creatorSelfCharacter = findCreatorSelfCharacter(characters);
@@ -873,7 +920,6 @@ export default function ProfilePage() {
         setProfile(remoteProfile);
         setProfileDraft(remoteProfile);
         setCharacters(remoteCharacters);
-        saveLumoraProfile(remoteProfile);
       } catch (error) {
         console.error('Unable to preload self character from Supabase:', error);
       }
@@ -913,6 +959,10 @@ export default function ProfilePage() {
             folder: 'profile',
             usage: 'profile-avatar',
           })).url;
+        console.log('UPLOADED AVATAR URL', {
+          authUserId: user.id,
+          avatarUrl: avatar,
+        });
         setProfileDraft((current) => ({
           ...current,
           avatar,
@@ -969,13 +1019,20 @@ export default function ProfilePage() {
         ? await saveSupabaseProfile(user.id, nextProfile)
         : nextProfile;
 
-      saveLumoraProfile(savedProfile);
       if (!user) {
+        saveLumoraProfile(savedProfile);
         cleanupCreatorSelfMetadata(savedProfile);
       }
       setProfile(savedProfile);
       setProfileDraft(savedProfile);
       setCharacters(user ? await loadSupabaseCharacters(user.id) : getStoredCharacters());
+      setDebugInfo((current) => ({
+        ...current,
+        authUserId: user?.id ?? null,
+        loadedProfileId: savedProfile.userId || savedProfile.id || user?.id || null,
+        profileAvatarUrlExists: Boolean(savedProfile.avatar),
+        source: user ? 'supabase' : current.source,
+      }));
       setSaveMessage('Profile saved.');
       setEditingProfile(false);
     } catch (error) {
@@ -1160,10 +1217,17 @@ export default function ProfilePage() {
         });
         const remoteCharacters = await loadSupabaseCharacters(user.id);
 
-        saveLumoraProfile(saved.profile);
         setProfile(saved.profile);
         setProfileDraft(saved.profile);
         setCharacters(remoteCharacters.length ? remoteCharacters : [saved.character]);
+        setDebugInfo({
+          authUserId: user.id,
+          loadedProfileId: saved.profile.userId || saved.profile.id || user.id,
+          profileAvatarUrlExists: Boolean(saved.profile.avatar),
+          selfCharacterLoaded: true,
+          selfCharacterUserId: saved.character.ownerUserId,
+          source: 'supabase',
+        });
         setSaveMessage('Self character saved.');
         setSelfCharacterStatus(null);
         setEditingSelfCharacter(false);
@@ -1317,6 +1381,18 @@ export default function ProfilePage() {
       </section>
 
       <AuthCard />
+
+      <section className="headline-card compact" style={{ borderRadius: '24px', padding: '14px' }}>
+        <span className="eyebrow">profile debug</span>
+        <div className="stats-row" style={{ marginTop: '10px', flexWrap: 'wrap' }}>
+          <span>authUserId: {debugInfo.authUserId || 'none'}</span>
+          <span>loadedProfileId: {debugInfo.loadedProfileId || 'none'}</span>
+          <span>profileAvatarUrl: {debugInfo.profileAvatarUrlExists ? 'yes' : 'no'}</span>
+          <span>selfCharacterLoaded: {debugInfo.selfCharacterLoaded ? 'yes' : 'no'}</span>
+          <span>selfCharacterUserId: {debugInfo.selfCharacterUserId || 'none'}</span>
+          <span>source: {debugInfo.source}</span>
+        </div>
+      </section>
 
       {editingProfile ? (
         <section className="headline-card compact" style={{ marginTop: '18px', padding: '22px', borderRadius: '30px' }}>

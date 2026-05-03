@@ -5,8 +5,8 @@ async function seed() {
   const userId = randomUUID();
 
   await query(
-    `insert into profiles (id, handle, display_name, bio, plan_slug)
-     values ($1, 'lumora_demo', 'Lumora Demo', 'Demo creator profile', 'free')
+    `insert into profiles (id, user_id, handle, display_name, bio, plan_slug)
+     values ($1, $1, 'lumora_demo', 'Lumora Demo', 'Demo creator profile', 'free')
      on conflict do nothing`,
     [userId],
   );

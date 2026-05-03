@@ -142,6 +142,7 @@ export type CreateCharacterPayload = {
 
 export type LumoraPost = {
   id: string;
+  userId?: string | null;
   title?: string | null;
   caption?: string | null;
   prompt?: string | null;

@@ -54,5 +54,5 @@ export async function upsertBillingCustomer(input: {
     ],
   );
 
-  await query(`update profiles set plan_slug = coalesce($2, plan_slug), updated_at = now() where id = $1`, [input.userId, input.planSlug ?? null]);
+  await query(`update profiles set plan_slug = coalesce($2, plan_slug), updated_at = now() where user_id = $1`, [input.userId, input.planSlug ?? null]);
 }
