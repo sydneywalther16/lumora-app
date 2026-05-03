@@ -27,6 +27,11 @@ import {
   saveSupabaseProfile,
   uploadLumoraMedia,
 } from '../lib/supabaseAppData';
+import {
+  loadLocalProfileAvatarFile,
+  loadLocalProfileAvatarUrl,
+  saveLocalProfileAvatar,
+} from '../lib/localAvatarStorage';
 
 type Draft = { id: string; title: string; prompt: string; createdAt: string };
 
@@ -179,6 +184,17 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error('Unable to read media file.'));
     reader.readAsDataURL(file);
   });
+}
+
+function isTransientMediaUrl(value?: string | null): boolean {
+  return Boolean(value && (value.startsWith('data:') || value.startsWith('blob:')));
+}
+
+async function hydrateLocalProfileAvatar(profile: LumoraProfile): Promise<LumoraProfile> {
+  if (profile.avatar || !profile.avatarStorageKey) return profile;
+
+  const avatar = await loadLocalProfileAvatarUrl(profile.avatarStorageKey);
+  return avatar ? { ...profile, avatar } : profile;
 }
 
 function readStringRecord(value: unknown): Record<string, string> {
@@ -357,13 +373,13 @@ function createSelfCharacterEditorDraft(form: SelfCharacterForm): SelfCharacterE
 
 /**
  * Clean media URLs from draft values before storing.
- * Removes base64 data URLs to avoid localStorage quota issues.
+ * Removes transient data/blob URLs to avoid localStorage quota issues.
  */
 function cleanMediaFromDraft(draft: SelfCharacterEditorDraft): SelfCharacterEditorDraft {
   const cleanMediaUrl = (value?: string | null): string | null => {
     if (!value) return null;
     if (typeof value !== 'string') return null;
-    if (value.startsWith('data:')) {
+    if (value.startsWith('data:') || value.startsWith('blob:')) {
       return null;
     }
     return value;
@@ -624,13 +640,13 @@ function ImagePreview({ src, fallback }: { src?: string | null; fallback: string
   );
 }
 
-function PostCard({ post }: { post: LumoraPost }) {
+function PostCard({ post, fallbackAvatar }: { post: LumoraPost; fallbackAvatar?: string | null }) {
   const title = post.title || post.caption || 'Untitled post';
   const bodyText = post.caption || post.prompt || 'No prompt available';
   const videoUrl = post.videoUrl || post.imageUrl || '/demo-video.mp4';
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
   const authorUsername = post.creatorUsername || post.username || 'lumora.creator';
-  const authorAvatar = post.creatorAvatar || post.avatar;
+  const authorAvatar = post.creatorAvatar || post.avatar || fallbackAvatar;
   const characterLabel = post.isDefaultSelfCharacter
     ? 'Created as self'
     : post.characterName
@@ -818,7 +834,7 @@ export default function ProfilePage() {
       }
     }
 
-    const loadedProfile = loadLumoraProfile();
+    const loadedProfile = await hydrateLocalProfileAvatar(loadLumoraProfile());
     cleanupCreatorSelfMetadata(loadedProfile);
     const loadedCharacters = getStoredCharacters();
     const loadedCreatorSelf = findCreatorSelfCharacter(loadedCharacters);
@@ -843,7 +859,7 @@ export default function ProfilePage() {
   }
 
   async function openSelfCharacterEditor() {
-    let latestProfile = loadLumoraProfile();
+    let latestProfile = await hydrateLocalProfileAvatar(loadLumoraProfile());
     let latestCharacters = getStoredCharacters();
 
     if (user) {
@@ -889,23 +905,37 @@ export default function ProfilePage() {
     if (!file) return;
 
     try {
-      const avatar = user
-        ? (await uploadLumoraMedia({
+      if (user) {
+        const avatar = (await uploadLumoraMedia({
             userId: user.id,
             bucket: 'avatars',
             file,
             folder: 'profile',
             usage: 'profile-avatar',
-          })).url
-        : await readFileAsDataUrl(file);
-      setProfileDraft((current) => ({ ...current, avatar }));
+          })).url;
+        setProfileDraft((current) => ({
+          ...current,
+          avatar,
+          avatarStorageKey: null,
+          avatarFileName: file.name,
+        }));
+        return;
+      }
+
+      const localAvatar = await saveLocalProfileAvatar(file);
+      setProfileDraft((current) => ({
+        ...current,
+        avatar: localAvatar.url,
+        avatarStorageKey: localAvatar.storageKey,
+        avatarFileName: localAvatar.fileName,
+      }));
     } catch (error) {
       setSaveMessage(error instanceof Error ? error.message : 'Unable to upload avatar.');
     }
   }
 
   async function handleSaveProfile() {
-    const nextProfile: LumoraProfile = {
+    let nextProfile: LumoraProfile = {
       ...profileDraft,
       displayName: profileDraft.displayName.trim() || 'Creator',
       username: profileDraft.username.trim() || 'lumora.creator',
@@ -916,6 +946,25 @@ export default function ProfilePage() {
     };
 
     try {
+      if (user && isTransientMediaUrl(nextProfile.avatar) && nextProfile.avatarStorageKey) {
+        const avatarFile = await loadLocalProfileAvatarFile(nextProfile.avatarStorageKey);
+        if (avatarFile) {
+          const uploadedAvatar = await uploadLumoraMedia({
+            userId: user.id,
+            bucket: 'avatars',
+            file: avatarFile,
+            folder: 'profile',
+            usage: 'profile-avatar',
+          });
+          nextProfile = {
+            ...nextProfile,
+            avatar: uploadedAvatar.url,
+            avatarStorageKey: null,
+            avatarFileName: uploadedAvatar.fileName,
+          };
+        }
+      }
+
       const savedProfile = user
         ? await saveSupabaseProfile(user.id, nextProfile)
         : nextProfile;
@@ -1583,7 +1632,7 @@ export default function ProfilePage() {
         {posts.length ? (
           <div className="list-stack">
             {posts.map((post) => (
-              <PostCard key={post.id} post={post} />
+              <PostCard key={post.id} post={post} fallbackAvatar={profile.avatar} />
             ))}
           </div>
         ) : (

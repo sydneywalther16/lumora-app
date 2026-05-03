@@ -21,7 +21,7 @@ export type StudioProject = {
 const STORAGE_KEY = 'lumora_projects';
 
 function cleanMediaUrl(value: string): string {
-  return value.startsWith('data:') ? '' : value;
+  return value.startsWith('data:') || value.startsWith('blob:') ? '' : value;
 }
 
 export function loadStudioProjects(): StudioProject[] {

@@ -7,6 +7,8 @@ import TopChips from '../components/TopChips';
 import { posts, topChips, type Post, type TopChip } from '../data/mockData';
 import { type LumoraPost } from '../lib/api';
 import { loadPostedPublications } from '../lib/postStorage';
+import { loadLumoraProfile } from '../lib/profileStorage';
+import { loadLocalProfileAvatarUrl } from '../lib/localAvatarStorage';
 import { useSession } from '../hooks/useSession';
 import { loadSupabasePublicPosts } from '../lib/supabaseAppData';
 
@@ -129,9 +131,10 @@ function matchesCategory(category: TopChip, text: string): boolean {
 
 type HomeFeedCardProps = {
   post: LumoraPost;
+  fallbackAuthorAvatar?: string | null;
 };
 
-function HomeFeedCard({ post }: HomeFeedCardProps) {
+function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
   const [videoFailed, setVideoFailed] = useState(false);
   const stats = getPostStats(post.id);
 
@@ -140,7 +143,7 @@ function HomeFeedCard({ post }: HomeFeedCardProps) {
   const bodyText = post.caption || post.prompt || 'Posted from Studio';
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
   const authorUsername = post.creatorUsername || post.username || 'lumora.creator';
-  const authorAvatar = post.creatorAvatar || post.avatar;
+  const authorAvatar = post.creatorAvatar || post.avatar || fallbackAuthorAvatar;
   const featuring = !post.isDefaultSelfCharacter && post.characterName ? `Featuring ${post.characterName}` : undefined;
   const defaultSelfLabel = post.isDefaultSelfCharacter ? 'Created as self' : undefined;
   const hasVideo = Boolean(post.videoUrl);
@@ -275,6 +278,7 @@ export default function HomePage() {
   const { configured } = useSession();
   const [activeCategory, setActiveCategory] = useState<TopChip>('For You');
   const [localPosts, setLocalPosts] = useState<LumoraPost[]>([]);
+  const [fallbackAuthorAvatar, setFallbackAuthorAvatar] = useState<string | null>(null);
   const [feedMessage, setFeedMessage] = useState('');
 
   useEffect(() => {
@@ -282,6 +286,14 @@ export default function HomePage() {
 
     async function loadFeed() {
       try {
+        if (!configured) {
+          const profile = loadLumoraProfile();
+          const avatar = profile.avatar || await loadLocalProfileAvatarUrl(profile.avatarStorageKey);
+          if (active) setFallbackAuthorAvatar(avatar);
+        } else if (active) {
+          setFallbackAuthorAvatar(null);
+        }
+
         const savedPosts = configured
           ? await loadSupabasePublicPosts()
           : loadPostedPublications();
@@ -354,7 +366,11 @@ export default function HomePage() {
       {filteredLocalPosts.length ? (
         <section className="list-stack">
           {filteredLocalPosts.map((post) => (
-            <HomeFeedCard key={`local-${post.id}`} post={post} />
+            <HomeFeedCard
+              key={`local-${post.id}`}
+              post={post}
+              fallbackAuthorAvatar={fallbackAuthorAvatar}
+            />
           ))}
         </section>
       ) : null}

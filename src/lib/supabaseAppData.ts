@@ -53,7 +53,7 @@ function nullableString(value: unknown): string | null {
 function storageUrl(value: unknown, label: string): string | null {
   const url = nullableString(value);
   if (!url) return null;
-  if (url.startsWith('data:')) {
+  if (url.startsWith('data:') || url.startsWith('blob:')) {
     throw new Error(`${label} must be uploaded to Supabase Storage before saving.`);
   }
   return url;
@@ -77,7 +77,7 @@ function stringRecord(value: unknown): Record<string, string> {
 
 function stripBase64Media(value: unknown): unknown {
   if (typeof value === 'string') {
-    return value.startsWith('data:') ? null : value;
+    return value.startsWith('data:') || value.startsWith('blob:') ? null : value;
   }
 
   if (Array.isArray(value)) {

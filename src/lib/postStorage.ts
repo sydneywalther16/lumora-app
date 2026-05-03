@@ -4,7 +4,7 @@ const STORAGE_KEY = 'lumora_posts';
 
 function cleanMediaUrl(value?: string | null): string | null {
   if (!value) return null;
-  return value.startsWith('data:') ? null : value;
+  return value.startsWith('data:') || value.startsWith('blob:') ? null : value;
 }
 
 export function loadPostedPublications(): LumoraPost[] {

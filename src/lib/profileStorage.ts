@@ -15,6 +15,8 @@ type SelfReferencePhotoNames = {
 
 export type LumoraProfile = {
   avatar?: string;
+  avatarStorageKey?: string | null;
+  avatarFileName?: string | null;
   displayName: string;
   username: string;
   bio: string;
@@ -43,9 +45,13 @@ export type LumoraProfile = {
 
 const STORAGE_KEY = 'lumora_profile';
 
+function isTransientMediaUrl(value: string): boolean {
+  return value.startsWith('data:') || value.startsWith('blob:');
+}
+
 function stripBase64Media(value: unknown): unknown {
   if (typeof value === 'string') {
-    return value.startsWith('data:') ? null : value;
+    return isTransientMediaUrl(value) ? null : value;
   }
 
   if (Array.isArray(value)) {
@@ -110,7 +116,12 @@ export function loadLumoraProfile(): LumoraProfile {
     const parsed = JSON.parse(raw) as LumoraProfile;
 
     return {
-      avatar: typeof parsed.avatar === 'string' ? parsed.avatar : undefined,
+      avatar:
+        typeof parsed.avatar === 'string' && !isTransientMediaUrl(parsed.avatar)
+          ? parsed.avatar
+          : undefined,
+      avatarStorageKey: typeof parsed.avatarStorageKey === 'string' ? parsed.avatarStorageKey : null,
+      avatarFileName: typeof parsed.avatarFileName === 'string' ? parsed.avatarFileName : null,
       displayName:
         typeof parsed.displayName === 'string' && parsed.displayName.trim().length > 0
           ? parsed.displayName.trim()

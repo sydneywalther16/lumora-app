@@ -4,15 +4,14 @@ const STORAGE_KEY = 'lumora_characters';
 export const CREATOR_SELF_CHARACTER_ID = 'creator-self';
 
 /**
- * Remove base64 data URLs and large media from values.
- * Keep URLs that don't start with "data:" (like external URLs).
+ * Remove transient data/blob URLs and large media from values.
+ * Keep durable URLs like Supabase Storage URLs.
  */
 export function cleanMediaUrl(value?: string | null): string | null {
   if (!value) return null;
   if (typeof value !== 'string') return null;
-  // Remove data URLs (base64 encoded media)
-  if (value.startsWith('data:')) {
-    console.log('[cleanMediaUrl] Removing base64 data URL to save storage');
+  if (value.startsWith('data:') || value.startsWith('blob:')) {
+    console.log('[cleanMediaUrl] Removing transient media URL to save storage');
     return null;
   }
   return value;
@@ -51,8 +50,8 @@ export function cleanupCreatorSelfMetadata(profile: { displayName: string; defau
           ...fallbackReferenceImages,
           ...previousSelfCharacter.referenceImageUrls,
           frontFace:
-            profile.defaultSelfCharacterAvatar ||
-            profile.avatar ||
+            cleanMediaUrl(profile.defaultSelfCharacterAvatar) ||
+            cleanMediaUrl(profile.avatar) ||
             previousSelfCharacter.referenceImageUrls?.frontFace ||
             '',
         },
@@ -75,7 +74,11 @@ export function cleanupCreatorSelfMetadata(profile: { displayName: string; defau
           visibility: 'private',
           stylePreferences: {},
           referenceImageUrls: {
-            frontFace: profile.selfReferenceImageUrls?.frontFace || profile.defaultSelfCharacterAvatar || profile.avatar || '',
+            frontFace:
+              cleanMediaUrl(profile.selfReferenceImageUrls?.frontFace) ||
+              cleanMediaUrl(profile.defaultSelfCharacterAvatar) ||
+              cleanMediaUrl(profile.avatar) ||
+              '',
             leftAngle: profile.selfReferenceImageUrls?.leftAngle || '',
             rightAngle: profile.selfReferenceImageUrls?.rightAngle || '',
           },
