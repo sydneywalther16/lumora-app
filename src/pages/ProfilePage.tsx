@@ -994,120 +994,205 @@ type ProfileMenuItem = {
   id: ProfileMenuPanelId;
   label: string;
   title: string;
-  body: string[];
 };
 
 const profileMenuItems: ProfileMenuItem[] = [
-  {
-    id: 'settings',
-    label: 'Settings',
-    title: 'Settings',
-    body: ['Settings are coming soon. Your creator workspace preferences will live here.'],
-  },
-  {
-    id: 'account',
-    label: 'Account',
-    title: 'Account',
-    body: ['Manage your Lumora sign-in, profile, and creator workspace from this page.'],
-  },
-  {
-    id: 'about',
-    label: 'About Lumora',
-    title: 'About Lumora',
-    body: ['Lumora is a creator workspace for character-led short video concepts, self-character creation, and social publishing.'],
-  },
-  {
-    id: 'help',
-    label: 'Help',
-    title: 'Help',
-    body: ['Need a hand? Start with Create, capture or select a character, generate a concept, then post from Studio.'],
-  },
-  {
-    id: 'contact',
-    label: 'Contact',
-    title: 'Contact',
-    body: ['Contact options are coming soon. For now, keep feedback and support notes with your Lumora project owner.'],
-  },
-  {
-    id: 'privacy',
-    label: 'Privacy',
-    title: 'Privacy',
-    body: ['Your profile, self character, drafts, and private posts are intended to stay private unless you choose a public post privacy setting.'],
-  },
-  {
-    id: 'terms',
-    label: 'Terms',
-    title: 'Terms',
-    body: ['Terms are coming soon. Continue using Lumora responsibly with permission for any people or characters you create.'],
-  },
+  { id: 'settings', label: 'Settings', title: 'Settings' },
+  { id: 'account', label: 'Account', title: 'Account' },
+  { id: 'about', label: 'About Lumora', title: 'About Lumora' },
+  { id: 'help', label: 'Help', title: 'Help' },
+  { id: 'contact', label: 'Contact', title: 'Contact' },
+  { id: 'privacy', label: 'Privacy', title: 'Privacy' },
+  { id: 'terms', label: 'Terms', title: 'Terms' },
 ];
 
-function ProfileMenuPanel({
-  panel,
-  signedIn,
-  userEmail,
-  onClose,
+function shortenUserId(userId: string | null): string {
+  if (!userId) return '';
+  return userId.length > 12 ? `${userId.slice(0, 8)}...${userId.slice(-4)}` : userId;
+}
+
+function MenuSectionCard({
+  title,
+  children,
 }: {
-  panel: ProfileMenuItem | null;
-  signedIn: boolean;
-  userEmail?: string | null;
-  onClose: () => void;
+  title?: string;
+  children: React.ReactNode;
 }) {
-  if (!panel) return null;
-
-  const body =
-    panel.id === 'account'
-      ? [
-          signedIn
-            ? `Signed in as ${userEmail || 'your Lumora account'}.`
-            : 'You are not signed in. Use the creator access form on Profile to save your workspace to Supabase.',
-          ...panel.body,
-        ]
-      : panel.body;
-
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
+    <section
       style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 10001,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '18px',
-        background: 'rgba(0,0,0,0.66)',
+        display: 'grid',
+        gap: '10px',
+        padding: '14px',
+        borderRadius: '20px',
+        background: 'rgba(255,255,255,0.055)',
+        border: '1px solid rgba(255,255,255,0.08)',
       }}
     >
-      <section
-        className="headline-card"
-        onClick={(event) => event.stopPropagation()}
-        style={{
-          width: 'min(100%, 360px)',
-          borderRadius: '28px',
-          background: 'linear-gradient(180deg, rgba(20,16,24,0.98), rgba(9,8,20,0.98))',
-          boxShadow: '0 24px 80px rgba(0,0,0,0.45)',
-        }}
+      {title ? <strong>{title}</strong> : null}
+      {children}
+    </section>
+  );
+}
+
+function ComingSoonPill() {
+  return (
+    <span className="tiny-pill" style={{ width: 'fit-content', background: 'rgba(255,255,255,0.1)' }}>
+      Coming soon
+    </span>
+  );
+}
+
+function ProfileMenuDetail({
+  item,
+  signedIn,
+  authUserId,
+  userEmail,
+  onBack,
+  onSignOut,
+  onJumpToAuth,
+}: {
+  item: ProfileMenuItem;
+  signedIn: boolean;
+  authUserId: string | null;
+  userEmail?: string | null;
+  onBack: () => void;
+  onSignOut: () => void;
+  onJumpToAuth: () => void;
+}) {
+  const mutedTextStyle = { margin: 0, color: '#d3cdf3', lineHeight: 1.45 };
+
+  return (
+    <div style={{ display: 'grid', gap: '14px', alignContent: 'start' }}>
+      <button
+        type="button"
+        className="text-btn"
+        onClick={onBack}
+        style={{ width: 'fit-content', paddingLeft: 0 }}
       >
-        <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start' }}>
-          <div>
-            <span className="eyebrow">profile menu</span>
-            <h2 style={{ margin: '8px 0 0' }}>{panel.title}</h2>
-          </div>
-          <button type="button" className="text-btn" onClick={onClose}>
-            Close
-          </button>
-        </div>
-        <div style={{ display: 'grid', gap: '10px', marginTop: '16px' }}>
-          {body.map((paragraph) => (
-            <p key={paragraph} className="muted" style={{ margin: 0 }}>
-              {paragraph}
-            </p>
+        Menu
+      </button>
+
+      <div>
+        <span className="eyebrow">profile menu</span>
+        <h2 style={{ margin: '6px 0 0' }}>{item.title}</h2>
+      </div>
+
+      {item.id === 'account' ? (
+        <MenuSectionCard>
+          {signedIn ? (
+            <>
+              <span className="eyebrow">signed in</span>
+              <strong>{userEmail || 'Lumora account'}</strong>
+              <p style={mutedTextStyle}>User ID {shortenUserId(authUserId)}</p>
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={onSignOut}
+                style={{ flex: 'unset', width: '100%', cursor: 'pointer', borderRadius: '18px' }}
+              >
+                Sign out
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="eyebrow">not signed in</span>
+              <p style={mutedTextStyle}>
+                Sign in to save profile, self character, posts, and drafts to your Lumora account.
+              </p>
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={onJumpToAuth}
+                style={{ flex: 'unset', width: '100%', cursor: 'pointer', borderRadius: '18px' }}
+              >
+                Go to creator access
+              </button>
+            </>
+          )}
+        </MenuSectionCard>
+      ) : null}
+
+      {item.id === 'settings' ? (
+        <div style={{ display: 'grid', gap: '10px' }}>
+          {[
+            'Workspace preferences',
+            'Creator profile',
+            'Notifications',
+            'Privacy controls',
+          ].map((setting) => (
+            <MenuSectionCard key={setting}>
+              <div className="row-between" style={{ gap: '10px' }}>
+                <strong>{setting}</strong>
+                <ComingSoonPill />
+              </div>
+              <p style={mutedTextStyle}>
+                Configure {setting.toLowerCase()} as Lumora grows your creator workspace.
+              </p>
+            </MenuSectionCard>
           ))}
         </div>
-      </section>
+      ) : null}
+
+      {item.id === 'about' ? (
+        <MenuSectionCard title="Lumora">
+          <p style={mutedTextStyle}>
+            Lumora is a creator workspace for character-led short video concepts, self-character creation, and social publishing.
+          </p>
+        </MenuSectionCard>
+      ) : null}
+
+      {item.id === 'help' ? (
+        <MenuSectionCard title="Quick steps">
+          {[
+            'Create or sync your self character',
+            'Generate a concept',
+            'Edit caption and privacy',
+            'Post from Studio',
+          ].map((step) => (
+            <p key={step} style={mutedTextStyle}>
+              {step}
+            </p>
+          ))}
+        </MenuSectionCard>
+      ) : null}
+
+      {item.id === 'contact' ? (
+        <MenuSectionCard title="Support">
+          <p style={mutedTextStyle}>support@lumora.app</p>
+          <p style={mutedTextStyle}>Contact tools are coming soon.</p>
+        </MenuSectionCard>
+      ) : null}
+
+      {item.id === 'privacy' ? (
+        <MenuSectionCard title="Privacy basics">
+          {[
+            'Private drafts stay private',
+            'Public posts appear in feed',
+            'Self character media is account-owned',
+            'Users control what they publish',
+          ].map((line) => (
+            <p key={line} style={mutedTextStyle}>
+              {line}
+            </p>
+          ))}
+        </MenuSectionCard>
+      ) : null}
+
+      {item.id === 'terms' ? (
+        <MenuSectionCard title="Terms preview">
+          {[
+            'Use Lumora responsibly',
+            'Only upload media you have permission to use',
+            'Do not impersonate people without consent',
+            'Final legal terms coming soon',
+          ].map((line) => (
+            <p key={line} style={mutedTextStyle}>
+              {line}
+            </p>
+          ))}
+        </MenuSectionCard>
+      ) : null}
     </div>
   );
 }
@@ -1115,15 +1200,25 @@ function ProfileMenuPanel({
 function ProfileMenuSidebar({
   open,
   signedIn,
+  authUserId,
+  userEmail,
+  activeItem,
+  onBack,
   onClose,
   onSelect,
   onSignOut,
+  onJumpToAuth,
 }: {
   open: boolean;
   signedIn: boolean;
+  authUserId: string | null;
+  userEmail?: string | null;
+  activeItem: ProfileMenuItem | null;
+  onBack: () => void;
   onClose: () => void;
   onSelect: (item: ProfileMenuItem) => void;
   onSignOut: () => void;
+  onJumpToAuth: () => void;
 }) {
   if (!open) return null;
 
@@ -1153,57 +1248,70 @@ function ProfileMenuSidebar({
           display: 'grid',
           gridTemplateRows: 'auto 1fr',
           gap: '18px',
+          overflowY: 'auto',
         }}
       >
         <div className="row-between" style={{ gap: '10px' }}>
           <div>
-            <span className="eyebrow">menu</span>
-            <h2 style={{ margin: '6px 0 0' }}>Lumora</h2>
+            <span className="eyebrow">{activeItem ? 'section' : 'menu'}</span>
+            <h2 style={{ margin: '6px 0 0' }}>{activeItem?.title ?? 'Lumora'}</h2>
           </div>
           <button type="button" className="text-btn" onClick={onClose}>
             Close
           </button>
         </div>
 
-        <nav style={{ display: 'grid', gap: '10px', alignContent: 'start' }}>
-          {profileMenuItems.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className="ghost-btn"
-              onClick={() => onSelect(item)}
-              style={{
-                width: '100%',
-                justifyContent: 'flex-start',
-                textAlign: 'left',
-                borderRadius: '18px',
-                flex: 'unset',
-                cursor: 'pointer',
-                touchAction: 'manipulation',
-              }}
-            >
-              {item.label}
-            </button>
-          ))}
-          <button
-            type="button"
-            className="ghost-btn"
-            onClick={signedIn ? onSignOut : undefined}
-            disabled={!signedIn}
-            style={{
-              width: '100%',
-              justifyContent: 'flex-start',
-              textAlign: 'left',
-              borderRadius: '18px',
-              flex: 'unset',
-              opacity: signedIn ? 1 : 0.55,
-              cursor: signedIn ? 'pointer' : 'not-allowed',
-              touchAction: 'manipulation',
-            }}
-          >
-            {signedIn ? 'Sign out' : 'Sign out (not signed in)'}
-          </button>
-        </nav>
+        {activeItem ? (
+          <ProfileMenuDetail
+            item={activeItem}
+            signedIn={signedIn}
+            authUserId={authUserId}
+            userEmail={userEmail}
+            onBack={onBack}
+            onSignOut={onSignOut}
+            onJumpToAuth={onJumpToAuth}
+          />
+        ) : (
+          <nav style={{ display: 'grid', gap: '10px', alignContent: 'start' }}>
+            {profileMenuItems.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className="ghost-btn"
+                onClick={() => onSelect(item)}
+                style={{
+                  width: '100%',
+                  justifyContent: 'flex-start',
+                  textAlign: 'left',
+                  borderRadius: '18px',
+                  flex: 'unset',
+                  cursor: 'pointer',
+                  touchAction: 'manipulation',
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+            {signedIn ? (
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={onSignOut}
+                style={{
+                  width: '100%',
+                  justifyContent: 'flex-start',
+                  textAlign: 'left',
+                  borderRadius: '18px',
+                  flex: 'unset',
+                  cursor: 'pointer',
+                  touchAction: 'manipulation',
+                }}
+              >
+                Sign out
+              </button>
+            ) : null}
+          </nav>
+        )}
       </aside>
     </div>
   );
@@ -1283,7 +1391,7 @@ export default function ProfilePage() {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [selectedPost, setSelectedPost] = useState<LumoraPost | null>(null);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
-  const [activeProfileMenuPanel, setActiveProfileMenuPanel] = useState<ProfileMenuItem | null>(null);
+  const [activeProfileMenuItem, setActiveProfileMenuItem] = useState<ProfileMenuItem | null>(null);
   const [editingProfile, setEditingProfile] = useState(false);
   const [editingSelfCharacter, setEditingSelfCharacter] = useState(false);
   const [selfForm, setSelfForm] = useState<SelfCharacterForm>(() => buildSelfCharacterForm(loadLumoraProfile(), null));
@@ -1456,12 +1564,22 @@ export default function ProfilePage() {
   async function handleProfileMenuSignOut() {
     await supabase?.auth.signOut();
     setProfileMenuOpen(false);
-    setActiveProfileMenuPanel(null);
+    setActiveProfileMenuItem(null);
   }
 
   function handleProfileMenuSelect(item: ProfileMenuItem) {
-    setActiveProfileMenuPanel(item);
+    setActiveProfileMenuItem(item);
+  }
+
+  function handleProfileMenuJumpToAuth() {
     setProfileMenuOpen(false);
+    setActiveProfileMenuItem(null);
+    window.requestAnimationFrame(() => {
+      document.getElementById('profile-auth-section')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    });
   }
 
   async function openSelfCharacterEditor() {
@@ -2087,12 +2205,14 @@ export default function ProfilePage() {
         </div>
       </section>
 
-      <AuthCard
-        configured={supabaseConfigured}
-        loading={sessionLoading && !signedIn}
-        user={authUser}
-        session={session}
-      />
+      <div id="profile-auth-section">
+        <AuthCard
+          configured={supabaseConfigured}
+          loading={sessionLoading && !signedIn}
+          user={authUser}
+          session={session}
+        />
+      </div>
 
       {signedIn && (syncLocalProfileAvailable || syncLocalSelfAvailable) ? (
         <section className="headline-card compact" style={{ borderRadius: '24px', padding: '14px' }}>
@@ -2525,16 +2645,14 @@ export default function ProfilePage() {
       <ProfileMenuSidebar
         open={profileMenuOpen}
         signedIn={signedIn}
+        authUserId={authUserId}
+        userEmail={authUser?.email}
+        activeItem={activeProfileMenuItem}
+        onBack={() => setActiveProfileMenuItem(null)}
         onClose={() => setProfileMenuOpen(false)}
         onSelect={handleProfileMenuSelect}
         onSignOut={() => void handleProfileMenuSignOut()}
-      />
-
-      <ProfileMenuPanel
-        panel={activeProfileMenuPanel}
-        signedIn={signedIn}
-        userEmail={authUser?.email}
-        onClose={() => setActiveProfileMenuPanel(null)}
+        onJumpToAuth={handleProfileMenuJumpToAuth}
       />
     </div>
   );
