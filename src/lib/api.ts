@@ -79,7 +79,7 @@ export type GenerationJob = {
 
 export type CharacterStatus = 'draft' | 'processing' | 'ready' | 'failed';
 export type PrivacySetting = 'private' | 'approved_only' | 'public';
-export type VideoEngine = 'replicate' | 'veo' | 'runway' | 'mock' | 'openai';
+export type VideoEngine = 'sora-2' | 'sora-2-pro' | 'replicate' | 'veo' | 'runway' | 'mock' | 'openai';
 export type VideoAspectRatio = '9:16' | '16:9' | '1:1';
 
 export type MediaUploadInput = {

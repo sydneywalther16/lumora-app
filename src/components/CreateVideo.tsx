@@ -19,12 +19,13 @@ type CreateVideoProps = {
 const stylePresets = ['Editorial Drama', 'Virtual Sitcom', 'Luxury POV', 'Cinematic Sunset'];
 const durations = [4, 8, 12, 16];
 const aspectRatios: VideoAspectRatio[] = ['9:16', '16:9', '1:1'];
-const engines: VideoEngine[] = ['replicate', 'veo', 'runway', 'mock', 'openai'];
+const engines: VideoEngine[] = ['sora-2', 'sora-2-pro', 'replicate'];
 
 type GenerateVideoApiResponse = {
   videoUrl?: unknown;
   video?: unknown;
   provider?: string;
+  model?: string;
   finalPrompt?: string;
   rawOutput?: unknown;
   referenceImageNote?: string;
@@ -101,7 +102,7 @@ export default function CreateVideo({
 
   const [duration, setDuration] = useState(8);
   const [aspectRatio, setAspectRatio] = useState<VideoAspectRatio>('9:16');
-  const [engine, setEngine] = useState<VideoEngine>('replicate');
+  const [engine, setEngine] = useState<VideoEngine>('sora-2');
   const [status, setStatus] = useState('');
   const [generationLoading, setGenerationLoading] = useState(false);
   const [generationError, setGenerationError] = useState('');
@@ -110,10 +111,11 @@ export default function CreateVideo({
   const [busy, setBusy] = useState(false);
   const [generationResult, setGenerationResult] = useState<GenerationResponse | null>(null);
   const actionBusy = busy || generationLoading;
+  const isSoraEngine = engine === 'sora-2' || engine === 'sora-2-pro';
   const engineRoutingMessage =
-    engine === 'replicate'
-      ? 'Replicate is live for video generation.'
-      : `${engine} is not live yet. This render will use Replicate for now.`;
+    isSoraEngine
+      ? 'Sora 2 is available only if this OpenAI API account has video access. Replicate remains fallback.'
+      : 'Replicate is live for video generation and remains the fallback.';
 
   async function handleGenerate() {
     if (configured && sessionLoading && !authUser) {
@@ -148,6 +150,7 @@ export default function CreateVideo({
           characterDescription: selectedCharacterDescription,
           referenceImageUrl,
           aspectRatio: selectedAspectRatio,
+          duration,
           engine: selectedEngine,
         }),
       });
@@ -159,6 +162,7 @@ export default function CreateVideo({
       }
 
       const nextVideoUrl = normalizeVideoUrl(data.videoUrl ?? data.video);
+      const generationProvider = data.provider === 'openai' ? 'openai' : 'replicate';
 
       if (!nextVideoUrl) {
         console.error('No video returned', data);
@@ -177,14 +181,16 @@ export default function CreateVideo({
         id: generationId,
         jobId: generationId,
         status: 'completed',
-        engine: 'replicate',
+        engine: selectedEngine,
         characterId,
         characterName,
         characterAvatar,
         isDefaultSelfCharacter,
         prompt: currentPrompt,
         outputUrl: nextVideoUrl,
-        message: 'Replicate video render created.',
+        message: generationProvider === 'openai'
+          ? 'OpenAI Sora video render created.'
+          : 'Replicate video render created.',
         createdAt: now,
       };
       setGenerationResult(result);
@@ -198,7 +204,7 @@ export default function CreateVideo({
           finalPrompt: nextFinalPrompt,
           videoUrl: result.outputUrl,
           status: result.status,
-          provider: 'replicate',
+          provider: generationProvider,
           engine: selectedEngine,
           aspectRatio: selectedAspectRatio,
           characterId,
@@ -224,7 +230,12 @@ export default function CreateVideo({
       setStatus('Video generated and saved to Studio.');
     } catch (error) {
       console.error('Generation failed', error);
-      setGenerationError(error instanceof Error ? error.message : 'Unable to create draft render');
+      const message = error instanceof Error ? error.message : 'Unable to create draft render';
+      setGenerationError(
+        isSoraEngine
+          ? `${message} Try switching the engine to Replicate.`
+          : message,
+      );
     } finally {
       setGenerationLoading(false);
     }
