@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import Replicate from 'replicate';
 
 export type GenerateRequest = IncomingMessage & {
   body?: unknown;
@@ -57,11 +56,6 @@ const OPENAI_VIDEO_MODEL = (process.env.OPENAI_VIDEO_MODEL || 'sora-2') as OpenA
 const OPENAI_VIDEO_API_BASE_URL = 'https://api.openai.com/v1';
 const OPENAI_VIDEO_POLL_INTERVAL_MS = 5000;
 const OPENAI_VIDEO_POLL_TIMEOUT_MS = 240000;
-
-const replicate = new Replicate({
-  auth: process.env.REPLICATE_API_TOKEN,
-  useFileOutput: false,
-});
 
 export function sendJsonResponse(res: ServerResponse, statusCode: number, payload: unknown) {
   const response = res as ServerResponse & {
@@ -813,12 +807,7 @@ async function createReplicateVideo(input: {
 }): Promise<ProviderResult> {
   if (!process.env.REPLICATE_API_TOKEN) {
     console.error('REPLICATE_API_TOKEN is not configured.');
-    throw new ProviderError({
-      statusCode: 500,
-      provider: 'replicate',
-      model: REPLICATE_VIDEO_MODEL,
-      message: 'Missing REPLICATE_API_TOKEN',
-    });
+    throw new Error('Missing REPLICATE_API_TOKEN');
   }
 
   const referenceImageNote = input.referenceImageUrl
@@ -834,6 +823,12 @@ async function createReplicateVideo(input: {
   let output: unknown;
 
   try {
+    const { default: Replicate } = await import('replicate');
+    const replicate = new Replicate({
+      auth: process.env.REPLICATE_API_TOKEN,
+      useFileOutput: false,
+    });
+
     output = await replicate.run(REPLICATE_VIDEO_MODEL, {
       input: {
         prompt: input.finalPrompt,
@@ -843,17 +838,13 @@ async function createReplicateVideo(input: {
       },
     });
   } catch (error) {
+    console.error('REPLICATE ERROR:', error);
+
     if (isReplicateNotFoundError(error)) {
-      throw new ProviderError({
-        statusCode: 502,
-        provider: 'replicate',
-        model: REPLICATE_VIDEO_MODEL,
-        message: 'Selected Replicate model was not found. Check REPLICATE_VIDEO_MODEL.',
-        payload: error,
-      });
+      throw new Error('Replicate generation failed: Selected Replicate model was not found. Check REPLICATE_VIDEO_MODEL.');
     }
 
-    throw error;
+    throw new Error(`Replicate generation failed: ${errorMessage(error)}`);
   }
   const videoUrl = normalizeReplicateVideoUrl(output);
   const rawOutput = {
@@ -890,6 +881,22 @@ async function createReplicateVideo(input: {
 }
 
 export async function generateVideoFromBody(body: GenerateVideoRequestBody): Promise<GenerateVideoResponseBody> {
+  console.log('VIDEO GEN START');
+  console.log('ENV TOKEN EXISTS:', !!process.env.REPLICATE_API_TOKEN);
+
+  try {
+    return await generateVideoFromBodyUnsafe(body);
+  } catch (error) {
+    console.error('VIDEO GEN ERROR:', error);
+    if (error instanceof Error || error instanceof ProviderError) {
+      throw error;
+    }
+
+    throw new Error(`Video generation failed: ${String(error)}`);
+  }
+}
+
+async function generateVideoFromBodyUnsafe(body: GenerateVideoRequestBody): Promise<GenerateVideoResponseBody> {
   const prompt = textValue(body.prompt);
   const characterDescription =
     textValue(body.characterDescription) || formatCharacterDescription(body.character);
