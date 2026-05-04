@@ -8,6 +8,7 @@ type GenerateRequest = IncomingMessage & {
 type RequestBody = {
   prompt?: unknown;
   characterDescription?: unknown;
+  referenceImageUrl?: unknown;
   aspectRatio?: unknown;
   engine?: unknown;
   character?: unknown;
@@ -92,7 +93,16 @@ function formatCharacterDescription(character: unknown): string {
 }
 
 function buildFinalPrompt(prompt: string, characterDescription: string): string {
-  return `${characterDescription || ''}, ${prompt || ''}, vertical video, cinematic lighting, realistic motion, high detail, TikTok style`
+  return [
+    characterDescription
+      ? 'same person as the saved self character, preserve facial identity, consistent hair, makeup, skin tone, wardrobe style'
+      : '',
+    characterDescription,
+    prompt,
+    'vertical video, cinematic lighting, realistic motion, high detail, TikTok style',
+  ]
+    .filter(Boolean)
+    .join(', ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -202,9 +212,13 @@ export default async function handler(req: GenerateRequest, res: ServerResponse)
     const prompt = textValue(body.prompt);
     const characterDescription =
       textValue(body.characterDescription) || formatCharacterDescription(body.character);
+    const referenceImageUrl = textValue(body.referenceImageUrl);
     const aspectRatio = normalizeAspectRatio(body.aspectRatio);
     const engine = textValue(body.engine) || 'replicate';
     const finalPrompt = buildFinalPrompt(prompt, characterDescription);
+    const referenceImageNote = referenceImageUrl
+      ? 'This model is text-to-video only and cannot preserve exact character likeness from reference images.'
+      : null;
 
     if (!prompt) {
       return sendJson(res, 400, { error: 'A prompt is required.' });
@@ -214,6 +228,7 @@ export default async function handler(req: GenerateRequest, res: ServerResponse)
       model: REPLICATE_VIDEO_MODEL,
       promptLength: prompt.length,
       hasCharacterDescription: Boolean(characterDescription),
+      hasReferenceImageUrl: Boolean(referenceImageUrl),
       aspectRatio,
       engine,
     });
@@ -227,11 +242,16 @@ export default async function handler(req: GenerateRequest, res: ServerResponse)
       },
     });
     const videoUrl = normalizeReplicateVideoUrl(output);
-    const rawOutput = serializeReplicateOutput(output);
+    const rawOutput = {
+      output: serializeReplicateOutput(output),
+      referenceImageUrl: referenceImageUrl || null,
+      referenceImageNote,
+    };
 
     console.info('REPLICATE GENERATE OUTPUT', {
       model: REPLICATE_VIDEO_MODEL,
       hasVideoUrl: Boolean(videoUrl),
+      referenceImageUsed: false,
       outputType: Array.isArray(output) ? 'array' : typeof output,
     });
 
@@ -240,6 +260,8 @@ export default async function handler(req: GenerateRequest, res: ServerResponse)
         error: 'Replicate completed, but no usable video URL was found in the output.',
         provider: 'replicate',
         finalPrompt,
+        referenceImageUrl: referenceImageUrl || null,
+        referenceImageNote,
         rawOutput,
       });
     }
@@ -249,6 +271,8 @@ export default async function handler(req: GenerateRequest, res: ServerResponse)
       video: videoUrl,
       provider: 'replicate',
       finalPrompt,
+      referenceImageUrl: referenceImageUrl || null,
+      referenceImageNote,
       rawOutput,
     });
   } catch (error) {

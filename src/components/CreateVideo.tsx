@@ -12,6 +12,8 @@ type CreateVideoProps = {
   characterName: string | null;
   characterAvatar: string | null;
   isDefaultSelfCharacter: boolean;
+  characterDescription?: string;
+  referenceImageUrl?: string | null;
 };
 
 const stylePresets = ['Editorial Drama', 'Virtual Sitcom', 'Luxury POV', 'Cinematic Sunset'];
@@ -25,6 +27,7 @@ type GenerateVideoApiResponse = {
   provider?: string;
   finalPrompt?: string;
   rawOutput?: unknown;
+  referenceImageNote?: string;
   error?: string;
 };
 
@@ -82,6 +85,8 @@ export default function CreateVideo({
   characterName,
   characterAvatar,
   isDefaultSelfCharacter,
+  characterDescription,
+  referenceImageUrl,
 }: CreateVideoProps) {
   const { user, session, loading: sessionLoading, configured } = useSession();
   const authUser = session?.user ?? user;
@@ -119,11 +124,13 @@ export default function CreateVideo({
     const currentPrompt = activePrompt;
     const selectedAspectRatio = aspectRatio;
     const selectedEngine = engine;
-    const characterDescription = buildCharacterDescription({
-      characterId,
-      characterName,
-      isDefaultSelfCharacter,
-    });
+    const selectedCharacterDescription =
+      characterDescription ||
+      buildCharacterDescription({
+        characterId,
+        characterName,
+        isDefaultSelfCharacter,
+      });
 
     setGenerationLoading(true);
     setGenerationError('');
@@ -138,7 +145,8 @@ export default function CreateVideo({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: currentPrompt,
-          characterDescription,
+          characterDescription: selectedCharacterDescription,
+          referenceImageUrl,
           aspectRatio: selectedAspectRatio,
           engine: selectedEngine,
         }),
@@ -337,6 +345,12 @@ export default function CreateVideo({
           </select>
           <small className="muted">{engineRoutingMessage}</small>
         </label>
+
+        {isDefaultSelfCharacter ? (
+          <p className="muted">
+            For exact self-character likeness, use an image-to-video or reference-based model. Current Replicate model may only follow text traits.
+          </p>
+        ) : null}
 
         {characterName ? (
           <div className="selected-character">

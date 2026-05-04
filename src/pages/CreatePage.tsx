@@ -12,6 +12,23 @@ import { type CharacterProfile } from '../lib/api';
 import { useSession } from '../hooks/useSession';
 import { loadSupabaseCharacters, loadSupabaseProfile } from '../lib/supabaseAppData';
 
+const selfFeatureLabels: Array<[string, string]> = [
+  ['hairColorStyle', 'Hair color/style'],
+  ['eyeColor', 'Eye color'],
+  ['skinTone', 'Skin tone'],
+  ['bodyBuild', 'Body/build'],
+  ['signatureMakeup', 'Signature makeup'],
+  ['distinctiveFeatures', 'Distinctive features'],
+];
+
+const selfStyleLabels: Array<[string, string]> = [
+  ['everydayStyle', 'Everyday style'],
+  ['glamStyle', 'Glam style'],
+  ['videoWardrobe', 'Wardrobe style'],
+  ['colorsToFavor', 'Colors to favor'],
+  ['colorsToAvoid', 'Colors/items to avoid'],
+];
+
 function buildDefaultSelfCharacter(profile: LumoraProfile): CharacterProfile {
   return {
     id: CREATOR_SELF_CHARACTER_ID,
@@ -35,6 +52,64 @@ function buildDefaultSelfCharacter(profile: LumoraProfile): CharacterProfile {
     isSelf: true,
     isCreatorSelf: true,
   };
+}
+
+function readObjectRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function readStringRecord(value: unknown): Record<string, string> {
+  const record = readObjectRecord(value);
+  return Object.fromEntries(
+    Object.entries(record).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+  );
+}
+
+function pickDescriptionFields(
+  labels: Array<[string, string]>,
+  ...records: Array<Record<string, string>>
+): string[] {
+  return labels.flatMap(([key, label]) => {
+    const value = records.map((record) => record[key]?.trim()).find(Boolean);
+    return value ? [`${label}: ${value}`] : [];
+  });
+}
+
+function buildSelfCharacterDescription(
+  profile: LumoraProfile,
+  character: CharacterProfile | null,
+): string {
+  if (!character) return '';
+
+  const stylePreferences = readObjectRecord(character.stylePreferences);
+  const flatStylePreferences = readStringRecord(stylePreferences);
+  const profileFeatures = readStringRecord(profile.creatorSelfFeatures);
+  const profileStyle = readStringRecord(profile.creatorSelfStylePreferences);
+  const nestedFeatures = readStringRecord(stylePreferences.creatorSelfFeatures);
+  const nestedStyle = readStringRecord(stylePreferences.creatorSelfStylePreferences);
+  const characterFeatures = readStringRecord(character.creatorSelfFeatures);
+  const characterStyle = readStringRecord(character.creatorSelfStylePreferences);
+  const descriptionParts = [
+    `Name: ${character.name || profile.displayName || 'Creator Self'}`,
+    ...pickDescriptionFields(
+      selfFeatureLabels,
+      flatStylePreferences,
+      profileFeatures,
+      nestedFeatures,
+      characterFeatures,
+    ),
+    ...pickDescriptionFields(
+      selfStyleLabels,
+      flatStylePreferences,
+      profileStyle,
+      nestedStyle,
+      characterStyle,
+    ),
+  ];
+
+  return descriptionParts.join('; ');
 }
 
 export default function CreatePage() {
@@ -105,13 +180,23 @@ export default function CreatePage() {
   const usingDefaultSelf =
     !selectedCharacter &&
     Boolean(defaultSelfCharacter);
+  const selectedSelfCharacter = selectedCharacter && isCreatorSelfCharacter(selectedCharacter)
+    ? selectedCharacter
+    : null;
+  const activeSelfCharacter = usingDefaultSelf ? defaultSelfCharacter : selectedSelfCharacter;
 
-  const characterId = usingDefaultSelf ? CREATOR_SELF_CHARACTER_ID : selectedCharacter?.id ?? null;
-  const characterName = usingDefaultSelf ? profile.displayName : selectedCharacter?.name ?? null;
-  const characterAvatar = usingDefaultSelf
+  const characterId = activeSelfCharacter ? CREATOR_SELF_CHARACTER_ID : selectedCharacter?.id ?? null;
+  const characterName = activeSelfCharacter ? profile.displayName : selectedCharacter?.name ?? null;
+  const characterAvatar = activeSelfCharacter
     ? profile.defaultSelfCharacterAvatar ?? null
     : selectedCharacter?.referenceImageUrls.frontFace ?? null;
-  const isDefaultSelfCharacter = usingDefaultSelf;
+  const isDefaultSelfCharacter = Boolean(activeSelfCharacter);
+  const characterDescription = activeSelfCharacter
+    ? buildSelfCharacterDescription(profile, activeSelfCharacter)
+    : '';
+  const referenceImageUrl = activeSelfCharacter
+    ? activeSelfCharacter.referenceImageUrls.frontFace || characterAvatar || null
+    : null;
 
   return (
     <div className="page">
@@ -179,6 +264,8 @@ export default function CreatePage() {
         characterName={characterName}
         characterAvatar={characterAvatar}
         isDefaultSelfCharacter={isDefaultSelfCharacter}
+        characterDescription={characterDescription}
+        referenceImageUrl={referenceImageUrl}
       />
       <CharacterCapture onCreated={() => setCharacterRefreshKey((value) => value + 1)} />
     </div>
