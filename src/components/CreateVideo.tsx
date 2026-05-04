@@ -213,7 +213,7 @@ export default function CreateVideo({
         }
       }
 
-      setStatus('Draft render ready');
+      setStatus('Video generated and saved to Studio.');
     } catch (error) {
       console.error('Generation failed', error);
       setGenerationError(error instanceof Error ? error.message : 'Unable to create draft render');
@@ -361,6 +361,28 @@ export default function CreateVideo({
         {generationLoading ? <p className="muted">Rendering your concept...</p> : null}
         {generationError ? <p style={{ color: '#f07178' }}>{generationError}</p> : null}
         {status ? <p className="muted">{status}</p> : null}
+        {generatedVideoUrl ? (
+          <div style={{ display: 'grid', gap: '12px', marginTop: '14px' }}>
+            <video
+              src={generatedVideoUrl}
+              controls
+              autoPlay
+              loop
+              playsInline
+              style={{ width: '100%', borderRadius: 12 }}
+            />
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={() => {
+                window.location.href = '/studio';
+              }}
+              style={{ flex: 'unset', width: '100%' }}
+            >
+              View in Studio
+            </button>
+          </div>
+        ) : null}
       </section>
 
       {generationResult ? (
