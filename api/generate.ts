@@ -64,9 +64,33 @@ const replicate = new Replicate({
 });
 
 function sendJson(res: ServerResponse, statusCode: number, payload: unknown) {
+  const response = res as ServerResponse & {
+    status?: (code: number) => ServerResponse & { json?: (value: unknown) => void };
+    json?: (value: unknown) => void;
+  };
+  const safePayload = safeJsonValue(payload) ?? null;
+
+  if (typeof response.status === 'function') {
+    const statusResponse = response.status(statusCode);
+    if (statusResponse && typeof statusResponse.json === 'function') {
+      statusResponse.json(safePayload);
+      return;
+    }
+  }
+
+  if (typeof response.json === 'function') {
+    response.statusCode = statusCode;
+    response.json(safePayload);
+    return;
+  }
+
   res.statusCode = statusCode;
   res.setHeader('Content-Type', 'application/json');
-  res.end(JSON.stringify(payload));
+  try {
+    res.end(JSON.stringify(safePayload));
+  } catch {
+    res.end(JSON.stringify({ error: 'Unable to serialize JSON response.' }));
+  }
 }
 
 function errorMessage(error: unknown): string {
@@ -75,6 +99,49 @@ function errorMessage(error: unknown): string {
 
 function textValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+export function safeJsonValue(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (value == null) return value;
+
+  const valueType = typeof value;
+  if (valueType === 'string' || valueType === 'boolean') return value;
+  if (valueType === 'number') return Number.isFinite(value as number) ? value : String(value);
+  if (valueType === 'bigint') return String(value);
+  if (valueType === 'function' || valueType === 'symbol' || valueType === 'undefined') return undefined;
+
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: value.message,
+      stack: value.stack,
+    };
+  }
+
+  if (value instanceof URL) return value.toString();
+
+  if (typeof Blob !== 'undefined' && value instanceof Blob) {
+    return {
+      type: value.type,
+      size: value.size,
+    };
+  }
+
+  if (typeof value !== 'object') return value;
+  if (seen.has(value)) return '[Circular]';
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.map((item) => safeJsonValue(item, seen) ?? null);
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .flatMap(([key, entry]) => {
+        const safeEntry = safeJsonValue(entry, seen);
+        return typeof safeEntry === 'undefined' ? [] : [[key, safeEntry]];
+      }),
+  );
 }
 
 export class ProviderError extends Error {
@@ -621,7 +688,7 @@ async function createOpenAIVideo(input: {
       statusCode: 500,
       provider: 'openai',
       model: openAIVideoModelForEngine(input.engine),
-      message: 'OPENAI_API_KEY is not configured.',
+      message: 'Missing OPENAI_API_KEY',
     });
   }
 
@@ -750,7 +817,7 @@ async function createReplicateVideo(input: {
       statusCode: 500,
       provider: 'replicate',
       model: REPLICATE_VIDEO_MODEL,
-      message: 'REPLICATE_API_TOKEN is not configured.',
+      message: 'Missing REPLICATE_API_TOKEN',
     });
   }
 
@@ -953,13 +1020,12 @@ export async function generateVideoFromBody(body: GenerateVideoRequestBody): Pro
 }
 
 export default async function handler(req: GenerateRequest, res: ServerResponse) {
-  if (req.method !== 'POST') {
-    res.statusCode = 405;
-    res.setHeader('Allow', 'POST');
-    return res.end();
-  }
-
   try {
+    if (req.method !== 'POST') {
+      res.setHeader('Allow', 'POST');
+      return sendJson(res, 405, { error: 'Method not allowed' });
+    }
+
     let body: GenerateVideoRequestBody;
 
     try {
@@ -974,11 +1040,13 @@ export default async function handler(req: GenerateRequest, res: ServerResponse)
   } catch (error) {
     console.error('VIDEO GENERATE FAILED', error);
     if (error instanceof ProviderError) {
+      const details = safeJsonValue(error.payload);
       return sendJson(res, error.statusCode, {
         error: error.message,
+        details,
         provider: error.provider,
         model: error.model,
-        rawOutput: error.payload,
+        rawOutput: details,
       });
     }
 

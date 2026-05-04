@@ -31,6 +31,7 @@ type GenerateVideoApiResponse = {
   rawOutput?: unknown;
   referenceImageNote?: string;
   error?: string;
+  details?: unknown;
 };
 
 function createLocalGenerationId() {
@@ -79,6 +80,41 @@ function normalizeVideoUrl(video: unknown): string | null {
     return normalizeVideoUrl(firstUrl);
   }
   return null;
+}
+
+function formatUnknownDetail(value: unknown): string {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function parseGenerateResponse(text: string): {
+  data: GenerateVideoApiResponse;
+  parseError: string | null;
+} {
+  if (!text.trim()) {
+    return {
+      data: {},
+      parseError: 'Generator returned an empty response.',
+    };
+  }
+
+  try {
+    return {
+      data: JSON.parse(text) as GenerateVideoApiResponse,
+      parseError: null,
+    };
+  } catch {
+    return {
+      data: { error: text },
+      parseError: text,
+    };
+  }
 }
 
 export default function CreateVideo({
@@ -172,10 +208,20 @@ export default function CreateVideo({
         }),
       });
 
-      const data = await res.json() as GenerateVideoApiResponse;
+      const responseText = await res.text();
+      const { data, parseError } = parseGenerateResponse(responseText);
 
       if (!res.ok) {
-        throw new Error(data.error || 'Generation failed.');
+        const detail = formatUnknownDetail(data.details);
+        throw new Error(
+          [data.error || parseError || 'Generation failed.', detail]
+            .filter(Boolean)
+            .join(' Details: '),
+        );
+      }
+
+      if (parseError) {
+        throw new Error(parseError);
       }
 
       const nextVideoUrl = normalizeVideoUrl(data.videoUrl ?? data.video);
