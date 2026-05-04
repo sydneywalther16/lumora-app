@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { type GenerationResponse, type VideoAspectRatio, type VideoEngine } from '../lib/api';
-import { saveStudioProject } from '../lib/projectStorage';
+import { saveStudioProject, type StudioProject } from '../lib/projectStorage';
 import { loadLumoraProfile } from '../lib/profileStorage';
 import { loadSupabaseProfile, saveSupabaseDraft, saveSupabaseProject } from '../lib/supabaseAppData';
 import { useSession } from '../hooks/useSession';
@@ -17,7 +17,16 @@ type CreateVideoProps = {
 const stylePresets = ['Editorial Drama', 'Virtual Sitcom', 'Luxury POV', 'Cinematic Sunset'];
 const durations = [4, 8, 12, 16];
 const aspectRatios: VideoAspectRatio[] = ['9:16', '16:9', '1:1'];
-const engines: VideoEngine[] = ['veo', 'runway', 'mock', 'openai'];
+const engines: VideoEngine[] = ['replicate', 'veo', 'runway', 'mock', 'openai'];
+
+type GenerateVideoApiResponse = {
+  videoUrl?: unknown;
+  video?: unknown;
+  provider?: string;
+  finalPrompt?: string;
+  rawOutput?: unknown;
+  error?: string;
+};
 
 function createLocalGenerationId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -46,6 +55,27 @@ function saveLocalDraft(title: string, prompt: string) {
   return draft;
 }
 
+function buildCharacterDescription(input: {
+  characterId: string | null;
+  characterName: string | null;
+  isDefaultSelfCharacter: boolean;
+}) {
+  if (!input.characterName) return '';
+  return input.isDefaultSelfCharacter
+    ? `Creator self character: ${input.characterName}`
+    : `Featured character: ${input.characterName}${input.characterId ? ` (${input.characterId})` : ''}`;
+}
+
+function normalizeVideoUrl(video: unknown): string | null {
+  if (typeof video === 'string') return video;
+  if (video instanceof URL) return video.toString();
+  if (Array.isArray(video)) {
+    const firstUrl = video.find((item) => typeof item === 'string' || item instanceof URL);
+    return normalizeVideoUrl(firstUrl);
+  }
+  return null;
+}
+
 export default function CreateVideo({
   refreshKey = 0,
   characterId,
@@ -53,7 +83,7 @@ export default function CreateVideo({
   characterAvatar,
   isDefaultSelfCharacter,
 }: CreateVideoProps) {
-  const { user, session, loading, configured } = useSession();
+  const { user, session, loading: sessionLoading, configured } = useSession();
   const authUser = session?.user ?? user;
   const {
     activePrompt,
@@ -66,20 +96,68 @@ export default function CreateVideo({
 
   const [duration, setDuration] = useState(8);
   const [aspectRatio, setAspectRatio] = useState<VideoAspectRatio>('9:16');
-  const [engine, setEngine] = useState<VideoEngine>('mock');
+  const [engine, setEngine] = useState<VideoEngine>('replicate');
   const [status, setStatus] = useState('');
+  const [generationLoading, setGenerationLoading] = useState(false);
+  const [generationError, setGenerationError] = useState('');
+  const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
+  const [finalGeneratedPrompt, setFinalGeneratedPrompt] = useState('');
   const [busy, setBusy] = useState(false);
   const [generationResult, setGenerationResult] = useState<GenerationResponse | null>(null);
+  const actionBusy = busy || generationLoading;
 
   async function handleGenerate() {
-    if (configured && loading && !authUser) {
+    if (configured && sessionLoading && !authUser) {
       setStatus('Checking your account session. Try again in a moment.');
       return;
     }
 
-    setBusy(true);
-    setStatus('Generating draft render...');
+    const currentPrompt = activePrompt;
+    const selectedAspectRatio = aspectRatio;
+    const selectedEngine = engine;
+    const characterDescription = buildCharacterDescription({
+      characterId,
+      characterName,
+      isDefaultSelfCharacter,
+    });
+
+    setGenerationLoading(true);
+    setGenerationError('');
+    setGeneratedVideoUrl(null);
+    setFinalGeneratedPrompt('');
+    setGenerationResult(null);
+    setStatus('');
+
     try {
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: currentPrompt,
+          characterDescription,
+          aspectRatio: selectedAspectRatio,
+          engine: selectedEngine,
+        }),
+      });
+
+      const data = await res.json() as GenerateVideoApiResponse;
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Generation failed.');
+      }
+
+      const nextVideoUrl = normalizeVideoUrl(data.videoUrl ?? data.video);
+
+      if (!nextVideoUrl) {
+        console.error('No video returned', data);
+        setGenerationError('No usable video URL was returned from the generator.');
+        return;
+      }
+
+      const nextFinalPrompt = data.finalPrompt || currentPrompt;
+      setGeneratedVideoUrl(nextVideoUrl);
+      setFinalGeneratedPrompt(nextFinalPrompt);
+
       const profile = authUser ? await loadSupabaseProfile(authUser.id) : loadLumoraProfile();
       const now = new Date().toISOString();
       const generationId = createLocalGenerationId();
@@ -87,26 +165,30 @@ export default function CreateVideo({
         id: generationId,
         jobId: generationId,
         status: 'completed',
-        engine,
+        engine: 'replicate',
         characterId,
         characterName,
         characterAvatar,
         isDefaultSelfCharacter,
-        prompt: activePrompt,
-        outputUrl: '/demo-video.mp4',
-        message: 'Local draft render created.',
+        prompt: currentPrompt,
+        outputUrl: nextVideoUrl,
+        message: 'Replicate video render created.',
         createdAt: now,
       };
       setGenerationResult(result);
 
       if (result.status === 'completed' && result.outputUrl) {
-        const studioProject = {
+        const studioProject: StudioProject = {
           id: result.jobId,
           title: draftTitle,
+          caption: currentPrompt,
           prompt: result.prompt,
+          finalPrompt: nextFinalPrompt,
           videoUrl: result.outputUrl,
           status: result.status,
-          provider: result.engine,
+          provider: 'replicate',
+          engine: selectedEngine,
+          aspectRatio: selectedAspectRatio,
           characterId,
           characterName,
           characterAvatar,
@@ -115,6 +197,7 @@ export default function CreateVideo({
           creatorUsername: profile.username || 'lumora.creator',
           creatorAvatar: profile.avatar || null,
           createdAt: result.createdAt,
+          updatedAt: now,
         };
 
         if (authUser) {
@@ -128,14 +211,15 @@ export default function CreateVideo({
 
       setStatus('Draft render ready');
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Unable to create draft render');
+      console.error('Generation failed', error);
+      setGenerationError(error instanceof Error ? error.message : 'Unable to create draft render');
     } finally {
-      setBusy(false);
+      setGenerationLoading(false);
     }
   }
 
   async function handleSaveDraft() {
-    if (configured && loading && !authUser) {
+    if (configured && sessionLoading && !authUser) {
       setStatus('Checking your account session. Try again in a moment.');
       return;
     }
@@ -262,13 +346,15 @@ export default function CreateVideo({
         ) : null}
 
         <div className="button-row">
-          <button type="button" className="primary-btn" onClick={handleGenerate} disabled={busy}>
-            {busy ? 'Submitting...' : 'Generate video'}
+          <button type="button" className="primary-btn" onClick={handleGenerate} disabled={actionBusy}>
+            {generationLoading ? 'Rendering...' : 'Generate video'}
           </button>
-          <button type="button" className="ghost-btn" onClick={() => void handleSaveDraft()} disabled={busy}>
+          <button type="button" className="ghost-btn" onClick={() => void handleSaveDraft()} disabled={actionBusy}>
             Save draft
           </button>
         </div>
+        {generationLoading ? <p className="muted">Rendering your concept...</p> : null}
+        {generationError ? <p style={{ color: '#f07178' }}>{generationError}</p> : null}
         {status ? <p className="muted">{status}</p> : null}
       </section>
 
@@ -288,12 +374,19 @@ export default function CreateVideo({
           ) : null}
           {generationResult.message ? <p>{generationResult.message}</p> : null}
           <p>Prompt: {generationResult.prompt}</p>
-          <div className="video-preview">
-            <div className="video-preview-inner">
-              <span>Mock video output</span>
-              <small>{generationResult.outputUrl}</small>
-            </div>
-          </div>
+          {finalGeneratedPrompt ? (
+            <p className="muted">Final prompt: {finalGeneratedPrompt}</p>
+          ) : null}
+          {generatedVideoUrl ? (
+            <video
+              src={generatedVideoUrl}
+              controls
+              autoPlay
+              loop
+              playsInline
+              style={{ width: '100%', borderRadius: 12 }}
+            />
+          ) : null}
         </section>
       ) : null}
     </section>

@@ -5,9 +5,12 @@ export type StudioProject = {
   title?: string | null;
   caption?: string | null;
   prompt: string;
+  finalPrompt?: string | null;
   videoUrl: string;
   status: string;
   provider: VideoEngine;
+  engine?: VideoEngine | null;
+  aspectRatio?: string | null;
   characterId: string | null;
   characterName: string | null;
   characterAvatar?: string | null;
@@ -16,6 +19,7 @@ export type StudioProject = {
   creatorUsername?: string | null;
   creatorAvatar?: string | null;
   createdAt: string;
+  updatedAt?: string | null;
 };
 
 const STORAGE_KEY = 'lumora_projects';
@@ -58,6 +62,9 @@ export function loadStudioProjects(): StudioProject[] {
         ...project,
         title: typeof project.title === 'string' ? project.title : null,
         caption: typeof project.caption === 'string' ? project.caption : null,
+        finalPrompt: typeof project.finalPrompt === 'string' ? project.finalPrompt : null,
+        engine: typeof project.engine === 'string' ? project.engine as VideoEngine : null,
+        aspectRatio: typeof project.aspectRatio === 'string' ? project.aspectRatio : null,
         characterId: typeof project.characterId === 'string' ? project.characterId : null,
         characterAvatar: typeof project.characterAvatar === 'string' ? project.characterAvatar : null,
         isDefaultSelfCharacter:
@@ -65,6 +72,7 @@ export function loadStudioProjects(): StudioProject[] {
         creatorName: typeof project.creatorName === 'string' ? project.creatorName : null,
         creatorUsername: typeof project.creatorUsername === 'string' ? project.creatorUsername : null,
         creatorAvatar: typeof project.creatorAvatar === 'string' ? project.creatorAvatar : null,
+        updatedAt: typeof project.updatedAt === 'string' ? project.updatedAt : project.createdAt,
       }))
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   } catch {
@@ -82,6 +90,7 @@ export function saveStudioProject(project: StudioProject) {
       videoUrl: cleanMediaUrl(project.videoUrl),
       characterAvatar: cleanOptionalMediaUrl(project.characterAvatar),
       creatorAvatar: cleanOptionalMediaUrl(project.creatorAvatar),
+      updatedAt: project.updatedAt ?? new Date().toISOString(),
     },
     ...existing,
   ];

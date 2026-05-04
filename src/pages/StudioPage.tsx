@@ -66,12 +66,12 @@ export default function StudioPage() {
       outputType: 'video',
       provider: project.provider,
       durationSeconds: null,
-      aspectRatio: null,
+      aspectRatio: project.aspectRatio ?? null,
       privacy: 'private',
       resultAssetUrl: project.videoUrl,
       errorMessage: null,
       createdAt: project.createdAt,
-      updatedAt: project.createdAt,
+      updatedAt: project.updatedAt ?? project.createdAt,
     }));
   }
 

@@ -672,36 +672,73 @@ export async function loadSupabaseProjects(userId: string): Promise<StudioProjec
 
 export async function saveSupabaseProject(userId: string, project: StudioProject): Promise<StudioProject> {
   const client = getClient();
-  const { data, error } = await client
+  const payload = {
+    id: project.id,
+    user_id: userId,
+    title: project.title || 'Untitled concept',
+    prompt: project.prompt,
+    final_prompt: project.finalPrompt ?? project.prompt,
+    style_preset: project.engine ?? project.provider ?? 'replicate',
+    status: project.status || 'completed',
+    provider: project.provider,
+    engine: project.engine ?? project.provider,
+    output_type: 'video',
+    video_url: storageUrl(project.videoUrl, 'Generated project video'),
+    cover_asset_url: storageUrl(project.videoUrl, 'Generated project video'),
+    character_id: project.characterId,
+    character_name: project.characterName,
+    character_avatar: storageUrl(project.characterAvatar, 'Project character avatar'),
+    is_default_self_character: Boolean(project.isDefaultSelfCharacter),
+    creator_name: project.creatorName ?? null,
+    creator_username: project.creatorUsername ?? null,
+    creator_avatar: storageUrl(project.creatorAvatar, 'Project creator avatar'),
+    aspect_ratio: project.aspectRatio ?? null,
+    updated_at: project.updatedAt ?? new Date().toISOString(),
+  };
+
+  let result = await client
     .from('projects')
     .upsert(
-      {
-        id: project.id,
-        user_id: userId,
-        title: project.title || 'Untitled concept',
-        prompt: project.prompt,
-        style_preset: 'Lumora',
-        status: project.status || 'completed',
-        provider: project.provider,
-        output_type: 'video',
-        video_url: storageUrl(project.videoUrl, 'Generated project video'),
-        cover_asset_url: storageUrl(project.videoUrl, 'Generated project video'),
-        character_id: project.characterId,
-        character_name: project.characterName,
-        character_avatar: storageUrl(project.characterAvatar, 'Project character avatar'),
-        is_default_self_character: Boolean(project.isDefaultSelfCharacter),
-        creator_name: project.creatorName ?? null,
-        creator_username: project.creatorUsername ?? null,
-        creator_avatar: storageUrl(project.creatorAvatar, 'Project creator avatar'),
-        updated_at: new Date().toISOString(),
-      },
+      payload,
       { onConflict: 'id' },
     )
     .select('*')
     .single();
 
-  if (error) throw error;
-  return mapProjectRow(data);
+  if (
+    result.error &&
+    (isMissingColumnError(result.error, 'final_prompt') || isMissingColumnError(result.error, 'engine'))
+  ) {
+    const { final_prompt: _finalPrompt, engine: _engine, ...legacyPayload } = payload;
+    result = await client
+      .from('projects')
+      .upsert(
+        legacyPayload,
+        { onConflict: 'id' },
+      )
+      .select('*')
+      .single();
+  }
+
+  if (result.error && isMissingColumnError(result.error, 'aspect_ratio')) {
+    const {
+      final_prompt: _finalPrompt,
+      engine: _engine,
+      aspect_ratio: _aspectRatio,
+      ...legacyPayload
+    } = payload;
+    result = await client
+      .from('projects')
+      .upsert(
+        legacyPayload,
+        { onConflict: 'id' },
+      )
+      .select('*')
+      .single();
+  }
+
+  if (result.error) throw result.error;
+  return mapProjectRow(result.data);
 }
 
 function mapProjectRow(row: DbRow): StudioProject {
@@ -710,9 +747,12 @@ function mapProjectRow(row: DbRow): StudioProject {
     title: nullableString(row.title),
     caption: nullableString(row.caption),
     prompt: stringValue(row.prompt),
+    finalPrompt: nullableString(row.final_prompt),
     videoUrl: stringValue(row.video_url) || stringValue(row.cover_asset_url),
     status: stringValue(row.status) || 'draft',
     provider: (row.provider ?? 'mock') as VideoEngine,
+    engine: nullableString(row.engine) as VideoEngine | null,
+    aspectRatio: nullableString(row.aspect_ratio),
     characterId: nullableString(row.character_id),
     characterName: nullableString(row.character_name),
     characterAvatar: nullableString(row.character_avatar),
@@ -721,6 +761,7 @@ function mapProjectRow(row: DbRow): StudioProject {
     creatorUsername: nullableString(row.creator_username),
     creatorAvatar: nullableString(row.creator_avatar),
     createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
   };
 }
 
