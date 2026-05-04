@@ -105,6 +105,10 @@ export default function CreateVideo({
   const [busy, setBusy] = useState(false);
   const [generationResult, setGenerationResult] = useState<GenerationResponse | null>(null);
   const actionBusy = busy || generationLoading;
+  const engineRoutingMessage =
+    engine === 'replicate'
+      ? 'Replicate is live for video generation.'
+      : `${engine} is not live yet. This render will use Replicate for now.`;
 
   async function handleGenerate() {
     if (configured && sessionLoading && !authUser) {
@@ -331,6 +335,7 @@ export default function CreateVideo({
               </option>
             ))}
           </select>
+          <small className="muted">{engineRoutingMessage}</small>
         </label>
 
         {characterName ? (
