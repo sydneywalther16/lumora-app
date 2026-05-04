@@ -5,14 +5,21 @@ type GenerateRequest = IncomingMessage & {
   body?: unknown;
 };
 
-type RequestBody = {
+export type GenerateVideoRequestBody = {
   prompt?: unknown;
   characterDescription?: unknown;
   referenceImageUrl?: unknown;
+  referenceImages?: unknown;
+  referenceImageUrls?: unknown;
   aspectRatio?: unknown;
   duration?: unknown;
   engine?: unknown;
+  provider?: unknown;
+  characterId?: unknown;
   character?: unknown;
+  style?: unknown;
+  camera?: unknown;
+  audio?: unknown;
 };
 
 type ReplicateModelIdentifier = `${string}/${string}` | `${string}/${string}:${string}`;
@@ -26,6 +33,23 @@ type ProviderResult = {
   rawOutput: unknown;
   referenceImageUrl?: string | null;
   referenceImageNote?: string | null;
+};
+
+type ReferenceImageSelection = {
+  requested: string[];
+  urls: string[];
+  unresolved: string[];
+};
+
+export type GenerateVideoResponseBody = {
+  videoUrl: string;
+  video: string;
+  provider: VideoProvider;
+  model: string;
+  finalPrompt: string;
+  referenceImageUrl: string | null;
+  referenceImageNote: string | null;
+  rawOutput: unknown;
 };
 
 const REPLICATE_VIDEO_MODEL = (process.env.REPLICATE_VIDEO_MODEL || 'luma/ray-2-720p') as ReplicateModelIdentifier;
@@ -53,7 +77,7 @@ function textValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-class ProviderError extends Error {
+export class ProviderError extends Error {
   statusCode: number;
   provider: VideoProvider;
   model?: string;
@@ -91,17 +115,17 @@ function isReplicateNotFoundError(error: unknown): boolean {
   return message.includes('404') || message.includes('Not Found');
 }
 
-async function readBody(req: GenerateRequest): Promise<RequestBody> {
+async function readBody(req: GenerateRequest): Promise<GenerateVideoRequestBody> {
   if (Buffer.isBuffer(req.body)) {
-    return JSON.parse(req.body.toString('utf8')) as RequestBody;
+    return JSON.parse(req.body.toString('utf8')) as GenerateVideoRequestBody;
   }
 
   if (req.body && typeof req.body === 'object') {
-    return req.body as RequestBody;
+    return req.body as GenerateVideoRequestBody;
   }
 
   if (typeof req.body === 'string') {
-    return JSON.parse(req.body) as RequestBody;
+    return JSON.parse(req.body) as GenerateVideoRequestBody;
   }
 
   const chunks: Buffer[] = [];
@@ -113,7 +137,7 @@ async function readBody(req: GenerateRequest): Promise<RequestBody> {
     return {};
   }
 
-  return JSON.parse(Buffer.concat(chunks).toString('utf8')) as RequestBody;
+  return JSON.parse(Buffer.concat(chunks).toString('utf8')) as GenerateVideoRequestBody;
 }
 
 function formatCharacterDescription(character: unknown): string {
@@ -130,13 +154,30 @@ function formatCharacterDescription(character: unknown): string {
   }
 }
 
-function buildFinalPrompt(prompt: string, characterDescription: string): string {
+function booleanValue(value: unknown): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    return value.toLowerCase() === 'true';
+  }
+  return false;
+}
+
+function buildFinalPrompt(input: {
+  prompt: string;
+  characterDescription: string;
+  style: string;
+  camera: string;
+  audio: boolean;
+}): string {
   return [
-    characterDescription
+    input.characterDescription
       ? 'same person as the saved self character, preserve facial identity, consistent hair, makeup, skin tone, wardrobe style'
       : '',
-    characterDescription,
-    prompt,
+    input.characterDescription,
+    input.prompt,
+    input.style ? `style: ${input.style}` : '',
+    input.camera ? `camera: ${input.camera}` : '',
+    input.audio ? 'include synced ambient audio when the selected provider supports audio' : '',
     'vertical video, cinematic lighting, realistic motion, high detail, TikTok style',
   ]
     .filter(Boolean)
@@ -147,6 +188,147 @@ function buildFinalPrompt(prompt: string, characterDescription: string): string 
 
 function normalizeAspectRatio(aspectRatio: unknown): string {
   return textValue(aspectRatio) || '9:16';
+}
+
+function objectRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+function normalizeReferenceImageAlias(value: string): string {
+  const normalized = value.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  if (normalized === 'front' || normalized === 'frontface' || normalized === 'face') return 'front';
+  if (normalized === 'left' || normalized === 'leftangle' || normalized === 'leftside') return 'left';
+  if (normalized === 'right' || normalized === 'rightangle' || normalized === 'rightside') return 'right';
+  if (normalized === 'expressive' || normalized === 'expression') return 'expressive';
+
+  return normalized;
+}
+
+function referenceImageUrlMap(source: unknown): Record<string, string> {
+  const record = objectRecord(source);
+  const nestedRecord = objectRecord(record.referenceImageUrls);
+  const referenceRecord = Object.keys(nestedRecord).length > 0 ? nestedRecord : record;
+  const aliases: Record<string, string[]> = {
+    front: ['front', 'frontFace', 'front_face', 'face'],
+    left: ['left', 'leftAngle', 'left_angle', 'leftSide'],
+    right: ['right', 'rightAngle', 'right_angle', 'rightSide'],
+    expressive: ['expressive', 'expression'],
+  };
+
+  return Object.fromEntries(
+    Object.entries(aliases).flatMap(([alias, keys]) => {
+      const url = keys
+        .map((key) => textValue(referenceRecord[key]))
+        .find((value) => value && isHttpUrl(value));
+
+      return url ? [[alias, url]] : [];
+    }),
+  );
+}
+
+function mergeReferenceImageUrlMaps(...sources: unknown[]): Record<string, string> {
+  return Object.assign({}, ...sources.map(referenceImageUrlMap));
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function normalizeReferenceImages(
+  referenceImages: unknown,
+  referenceUrlMap: Record<string, string>,
+): ReferenceImageSelection {
+  const candidates = Array.isArray(referenceImages) ? referenceImages : [referenceImages];
+  const requested: string[] = [];
+  const urls: string[] = [];
+  const unresolved: string[] = [];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+
+    if (candidate instanceof URL) {
+      urls.push(candidate.toString());
+      continue;
+    }
+
+    if (typeof candidate === 'string') {
+      const value = candidate.trim();
+      if (!value) continue;
+
+      requested.push(value);
+
+      if (isHttpUrl(value)) {
+        urls.push(value);
+        continue;
+      }
+
+      const alias = normalizeReferenceImageAlias(value);
+      const mappedUrl = referenceUrlMap[alias];
+      if (mappedUrl) {
+        urls.push(mappedUrl);
+      } else {
+        unresolved.push(value);
+      }
+      continue;
+    }
+
+    if (typeof candidate === 'object') {
+      const record = candidate as Record<string, unknown>;
+      const explicitUrl = [
+        textValue(record.url),
+        textValue(record.imageUrl),
+        textValue(record.referenceImageUrl),
+        textValue(record.src),
+      ].find((value) => value && isHttpUrl(value));
+
+      if (explicitUrl) {
+        urls.push(explicitUrl);
+        continue;
+      }
+
+      const label = [
+        textValue(record.label),
+        textValue(record.slot),
+        textValue(record.angle),
+        textValue(record.type),
+      ].find(Boolean);
+
+      if (label) {
+        requested.push(label);
+        const alias = normalizeReferenceImageAlias(label);
+        const mappedUrl = referenceUrlMap[alias];
+        if (mappedUrl) {
+          urls.push(mappedUrl);
+        } else {
+          unresolved.push(label);
+        }
+      }
+    }
+  }
+
+  return {
+    requested: uniqueStrings(requested),
+    urls: uniqueStrings(urls),
+    unresolved: uniqueStrings(unresolved),
+  };
+}
+
+function firstReferenceImageUrl(referenceImageUrl: string, referenceImages: string[]): string {
+  if (referenceImageUrl) return referenceImageUrl;
+  return referenceImages.find((image) => /^https?:\/\//i.test(image)) ?? '';
+}
+
+function resolveReferenceImageUrl(value: string, referenceUrlMap: Record<string, string>): string {
+  if (!value) return '';
+  if (isHttpUrl(value)) return value;
+  return referenceUrlMap[normalizeReferenceImageAlias(value)] ?? '';
 }
 
 function normalizeDurationSeconds(duration: unknown): number {
@@ -171,6 +353,19 @@ function isSoraEngine(engine: string): engine is OpenAIVideoModel {
 
 function openAIVideoModelForEngine(engine: string): OpenAIVideoModel {
   return isSoraEngine(engine) ? engine : OPENAI_VIDEO_MODEL;
+}
+
+function resolveEngine(engine: string, provider: string): string {
+  if (provider === 'auto') {
+    return process.env.OPENAI_API_KEY ? OPENAI_VIDEO_MODEL : 'replicate';
+  }
+
+  if (provider === 'openai') return OPENAI_VIDEO_MODEL;
+  if (provider === 'sora-2' || provider === 'sora-2-pro' || provider === 'replicate') {
+    return provider;
+  }
+
+  return engine || 'replicate';
 }
 
 function delay(ms: number): Promise<void> {
@@ -498,6 +693,27 @@ async function createOpenAIVideo(input: {
 
     if (status === 'failed' || status === 'cancelled' || status === 'canceled') {
       const message = videoJobErrorMessage(current) || 'OpenAI video generation failed.';
+
+      if (isOpenAIReferenceImageError(message)) {
+        throw new ProviderError({
+          statusCode: 400,
+          provider: 'openai',
+          model,
+          message: 'OpenAI rejected the reference image for this video request. Human-face reference images may be restricted; try Replicate or remove the reference image.',
+          payload: current,
+        });
+      }
+
+      if (isOpenAIAccessOrBillingError(502, message)) {
+        throw new ProviderError({
+          statusCode: 502,
+          provider: 'openai',
+          model,
+          message: 'Sora 2 video generation is unavailable for this OpenAI API account, model, billing state, or deprecation window. Try the Replicate engine fallback.',
+          payload: current,
+        });
+      }
+
       throw new ProviderError({
         statusCode: 502,
         provider: 'openai',
@@ -525,6 +741,7 @@ async function createOpenAIVideo(input: {
 async function createReplicateVideo(input: {
   finalPrompt: string;
   aspectRatio: string;
+  duration: number;
   referenceImageUrl: string;
 }): Promise<ProviderResult> {
   if (!process.env.REPLICATE_API_TOKEN) {
@@ -547,14 +764,30 @@ async function createReplicateVideo(input: {
     aspectRatio: input.aspectRatio,
   });
 
-  const output = await replicate.run(REPLICATE_VIDEO_MODEL, {
-    input: {
-      prompt: input.finalPrompt,
-      duration: 5,
-      aspect_ratio: input.aspectRatio || '9:16',
-      loop: false,
-    },
-  });
+  let output: unknown;
+
+  try {
+    output = await replicate.run(REPLICATE_VIDEO_MODEL, {
+      input: {
+        prompt: input.finalPrompt,
+        duration: input.duration || 5,
+        aspect_ratio: input.aspectRatio || '9:16',
+        loop: false,
+      },
+    });
+  } catch (error) {
+    if (isReplicateNotFoundError(error)) {
+      throw new ProviderError({
+        statusCode: 502,
+        provider: 'replicate',
+        model: REPLICATE_VIDEO_MODEL,
+        message: 'Selected Replicate model was not found. Check REPLICATE_VIDEO_MODEL.',
+        payload: error,
+      });
+    }
+
+    throw error;
+  }
   const videoUrl = normalizeReplicateVideoUrl(output);
   const rawOutput = {
     output: serializeReplicateOutput(output),
@@ -589,6 +822,136 @@ async function createReplicateVideo(input: {
   };
 }
 
+export async function generateVideoFromBody(body: GenerateVideoRequestBody): Promise<GenerateVideoResponseBody> {
+  const prompt = textValue(body.prompt);
+  const characterDescription =
+    textValue(body.characterDescription) || formatCharacterDescription(body.character);
+  const referenceUrlMap = mergeReferenceImageUrlMaps(body.referenceImageUrls, body.character);
+  const referenceImages = normalizeReferenceImages(body.referenceImages, referenceUrlMap);
+  const defaultMappedReferenceUrl = referenceUrlMap.front || referenceUrlMap.left || referenceUrlMap.right || '';
+  const referenceImageUrl = firstReferenceImageUrl(
+    resolveReferenceImageUrl(textValue(body.referenceImageUrl), referenceUrlMap) || defaultMappedReferenceUrl,
+    referenceImages.urls,
+  );
+  const aspectRatio = normalizeAspectRatio(body.aspectRatio);
+  const duration = normalizeDurationSeconds(body.duration);
+  const provider = textValue(body.provider);
+  const engine = resolveEngine(textValue(body.engine), provider);
+  const finalPrompt = buildFinalPrompt({
+    prompt,
+    characterDescription,
+    style: textValue(body.style),
+    camera: textValue(body.camera),
+    audio: booleanValue(body.audio),
+  });
+  const unresolvedReferenceImageNote = referenceImages.unresolved.length > 0
+    ? `referenceImages included label(s) without matching public URLs: ${referenceImages.unresolved.join(', ')}. Include referenceImageUrls to send image references to Sora.`
+    : null;
+
+  if (!prompt) {
+    throw new ProviderError({
+      statusCode: 400,
+      provider: isSoraEngine(engine) ? 'openai' : 'replicate',
+      model: isSoraEngine(engine) ? openAIVideoModelForEngine(engine) : REPLICATE_VIDEO_MODEL,
+      message: 'A prompt is required.',
+    });
+  }
+
+  let result: ProviderResult;
+
+  if (isSoraEngine(engine)) {
+    try {
+      result = await createOpenAIVideo({
+        finalPrompt,
+        aspectRatio,
+        duration,
+        engine,
+        referenceImageUrl,
+      });
+    } catch (error) {
+      if (provider !== 'auto' || !(error instanceof ProviderError) || error.provider !== 'openai') {
+        throw error;
+      }
+
+      console.warn('OPENAI AUTO PROVIDER FAILED; FALLING BACK TO REPLICATE', {
+        model: error.model,
+        message: error.message,
+      });
+      const fallback = await createReplicateVideo({
+        finalPrompt,
+        aspectRatio,
+        duration,
+        referenceImageUrl,
+      });
+      result = {
+        ...fallback,
+        referenceImageNote: fallback.referenceImageNote ?? unresolvedReferenceImageNote,
+        rawOutput: {
+          fallbackFrom: {
+            provider: 'openai',
+            model: error.model,
+            error: error.message,
+            rawOutput: error.payload,
+          },
+          referenceImages: {
+            requested: referenceImages.requested,
+            resolvedUrls: referenceImages.urls,
+            unresolved: referenceImages.unresolved,
+          },
+          result: fallback.rawOutput,
+        },
+      };
+    }
+  } else {
+    result = await createReplicateVideo({
+      finalPrompt,
+      aspectRatio,
+      duration,
+      referenceImageUrl,
+    });
+  }
+
+  console.info('VIDEO GENERATE COMPLETE', {
+    provider: result.provider,
+    model: result.model,
+    promptLength: prompt.length,
+    characterId: textValue(body.characterId) || null,
+    hasCharacterDescription: Boolean(characterDescription),
+    hasReferenceImageUrl: Boolean(referenceImageUrl),
+    referenceImageCount: referenceImages.urls.length,
+    requestedReferenceImages: referenceImages.requested,
+    unresolvedReferenceImages: referenceImages.unresolved,
+    aspectRatio,
+    duration,
+    engine,
+    requestedProvider: provider || null,
+  });
+
+  return {
+    videoUrl: result.videoUrl,
+    video: result.videoUrl,
+    provider: result.provider,
+    model: result.model,
+    finalPrompt,
+    referenceImageUrl: result.referenceImageUrl ?? null,
+    referenceImageNote: result.referenceImageNote ?? unresolvedReferenceImageNote,
+    rawOutput: {
+      request: {
+        characterId: textValue(body.characterId) || null,
+        requestedReferenceImages: referenceImages.requested,
+        resolvedReferenceImageUrls: referenceImages.urls,
+        unresolvedReferenceImages: referenceImages.unresolved,
+        style: textValue(body.style) || null,
+        camera: textValue(body.camera) || null,
+        audio: booleanValue(body.audio),
+        requestedProvider: provider || null,
+        engine,
+      },
+      provider: result.rawOutput,
+    },
+  };
+}
+
 export default async function handler(req: GenerateRequest, res: ServerResponse) {
   if (req.method !== 'POST') {
     res.statusCode = 405;
@@ -597,7 +960,7 @@ export default async function handler(req: GenerateRequest, res: ServerResponse)
   }
 
   try {
-    let body: RequestBody;
+    let body: GenerateVideoRequestBody;
 
     try {
       body = await readBody(req);
@@ -606,54 +969,8 @@ export default async function handler(req: GenerateRequest, res: ServerResponse)
       return sendJson(res, 400, { error: 'Invalid JSON body.' });
     }
 
-    const prompt = textValue(body.prompt);
-    const characterDescription =
-      textValue(body.characterDescription) || formatCharacterDescription(body.character);
-    const referenceImageUrl = textValue(body.referenceImageUrl);
-    const aspectRatio = normalizeAspectRatio(body.aspectRatio);
-    const duration = normalizeDurationSeconds(body.duration);
-    const engine = textValue(body.engine) || 'replicate';
-    const finalPrompt = buildFinalPrompt(prompt, characterDescription);
-
-    if (!prompt) {
-      return sendJson(res, 400, { error: 'A prompt is required.' });
-    }
-
-    const result = isSoraEngine(engine)
-      ? await createOpenAIVideo({
-          finalPrompt,
-          aspectRatio,
-          duration,
-          engine,
-          referenceImageUrl,
-        })
-      : await createReplicateVideo({
-          finalPrompt,
-          aspectRatio,
-          referenceImageUrl,
-        });
-
-    console.info('VIDEO GENERATE COMPLETE', {
-      provider: result.provider,
-      model: result.model,
-      promptLength: prompt.length,
-      hasCharacterDescription: Boolean(characterDescription),
-      hasReferenceImageUrl: Boolean(referenceImageUrl),
-      aspectRatio,
-      duration,
-      engine,
-    });
-
-    return sendJson(res, 200, {
-      videoUrl: result.videoUrl,
-      video: result.videoUrl,
-      provider: result.provider,
-      model: result.model,
-      finalPrompt,
-      referenceImageUrl: result.referenceImageUrl ?? null,
-      referenceImageNote: result.referenceImageNote ?? null,
-      rawOutput: result.rawOutput,
-    });
+    const result = await generateVideoFromBody(body);
+    return sendJson(res, 200, result);
   } catch (error) {
     console.error('VIDEO GENERATE FAILED', error);
     if (error instanceof ProviderError) {

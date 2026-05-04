@@ -197,6 +197,9 @@ export default function CreatePage() {
   const referenceImageUrl = activeSelfCharacter
     ? activeSelfCharacter.referenceImageUrls.frontFace || characterAvatar || null
     : null;
+  const referenceImageUrls = activeSelfCharacter
+    ? activeSelfCharacter.referenceImageUrls
+    : null;
 
   return (
     <div className="page">
@@ -266,6 +269,7 @@ export default function CreatePage() {
         isDefaultSelfCharacter={isDefaultSelfCharacter}
         characterDescription={characterDescription}
         referenceImageUrl={referenceImageUrl}
+        referenceImageUrls={referenceImageUrls}
       />
       <CharacterCapture onCreated={() => setCharacterRefreshKey((value) => value + 1)} />
     </div>

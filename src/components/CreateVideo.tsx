@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { type GenerationResponse, type VideoAspectRatio, type VideoEngine } from '../lib/api';
+import { type GenerationResponse, type ReferenceImageUrls, type VideoAspectRatio, type VideoEngine } from '../lib/api';
 import { saveStudioProject, type StudioProject } from '../lib/projectStorage';
 import { loadLumoraProfile } from '../lib/profileStorage';
 import { loadSupabaseProfile, saveSupabaseDraft, saveSupabaseProject } from '../lib/supabaseAppData';
@@ -14,6 +14,7 @@ type CreateVideoProps = {
   isDefaultSelfCharacter: boolean;
   characterDescription?: string;
   referenceImageUrl?: string | null;
+  referenceImageUrls?: Partial<ReferenceImageUrls> | null;
 };
 
 const stylePresets = ['Editorial Drama', 'Virtual Sitcom', 'Luxury POV', 'Cinematic Sunset'];
@@ -88,6 +89,7 @@ export default function CreateVideo({
   isDefaultSelfCharacter,
   characterDescription,
   referenceImageUrl,
+  referenceImageUrls,
 }: CreateVideoProps) {
   const { user, session, loading: sessionLoading, configured } = useSession();
   const authUser = session?.user ?? user;
@@ -142,15 +144,30 @@ export default function CreateVideo({
     setStatus('');
 
     try {
-      const res = await fetch('/api/generate', {
+      const res = await fetch('/api/lumora/generate-video', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: currentPrompt,
+          characterId,
           characterDescription: selectedCharacterDescription,
           referenceImageUrl,
+          referenceImages: referenceImageUrls ? ['front', 'left', 'right'] : referenceImageUrl ? [referenceImageUrl] : [],
+          referenceImageUrls: referenceImageUrls
+            ? {
+                front: referenceImageUrls.frontFace,
+                left: referenceImageUrls.leftAngle,
+                right: referenceImageUrls.rightAngle,
+                frontFace: referenceImageUrls.frontFace,
+                leftAngle: referenceImageUrls.leftAngle,
+                rightAngle: referenceImageUrls.rightAngle,
+              }
+            : undefined,
           aspectRatio: selectedAspectRatio,
           duration,
+          style: selectedStyle,
+          audio: true,
+          provider: selectedEngine,
           engine: selectedEngine,
         }),
       });
