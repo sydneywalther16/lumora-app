@@ -13,8 +13,9 @@ type RequestBody = {
   character?: unknown;
 };
 
-const REPLICATE_VIDEO_MODEL = 'anotherjesse/zeroscope-v2-xl';
-const DEFAULT_NEGATIVE_PROMPT = 'blurred, noisy, washed out, distorted, broken';
+type ReplicateModelIdentifier = `${string}/${string}` | `${string}/${string}:${string}`;
+
+const REPLICATE_VIDEO_MODEL = (process.env.REPLICATE_VIDEO_MODEL || 'luma/ray-2-720p') as ReplicateModelIdentifier;
 
 const replicate = new Replicate({
   auth: process.env.REPLICATE_API_TOKEN,
@@ -33,6 +34,22 @@ function errorMessage(error: unknown): string {
 
 function textValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function isReplicateNotFoundError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const record = error as Record<string, unknown>;
+  const response = record.response;
+
+  if (response && typeof response === 'object' && (response as Record<string, unknown>).status === 404) {
+    return true;
+  }
+
+  const message = error instanceof Error ? error.message : String(record.message ?? '');
+  return message.includes('404') || message.includes('Not Found');
 }
 
 async function readBody(req: GenerateRequest): Promise<RequestBody> {
@@ -80,10 +97,8 @@ function buildFinalPrompt(prompt: string, characterDescription: string): string 
     .trim();
 }
 
-function getDimensions(aspectRatio: unknown): { width: number; height: number } {
-  if (aspectRatio === '16:9') return { width: 1024, height: 576 };
-  if (aspectRatio === '1:1') return { width: 768, height: 768 };
-  return { width: 576, height: 1024 };
+function normalizeAspectRatio(aspectRatio: unknown): string {
+  return textValue(aspectRatio) || '9:16';
 }
 
 function maybeUrl(value: unknown): string | null {
@@ -187,10 +202,9 @@ export default async function handler(req: GenerateRequest, res: ServerResponse)
     const prompt = textValue(body.prompt);
     const characterDescription =
       textValue(body.characterDescription) || formatCharacterDescription(body.character);
-    const aspectRatio = textValue(body.aspectRatio) || '9:16';
+    const aspectRatio = normalizeAspectRatio(body.aspectRatio);
     const engine = textValue(body.engine) || 'replicate';
     const finalPrompt = buildFinalPrompt(prompt, characterDescription);
-    const { width, height } = getDimensions(aspectRatio);
 
     if (!prompt) {
       return sendJson(res, 400, { error: 'A prompt is required.' });
@@ -207,13 +221,9 @@ export default async function handler(req: GenerateRequest, res: ServerResponse)
     const output = await replicate.run(REPLICATE_VIDEO_MODEL, {
       input: {
         prompt: finalPrompt,
-        negative_prompt: DEFAULT_NEGATIVE_PROMPT,
-        num_frames: 24,
-        num_inference_steps: 50,
-        guidance_scale: 12.5,
-        fps: 24,
-        width,
-        height,
+        duration: 5,
+        aspect_ratio: aspectRatio || '9:16',
+        loop: false,
       },
     });
     const videoUrl = normalizeReplicateVideoUrl(output);
@@ -243,6 +253,14 @@ export default async function handler(req: GenerateRequest, res: ServerResponse)
     });
   } catch (error) {
     console.error('REPLICATE GENERATE FAILED', error);
+    if (isReplicateNotFoundError(error)) {
+      return sendJson(res, 502, {
+        error: 'Selected Replicate model was not found. Check REPLICATE_VIDEO_MODEL.',
+        provider: 'replicate',
+        model: REPLICATE_VIDEO_MODEL,
+      });
+    }
+
     return sendJson(res, 500, { error: errorMessage(error) });
   }
 }
