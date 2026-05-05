@@ -168,7 +168,7 @@ export default async function handler(req: GenerateVideoRequest, res: ServerResp
     let videoGeneration: VideoGenerationModule;
 
     try {
-      videoGeneration = await import('../../src/server/videoGeneration') as VideoGenerationModule;
+      videoGeneration = await import('../_lib/videoGeneration') as VideoGenerationModule;
     } catch (error) {
       console.error('LUMORA VIDEO MODULE IMPORT ERROR:', error);
       return sendJson(res, 500, {
