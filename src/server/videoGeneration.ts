@@ -51,11 +51,17 @@ export type GenerateVideoResponseBody = {
   rawOutput: unknown;
 };
 
-const REPLICATE_VIDEO_MODEL = (process.env.REPLICATE_VIDEO_MODEL || 'luma/ray-2-720p') as ReplicateModelIdentifier;
-const OPENAI_VIDEO_MODEL = (process.env.OPENAI_VIDEO_MODEL || 'sora-2') as OpenAIVideoModel;
 const OPENAI_VIDEO_API_BASE_URL = 'https://api.openai.com/v1';
 const OPENAI_VIDEO_POLL_INTERVAL_MS = 5000;
 const OPENAI_VIDEO_POLL_TIMEOUT_MS = 240000;
+
+function replicateVideoModel(): ReplicateModelIdentifier {
+  return (process.env.REPLICATE_VIDEO_MODEL || 'luma/ray-2-720p') as ReplicateModelIdentifier;
+}
+
+function defaultOpenAIVideoModel(): OpenAIVideoModel {
+  return (process.env.OPENAI_VIDEO_MODEL || 'sora-2') as OpenAIVideoModel;
+}
 
 export function sendJsonResponse(res: ServerResponse, statusCode: number, payload: unknown) {
   const response = res as ServerResponse & {
@@ -413,15 +419,15 @@ function isSoraEngine(engine: string): engine is OpenAIVideoModel {
 }
 
 function openAIVideoModelForEngine(engine: string): OpenAIVideoModel {
-  return isSoraEngine(engine) ? engine : OPENAI_VIDEO_MODEL;
+  return isSoraEngine(engine) ? engine : defaultOpenAIVideoModel();
 }
 
 function resolveEngine(engine: string, provider: string): string {
   if (provider === 'auto') {
-    return process.env.OPENAI_API_KEY ? OPENAI_VIDEO_MODEL : 'replicate';
+    return process.env.OPENAI_API_KEY ? defaultOpenAIVideoModel() : 'replicate';
   }
 
-  if (provider === 'openai') return OPENAI_VIDEO_MODEL;
+  if (provider === 'openai') return defaultOpenAIVideoModel();
   if (provider === 'sora-2' || provider === 'sora-2-pro' || provider === 'replicate') {
     return provider;
   }
@@ -570,7 +576,7 @@ function isOpenAIAccessOrBillingError(status: number, message: string): boolean 
   );
 }
 
-async function openAIJson(path: string, init: RequestInit, model = OPENAI_VIDEO_MODEL): Promise<unknown> {
+async function openAIJson(path: string, init: RequestInit, model = defaultOpenAIVideoModel()): Promise<unknown> {
   const response = await fetch(`${OPENAI_VIDEO_API_BASE_URL}${path}`, {
     ...init,
     headers: {
@@ -615,7 +621,7 @@ async function openAIJson(path: string, init: RequestInit, model = OPENAI_VIDEO_
   return payload;
 }
 
-function videoJobId(job: unknown, model = OPENAI_VIDEO_MODEL): string {
+function videoJobId(job: unknown, model = defaultOpenAIVideoModel()): string {
   if (job && typeof job === 'object') {
     const id = (job as Record<string, unknown>).id;
     if (typeof id === 'string' && id.length > 0) return id;
@@ -805,6 +811,8 @@ async function createReplicateVideo(input: {
   duration: number;
   referenceImageUrl: string;
 }): Promise<ProviderResult> {
+  const model = replicateVideoModel();
+
   if (!process.env.REPLICATE_API_TOKEN) {
     console.error('REPLICATE_API_TOKEN is not configured.');
     throw new Error('Missing REPLICATE_API_TOKEN');
@@ -815,7 +823,7 @@ async function createReplicateVideo(input: {
     : null;
 
   console.info('REPLICATE GENERATE REQUEST', {
-    model: REPLICATE_VIDEO_MODEL,
+    model,
     hasReferenceImageUrl: Boolean(input.referenceImageUrl),
     aspectRatio: input.aspectRatio,
   });
@@ -829,7 +837,7 @@ async function createReplicateVideo(input: {
       useFileOutput: false,
     });
 
-    output = await replicate.run(REPLICATE_VIDEO_MODEL, {
+    output = await replicate.run(model, {
       input: {
         prompt: input.finalPrompt,
         duration: input.duration || 5,
@@ -854,7 +862,7 @@ async function createReplicateVideo(input: {
   };
 
   console.info('REPLICATE GENERATE OUTPUT', {
-    model: REPLICATE_VIDEO_MODEL,
+    model,
     hasVideoUrl: Boolean(videoUrl),
     referenceImageUsed: false,
     outputType: Array.isArray(output) ? 'array' : typeof output,
@@ -864,7 +872,7 @@ async function createReplicateVideo(input: {
     throw new ProviderError({
       statusCode: 502,
       provider: 'replicate',
-      model: REPLICATE_VIDEO_MODEL,
+      model,
       message: 'Replicate completed, but no usable video URL was found in the output.',
       payload: rawOutput,
     });
@@ -873,7 +881,7 @@ async function createReplicateVideo(input: {
   return {
     videoUrl,
     provider: 'replicate',
-    model: REPLICATE_VIDEO_MODEL,
+    model,
     referenceImageUrl: input.referenceImageUrl || null,
     referenceImageNote,
     rawOutput,
@@ -926,7 +934,7 @@ async function generateVideoFromBodyUnsafe(body: GenerateVideoRequestBody): Prom
     throw new ProviderError({
       statusCode: 400,
       provider: isSoraEngine(engine) ? 'openai' : 'replicate',
-      model: isSoraEngine(engine) ? openAIVideoModelForEngine(engine) : REPLICATE_VIDEO_MODEL,
+      model: isSoraEngine(engine) ? openAIVideoModelForEngine(engine) : replicateVideoModel(),
       message: 'A prompt is required.',
     });
   }
