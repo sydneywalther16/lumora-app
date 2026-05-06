@@ -1,4 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import {
+  errorMessage as generationErrorMessage,
+  generateVideoFromBody,
+  ProviderError,
+  safeJsonValue as generationSafeJsonValue,
+} from './_lib/videoGeneration';
 
 type GenerateRequest = IncomingMessage & {
   body?: unknown;
@@ -6,18 +12,6 @@ type GenerateRequest = IncomingMessage & {
 
 type GenerateVideoBody = {
   [key: string]: unknown;
-};
-
-type VideoGenerationModule = {
-  generateVideoFromBody: (body: GenerateVideoBody) => Promise<unknown>;
-  ProviderError: new (...args: never[]) => Error & {
-    statusCode?: number;
-    provider?: unknown;
-    model?: unknown;
-    payload?: unknown;
-  };
-  errorMessage: (error: unknown) => string;
-  safeJsonValue: (value: unknown) => unknown;
 };
 
 function safeJsonValue(value: unknown, seen = new WeakSet<object>()): unknown {
@@ -138,26 +132,14 @@ export default async function handler(req: GenerateRequest, res: ServerResponse)
       return sendJson(res, 400, { error: 'Invalid JSON body.', details: errorMessage(error) });
     }
 
-    let videoGeneration: VideoGenerationModule;
-
     try {
-      videoGeneration = await import('./_lib/videoGeneration') as VideoGenerationModule;
-    } catch (error) {
-      console.error('VIDEO GENERATE MODULE IMPORT ERROR:', error);
-      return sendJson(res, 500, {
-        error: 'Failed to load video generation module',
-        details: errorMessage(error),
-      });
-    }
-
-    try {
-      const result = await videoGeneration.generateVideoFromBody(body);
+      const result = await generateVideoFromBody(body);
       return sendJson(res, 200, result);
     } catch (error) {
       console.error('VIDEO GENERATE FAILED', error);
 
-      if (error instanceof videoGeneration.ProviderError) {
-        const details = videoGeneration.safeJsonValue(error.payload);
+      if (error instanceof ProviderError) {
+        const details = generationSafeJsonValue(error.payload);
         return sendJson(res, 500, {
           error: error.message,
           details,
@@ -168,7 +150,7 @@ export default async function handler(req: GenerateRequest, res: ServerResponse)
       }
 
       return sendJson(res, 500, {
-        error: videoGeneration.errorMessage(error),
+        error: generationErrorMessage(error),
         details: safeJsonValue(error),
       });
     }

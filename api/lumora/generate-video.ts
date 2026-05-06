@@ -1,4 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import {
+  generateVideoFromBody,
+  ProviderError,
+  safeJsonValue as generationSafeJsonValue,
+} from '../_lib/videoGeneration';
 
 type GenerateVideoRequest = IncomingMessage & {
   body?: unknown;
@@ -8,18 +13,6 @@ type GenerateVideoBody = {
   provider?: unknown;
   engine?: unknown;
   [key: string]: unknown;
-};
-
-type VideoGenerationModule = {
-  generateVideoFromBody: (body: GenerateVideoBody) => Promise<unknown>;
-  ProviderError: new (...args: never[]) => Error & {
-    statusCode?: number;
-    provider?: unknown;
-    model?: unknown;
-    payload?: unknown;
-  };
-  errorMessage: (error: unknown) => string;
-  safeJsonValue: (value: unknown) => unknown;
 };
 
 function safeJsonValue(value: unknown, seen = new WeakSet<object>()): unknown {
@@ -165,28 +158,15 @@ export default async function handler(req: GenerateVideoRequest, res: ServerResp
       engine: textValue(body.engine) || null,
     });
 
-    let videoGeneration: VideoGenerationModule;
-
     try {
-      videoGeneration = await import('../_lib/videoGeneration') as VideoGenerationModule;
-    } catch (error) {
-      console.error('LUMORA VIDEO MODULE IMPORT ERROR:', error);
-      return sendJson(res, 500, {
-        error: 'Failed to load video generation module',
-        details: errorMessage(error),
-        stack: errorStack(error),
-      });
-    }
-
-    try {
-      const result = await videoGeneration.generateVideoFromBody(body);
+      const result = await generateVideoFromBody(body);
       return sendJson(res, 200, result);
     } catch (error) {
       console.error('LUMORA GENERATE ERROR:', error);
 
-      if (error instanceof videoGeneration.ProviderError) {
+      if (error instanceof ProviderError) {
         const provider = error.provider;
-        const details = videoGeneration.safeJsonValue(error.payload);
+        const details = generationSafeJsonValue(error.payload);
 
         if (isReplicateFailure(error, provider)) {
           return sendJson(res, 500, {
