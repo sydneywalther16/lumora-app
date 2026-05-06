@@ -30,6 +30,8 @@ const selfStyleLabels: Array<[string, string]> = [
 ];
 
 function buildDefaultSelfCharacter(profile: LumoraProfile): CharacterProfile {
+  const profileReferenceImages = readObjectRecord(profile.selfReferenceImageUrls);
+
   return {
     id: CREATOR_SELF_CHARACTER_ID,
     ownerUserId: 'local',
@@ -42,6 +44,7 @@ function buildDefaultSelfCharacter(profile: LumoraProfile): CharacterProfile {
       frontFace: profile.defaultSelfCharacterAvatar ?? '',
       leftAngle: profile.defaultSelfCharacterAvatar ?? '',
       rightAngle: profile.defaultSelfCharacterAvatar ?? '',
+      fullBody: typeof profileReferenceImages.fullBody === 'string' ? profileReferenceImages.fullBody : null,
     },
     sourceCaptureVideoUrl: profile.selfCaptureVideoUrl ?? null,
     voiceSampleUrl: profile.selfVoiceSampleUrl ?? null,
@@ -52,6 +55,27 @@ function buildDefaultSelfCharacter(profile: LumoraProfile): CharacterProfile {
     isSelf: true,
     isCreatorSelf: true,
   };
+}
+
+function cleanReferenceUrl(value?: string | null): string | null {
+  if (!value || value.startsWith('data:') || value.startsWith('blob:')) return null;
+  return value;
+}
+
+function pickPrimaryReferenceImage(
+  urls: CharacterProfile['referenceImageUrls'] | null,
+  fallbackUrl: string | null,
+): string | null {
+  if (!urls) return cleanReferenceUrl(fallbackUrl);
+
+  return (
+    cleanReferenceUrl(urls.frontFace) ||
+    cleanReferenceUrl(urls.fullBody) ||
+    cleanReferenceUrl(urls.leftAngle) ||
+    cleanReferenceUrl(urls.rightAngle) ||
+    cleanReferenceUrl(urls.expressive) ||
+    cleanReferenceUrl(fallbackUrl)
+  );
 }
 
 function readObjectRecord(value: unknown): Record<string, unknown> {
@@ -195,7 +219,7 @@ export default function CreatePage() {
     ? buildSelfCharacterDescription(profile, activeSelfCharacter)
     : '';
   const referenceImageUrl = activeSelfCharacter
-    ? activeSelfCharacter.referenceImageUrls.frontFace || characterAvatar || null
+    ? pickPrimaryReferenceImage(activeSelfCharacter.referenceImageUrls, characterAvatar)
     : null;
   const referenceImageUrls = activeSelfCharacter
     ? activeSelfCharacter.referenceImageUrls

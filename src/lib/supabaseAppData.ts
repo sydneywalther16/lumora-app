@@ -71,6 +71,10 @@ function isMissingColumnError(error: unknown, columnName: string): boolean {
   return code === '42703' || message.includes(columnName);
 }
 
+function missingColumnName<T extends string>(error: unknown, columns: readonly T[]): T | null {
+  return columns.find((column) => isMissingColumnError(error, column)) ?? null;
+}
+
 function jsonRecord(value: unknown): Record<string, unknown> {
   return isObject(value) ? value : {};
 }
@@ -412,6 +416,7 @@ function mapReferenceImages(value: unknown): ReferenceImageUrls {
     frontFace: record.frontFace ?? '',
     leftAngle: record.leftAngle ?? '',
     rightAngle: record.rightAngle ?? '',
+    fullBody: record.fullBody ?? null,
     expressive: record.expressive ?? null,
   };
 }
@@ -421,6 +426,7 @@ function cleanReferenceImageUrls(value: ReferenceImageUrls): ReferenceImageUrls 
     frontFace: storageUrl(value.frontFace, 'Front reference photo') ?? '',
     leftAngle: storageUrl(value.leftAngle, 'Left reference photo') ?? '',
     rightAngle: storageUrl(value.rightAngle, 'Right reference photo') ?? '',
+    fullBody: storageUrl(value.fullBody, 'Full body reference photo'),
     expressive: storageUrl(value.expressive, 'Expressive reference photo'),
   };
 }
@@ -676,15 +682,19 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
     id: project.id,
     user_id: userId,
     title: project.title || 'Untitled concept',
+    caption: project.caption ?? project.prompt,
     prompt: project.prompt,
     final_prompt: project.finalPrompt ?? project.prompt,
     style_preset: project.engine ?? project.provider ?? 'replicate',
     status: project.status || 'completed',
     provider: project.provider,
     engine: project.engine ?? project.provider,
+    model: project.model ?? null,
+    generation_mode: project.generationMode ?? null,
     output_type: 'video',
     video_url: storageUrl(project.videoUrl, 'Generated project video'),
     cover_asset_url: storageUrl(project.videoUrl, 'Generated project video'),
+    reference_image_url: storageUrl(project.referenceImageUrl, 'Project reference image'),
     character_id: project.characterId,
     character_name: project.characterName,
     character_avatar: storageUrl(project.characterAvatar, 'Project character avatar'),
@@ -695,49 +705,37 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
     aspect_ratio: project.aspectRatio ?? null,
     updated_at: project.updatedAt ?? new Date().toISOString(),
   };
+  const removableProjectColumns = [
+    'reference_image_url',
+    'generation_mode',
+    'model',
+    'caption',
+    'final_prompt',
+    'engine',
+    'aspect_ratio',
+  ] as const;
+  let payloadForUpsert: Partial<typeof payload> = payload;
+  let result: { data: DbRow | null; error: unknown } = { data: null, error: null };
 
-  let result = await client
-    .from('projects')
-    .upsert(
-      payload,
-      { onConflict: 'id' },
-    )
-    .select('*')
-    .single();
-
-  if (
-    result.error &&
-    (isMissingColumnError(result.error, 'final_prompt') || isMissingColumnError(result.error, 'engine'))
-  ) {
-    const { final_prompt: _finalPrompt, engine: _engine, ...legacyPayload } = payload;
+  for (let attempt = 0; attempt <= removableProjectColumns.length; attempt += 1) {
     result = await client
       .from('projects')
       .upsert(
-        legacyPayload,
+        payloadForUpsert,
         { onConflict: 'id' },
       )
       .select('*')
       .single();
-  }
 
-  if (result.error && isMissingColumnError(result.error, 'aspect_ratio')) {
-    const {
-      final_prompt: _finalPrompt,
-      engine: _engine,
-      aspect_ratio: _aspectRatio,
-      ...legacyPayload
-    } = payload;
-    result = await client
-      .from('projects')
-      .upsert(
-        legacyPayload,
-        { onConflict: 'id' },
-      )
-      .select('*')
-      .single();
+    const column = missingColumnName(result.error, removableProjectColumns);
+    if (!result.error || !column) break;
+
+    const { [column]: _removedColumn, ...nextPayload } = payloadForUpsert;
+    payloadForUpsert = nextPayload;
   }
 
   if (result.error) throw result.error;
+  if (!result.data) throw new Error('Unable to save project.');
   return mapProjectRow(result.data);
 }
 
@@ -753,6 +751,9 @@ function mapProjectRow(row: DbRow): StudioProject {
     provider: (row.provider ?? 'mock') as VideoEngine,
     engine: nullableString(row.engine) as VideoEngine | null,
     aspectRatio: nullableString(row.aspect_ratio),
+    model: nullableString(row.model),
+    generationMode: nullableString(row.generation_mode) as StudioProject['generationMode'],
+    referenceImageUrl: nullableString(row.reference_image_url),
     characterId: nullableString(row.character_id),
     characterName: nullableString(row.character_name),
     characterAvatar: nullableString(row.character_avatar),

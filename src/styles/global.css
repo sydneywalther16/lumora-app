@@ -466,6 +466,65 @@ button {
   margin-bottom: 14px;
 }
 
+.reference-mode-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.05);
+  margin-bottom: 14px;
+}
+
+.reference-mode-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.reference-mode-thumb {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.reference-mode-pill {
+  grid-column: 1 / -1;
+  width: fit-content;
+}
+
+.generation-warning-list {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(240, 113, 120, 0.28);
+  background: rgba(240, 113, 120, 0.08);
+  color: #ffd7dc;
+}
+
+.generation-warning-list p {
+  margin: 0;
+}
+
+.reference-result-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.reference-result-row img {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  object-fit: cover;
+}
+
 .video-result-card {
   display: grid;
   gap: 12px;

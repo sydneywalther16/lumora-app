@@ -179,6 +179,7 @@ export function saveCreatorSelfCharacter(payload: {
       frontFace: cleanMediaUrl(payload.referenceImageUrls.frontFace) || '',
       leftAngle: cleanMediaUrl(payload.referenceImageUrls.leftAngle) || '',
       rightAngle: cleanMediaUrl(payload.referenceImageUrls.rightAngle) || '',
+      fullBody: cleanMediaUrl(payload.referenceImageUrls.fullBody),
       expressive: cleanMediaUrl(payload.referenceImageUrls.expressive),
     };
     const cleanedSourceCaptureVideoUrl = cleanMediaUrl(payload.sourceCaptureVideoUrl);
@@ -314,6 +315,7 @@ export function saveLocalCharacter(payload: {
       frontFace: cleanMediaUrl(payload.referenceImageUrls.frontFace) || '',
       leftAngle: cleanMediaUrl(payload.referenceImageUrls.leftAngle) || '',
       rightAngle: cleanMediaUrl(payload.referenceImageUrls.rightAngle) || '',
+      fullBody: cleanMediaUrl(payload.referenceImageUrls.fullBody),
       expressive: cleanMediaUrl(payload.referenceImageUrls.expressive),
     },
     sourceCaptureVideoUrl: cleanMediaUrl(payload.sourceCaptureVideoUrl),

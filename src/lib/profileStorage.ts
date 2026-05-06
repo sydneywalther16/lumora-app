@@ -5,12 +5,14 @@ type SelfReferenceImageUrls = {
   frontFace?: string | null;
   leftAngle?: string | null;
   rightAngle?: string | null;
+  fullBody?: string | null;
 };
 
 type SelfReferencePhotoNames = {
   frontFace?: string | null;
   leftAngle?: string | null;
   rightAngle?: string | null;
+  fullBody?: string | null;
 };
 
 export type LumoraProfile = {
@@ -93,6 +95,7 @@ function readReferenceMetadata(value: unknown): SelfReferenceImageUrls | null {
     frontFace: typeof record.frontFace === 'string' ? record.frontFace : null,
     leftAngle: typeof record.leftAngle === 'string' ? record.leftAngle : null,
     rightAngle: typeof record.rightAngle === 'string' ? record.rightAngle : null,
+    fullBody: typeof record.fullBody === 'string' ? record.fullBody : null,
   };
 }
 

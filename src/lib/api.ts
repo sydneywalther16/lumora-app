@@ -48,6 +48,9 @@ export type GenerationResponse = {
   isDefaultSelfCharacter?: boolean | null;
   prompt: string;
   outputUrl: string;
+  generationMode?: GenerationMode | null;
+  model?: string | null;
+  referenceImageUrl?: string | null;
   createdAt: string;
   message?: string;
 };
@@ -81,6 +84,7 @@ export type CharacterStatus = 'draft' | 'processing' | 'ready' | 'failed';
 export type PrivacySetting = 'private' | 'approved_only' | 'public';
 export type VideoEngine = 'sora-2' | 'sora-2-pro' | 'replicate' | 'veo' | 'runway' | 'mock' | 'openai';
 export type VideoAspectRatio = '9:16' | '16:9' | '1:1';
+export type GenerationMode = 'self-reference-video' | 'image-to-video' | 'text-to-video-fallback';
 
 export type MediaUploadInput = {
   url?: string;
@@ -93,6 +97,7 @@ export type ReferenceImageUrls = {
   frontFace: string;
   leftAngle: string;
   rightAngle: string;
+  fullBody?: string | null;
   expressive?: string | null;
 };
 

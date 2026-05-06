@@ -1,5 +1,11 @@
 import { useState } from 'react';
-import { type GenerationResponse, type ReferenceImageUrls, type VideoAspectRatio, type VideoEngine } from '../lib/api';
+import {
+  type GenerationMode,
+  type GenerationResponse,
+  type ReferenceImageUrls,
+  type VideoAspectRatio,
+  type VideoEngine,
+} from '../lib/api';
 import { saveStudioProject, type StudioProject } from '../lib/projectStorage';
 import { loadLumoraProfile } from '../lib/profileStorage';
 import { loadSupabaseProfile, saveSupabaseDraft, saveSupabaseProject } from '../lib/supabaseAppData';
@@ -20,7 +26,14 @@ type CreateVideoProps = {
 const stylePresets = ['Editorial Drama', 'Virtual Sitcom', 'Luxury POV', 'Cinematic Sunset'];
 const durations = [4, 8, 12, 16];
 const aspectRatios: VideoAspectRatio[] = ['9:16', '16:9', '1:1'];
-const engines: VideoEngine[] = ['sora-2', 'sora-2-pro', 'replicate'];
+const engines: VideoEngine[] = ['replicate', 'sora-2', 'sora-2-pro'];
+const referenceImageLabels: Partial<Record<keyof ReferenceImageUrls, string>> = {
+  frontFace: 'Front face',
+  fullBody: 'Full body',
+  leftAngle: 'Left angle',
+  rightAngle: 'Right angle',
+  expressive: 'Expression',
+};
 
 type GenerateVideoApiResponse = {
   videoUrl?: unknown;
@@ -30,6 +43,9 @@ type GenerateVideoApiResponse = {
   finalPrompt?: string;
   rawOutput?: unknown;
   referenceImageNote?: string;
+  referenceImageUrl?: unknown;
+  generationMode?: GenerationMode;
+  warnings?: unknown;
   error?: string;
   details?: unknown;
 };
@@ -80,6 +96,66 @@ function normalizeVideoUrl(video: unknown): string | null {
     return normalizeVideoUrl(firstUrl);
   }
   return null;
+}
+
+function cleanReferenceUrl(value?: string | null): string | null {
+  if (!value || value.startsWith('data:') || value.startsWith('blob:')) return null;
+  return value;
+}
+
+function pickReferenceImage(input: {
+  referenceImageUrl?: string | null;
+  referenceImageUrls?: Partial<ReferenceImageUrls> | null;
+}): { url: string | null; label: string | null } {
+  const explicitUrl = cleanReferenceUrl(input.referenceImageUrl);
+  if (explicitUrl) return { url: explicitUrl, label: 'Selected reference' };
+
+  const urls = input.referenceImageUrls;
+  if (!urls) return { url: null, label: null };
+
+  const orderedSlots: Array<keyof ReferenceImageUrls> = [
+    'frontFace',
+    'fullBody',
+    'leftAngle',
+    'rightAngle',
+    'expressive',
+  ];
+
+  for (const slot of orderedSlots) {
+    const url = cleanReferenceUrl(urls[slot]);
+    if (url) {
+      return {
+        url,
+        label: referenceImageLabels[slot] ?? 'Reference image',
+      };
+    }
+  }
+
+  return { url: null, label: null };
+}
+
+function referenceImagePayload(urls?: Partial<ReferenceImageUrls> | null) {
+  if (!urls) return undefined;
+
+  return {
+    front: cleanReferenceUrl(urls.frontFace),
+    frontFace: cleanReferenceUrl(urls.frontFace),
+    fullBody: cleanReferenceUrl(urls.fullBody),
+    left: cleanReferenceUrl(urls.leftAngle),
+    leftAngle: cleanReferenceUrl(urls.leftAngle),
+    right: cleanReferenceUrl(urls.rightAngle),
+    rightAngle: cleanReferenceUrl(urls.rightAngle),
+    expressive: cleanReferenceUrl(urls.expressive),
+  };
+}
+
+function formatWarnings(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => (typeof item === 'string' && item.trim() ? [item.trim()] : []));
+  }
+
+  if (typeof value === 'string' && value.trim()) return [value.trim()];
+  return [];
 }
 
 function formatUnknownDetail(value: unknown): string {
@@ -140,20 +216,33 @@ export default function CreateVideo({
 
   const [duration, setDuration] = useState(8);
   const [aspectRatio, setAspectRatio] = useState<VideoAspectRatio>('9:16');
-  const [engine, setEngine] = useState<VideoEngine>('sora-2');
+  const [engine, setEngine] = useState<VideoEngine>('replicate');
   const [status, setStatus] = useState('');
   const [generationLoading, setGenerationLoading] = useState(false);
   const [generationError, setGenerationError] = useState('');
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
   const [finalGeneratedPrompt, setFinalGeneratedPrompt] = useState('');
+  const [generatedModel, setGeneratedModel] = useState('');
+  const [generatedReferenceImageUrl, setGeneratedReferenceImageUrl] = useState<string | null>(null);
+  const [generatedMode, setGeneratedMode] = useState<GenerationMode | null>(null);
+  const [generationWarnings, setGenerationWarnings] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [generationResult, setGenerationResult] = useState<GenerationResponse | null>(null);
   const actionBusy = busy || generationLoading;
+  const primaryReferenceImage = pickReferenceImage({ referenceImageUrl, referenceImageUrls });
+  const selfReferenceMode = isDefaultSelfCharacter && Boolean(primaryReferenceImage.url);
+  const selectedGenerationMode: GenerationMode = selfReferenceMode
+    ? 'self-reference-video'
+    : primaryReferenceImage.url
+      ? 'image-to-video'
+      : 'text-to-video-fallback';
+  const referencePayload = referenceImagePayload(referenceImageUrls);
+  const isTextFallbackMode = selectedGenerationMode === 'text-to-video-fallback';
   const isSoraEngine = engine === 'sora-2' || engine === 'sora-2-pro';
   const engineRoutingMessage =
     isSoraEngine
-      ? 'Sora 2 is available only if this OpenAI API account has video access. Replicate remains fallback.'
-      : 'Replicate is live for video generation and remains the fallback.';
+      ? 'Self likeness mode currently routes through Replicate image-to-video. Sora remains optional elsewhere.'
+      : 'Replicate uses self-character reference images first, then text-only fallback.';
 
   async function handleGenerate() {
     if (configured && sessionLoading && !authUser) {
@@ -164,6 +253,12 @@ export default function CreateVideo({
     const currentPrompt = activePrompt;
     const selectedAspectRatio = aspectRatio;
     const selectedEngine = engine;
+    const selectedReferenceImageUrl = primaryReferenceImage.url;
+    const selectedGenerationMode = selfReferenceMode
+      ? 'self-reference-video'
+      : selectedReferenceImageUrl
+        ? 'image-to-video'
+        : 'text-to-video-fallback';
     const selectedCharacterDescription =
       characterDescription ||
       buildCharacterDescription({
@@ -176,6 +271,10 @@ export default function CreateVideo({
     setGenerationError('');
     setGeneratedVideoUrl(null);
     setFinalGeneratedPrompt('');
+    setGeneratedModel('');
+    setGeneratedReferenceImageUrl(null);
+    setGeneratedMode(null);
+    setGenerationWarnings([]);
     setGenerationResult(null);
     setStatus('');
 
@@ -187,24 +286,20 @@ export default function CreateVideo({
           prompt: currentPrompt,
           characterId,
           characterDescription: selectedCharacterDescription,
-          referenceImageUrl,
-          referenceImages: referenceImageUrls ? ['front', 'left', 'right'] : referenceImageUrl ? [referenceImageUrl] : [],
-          referenceImageUrls: referenceImageUrls
-            ? {
-                front: referenceImageUrls.frontFace,
-                left: referenceImageUrls.leftAngle,
-                right: referenceImageUrls.rightAngle,
-                frontFace: referenceImageUrls.frontFace,
-                leftAngle: referenceImageUrls.leftAngle,
-                rightAngle: referenceImageUrls.rightAngle,
-              }
-            : undefined,
+          referenceImageUrl: selectedReferenceImageUrl,
+          referenceImages: referencePayload
+            ? ['frontFace', 'leftAngle', 'rightAngle', 'fullBody']
+            : selectedReferenceImageUrl
+              ? [selectedReferenceImageUrl]
+              : [],
+          referenceImageUrls: referencePayload,
           aspectRatio: selectedAspectRatio,
           duration,
           style: selectedStyle,
           audio: true,
-          provider: selectedEngine,
+          provider: 'replicate',
           engine: selectedEngine,
+          generationMode: selectedGenerationMode,
         }),
       });
 
@@ -226,6 +321,12 @@ export default function CreateVideo({
 
       const nextVideoUrl = normalizeVideoUrl(data.videoUrl ?? data.video);
       const generationProvider = data.provider === 'openai' ? 'openai' : 'replicate';
+      const nextGenerationMode = data.generationMode || selectedGenerationMode;
+      const nextReferenceImageUrl = cleanReferenceUrl(normalizeVideoUrl(data.referenceImageUrl) || selectedReferenceImageUrl);
+      const nextWarnings = [
+        ...formatWarnings(data.warnings),
+        ...(data.referenceImageNote ? [data.referenceImageNote] : []),
+      ];
 
       if (!nextVideoUrl) {
         console.error('No video returned', data);
@@ -236,6 +337,10 @@ export default function CreateVideo({
       const nextFinalPrompt = data.finalPrompt || currentPrompt;
       setGeneratedVideoUrl(nextVideoUrl);
       setFinalGeneratedPrompt(nextFinalPrompt);
+      setGeneratedModel(data.model || '');
+      setGeneratedReferenceImageUrl(nextReferenceImageUrl);
+      setGeneratedMode(nextGenerationMode);
+      setGenerationWarnings(nextWarnings);
 
       const profile = authUser ? await loadSupabaseProfile(authUser.id) : loadLumoraProfile();
       const now = new Date().toISOString();
@@ -251,9 +356,12 @@ export default function CreateVideo({
         isDefaultSelfCharacter,
         prompt: currentPrompt,
         outputUrl: nextVideoUrl,
-        message: generationProvider === 'openai'
-          ? 'OpenAI Sora video render created.'
-          : 'Replicate video render created.',
+        generationMode: nextGenerationMode,
+        model: data.model || null,
+        referenceImageUrl: nextReferenceImageUrl,
+        message: nextGenerationMode === 'text-to-video-fallback'
+          ? 'Replicate text-only fallback render created. Likeness is not guaranteed.'
+          : 'Replicate self-reference video render created.',
         createdAt: now,
       };
       setGenerationResult(result);
@@ -270,6 +378,9 @@ export default function CreateVideo({
           provider: generationProvider,
           engine: selectedEngine,
           aspectRatio: selectedAspectRatio,
+          model: data.model || null,
+          generationMode: nextGenerationMode,
+          referenceImageUrl: nextReferenceImageUrl,
           characterId,
           characterName,
           characterAvatar,
@@ -296,7 +407,7 @@ export default function CreateVideo({
       const message = error instanceof Error ? error.message : 'Unable to create draft render';
       setGenerationError(
         isSoraEngine
-          ? `${message} Try switching the engine to Replicate.`
+          ? `${message} Self-character likeness is currently routed through Replicate.`
           : message,
       );
     } finally {
@@ -328,6 +439,9 @@ export default function CreateVideo({
             characterName,
             characterAvatar,
             isDefaultSelfCharacter,
+            generationMode: selectedGenerationMode,
+            referenceImageUrl: primaryReferenceImage.url,
+            referenceImageUrls: referencePayload,
           },
         });
         setStatus('Draft saved to your account.');
@@ -420,11 +534,37 @@ export default function CreateVideo({
           <small className="muted">{engineRoutingMessage}</small>
         </label>
 
-        {isDefaultSelfCharacter ? (
-          <p className="muted">
-            For exact self-character likeness, use an image-to-video or reference-based model. Current Replicate model may only follow text traits.
-          </p>
-        ) : null}
+        <div className="reference-mode-card">
+          <div className="reference-mode-copy">
+            <span className="eyebrow">
+              {selfReferenceMode ? 'Self likeness mode' : isTextFallbackMode ? 'Text-only fallback' : 'Image-to-video'}
+            </span>
+            <strong>
+              {selfReferenceMode
+                ? 'Using your saved self-character photo'
+                : isTextFallbackMode
+                  ? 'Likeness not guaranteed'
+                  : 'Using a reference image'}
+            </strong>
+            <span className="muted">
+              {selfReferenceMode
+                ? 'Replicate image-to-video will use this photo as the identity source.'
+                : isTextFallbackMode
+                  ? 'Add a self-character reference photo for accurate likeness.'
+                  : 'Replicate will condition the video on the selected image.'}
+            </span>
+          </div>
+          {primaryReferenceImage.url ? (
+            <img
+              src={primaryReferenceImage.url}
+              alt=""
+              className="reference-mode-thumb"
+            />
+          ) : null}
+          {primaryReferenceImage.label ? (
+            <span className="tiny-pill reference-mode-pill">{primaryReferenceImage.label}</span>
+          ) : null}
+        </div>
 
         {characterName ? (
           <div className="selected-character">
@@ -440,7 +580,13 @@ export default function CreateVideo({
 
         <div className="button-row">
           <button type="button" className="primary-btn" onClick={handleGenerate} disabled={actionBusy}>
-            {generationLoading ? 'Rendering...' : 'Generate video'}
+            {generationLoading
+              ? 'Rendering...'
+              : selfReferenceMode
+                ? 'Generate with self character'
+                : isTextFallbackMode
+                  ? 'Generate text-only fallback'
+                  : 'Generate video'}
           </button>
           <button type="button" className="ghost-btn" onClick={() => void handleSaveDraft()} disabled={actionBusy}>
             Save draft
@@ -448,6 +594,13 @@ export default function CreateVideo({
         </div>
         {generationLoading ? <p className="muted">Rendering your concept...</p> : null}
         {generationError ? <p style={{ color: '#f07178' }}>{generationError}</p> : null}
+        {generationWarnings.length ? (
+          <div className="generation-warning-list">
+            {generationWarnings.map((warning) => (
+              <p key={warning}>{warning}</p>
+            ))}
+          </div>
+        ) : null}
         {status ? <p className="muted">{status}</p> : null}
         {generatedVideoUrl ? (
           <div style={{ display: 'grid', gap: '12px', marginTop: '14px' }}>
@@ -480,7 +633,7 @@ export default function CreateVideo({
               <span className="eyebrow">result</span>
               <h3>Video generated</h3>
             </div>
-            <span className="tiny-pill">{generationResult.engine.toUpperCase()}</span>
+            <span className="tiny-pill">{(generatedModel || generationResult.engine).toUpperCase()}</span>
           </div>
           {isDefaultSelfCharacter ? (
             <p><strong>Created as self</strong></p>
@@ -491,6 +644,15 @@ export default function CreateVideo({
           <p>Prompt: {generationResult.prompt}</p>
           {finalGeneratedPrompt ? (
             <p className="muted">Final prompt: {finalGeneratedPrompt}</p>
+          ) : null}
+          {generatedMode ? (
+            <p className="muted">Generation mode: {generatedMode}</p>
+          ) : null}
+          {generatedReferenceImageUrl ? (
+            <div className="reference-result-row">
+              <img src={generatedReferenceImageUrl} alt="" />
+              <span className="muted">Reference image used for likeness</span>
+            </div>
           ) : null}
           {generatedVideoUrl ? (
             <video
