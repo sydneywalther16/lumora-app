@@ -1,84 +1,140 @@
-﻿import type { VercelRequest, VercelResponse } from "@vercel/node";
+import type { IncomingMessage, ServerResponse } from 'node:http';
+
+type VercelRequest = IncomingMessage & {
+  body?: unknown;
+  method?: string;
+};
+
+type VercelResponse = ServerResponse & {
+  status: (code: number) => VercelResponse;
+  json: (payload: unknown) => void;
+};
+
+type ReplicateModelIdentifier = `${string}/${string}` | `${string}/${string}:${string}`;
+
+function sendJson(res: ServerResponse, statusCode: number, payload: unknown) {
+  const vercelRes = res as Partial<VercelResponse>;
+
+  if (typeof vercelRes.status === 'function' && typeof vercelRes.json === 'function') {
+    vercelRes.status(statusCode).json(payload);
+    return;
+  }
+
+  res.statusCode = statusCode;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify(payload));
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Unknown error';
+}
+
+function errorStack(error: unknown): string | null {
+  return error instanceof Error ? error.stack ?? null : null;
+}
+
+function maybeUrl(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  if (value instanceof URL) return value.toString();
+  return null;
+}
+
+function outputUrl(output: unknown): string | null {
+  const directUrl = maybeUrl(output);
+  if (directUrl) return directUrl;
+
+  if (Array.isArray(output)) {
+    return output.find((item): item is string => typeof item === 'string') ?? null;
+  }
+
+  if (!output || typeof output !== 'object') return null;
+
+  const record = output as Record<string, unknown>;
+  const url = record.url;
+
+  if (typeof url === 'string') return url;
+
+  if (typeof url === 'function') {
+    try {
+      const value = url.call(output);
+      const resolvedUrl = maybeUrl(value);
+      if (resolvedUrl) return resolvedUrl;
+    } catch (error) {
+      console.warn('Unable to read Replicate output url:', error);
+    }
+  }
+
+  const nestedOutput = record.output;
+  if (Array.isArray(nestedOutput)) {
+    return nestedOutput.find((item): item is string => typeof item === 'string') ?? null;
+  }
+
+  return null;
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  console.log("LUMORA GENERATE START");
+  console.log('LUMORA GENERATE START');
 
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== 'POST') {
+    return sendJson(res, 405, { error: 'Method not allowed' });
   }
 
   try {
-    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-
-    const {
-      prompt,
-      aspectRatio = "9:16",
-      duration = 8
-    } = body || {};
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    const { prompt } = (body && typeof body === 'object' ? body : {}) as { prompt?: unknown };
 
     if (!prompt) {
-      return res.status(400).json({ error: "Missing prompt" });
+      return sendJson(res, 400, { error: 'Missing prompt' });
     }
 
     const token = process.env.REPLICATE_API_TOKEN;
     if (!token) {
-      return res.status(500).json({ error: "Missing REPLICATE_API_TOKEN" });
+      return sendJson(res, 500, { error: 'Missing REPLICATE_API_TOKEN' });
     }
 
-    const model =
-      process.env.REPLICATE_VIDEO_MODEL || "luma/ray-2-720p";
+    const model = 'anotherjesse/zeroscope-v2-xl' as ReplicateModelIdentifier;
 
-    console.log("Using model:", model);
+    console.log('Using model:', model);
 
-    const { default: Replicate } = await import("replicate");
-
+    const { default: Replicate } = await import('replicate');
     const replicate = new Replicate({
-      auth: token
+      auth: token,
     });
 
     const input = {
-      prompt,
-      aspect_ratio: aspectRatio,
-      duration
+      prompt: `${String(prompt)}, cinematic lighting, high detail, realistic motion`,
     };
 
-    console.log("Calling Replicate...");
+    console.log('Calling Replicate...');
 
     const output = await replicate.run(model, { input });
 
-    console.log("Replicate output:", output);
+    console.log('RAW OUTPUT:', JSON.stringify(output, null, 2));
 
-    let videoUrl = null;
+    const videoUrl = outputUrl(output);
 
-    if (typeof output === "string") {
-      videoUrl = output;
-    } else if (Array.isArray(output)) {
-      videoUrl = output[0];
-    } else if (output?.url) {
-      videoUrl = output.url;
-    }
+    console.log('FINAL VIDEO URL:', videoUrl);
 
     if (!videoUrl) {
-      return res.status(500).json({
-        error: "No video returned",
-        raw: output
+      return sendJson(res, 500, {
+        error: 'No video returned',
+        raw: output,
       });
     }
 
-    return res.status(200).json({
+    return sendJson(res, 200, {
       success: true,
       videoUrl,
-      provider: "replicate",
-      model
+      provider: 'replicate',
+      model,
     });
+  } catch (error) {
+    console.error('LUMORA GENERATE ERROR:', error);
 
-  } catch (err: any) {
-    console.error("LUMORA GENERATE ERROR:", err);
-
-    return res.status(500).json({
-      error: "Generation failed",
-      message: err?.message || "Unknown error",
-      stack: err?.stack || null
+    return sendJson(res, 500, {
+      error: 'Generation failed',
+      message: errorMessage(error),
+      stack: errorStack(error),
     });
   }
 }
