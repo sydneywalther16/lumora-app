@@ -1083,7 +1083,7 @@ function ProfileMenuDetail({
           {signedIn ? (
             <>
               <span className="eyebrow">signed in</span>
-              <strong>{userEmail || 'Lumora account'}</strong>
+              <strong>Signed in as {userEmail || 'Lumora account'}</strong>
               <p style={mutedTextStyle}>User ID {shortenUserId(authUserId)}</p>
               <button
                 type="button"
@@ -1330,7 +1330,7 @@ function ProjectCard({ project }: { project: StudioProject }) {
         <div style={{ minWidth: 0, flex: 1 }}>
           <h3>{project.prompt || 'Cast Video'}</h3>
           <p className="muted" style={{ marginTop: '10px' }}>
-            {characterLabel} - {project.provider.toUpperCase()}
+            {characterLabel} - {(project.displayEngine || project.provider).toUpperCase()}
           </p>
         </div>
         <span className="tiny-pill" style={{ background: '#2a1f3d' }}>

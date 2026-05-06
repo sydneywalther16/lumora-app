@@ -373,7 +373,7 @@ export default function StudioList({ jobs }: Props) {
                 </div>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                   <span className={`tiny-pill status-${statusLabel.toLowerCase()}`}>{statusLabel}</span>
-                  <span className="tiny-pill">{job.provider.toUpperCase()}</span>
+                  <span className="tiny-pill">{(job.displayEngine || job.provider).toUpperCase()}</span>
                 </div>
               </div>
 

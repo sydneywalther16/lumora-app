@@ -10,6 +10,7 @@ export type StudioProject = {
   status: string;
   provider: VideoEngine;
   engine?: VideoEngine | null;
+  displayEngine?: string | null;
   aspectRatio?: string | null;
   model?: string | null;
   generationMode?: GenerationMode | null;
@@ -67,6 +68,7 @@ export function loadStudioProjects(): StudioProject[] {
         caption: typeof project.caption === 'string' ? project.caption : null,
         finalPrompt: typeof project.finalPrompt === 'string' ? project.finalPrompt : null,
         engine: typeof project.engine === 'string' ? project.engine as VideoEngine : null,
+        displayEngine: typeof project.displayEngine === 'string' ? project.displayEngine : null,
         aspectRatio: typeof project.aspectRatio === 'string' ? project.aspectRatio : null,
         model: typeof project.model === 'string' ? project.model : null,
         generationMode: typeof project.generationMode === 'string' ? project.generationMode as GenerationMode : null,

@@ -98,6 +98,63 @@ function hasAuthRedirectParams(): boolean {
   return authParamNames.some((paramName) => searchParams.has(paramName) || hashParams.has(paramName));
 }
 
+function authSearchParams() {
+  if (typeof window === 'undefined') return new URLSearchParams();
+  return new URLSearchParams(window.location.search);
+}
+
+function authHashParams() {
+  if (typeof window === 'undefined') return new URLSearchParams();
+  return new URLSearchParams(
+    window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash,
+  );
+}
+
+async function exchangeRedirectSession(client: SupabaseClient): Promise<Session | null> {
+  const searchParams = authSearchParams();
+  const hashParams = authHashParams();
+  const code = searchParams.get('code');
+
+  if (code) {
+    const { data, error } = await client.auth.exchangeCodeForSession(code);
+
+    if (error) {
+      console.error('AUTH CODE EXCHANGE FAILED', error);
+    }
+
+    if (data.session) {
+      console.log('AUTH CODE EXCHANGED', {
+        authUserId: data.session.user.id,
+      });
+      return data.session;
+    }
+  }
+
+  const accessToken = hashParams.get('access_token');
+  const refreshToken = hashParams.get('refresh_token');
+
+  if (accessToken && refreshToken) {
+    const { data, error } = await client.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+
+    if (error) {
+      console.error('AUTH HASH SESSION SAVE FAILED', error);
+    }
+
+    if (data.session) {
+      console.log('AUTH CODE EXCHANGED', {
+        authUserId: data.session.user.id,
+        format: 'hash',
+      });
+      return data.session;
+    }
+  }
+
+  return null;
+}
+
 function cleanAuthUrl() {
   if (typeof window === 'undefined') return;
 
@@ -111,8 +168,19 @@ function delay(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
-async function getSessionAfterRedirect(client: SupabaseClient, hasRedirectParams: boolean) {
+async function getSessionAfterRedirect(
+  client: SupabaseClient,
+  hasRedirectParams: boolean,
+): Promise<{ data: { session: Session | null }; error: unknown }> {
+  const exchangedSession = hasRedirectParams ? await exchangeRedirectSession(client) : null;
   let lastResult = await client.auth.getSession();
+
+  if (exchangedSession && !lastResult.data.session) {
+    lastResult = {
+      data: { session: exchangedSession },
+      error: null,
+    };
+  }
 
   if (!hasRedirectParams || lastResult.data.session) {
     return lastResult;

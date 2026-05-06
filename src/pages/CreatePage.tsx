@@ -11,6 +11,10 @@ import { loadLumoraProfile, type LumoraProfile } from '../lib/profileStorage';
 import { type CharacterProfile } from '../lib/api';
 import { useSession } from '../hooks/useSession';
 import { loadSupabaseCharacters, loadSupabaseProfile } from '../lib/supabaseAppData';
+import {
+  getSelfCharacterReferenceImage,
+  type SelfCharacterReferenceImage,
+} from '../lib/selfCharacterReference';
 
 const selfFeatureLabels: Array<[string, string]> = [
   ['hairColorStyle', 'Hair color/style'],
@@ -139,9 +143,18 @@ function buildSelfCharacterDescription(
 export default function CreatePage() {
   const { user, session, loading, configured } = useSession();
   const authUser = session?.user ?? user;
+  const sessionResolving = configured && loading && !authUser;
   const [characterRefreshKey, setCharacterRefreshKey] = useState(0);
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterProfile | null>(null);
   const [defaultSelfCharacter, setDefaultSelfCharacter] = useState<CharacterProfile | null>(null);
+  const [selfReference, setSelfReference] = useState<SelfCharacterReferenceImage>({
+    url: null,
+    label: null,
+    slot: null,
+    referenceImageUrls: {},
+    inspectedFields: [],
+  });
+  const [selfReferenceLoading, setSelfReferenceLoading] = useState(false);
   const [profile, setProfile] = useState<LumoraProfile>({
     displayName: 'Creator',
     username: 'lumora.creator',
@@ -219,11 +232,72 @@ export default function CreatePage() {
     ? buildSelfCharacterDescription(profile, activeSelfCharacter)
     : '';
   const referenceImageUrl = activeSelfCharacter
-    ? pickPrimaryReferenceImage(activeSelfCharacter.referenceImageUrls, characterAvatar)
+    ? selfReference.url ?? pickPrimaryReferenceImage(activeSelfCharacter.referenceImageUrls, characterAvatar)
     : null;
   const referenceImageUrls = activeSelfCharacter
-    ? activeSelfCharacter.referenceImageUrls
+    ? {
+        ...activeSelfCharacter.referenceImageUrls,
+        ...selfReference.referenceImageUrls,
+      }
     : null;
+  const referenceResolving =
+    Boolean(activeSelfCharacter) && (selfReferenceLoading || selfReference.inspectedFields.length === 0);
+
+  useEffect(() => {
+    let active = true;
+
+    async function resolveSelfReference() {
+      if (!activeSelfCharacter) {
+        setSelfReference({
+          url: null,
+          label: null,
+          slot: null,
+          referenceImageUrls: {},
+          inspectedFields: [],
+        });
+        setSelfReferenceLoading(false);
+        return;
+      }
+
+      setSelfReferenceLoading(true);
+      console.log('[CreatePage] resolving self-character reference image', {
+        characterId: activeSelfCharacter.id,
+        referenceImageUrls: activeSelfCharacter.referenceImageUrls,
+        profileSelfReferenceImageUrls: profile.selfReferenceImageUrls ?? null,
+        defaultSelfCharacterAvatar: profile.defaultSelfCharacterAvatar ?? null,
+        profileAvatar: profile.avatar ?? null,
+      });
+
+      const nextReference = await getSelfCharacterReferenceImage({
+        selfCharacter: activeSelfCharacter,
+        profile,
+      });
+
+      if (!active) return;
+      setSelfReference(nextReference);
+      setSelfReferenceLoading(false);
+    }
+
+    void resolveSelfReference();
+
+    return () => {
+      active = false;
+    };
+  }, [activeSelfCharacter, profile]);
+
+  if (sessionResolving) {
+    return (
+      <div className="page">
+        <section className="headline-card">
+          <div>
+            <span className="eyebrow">composer</span>
+            <h2>Loading creator session</h2>
+          </div>
+          <p>Checking your saved Lumora account before loading self-character generation.</p>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="page">
@@ -294,6 +368,8 @@ export default function CreatePage() {
         characterDescription={characterDescription}
         referenceImageUrl={referenceImageUrl}
         referenceImageUrls={referenceImageUrls}
+        referenceLoading={referenceResolving}
+        referenceLabel={selfReference.label}
       />
       <CharacterCapture onCreated={() => setCharacterRefreshKey((value) => value + 1)} />
     </div>

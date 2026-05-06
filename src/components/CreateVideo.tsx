@@ -21,12 +21,23 @@ type CreateVideoProps = {
   characterDescription?: string;
   referenceImageUrl?: string | null;
   referenceImageUrls?: Partial<ReferenceImageUrls> | null;
+  referenceLoading?: boolean;
+  referenceLabel?: string | null;
 };
 
 const stylePresets = ['Editorial Drama', 'Virtual Sitcom', 'Luxury POV', 'Cinematic Sunset'];
 const durations = [4, 8, 12, 16];
 const aspectRatios: VideoAspectRatio[] = ['9:16', '16:9', '1:1'];
 const engines: VideoEngine[] = ['replicate', 'sora-2', 'sora-2-pro'];
+const engineLabels: Record<VideoEngine, string> = {
+  replicate: 'Kling image-to-video',
+  'sora-2': 'Sora 2',
+  'sora-2-pro': 'Sora 2 Pro',
+  veo: 'Veo',
+  runway: 'Runway',
+  mock: 'Mock',
+  openai: 'OpenAI',
+};
 const referenceImageLabels: Partial<Record<keyof ReferenceImageUrls, string>> = {
   frontFace: 'Front face',
   fullBody: 'Full body',
@@ -45,6 +56,7 @@ type GenerateVideoApiResponse = {
   referenceImageNote?: string;
   referenceImageUrl?: unknown;
   generationMode?: GenerationMode;
+  displayEngine?: string;
   warnings?: unknown;
   error?: string;
   details?: unknown;
@@ -202,6 +214,8 @@ export default function CreateVideo({
   characterDescription,
   referenceImageUrl,
   referenceImageUrls,
+  referenceLoading = false,
+  referenceLabel,
 }: CreateVideoProps) {
   const { user, session, loading: sessionLoading, configured } = useSession();
   const authUser = session?.user ?? user;
@@ -223,12 +237,13 @@ export default function CreateVideo({
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
   const [finalGeneratedPrompt, setFinalGeneratedPrompt] = useState('');
   const [generatedModel, setGeneratedModel] = useState('');
+  const [generatedDisplayEngine, setGeneratedDisplayEngine] = useState('');
   const [generatedReferenceImageUrl, setGeneratedReferenceImageUrl] = useState<string | null>(null);
   const [generatedMode, setGeneratedMode] = useState<GenerationMode | null>(null);
   const [generationWarnings, setGenerationWarnings] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [generationResult, setGenerationResult] = useState<GenerationResponse | null>(null);
-  const actionBusy = busy || generationLoading;
+  const actionBusy = busy || generationLoading || referenceLoading;
   const primaryReferenceImage = pickReferenceImage({ referenceImageUrl, referenceImageUrls });
   const selfReferenceMode = isDefaultSelfCharacter && Boolean(primaryReferenceImage.url);
   const selectedGenerationMode: GenerationMode = selfReferenceMode
@@ -237,12 +252,12 @@ export default function CreateVideo({
       ? 'image-to-video'
       : 'text-to-video-fallback';
   const referencePayload = referenceImagePayload(referenceImageUrls);
-  const isTextFallbackMode = selectedGenerationMode === 'text-to-video-fallback';
+  const isTextFallbackMode = !referenceLoading && selectedGenerationMode === 'text-to-video-fallback';
   const isSoraEngine = engine === 'sora-2' || engine === 'sora-2-pro';
   const engineRoutingMessage =
     isSoraEngine
       ? 'Self likeness mode currently routes through Replicate image-to-video. Sora remains optional elsewhere.'
-      : 'Replicate uses self-character reference images first, then text-only fallback.';
+      : 'Kling runs through Replicate and uses your self-character reference image first.';
 
   async function handleGenerate() {
     if (configured && sessionLoading && !authUser) {
@@ -272,6 +287,7 @@ export default function CreateVideo({
     setGeneratedVideoUrl(null);
     setFinalGeneratedPrompt('');
     setGeneratedModel('');
+    setGeneratedDisplayEngine('');
     setGeneratedReferenceImageUrl(null);
     setGeneratedMode(null);
     setGenerationWarnings([]);
@@ -322,6 +338,8 @@ export default function CreateVideo({
       const nextVideoUrl = normalizeVideoUrl(data.videoUrl ?? data.video);
       const generationProvider = data.provider === 'openai' ? 'openai' : 'replicate';
       const nextGenerationMode = data.generationMode || selectedGenerationMode;
+      const nextDisplayEngine =
+        data.displayEngine || (nextGenerationMode === 'text-to-video-fallback' ? 'text fallback' : 'kling');
       const nextReferenceImageUrl = cleanReferenceUrl(normalizeVideoUrl(data.referenceImageUrl) || selectedReferenceImageUrl);
       const nextWarnings = [
         ...formatWarnings(data.warnings),
@@ -338,6 +356,7 @@ export default function CreateVideo({
       setGeneratedVideoUrl(nextVideoUrl);
       setFinalGeneratedPrompt(nextFinalPrompt);
       setGeneratedModel(data.model || '');
+      setGeneratedDisplayEngine(nextDisplayEngine);
       setGeneratedReferenceImageUrl(nextReferenceImageUrl);
       setGeneratedMode(nextGenerationMode);
       setGenerationWarnings(nextWarnings);
@@ -358,6 +377,7 @@ export default function CreateVideo({
         outputUrl: nextVideoUrl,
         generationMode: nextGenerationMode,
         model: data.model || null,
+        displayEngine: nextDisplayEngine,
         referenceImageUrl: nextReferenceImageUrl,
         message: nextGenerationMode === 'text-to-video-fallback'
           ? 'Replicate text-only fallback render created. Likeness is not guaranteed.'
@@ -379,6 +399,7 @@ export default function CreateVideo({
           engine: selectedEngine,
           aspectRatio: selectedAspectRatio,
           model: data.model || null,
+          displayEngine: nextDisplayEngine,
           generationMode: nextGenerationMode,
           referenceImageUrl: nextReferenceImageUrl,
           characterId,
@@ -435,6 +456,7 @@ export default function CreateVideo({
             duration,
             aspectRatio,
             engine,
+            displayEngine: engine === 'replicate' ? 'kling' : engine,
             characterId,
             characterName,
             characterAvatar,
@@ -527,7 +549,7 @@ export default function CreateVideo({
           <select value={engine} onChange={(event) => setEngine(event.target.value as VideoEngine)}>
             {engines.map((option) => (
               <option key={option} value={option}>
-                {option}
+                {engineLabels[option] ?? option}
               </option>
             ))}
           </select>
@@ -537,17 +559,27 @@ export default function CreateVideo({
         <div className="reference-mode-card">
           <div className="reference-mode-copy">
             <span className="eyebrow">
-              {selfReferenceMode ? 'Self likeness mode' : isTextFallbackMode ? 'Text-only fallback' : 'Image-to-video'}
+              {referenceLoading
+                ? 'Checking self reference'
+                : selfReferenceMode
+                  ? 'Self likeness mode'
+                  : isTextFallbackMode
+                    ? 'Text-only fallback'
+                    : 'Image-to-video'}
             </span>
             <strong>
-              {selfReferenceMode
+              {referenceLoading
+                ? 'Looking for saved self-character photos'
+                : selfReferenceMode
                 ? 'Using your saved self-character photo'
                 : isTextFallbackMode
                   ? 'Likeness not guaranteed'
                   : 'Using a reference image'}
             </strong>
             <span className="muted">
-              {selfReferenceMode
+              {referenceLoading
+                ? 'Lumora is checking front, full-body, angle, avatar, and media URL fields.'
+                : selfReferenceMode
                 ? 'Replicate image-to-video will use this photo as the identity source.'
                 : isTextFallbackMode
                   ? 'Add a self-character reference photo for accurate likeness.'
@@ -562,7 +594,7 @@ export default function CreateVideo({
             />
           ) : null}
           {primaryReferenceImage.label ? (
-            <span className="tiny-pill reference-mode-pill">{primaryReferenceImage.label}</span>
+            <span className="tiny-pill reference-mode-pill">{referenceLabel || primaryReferenceImage.label}</span>
           ) : null}
         </div>
 
@@ -582,6 +614,8 @@ export default function CreateVideo({
           <button type="button" className="primary-btn" onClick={handleGenerate} disabled={actionBusy}>
             {generationLoading
               ? 'Rendering...'
+              : referenceLoading
+                ? 'Checking self character...'
               : selfReferenceMode
                 ? 'Generate with self character'
                 : isTextFallbackMode
@@ -633,7 +667,9 @@ export default function CreateVideo({
               <span className="eyebrow">result</span>
               <h3>Video generated</h3>
             </div>
-            <span className="tiny-pill">{(generatedModel || generationResult.engine).toUpperCase()}</span>
+            <span className="tiny-pill">
+              {(generatedDisplayEngine || generatedModel || generationResult.engine).toUpperCase()}
+            </span>
           </div>
           {isDefaultSelfCharacter ? (
             <p><strong>Created as self</strong></p>

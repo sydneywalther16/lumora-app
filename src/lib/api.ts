@@ -50,6 +50,7 @@ export type GenerationResponse = {
   outputUrl: string;
   generationMode?: GenerationMode | null;
   model?: string | null;
+  displayEngine?: string | null;
   referenceImageUrl?: string | null;
   createdAt: string;
   message?: string;
@@ -71,6 +72,7 @@ export type GenerationJob = {
   status: string;
   outputType: string;
   provider: string;
+  displayEngine?: string | null;
   durationSeconds: number | null;
   aspectRatio: string | null;
   privacy: string;

@@ -65,6 +65,7 @@ export default function StudioPage() {
       status: project.status,
       outputType: 'video',
       provider: project.provider,
+      displayEngine: project.displayEngine ?? null,
       durationSeconds: null,
       aspectRatio: project.aspectRatio ?? null,
       privacy: 'private',

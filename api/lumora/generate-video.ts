@@ -304,20 +304,6 @@ function imageInputs(input: {
         start_image: input.referenceImageUrl,
       },
     },
-    {
-      label: 'image-minimal',
-      input: {
-        prompt: input.finalPrompt,
-        image: input.referenceImageUrl,
-      },
-    },
-    {
-      label: 'input_image-minimal',
-      input: {
-        prompt: input.finalPrompt,
-        input_image: input.referenceImageUrl,
-      },
-    },
   ];
 }
 
@@ -351,6 +337,17 @@ function modelErrorMessage(error: unknown): string {
 function isBillingOrCreditError(error: unknown): boolean {
   const lower = JSON.stringify(safeJsonValue(error) ?? '').toLowerCase();
   return lower.includes('credit') || lower.includes('billing') || lower.includes('payment');
+}
+
+function isInputValidationError(error: unknown): boolean {
+  const lower = JSON.stringify(safeJsonValue(error) ?? '').toLowerCase();
+  return (
+    lower.includes('validation') ||
+    lower.includes('start_image') ||
+    lower.includes('invalid input') ||
+    lower.includes('input schema') ||
+    lower.includes('schema')
+  );
 }
 
 async function runImageConditionedReplicate(input: {
@@ -409,6 +406,15 @@ async function runImageConditionedReplicate(input: {
 
         if (isBillingOrCreditError(error)) {
           throw Object.assign(new Error(modelErrorMessage(error)), {
+            provider: 'replicate',
+            model,
+            details: safeJsonValue(error),
+            attempts,
+          });
+        }
+
+        if (isInputValidationError(error)) {
+          throw Object.assign(new Error('Kling image-to-video rejected start_image input.'), {
             provider: 'replicate',
             model,
             details: safeJsonValue(error),
@@ -548,6 +554,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       videoUrl: result.videoUrl,
       provider: 'replicate',
       model: result.model,
+      displayEngine: referenceImageUrl ? 'kling' : 'text-to-video-fallback',
       generationMode,
       referenceImageUrl: referenceImageUrl || null,
       finalPrompt,

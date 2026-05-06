@@ -689,6 +689,7 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
     status: project.status || 'completed',
     provider: project.provider,
     engine: project.engine ?? project.provider,
+    display_engine: project.displayEngine ?? null,
     model: project.model ?? null,
     generation_mode: project.generationMode ?? null,
     output_type: 'video',
@@ -708,6 +709,7 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
   const removableProjectColumns = [
     'reference_image_url',
     'generation_mode',
+    'display_engine',
     'model',
     'caption',
     'final_prompt',
@@ -750,6 +752,7 @@ function mapProjectRow(row: DbRow): StudioProject {
     status: stringValue(row.status) || 'draft',
     provider: (row.provider ?? 'mock') as VideoEngine,
     engine: nullableString(row.engine) as VideoEngine | null,
+    displayEngine: nullableString(row.display_engine),
     aspectRatio: nullableString(row.aspect_ratio),
     model: nullableString(row.model),
     generationMode: nullableString(row.generation_mode) as StudioProject['generationMode'],
