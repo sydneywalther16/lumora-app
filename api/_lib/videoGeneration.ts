@@ -410,6 +410,16 @@ function normalizeSoraSeconds(duration: unknown): '4' | '8' | '12' {
   return '4';
 }
 
+function normalizeReplicateDuration(model: ReplicateModelIdentifier, duration: number): number {
+  const modelSlug = model.toLowerCase();
+
+  if (modelSlug.includes('luma/ray-2')) {
+    return duration <= 7 ? 5 : 9;
+  }
+
+  return duration;
+}
+
 function soraSizeForAspectRatio(aspectRatio: string): string {
   return aspectRatio === '16:9' ? '1280x720' : '720x1280';
 }
@@ -826,6 +836,8 @@ async function createReplicateVideo(input: {
     model,
     hasReferenceImageUrl: Boolean(input.referenceImageUrl),
     aspectRatio: input.aspectRatio,
+    requestedDuration: input.duration,
+    modelDuration: normalizeReplicateDuration(model, input.duration || 5),
   });
 
   let output: unknown;
@@ -840,7 +852,7 @@ async function createReplicateVideo(input: {
     output = await replicate.run(model, {
       input: {
         prompt: input.finalPrompt,
-        duration: input.duration || 5,
+        duration: normalizeReplicateDuration(model, input.duration || 5),
         aspect_ratio: input.aspectRatio || '9:16',
         loop: false,
       },

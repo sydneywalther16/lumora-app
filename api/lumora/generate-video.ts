@@ -319,10 +319,20 @@ function textFallbackInput(input: {
 
   return {
     prompt: input.finalPrompt,
-    duration: input.duration,
+    duration: replicateTextModelDuration(input.model, input.duration),
     aspect_ratio: input.aspectRatio,
     loop: false,
   };
+}
+
+function replicateTextModelDuration(model: ReplicateModelIdentifier, duration: number): number {
+  const modelSlug = model.toLowerCase();
+
+  if (modelSlug.includes('luma/ray-2')) {
+    return duration <= 7 ? 5 : 9;
+  }
+
+  return duration;
 }
 
 function modelErrorMessage(error: unknown): string {
@@ -450,6 +460,8 @@ async function runTextFallbackReplicate(input: {
     provider: 'replicate',
     model,
     mode: 'text-to-video-fallback',
+    requestedDuration: input.duration,
+    modelDuration: requestInput.duration ?? null,
   });
 
   try {
