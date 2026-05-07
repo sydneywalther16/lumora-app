@@ -497,8 +497,11 @@ button {
   display: grid;
   place-items: center;
   color: rgba(255, 255, 255, 0.72);
-  font-size: 0.78rem;
+  font-size: 0.64rem;
   font-weight: 700;
+  line-height: 1.15;
+  padding: 6px;
+  text-align: center;
   text-transform: uppercase;
 }
 

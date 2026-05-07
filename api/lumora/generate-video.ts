@@ -153,7 +153,7 @@ function objectRecord(value: unknown): Record<string, unknown> {
 function publicImageUrl(value: unknown): string {
   const url = textValue(value);
   if (!url || url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('file:')) return '';
-  return url;
+  return /^https?:\/\//i.test(url) ? url : '';
 }
 
 function referenceUrlMap(value: unknown): Record<string, string> {

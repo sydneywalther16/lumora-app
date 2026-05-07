@@ -113,13 +113,13 @@ function normalizeVideoUrl(video: unknown): string | null {
 
 function cleanReferenceUrl(value?: string | null): string | null {
   if (!value || value.startsWith('data:') || value.startsWith('blob:')) return null;
-  return value;
+  return /^https?:\/\//i.test(value) ? value : null;
 }
 
 function renderableReferenceImageUrl(value?: string | null): string | null {
   const cleaned = cleanReferenceUrl(value);
   if (!cleaned) return null;
-  return /^https?:\/\//i.test(cleaned) || cleaned.startsWith('/') ? cleaned : null;
+  return cleaned;
 }
 
 function pickReferenceImage(input: {
@@ -254,7 +254,7 @@ export default function CreateVideo({
   const primaryReferenceImage = pickReferenceImage({ referenceImageUrl, referenceImageUrls });
   const hasSelfCharacter = forceSelfMode || isDefaultSelfCharacter;
   const selectedSelfReferenceImageUrl = primaryReferenceImage.url ||
-    (hasSelfCharacter ? cleanReferenceUrl(characterAvatar) || 'creator-self-reference' : null);
+    (hasSelfCharacter ? cleanReferenceUrl(characterAvatar) : null);
   const selfReferenceMode = hasSelfCharacter;
   const selectedGenerationMode: GenerationMode = selfReferenceMode
     ? 'self-reference-video'
@@ -600,7 +600,7 @@ export default function CreateVideo({
                 : selfReferenceMode
                 ? primaryReferenceImage.url
                   ? 'Kling image-to-video uses this reference first.'
-                  : 'Lumora will force Kling image-to-video and pass the best saved self-character reference it can find.'
+                  : 'Self likeness mode is on. Add or resave a Supabase reference photo if generation needs a fresh image URL.'
                 : isTextFallbackMode
                   ? 'Text-only fallback uses Luma and supports 5s or 9s renders.'
                   : 'Replicate will condition the video on the selected image.'}
@@ -614,7 +614,7 @@ export default function CreateVideo({
             />
           ) : selfReferenceMode ? (
             <div className="reference-mode-thumb reference-mode-placeholder" aria-hidden="true">
-              Self
+              Reference image loaded
             </div>
           ) : null}
           {primaryReferenceImage.label || selfReferenceMode ? (

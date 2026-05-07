@@ -421,6 +421,17 @@ function mapReferenceImages(value: unknown): ReferenceImageUrls {
   };
 }
 
+function mapReferencePhotoNames(value: unknown): Partial<Record<keyof ReferenceImageUrls, string | null>> {
+  const record = stringRecord(value);
+  return {
+    frontFace: record.frontFace ?? null,
+    leftAngle: record.leftAngle ?? null,
+    rightAngle: record.rightAngle ?? null,
+    fullBody: record.fullBody ?? null,
+    expressive: record.expressive ?? null,
+  };
+}
+
 function cleanReferenceImageUrls(value: ReferenceImageUrls): ReferenceImageUrls {
   return {
     frontFace: storageUrl(value.frontFace, 'Front reference photo') ?? '',
@@ -441,6 +452,7 @@ function mapCharacterRow(row: DbRow): CharacterProfile {
     visibility: (row.visibility ?? 'private') as PrivacySetting,
     stylePreferences: jsonRecord(row.style_preferences),
     referenceImageUrls: mapReferenceImages(row.reference_image_urls),
+    referencePhotoNames: mapReferencePhotoNames(row.reference_photo_names),
     sourceCaptureVideoUrl: nullableString(row.source_capture_video_url),
     voiceSampleUrl: nullableString(row.voice_sample_url),
     voiceSampleName: nullableString(row.voice_sample_name),
@@ -473,6 +485,7 @@ function mapSelfCharacterRow(row: DbRow): CharacterProfile {
     visibility: (row.visibility ?? 'private') as PrivacySetting,
     stylePreferences,
     referenceImageUrls: mapReferenceImages(row.reference_image_urls),
+    referencePhotoNames: mapReferencePhotoNames(row.reference_photo_names),
     sourceCaptureVideoUrl: nullableString(row.source_capture_video_url),
     voiceSampleUrl: nullableString(row.voice_sample_url),
     voiceSampleName: nullableString(row.voice_sample_name),

@@ -63,7 +63,7 @@ function buildDefaultSelfCharacter(profile: LumoraProfile): CharacterProfile {
 
 function cleanReferenceUrl(value?: string | null): string | null {
   if (!value || value.startsWith('data:') || value.startsWith('blob:')) return null;
-  return value;
+  return /^https?:\/\//i.test(value) ? value : null;
 }
 
 function pickPrimaryReferenceImage(

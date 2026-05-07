@@ -9,6 +9,7 @@ type ReferenceCandidate = {
   label: string;
   value: unknown;
   bucket: ReferenceBucket;
+  userId?: string | null;
 };
 
 type StoragePath = {
@@ -59,21 +60,13 @@ function previewValue(value: unknown): string | null {
   return `${value.slice(0, 54)}...${value.slice(-18)}`;
 }
 
-function candidateStringValue(candidate: ReferenceCandidate): string | null {
-  if (typeof candidate.value !== 'string') return null;
-  const trimmed = candidate.value.trim();
-  if (!trimmed) return null;
-  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:') || trimmed.startsWith('file:')) return null;
-  return trimmed;
-}
-
-function hasStorageHint(value: string): boolean {
-  const lowerValue = value.toLowerCase();
-  return lowerValue.includes('supabase') || lowerValue.includes('storage') || lowerValue.includes('public');
-}
-
 function looksImageish(value: string): boolean {
-  return hasStorageHint(value) || /\.(png|jpe?g|webp|gif)(?:[?#].*)?$/i.test(value);
+  return (
+    value.toLowerCase().includes('supabase') ||
+    value.toLowerCase().includes('storage') ||
+    value.toLowerCase().includes('public') ||
+    /\.(png|jpe?g|webp|gif)(?:[?#].*)?$/i.test(value)
+  );
 }
 
 function isTransientOrLocalUrl(value: string): boolean {
@@ -180,6 +173,20 @@ function storagePathFromValue(value: unknown, bucket: ReferenceBucket): StorageP
   return null;
 }
 
+function fallbackBuckets(bucket: ReferenceBucket): ReferenceBucket[] {
+  return bucket === 'avatars'
+    ? ['avatars', 'character-reference-images']
+    : ['character-reference-images', 'avatars'];
+}
+
+function fieldKeyLikeValue(value: string): boolean {
+  return /^(?:profile|selfCharacter)\.[a-zA-Z0-9_.]+$/.test(value);
+}
+
+function storageObjectPathFromPublicUrl(value: string, bucket: ReferenceBucket): string | null {
+  return storagePathFromSupabaseUrl(value, bucket)?.objectPath ?? null;
+}
+
 function storagePathFromSupabaseUrl(value: string, bucket: ReferenceBucket): StoragePath | null {
   try {
     const parsed = new URL(value);
@@ -211,60 +218,123 @@ function storagePathFromSupabaseUrl(value: string, bucket: ReferenceBucket): Sto
   }
 }
 
-async function storagePathToUrl(value: unknown, bucket: ReferenceBucket): Promise<{ url: string; source: string } | null> {
-  const storagePath = typeof value === 'string' && isValidPublicUrl(value)
-    ? storagePathFromSupabaseUrl(value, bucket)
-    : storagePathFromValue(value, bucket);
-  if (!storagePath || !supabase) return null;
-
-  if (storagePath.bucket === 'avatars') {
-    try {
-      const publicUrl = supabase.storage.from(storagePath.bucket).getPublicUrl(storagePath.objectPath).data.publicUrl;
-      if (publicUrl) {
-        return {
-          url: publicUrl,
-          source: `${storagePath.bucket}:${storagePath.objectPath}`,
-        };
-      }
-    } catch (error) {
-      console.warn('[getSelfCharacterReferenceImage] Unable to create avatar public URL:', {
-        bucket: storagePath.bucket,
-        objectPath: storagePath.objectPath,
-        error,
-      });
-    }
-  }
+function storagePathToPublicUrl(storagePath: StoragePath): { url: string; source: string } | null {
+  if (!supabase) return null;
 
   try {
-    const { data, error } = await supabase.storage
-      .from(storagePath.bucket)
-      .createSignedUrl(storagePath.objectPath, 60 * 60 * 24);
-
-    if (!error && data?.signedUrl) {
+    const publicUrl = supabase.storage.from(storagePath.bucket).getPublicUrl(storagePath.objectPath).data.publicUrl;
+    if (isValidPublicUrl(publicUrl)) {
+      console.log('RESOLVED PUBLIC URL:', publicUrl);
       return {
-        url: data.signedUrl,
+        url: publicUrl,
         source: `${storagePath.bucket}:${storagePath.objectPath}`,
       };
     }
   } catch (error) {
-    console.warn('[getSelfCharacterReferenceImage] Unable to create signed reference URL:', {
+    console.warn('[getSelfCharacterReferenceImage] Unable to create public URL:', {
       bucket: storagePath.bucket,
       objectPath: storagePath.objectPath,
       error,
     });
   }
 
-  try {
-    const publicUrl = supabase.storage.from(storagePath.bucket).getPublicUrl(storagePath.objectPath).data.publicUrl;
-    return publicUrl
-      ? {
-          url: publicUrl,
-          source: `${storagePath.bucket}:${storagePath.objectPath}`,
-        }
-      : null;
-  } catch {
+  return null;
+}
+
+async function mediaAssetUrlFromFileName(
+  value: string,
+  bucket: ReferenceBucket,
+  userId?: string | null,
+): Promise<{ url: string; source: string } | null> {
+  if (!supabase || !userId || fieldKeyLikeValue(value)) return null;
+
+  const fileName = value.trim();
+  if (!fileName || fileName.startsWith('http') || fileName.startsWith('data:') || fileName.startsWith('blob:')) {
     return null;
   }
+
+  for (const candidateBucket of fallbackBuckets(bucket)) {
+    try {
+      const { data, error } = await supabase
+        .from('media_assets')
+        .select('bucket, object_path, public_url')
+        .eq('user_id', userId)
+        .eq('bucket', candidateBucket)
+        .eq('file_name', fileName)
+        .order('updated_at', { ascending: false })
+        .limit(1);
+
+      if (error) {
+        console.warn('[getSelfCharacterReferenceImage] Unable to resolve media asset filename:', {
+          bucket: candidateBucket,
+          fileName,
+          error,
+        });
+        continue;
+      }
+
+      const asset = Array.isArray(data) ? data[0] as Record<string, unknown> | undefined : undefined;
+      const objectPath = typeof asset?.object_path === 'string' ? asset.object_path : null;
+      const publicUrl = typeof asset?.public_url === 'string' && isValidPublicUrl(asset.public_url)
+        ? asset.public_url
+        : null;
+
+      if (publicUrl) {
+        console.log('RESOLVED PUBLIC URL:', publicUrl);
+        return {
+          url: publicUrl,
+          source: `${candidateBucket}:media_assets.public_url`,
+        };
+      }
+
+      if (objectPath) {
+        const resolved = storagePathToPublicUrl({
+          bucket: candidateBucket,
+          objectPath,
+        });
+        if (resolved) return resolved;
+      }
+    } catch (error) {
+      console.warn('[getSelfCharacterReferenceImage] Media asset lookup failed:', {
+        bucket: candidateBucket,
+        fileName,
+        error,
+      });
+    }
+  }
+
+  return null;
+}
+
+async function storagePathToUrl(
+  value: unknown,
+  bucket: ReferenceBucket,
+  userId?: string | null,
+): Promise<{ url: string; source: string } | null> {
+  const storagePath = typeof value === 'string' && isValidPublicUrl(value)
+    ? storagePathFromSupabaseUrl(value, bucket)
+    : storagePathFromValue(value, bucket);
+  if (storagePath) {
+    const publicUrl = storagePathToPublicUrl(storagePath);
+    if (publicUrl) return publicUrl;
+  }
+
+  if (typeof value === 'string') {
+    for (const candidateBucket of fallbackBuckets(bucket)) {
+      const publicUrlObjectPath = storageObjectPathFromPublicUrl(value, candidateBucket);
+      if (publicUrlObjectPath) {
+        const resolved = storagePathToPublicUrl({
+          bucket: candidateBucket,
+          objectPath: publicUrlObjectPath,
+        });
+        if (resolved) return resolved;
+      }
+    }
+  }
+
+  return typeof value === 'string'
+    ? mediaAssetUrlFromFileName(value, bucket, userId)
+    : null;
 }
 
 function pushCandidate(
@@ -273,8 +343,9 @@ function pushCandidate(
   label: string,
   value: unknown,
   bucket: ReferenceBucket,
+  userId?: string | null,
 ) {
-  candidates.push({ slot, label, value, bucket });
+  candidates.push({ slot, label, value, bucket, userId });
 }
 
 function pushKnownReferenceCandidates(
@@ -282,20 +353,21 @@ function pushKnownReferenceCandidates(
   source: Record<string, unknown>,
   prefix: string,
   bucket: ReferenceBucket,
+  userId?: string | null,
 ) {
-  pushCandidate(candidates, 'frontFace', `${prefix}.frontFace`, source.frontFace, bucket);
-  pushCandidate(candidates, 'frontFace', `${prefix}.frontFaceUrl`, source.frontFaceUrl, bucket);
-  pushCandidate(candidates, 'frontFace', `${prefix}.frontImage`, source.frontImage, bucket);
-  pushCandidate(candidates, 'frontFace', `${prefix}.frontImageUrl`, source.frontImageUrl, bucket);
-  pushCandidate(candidates, 'fullBody', `${prefix}.fullBody`, source.fullBody, bucket);
-  pushCandidate(candidates, 'fullBody', `${prefix}.fullBodyUrl`, source.fullBodyUrl, bucket);
-  pushCandidate(candidates, 'leftAngle', `${prefix}.leftAngle`, source.leftAngle, bucket);
-  pushCandidate(candidates, 'leftAngle', `${prefix}.leftAngleUrl`, source.leftAngleUrl, bucket);
-  pushCandidate(candidates, 'rightAngle', `${prefix}.rightAngle`, source.rightAngle, bucket);
-  pushCandidate(candidates, 'rightAngle', `${prefix}.rightAngleUrl`, source.rightAngleUrl, bucket);
-  pushCandidate(candidates, 'avatar', `${prefix}.avatar`, source.avatar, 'avatars');
-  pushCandidate(candidates, 'avatar', `${prefix}.avatarUrl`, source.avatarUrl, 'avatars');
-  pushCandidate(candidates, 'image', `${prefix}.imageUrl`, source.imageUrl, bucket);
+  pushCandidate(candidates, 'frontFace', `${prefix}.frontFace`, source.frontFace, bucket, userId);
+  pushCandidate(candidates, 'frontFace', `${prefix}.frontFaceUrl`, source.frontFaceUrl, bucket, userId);
+  pushCandidate(candidates, 'frontFace', `${prefix}.frontImage`, source.frontImage, bucket, userId);
+  pushCandidate(candidates, 'frontFace', `${prefix}.frontImageUrl`, source.frontImageUrl, bucket, userId);
+  pushCandidate(candidates, 'fullBody', `${prefix}.fullBody`, source.fullBody, bucket, userId);
+  pushCandidate(candidates, 'fullBody', `${prefix}.fullBodyUrl`, source.fullBodyUrl, bucket, userId);
+  pushCandidate(candidates, 'leftAngle', `${prefix}.leftAngle`, source.leftAngle, bucket, userId);
+  pushCandidate(candidates, 'leftAngle', `${prefix}.leftAngleUrl`, source.leftAngleUrl, bucket, userId);
+  pushCandidate(candidates, 'rightAngle', `${prefix}.rightAngle`, source.rightAngle, bucket, userId);
+  pushCandidate(candidates, 'rightAngle', `${prefix}.rightAngleUrl`, source.rightAngleUrl, bucket, userId);
+  pushCandidate(candidates, 'avatar', `${prefix}.avatar`, source.avatar, 'avatars', userId);
+  pushCandidate(candidates, 'avatar', `${prefix}.avatarUrl`, source.avatarUrl, 'avatars', userId);
+  pushCandidate(candidates, 'image', `${prefix}.imageUrl`, source.imageUrl, bucket, userId);
 }
 
 function collectMediaUrlCandidates(
@@ -369,22 +441,52 @@ function buildReferenceCandidates(
   const candidates: ReferenceCandidate[] = [];
   const characterRecord = readObject(selfCharacter);
   const profileRecord = readObject(profile);
+  const userId = typeof characterRecord.ownerUserId === 'string' && characterRecord.ownerUserId !== 'local'
+    ? characterRecord.ownerUserId
+    : typeof profileRecord.userId === 'string'
+      ? profileRecord.userId
+      : typeof profileRecord.id === 'string'
+        ? profileRecord.id
+        : null;
 
   pushKnownReferenceCandidates(
     candidates,
     readObject(characterRecord.referenceImageUrls),
     'selfCharacter.referenceImageUrls',
     'character-reference-images',
+    userId,
   );
-  pushKnownReferenceCandidates(candidates, characterRecord, 'selfCharacter', 'character-reference-images');
+  pushKnownReferenceCandidates(
+    candidates,
+    readObject(characterRecord.referencePhotoNames),
+    'selfCharacter.referencePhotoNames',
+    'character-reference-images',
+    userId,
+  );
+  pushKnownReferenceCandidates(
+    candidates,
+    readObject(characterRecord.selfReferencePhotoNames),
+    'selfCharacter.selfReferencePhotoNames',
+    'character-reference-images',
+    userId,
+  );
+  pushKnownReferenceCandidates(candidates, characterRecord, 'selfCharacter', 'character-reference-images', userId);
   pushKnownReferenceCandidates(
     candidates,
     readObject(profileRecord.selfReferenceImageUrls),
     'profile.selfReferenceImageUrls',
     'character-reference-images',
+    userId,
   );
-  pushCandidate(candidates, 'avatar', 'profile.defaultSelfCharacterAvatar', profileRecord.defaultSelfCharacterAvatar, 'character-reference-images');
-  pushCandidate(candidates, 'avatar', 'profile.avatar', profileRecord.avatar, 'avatars');
+  pushKnownReferenceCandidates(
+    candidates,
+    readObject(profileRecord.selfReferencePhotoNames),
+    'profile.selfReferencePhotoNames',
+    'character-reference-images',
+    userId,
+  );
+  pushCandidate(candidates, 'avatar', 'profile.defaultSelfCharacterAvatar', profileRecord.defaultSelfCharacterAvatar, 'character-reference-images', userId);
+  pushCandidate(candidates, 'avatar', 'profile.avatar', profileRecord.avatar, 'avatars', userId);
   collectMediaUrlCandidates(candidates, characterRecord, 'selfCharacter');
   collectMediaUrlCandidates(candidates, profileRecord, 'profile');
   collectPermissiveStringCandidates(candidates, characterRecord, 'selfCharacter');
@@ -404,7 +506,7 @@ function slotPriority(slot: ReferenceCandidate['slot']) {
 }
 
 async function resolveCandidateUrl(candidate: ReferenceCandidate): Promise<ResolvedCandidate> {
-  const refreshedStorageUrl = await storagePathToUrl(candidate.value, candidate.bucket);
+  const refreshedStorageUrl = await storagePathToUrl(candidate.value, candidate.bucket, candidate.userId);
   if (refreshedStorageUrl) {
     return {
       url: refreshedStorageUrl.url,
@@ -453,43 +555,24 @@ function addReferenceImageUrl(
   }
 }
 
-function pickPermissiveFallbackCandidate(candidates: ReferenceCandidate[]): {
-  candidate: ReferenceCandidate;
-  value: string;
-  reason: string;
-} | null {
-  const stringCandidates = candidates.flatMap((candidate) => {
-    const value = candidateStringValue(candidate);
-    return value ? [{ candidate, value }] : [];
-  });
-
-  const hintedCandidate = stringCandidates.find(({ value }) => hasStorageHint(value));
-  if (hintedCandidate) {
-    return {
-      ...hintedCandidate,
-      reason: 'storage/public string fallback',
-    };
-  }
-
-  const firstStringCandidate = stringCandidates[0];
-  return firstStringCandidate
-    ? {
-        ...firstStringCandidate,
-        reason: 'first available image field fallback',
-      }
-    : null;
-}
-
 export async function getSelfCharacterReferenceImage(input: {
   selfCharacter: CharacterProfile | Record<string, unknown> | null | undefined;
   profile?: LumoraProfile | null;
 }): Promise<SelfCharacterReferenceImage> {
   const characterRecord = readObject(input.selfCharacter);
   const referenceRecord = readObject(characterRecord.referenceImageUrls);
+  const referencePhotoNames = readObject(characterRecord.referencePhotoNames);
+  const selfReferencePhotoNames = readObject(characterRecord.selfReferencePhotoNames);
   const profileRecord = readObject(input.profile);
   const profileReferenceRecord = readObject(profileRecord.selfReferenceImageUrls);
+  const profileReferencePhotoNames = readObject(profileRecord.selfReferencePhotoNames);
   const fieldsChecked = {
     frontFace: referenceRecord.frontFace ?? characterRecord.frontFace ?? profileReferenceRecord.frontFace ?? null,
+    frontFacePhotoName:
+      referencePhotoNames.frontFace ??
+      selfReferencePhotoNames.frontFace ??
+      profileReferencePhotoNames.frontFace ??
+      null,
     frontFaceUrl: referenceRecord.frontFaceUrl ?? characterRecord.frontFaceUrl ?? profileReferenceRecord.frontFaceUrl ?? null,
     frontImage: referenceRecord.frontImage ?? characterRecord.frontImage ?? profileReferenceRecord.frontImage ?? null,
     fullBody: referenceRecord.fullBody ?? characterRecord.fullBody ?? profileReferenceRecord.fullBody ?? null,
@@ -581,30 +664,6 @@ export async function getSelfCharacterReferenceImage(input: {
       url: selectedUrl,
       label: selectedLabel,
       slot: selectedSlot,
-      referenceImageUrls,
-      inspectedFields,
-    };
-  }
-
-  const fallbackCandidate = pickPermissiveFallbackCandidate(candidates);
-  if (fallbackCandidate) {
-    addReferenceImageUrl(
-      referenceImageUrls,
-      fallbackCandidate.candidate.slot,
-      fallbackCandidate.value,
-    );
-
-    console.log('REFERENCE FALLBACK SELECTED:', {
-      label: fallbackCandidate.candidate.label,
-      slot: fallbackCandidate.candidate.slot,
-      reason: fallbackCandidate.reason,
-      valuePreview: previewValue(fallbackCandidate.value),
-    });
-
-    return {
-      url: fallbackCandidate.value,
-      label: slotLabel(fallbackCandidate.candidate),
-      slot: fallbackCandidate.candidate.slot,
       referenceImageUrls,
       inspectedFields,
     };

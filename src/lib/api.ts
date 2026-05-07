@@ -120,6 +120,7 @@ export type CharacterProfile = {
   visibility: PrivacySetting;
   stylePreferences: Record<string, unknown>;
   referenceImageUrls: ReferenceImageUrls;
+  referencePhotoNames?: Partial<Record<keyof ReferenceImageUrls, string | null>>;
   sourceCaptureVideoUrl: string | null;
   voiceSampleUrl: string | null;
   voiceSampleName?: string | null;
