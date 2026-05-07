@@ -233,14 +233,13 @@ export default function CreatePage() {
     ? buildSelfCharacterDescription(profile, activeSelfCharacter)
     : '';
   const referenceImageUrl = activeSelfCharacter
-    ? selfReference.url ?? pickPrimaryReferenceImage(activeSelfCharacter.referenceImageUrls, characterAvatar)
-    : null;
+    ? selfReference.url
+    : selectedCharacter
+      ? pickPrimaryReferenceImage(selectedCharacter.referenceImageUrls, characterAvatar)
+      : null;
   const referenceImageUrls = activeSelfCharacter
-    ? {
-        ...activeSelfCharacter.referenceImageUrls,
-        ...selfReference.referenceImageUrls,
-      }
-    : null;
+    ? selfReference.referenceImageUrls
+    : selectedCharacter?.referenceImageUrls ?? null;
   const referenceResolving =
     Boolean(activeSelfCharacter) && (selfReferenceLoading || selfReference.inspectedFields.length === 0);
 

@@ -2,18 +2,26 @@ import type { CharacterProfile, ReferenceImageUrls } from './api';
 import type { LumoraProfile } from './profileStorage';
 import { supabase } from './supabase';
 
-type ReferenceBucket = 'character-reference-images';
+const SUPABASE_STORAGE_BUCKETS = [
+  'character-reference-images',
+  'avatars',
+  'self-capture-videos',
+  'reference-images',
+  'media-assets',
+] as const;
+
+type ReferenceBucket = (typeof SUPABASE_STORAGE_BUCKETS)[number];
+type ReferenceSlot = keyof ReferenceImageUrls | 'avatar' | 'image' | 'media';
 
 type ReferenceCandidate = {
-  slot: keyof ReferenceImageUrls | 'avatar' | 'image' | 'media';
+  slot: ReferenceSlot;
   label: string;
   value: unknown;
-  bucket: ReferenceBucket;
   userId?: string | null;
 };
 
 type StoragePath = {
-  bucket: 'character-reference-images';
+  bucket: ReferenceBucket;
   objectPath: string;
 };
 
@@ -36,88 +44,46 @@ export type SelfCharacterReferenceImage = {
   }>;
 };
 
-const candidateKeys = new Set([
+const knownImageKeys = new Set([
   'frontFace',
   'frontFaceUrl',
   'frontImage',
   'frontImageUrl',
+  'front',
+  'face',
+  'primary',
   'fullBody',
   'fullBodyUrl',
+  'body',
+  'full',
   'leftAngle',
   'leftAngleUrl',
+  'left',
   'rightAngle',
   'rightAngleUrl',
+  'right',
   'avatar',
   'avatarUrl',
+  'image',
   'imageUrl',
+  'media',
   'mediaUrl',
   'url',
+  'publicUrl',
+  'signedUrl',
+  'objectPath',
+  'path',
+  'fileName',
+  'name',
 ]);
+
+const bucketSet = new Set<string>(SUPABASE_STORAGE_BUCKETS);
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 
 function previewValue(value: unknown): string | null {
   if (typeof value !== 'string' || !value) return null;
   if (value.length <= 90) return value;
   return `${value.slice(0, 54)}...${value.slice(-18)}`;
-}
-
-function looksImageish(value: string): boolean {
-  return (
-    value.toLowerCase().includes('supabase') ||
-    value.toLowerCase().includes('storage') ||
-    value.toLowerCase().includes('public') ||
-    /\.(png|jpe?g|webp|gif)(?:[?#].*)?$/i.test(value)
-  );
-}
-
-function isTransientOrLocalUrl(value: string): boolean {
-  const trimmed = value.trim();
-  if (!trimmed) return true;
-  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:') || trimmed.startsWith('file:')) return true;
-  if (trimmed.startsWith('/') || trimmed.startsWith('./') || trimmed.startsWith('../')) return true;
-
-  try {
-    const parsed = new URL(trimmed);
-    return ['localhost', '127.0.0.1', '0.0.0.0'].includes(parsed.hostname);
-  } catch {
-    return false;
-  }
-}
-
-function cleanPermanentPublicUrl(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const cleanUrl = value.trim().split('?')[0];
-  if (!cleanUrl.startsWith('https://')) return null;
-  return cleanUrl;
-}
-
-function rejectionReason(value: unknown): string | null {
-  if (typeof value !== 'string' || !value.trim()) return 'empty';
-
-  const trimmed = value.trim();
-  if (trimmed.startsWith('blob:')) return 'blob:';
-  if (trimmed.startsWith('data:')) return 'data:';
-  if (trimmed.startsWith('file:')) return 'relative path';
-  if (trimmed.startsWith('/') || trimmed.startsWith('./') || trimmed.startsWith('../')) return 'relative path';
-
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== 'https:') return 'missing protocol';
-    if (['localhost', '127.0.0.1', '0.0.0.0'].includes(parsed.hostname)) return 'relative path';
-    return null;
-  } catch {
-    return 'missing protocol';
-  }
-}
-
-function isValidPublicUrl(value: unknown): boolean {
-  if (typeof value !== 'string' || isTransientOrLocalUrl(value)) return false;
-
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === 'https:';
-  } catch {
-    return false;
-  }
 }
 
 function readObject(value: unknown): Record<string, unknown> {
@@ -126,283 +92,294 @@ function readObject(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function normalizePotentialStoragePath(value: string): string {
-  return value
-    .trim()
-    .replace(/^(\.\/|\.\.\/)+/, '')
-    .replace(/^\/+/, '');
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
-function bucketPrefixedPath(path: string): StoragePath | null {
-  const normalized = normalizePotentialStoragePath(path);
+function cleanCandidateValue(value: unknown): string | null {
+  const raw = stringValue(value);
+  if (!raw) return null;
 
-  if (normalized.startsWith('character-reference-images/')) {
-    return {
-      bucket: 'character-reference-images',
-      objectPath: normalized.slice('character-reference-images/'.length),
-    };
-  }
-
-  return null;
-}
-
-function storagePathFromValue(value: unknown, bucket: ReferenceBucket): StoragePath | null {
-  if (typeof value !== 'string') return null;
-  if (isValidPublicUrl(value)) return null;
-  if (bucket !== 'character-reference-images') return null;
-
-  const bucketPath = bucketPrefixedPath(value);
-  if (bucketPath?.objectPath) return bucketPath;
-
-  const trimmed = normalizePotentialStoragePath(value);
-  if (!trimmed || trimmed.includes(' ') || !trimmed.includes('/')) return null;
-
-  if (trimmed.startsWith(`${bucket}/`)) {
-    return {
-      bucket: 'character-reference-images',
-      objectPath: trimmed.slice(bucket.length + 1),
-    };
-  }
-
-  return null;
-}
-
-function fieldKeyLikeValue(value: string): boolean {
-  return /^(?:profile|selfCharacter)\.[a-zA-Z0-9_.]+$/.test(value);
-}
-
-function storageObjectPathFromPublicUrl(value: string): string | null {
-  return storagePathFromSupabaseUrl(value)?.objectPath ?? null;
-}
-
-function storagePathFromSupabaseUrl(value: string): StoragePath | null {
-  try {
-    const parsed = new URL(value);
-    const marker = `/storage/v1/object/`;
-    const markerIndex = parsed.pathname.indexOf(marker);
-    if (markerIndex < 0) return null;
-
-    const objectPath = parsed.pathname.slice(markerIndex + marker.length);
-    const bucketPathMatch = objectPath.match(/^(?:public|sign)\/([^/]+)\/(.+)$/);
-    const matchedBucket = bucketPathMatch?.[1];
-    const matchedPath = bucketPathMatch?.[2];
-
-    if (matchedBucket === 'character-reference-images' && matchedPath) {
-      return {
-        bucket: 'character-reference-images',
-        objectPath: decodeURIComponent(matchedPath),
-      };
-    }
-
+  const lowerValue = raw.toLowerCase();
+  if (
+    lowerValue.startsWith('blob:') ||
+    lowerValue.startsWith('data:') ||
+    lowerValue.startsWith('file:')
+  ) {
     return null;
+  }
+
+  if (
+    raw.startsWith('/') ||
+    raw.startsWith('./') ||
+    raw.startsWith('../') ||
+    /^(?:profile|selfCharacter)\.[a-zA-Z0-9_.]+$/.test(raw)
+  ) {
+    return null;
+  }
+
+  return raw;
+}
+
+function cleanHttpUrl(value: string): string | null {
+  const raw = cleanCandidateValue(value);
+  if (!raw) return null;
+
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (['localhost', '127.0.0.1', '0.0.0.0'].includes(parsed.hostname)) return null;
+
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString();
   } catch {
     return null;
   }
 }
 
-function storagePathToPublicUrl(storagePath: StoragePath): { url: string; source: string } | null {
-  if (!supabase) return null;
-
-  try {
-    const publicUrl = supabase.storage
-      .from('character-reference-images')
-      .getPublicUrl(storagePath.objectPath)
-      .data.publicUrl;
-    const cleanUrl = cleanPermanentPublicUrl(publicUrl);
-
-    if (cleanUrl) {
-      console.log('RESOLVED PUBLIC URL:', publicUrl);
-      console.log('FINAL CLEAN URL:', cleanUrl);
-      return {
-        url: cleanUrl,
-        source: `character-reference-images:${storagePath.objectPath}`,
-      };
-    }
-  } catch (error) {
-    console.warn('[getSelfCharacterReferenceImage] Unable to create public URL:', {
-      bucket: storagePath.bucket,
-      objectPath: storagePath.objectPath,
-      error,
-    });
-  }
-
-  return null;
+function normalizeStoragePath(value: string): string {
+  return value
+    .trim()
+    .replace(/^(\.\/|\.\.\/)+/, '')
+    .replace(/^\/+/, '')
+    .replace(/^storage\/v1\/object\/(?:public|sign)\//, '');
 }
 
-async function mediaAssetUrlFromFileName(
-  value: string,
-  _bucket: ReferenceBucket,
-  userId?: string | null,
-): Promise<{ url: string; source: string } | null> {
-  if (!supabase || !userId || fieldKeyLikeValue(value)) return null;
+function decodePath(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
 
-  const fileName = value.trim();
-  if (!fileName || fileName.startsWith('http') || fileName.startsWith('data:') || fileName.startsWith('blob:')) {
+function encodeStoragePath(value: string): string {
+  return normalizeStoragePath(decodePath(value))
+    .split('/')
+    .filter(Boolean)
+    .map((part) => encodeURIComponent(part))
+    .join('/');
+}
+
+function splitBucketPath(value: string): StoragePath | null {
+  const normalized = normalizeStoragePath(value);
+  const [maybeBucket, ...pathParts] = normalized.split('/');
+  if (!bucketSet.has(maybeBucket) || pathParts.length === 0) return null;
+
+  return {
+    bucket: maybeBucket as ReferenceBucket,
+    objectPath: pathParts.join('/'),
+  };
+}
+
+function storagePathFromSupabaseUrl(value: string): StoragePath | null {
+  try {
+    const parsed = new URL(value);
+    const marker = '/storage/v1/object/';
+    const markerIndex = parsed.pathname.indexOf(marker);
+    if (markerIndex < 0) return null;
+
+    const storagePath = decodePath(parsed.pathname.slice(markerIndex + marker.length));
+    const match = storagePath.match(/^(?:public|sign)\/([^/]+)\/(.+)$/);
+    const bucket = match?.[1];
+    const objectPath = match?.[2];
+
+    if (!bucket || !objectPath || !bucketSet.has(bucket)) return null;
+    return {
+      bucket: bucket as ReferenceBucket,
+      objectPath,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function publicUrlForStoragePath(storagePath: StoragePath): string | null {
+  if (!supabaseUrl) return null;
+
+  const baseUrl = supabaseUrl.replace(/\/+$/, '');
+  const encodedPath = encodeStoragePath(storagePath.objectPath);
+  if (!encodedPath) return null;
+
+  const publicUrl = `${baseUrl}/storage/v1/object/public/${storagePath.bucket}/${encodedPath}`;
+  console.log('TRY PUBLIC URL', {
+    bucket: storagePath.bucket,
+    path: storagePath.objectPath,
+    publicUrl,
+  });
+
+  return cleanHttpUrl(publicUrl);
+}
+
+export function toPublicSupabaseUrl(value: string): string | null {
+  const raw = cleanCandidateValue(value);
+  if (!raw) return null;
+
+  const storageUrlPath = storagePathFromSupabaseUrl(raw);
+  if (storageUrlPath) {
+    return publicUrlForStoragePath(storageUrlPath);
+  }
+
+  const bucketPath = splitBucketPath(raw);
+  if (bucketPath) {
+    return publicUrlForStoragePath(bucketPath);
+  }
+
+  if (/^https?:\/\//i.test(raw)) {
+    return cleanHttpUrl(raw);
+  }
+
+  const normalized = normalizeStoragePath(raw);
+  if (!normalized || normalized.includes(' ')) {
     return null;
   }
 
-  try {
-    const { data, error } = await supabase
-      .from('media_assets')
-      .select('bucket, object_path')
-      .eq('user_id', userId)
-      .eq('bucket', 'character-reference-images')
-      .eq('file_name', fileName)
-      .order('updated_at', { ascending: false })
-      .limit(1);
+  const canBeStorageObject =
+    normalized.includes('/') ||
+    /\.(png|jpe?g|webp|gif)$/i.test(normalized) ||
+    SUPABASE_STORAGE_BUCKETS.some((bucket) => normalized.toLowerCase().includes(bucket));
+  if (!canBeStorageObject) return null;
 
-    if (error) {
-      console.warn('[getSelfCharacterReferenceImage] Unable to resolve media asset filename:', {
-        bucket: 'character-reference-images',
-        fileName,
-        error,
-      });
-      return null;
-    }
-
-    const asset = Array.isArray(data) ? data[0] as Record<string, unknown> | undefined : undefined;
-    const objectPath = typeof asset?.object_path === 'string' ? asset.object_path : null;
-
-    if (objectPath) {
-      return storagePathToPublicUrl({
-        bucket: 'character-reference-images',
-        objectPath,
-      });
-    }
-  } catch (error) {
-    console.warn('[getSelfCharacterReferenceImage] Media asset lookup failed:', {
-      bucket: 'character-reference-images',
-      fileName,
-      error,
+  for (const bucket of SUPABASE_STORAGE_BUCKETS) {
+    const publicUrl = publicUrlForStoragePath({
+      bucket,
+      objectPath: normalized,
     });
+    if (publicUrl) return publicUrl;
   }
 
   return null;
 }
 
-async function storagePathToUrl(
-  value: unknown,
-  bucket: ReferenceBucket,
-  userId?: string | null,
-): Promise<{ url: string; source: string } | null> {
-  const storagePath = typeof value === 'string' && isValidPublicUrl(value)
-    ? storagePathFromSupabaseUrl(value)
-    : storagePathFromValue(value, bucket);
-  if (storagePath) {
-    const publicUrl = storagePathToPublicUrl(storagePath);
-    if (publicUrl) return publicUrl;
-  }
+function rejectionReason(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return 'empty';
 
-  if (typeof value === 'string') {
-    const publicUrlObjectPath = storageObjectPathFromPublicUrl(value);
-    if (publicUrlObjectPath) {
-      const resolved = storagePathToPublicUrl({
-        bucket: 'character-reference-images',
-        objectPath: publicUrlObjectPath,
-      });
-      if (resolved) return resolved;
-    }
-  }
+  const trimmed = value.trim();
+  const lowerValue = trimmed.toLowerCase();
+  if (lowerValue.startsWith('blob:')) return 'blob:';
+  if (lowerValue.startsWith('data:')) return 'data:';
+  if (lowerValue.startsWith('file:')) return 'local file';
+  if (trimmed.startsWith('/') || trimmed.startsWith('./') || trimmed.startsWith('../')) return 'relative path';
+  if (/^(?:profile|selfCharacter)\.[a-zA-Z0-9_.]+$/.test(trimmed)) return 'field key';
+  return null;
+}
 
-  return typeof value === 'string'
-    ? mediaAssetUrlFromFileName(value, bucket, userId)
-    : null;
+function looksLikeReferenceString(value: string): boolean {
+  const lowerValue = value.toLowerCase();
+  return (
+    lowerValue.includes('supabase') ||
+    lowerValue.includes('storage') ||
+    lowerValue.includes('/object/') ||
+    SUPABASE_STORAGE_BUCKETS.some((bucket) => lowerValue.includes(bucket)) ||
+    /\.(png|jpe?g|webp|gif)(?:[?#].*)?$/i.test(value)
+  );
+}
+
+function candidateSlotForKey(key: string): ReferenceSlot {
+  const normalized = key.toLowerCase();
+  if (normalized.includes('front') || normalized === 'face' || normalized === 'primary') return 'frontFace';
+  if (normalized.includes('full') || normalized.includes('body')) return 'fullBody';
+  if (normalized.includes('left')) return 'leftAngle';
+  if (normalized.includes('right')) return 'rightAngle';
+  if (normalized.includes('avatar')) return 'avatar';
+  if (normalized.includes('image')) return 'image';
+  return 'media';
 }
 
 function pushCandidate(
   candidates: ReferenceCandidate[],
-  slot: ReferenceCandidate['slot'],
+  slot: ReferenceSlot,
   label: string,
   value: unknown,
-  bucket: ReferenceBucket,
   userId?: string | null,
 ) {
-  candidates.push({ slot, label, value, bucket, userId });
+  candidates.push({ slot, label, value, userId });
 }
 
 function pushKnownReferenceCandidates(
   candidates: ReferenceCandidate[],
   source: Record<string, unknown>,
   prefix: string,
-  bucket: ReferenceBucket,
   userId?: string | null,
 ) {
-  pushCandidate(candidates, 'frontFace', `${prefix}.frontFace`, source.frontFace, bucket, userId);
-  pushCandidate(candidates, 'frontFace', `${prefix}.frontFaceUrl`, source.frontFaceUrl, bucket, userId);
-  pushCandidate(candidates, 'frontFace', `${prefix}.frontImage`, source.frontImage, bucket, userId);
-  pushCandidate(candidates, 'frontFace', `${prefix}.frontImageUrl`, source.frontImageUrl, bucket, userId);
-  pushCandidate(candidates, 'fullBody', `${prefix}.fullBody`, source.fullBody, bucket, userId);
-  pushCandidate(candidates, 'fullBody', `${prefix}.fullBodyUrl`, source.fullBodyUrl, bucket, userId);
-  pushCandidate(candidates, 'leftAngle', `${prefix}.leftAngle`, source.leftAngle, bucket, userId);
-  pushCandidate(candidates, 'leftAngle', `${prefix}.leftAngleUrl`, source.leftAngleUrl, bucket, userId);
-  pushCandidate(candidates, 'rightAngle', `${prefix}.rightAngle`, source.rightAngle, bucket, userId);
-  pushCandidate(candidates, 'rightAngle', `${prefix}.rightAngleUrl`, source.rightAngleUrl, bucket, userId);
-  pushCandidate(candidates, 'avatar', `${prefix}.avatar`, source.avatar, 'character-reference-images', userId);
-  pushCandidate(candidates, 'avatar', `${prefix}.avatarUrl`, source.avatarUrl, 'character-reference-images', userId);
-  pushCandidate(candidates, 'image', `${prefix}.imageUrl`, source.imageUrl, bucket, userId);
+  pushCandidate(candidates, 'frontFace', `${prefix}.frontFace`, source.frontFace, userId);
+  pushCandidate(candidates, 'frontFace', `${prefix}.frontFaceUrl`, source.frontFaceUrl, userId);
+  pushCandidate(candidates, 'frontFace', `${prefix}.frontImage`, source.frontImage, userId);
+  pushCandidate(candidates, 'frontFace', `${prefix}.frontImageUrl`, source.frontImageUrl, userId);
+  pushCandidate(candidates, 'frontFace', `${prefix}.front`, source.front, userId);
+  pushCandidate(candidates, 'frontFace', `${prefix}.face`, source.face, userId);
+  pushCandidate(candidates, 'frontFace', `${prefix}.primary`, source.primary, userId);
+  pushCandidate(candidates, 'fullBody', `${prefix}.fullBody`, source.fullBody, userId);
+  pushCandidate(candidates, 'fullBody', `${prefix}.fullBodyUrl`, source.fullBodyUrl, userId);
+  pushCandidate(candidates, 'fullBody', `${prefix}.body`, source.body, userId);
+  pushCandidate(candidates, 'fullBody', `${prefix}.full`, source.full, userId);
+  pushCandidate(candidates, 'leftAngle', `${prefix}.leftAngle`, source.leftAngle, userId);
+  pushCandidate(candidates, 'leftAngle', `${prefix}.leftAngleUrl`, source.leftAngleUrl, userId);
+  pushCandidate(candidates, 'leftAngle', `${prefix}.left`, source.left, userId);
+  pushCandidate(candidates, 'rightAngle', `${prefix}.rightAngle`, source.rightAngle, userId);
+  pushCandidate(candidates, 'rightAngle', `${prefix}.rightAngleUrl`, source.rightAngleUrl, userId);
+  pushCandidate(candidates, 'rightAngle', `${prefix}.right`, source.right, userId);
+  pushCandidate(candidates, 'avatar', `${prefix}.avatar`, source.avatar, userId);
+  pushCandidate(candidates, 'avatar', `${prefix}.avatarUrl`, source.avatarUrl, userId);
+  pushCandidate(candidates, 'image', `${prefix}.image`, source.image, userId);
+  pushCandidate(candidates, 'image', `${prefix}.imageUrl`, source.imageUrl, userId);
+  pushCandidate(candidates, 'media', `${prefix}.mediaUrl`, source.mediaUrl, userId);
+  pushCandidate(candidates, 'media', `${prefix}.url`, source.url, userId);
+  pushCandidate(candidates, 'media', `${prefix}.publicUrl`, source.publicUrl, userId);
+  pushCandidate(candidates, 'media', `${prefix}.signedUrl`, source.signedUrl, userId);
+  pushCandidate(candidates, 'media', `${prefix}.objectPath`, source.objectPath, userId);
+  pushCandidate(candidates, 'media', `${prefix}.path`, source.path, userId);
+  pushCandidate(candidates, 'media', `${prefix}.fileName`, source.fileName, userId);
 }
 
-function collectMediaUrlCandidates(
+function collectNestedReferenceCandidates(
   candidates: ReferenceCandidate[],
   value: unknown,
   prefix: string,
+  userId?: string | null,
   depth = 0,
 ) {
-  if (depth > 3) return;
+  if (depth > 5) return;
 
   if (Array.isArray(value)) {
-    value.forEach((entry, index) => collectMediaUrlCandidates(candidates, entry, `${prefix}[${index}]`, depth + 1));
+    value.forEach((entry, index) => {
+      if (typeof entry === 'string') {
+        pushCandidate(candidates, 'media', `${prefix}[${index}]`, entry, userId);
+        return;
+      }
+
+      collectNestedReferenceCandidates(candidates, entry, `${prefix}[${index}]`, userId, depth + 1);
+    });
     return;
   }
 
   const record = readObject(value);
   Object.entries(record).forEach(([key, entry]) => {
     const nextPrefix = `${prefix}.${key}`;
-    if (typeof entry === 'string' && candidateKeys.has(key)) {
-      pushCandidate(
-        candidates,
-        key.toLowerCase().includes('avatar') ? 'avatar' : 'media',
-        nextPrefix,
-        entry,
-        'character-reference-images',
-      );
+
+    if (typeof entry === 'string') {
+      if (knownImageKeys.has(key) || looksLikeReferenceString(entry)) {
+        pushCandidate(candidates, candidateSlotForKey(key), nextPrefix, entry, userId);
+      }
+      return;
     }
 
     if (entry && typeof entry === 'object') {
-      collectMediaUrlCandidates(candidates, entry, nextPrefix, depth + 1);
+      collectNestedReferenceCandidates(candidates, entry, nextPrefix, userId, depth + 1);
     }
   });
 }
 
-function collectPermissiveStringCandidates(
-  candidates: ReferenceCandidate[],
-  value: unknown,
-  prefix: string,
-  depth = 0,
-) {
-  if (depth > 4) return;
+function uniqueCandidates(candidates: ReferenceCandidate[]): ReferenceCandidate[] {
+  const seen = new Set<string>();
 
-  if (Array.isArray(value)) {
-    value.forEach((entry, index) => collectPermissiveStringCandidates(candidates, entry, `${prefix}[${index}]`, depth + 1));
-    return;
-  }
-
-  const record = readObject(value);
-  Object.entries(record).forEach(([key, entry]) => {
-    const nextPrefix = `${prefix}.${key}`;
-    if (typeof entry === 'string' && looksImageish(entry)) {
-      pushCandidate(
-        candidates,
-        key.toLowerCase().includes('avatar') ? 'avatar' : 'media',
-        nextPrefix,
-        entry,
-        'character-reference-images',
-      );
-    }
-
-    if (entry && typeof entry === 'object') {
-      collectPermissiveStringCandidates(candidates, entry, nextPrefix, depth + 1);
-    }
+  return candidates.filter((candidate) => {
+    const value = stringValue(candidate.value);
+    const key = `${candidate.label}|${value}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
 }
 
@@ -413,6 +390,7 @@ function buildReferenceCandidates(
   const candidates: ReferenceCandidate[] = [];
   const characterRecord = readObject(selfCharacter);
   const profileRecord = readObject(profile);
+  const stylePreferences = readObject(characterRecord.stylePreferences);
   const userId = typeof characterRecord.ownerUserId === 'string' && characterRecord.ownerUserId !== 'local'
     ? characterRecord.ownerUserId
     : typeof profileRecord.userId === 'string'
@@ -421,53 +399,23 @@ function buildReferenceCandidates(
         ? profileRecord.id
         : null;
 
-  pushKnownReferenceCandidates(
-    candidates,
-    readObject(characterRecord.referenceImageUrls),
-    'selfCharacter.referenceImageUrls',
-    'character-reference-images',
-    userId,
-  );
-  pushKnownReferenceCandidates(
-    candidates,
-    readObject(characterRecord.referencePhotoNames),
-    'selfCharacter.referencePhotoNames',
-    'character-reference-images',
-    userId,
-  );
-  pushKnownReferenceCandidates(
-    candidates,
-    readObject(characterRecord.selfReferencePhotoNames),
-    'selfCharacter.selfReferencePhotoNames',
-    'character-reference-images',
-    userId,
-  );
-  pushKnownReferenceCandidates(candidates, characterRecord, 'selfCharacter', 'character-reference-images', userId);
-  pushKnownReferenceCandidates(
-    candidates,
-    readObject(profileRecord.selfReferenceImageUrls),
-    'profile.selfReferenceImageUrls',
-    'character-reference-images',
-    userId,
-  );
-  pushKnownReferenceCandidates(
-    candidates,
-    readObject(profileRecord.selfReferencePhotoNames),
-    'profile.selfReferencePhotoNames',
-    'character-reference-images',
-    userId,
-  );
-  pushCandidate(candidates, 'avatar', 'profile.defaultSelfCharacterAvatar', profileRecord.defaultSelfCharacterAvatar, 'character-reference-images', userId);
-  pushCandidate(candidates, 'avatar', 'profile.avatar', profileRecord.avatar, 'character-reference-images', userId);
-  collectMediaUrlCandidates(candidates, characterRecord, 'selfCharacter');
-  collectMediaUrlCandidates(candidates, profileRecord, 'profile');
-  collectPermissiveStringCandidates(candidates, characterRecord, 'selfCharacter');
-  collectPermissiveStringCandidates(candidates, profileRecord, 'profile');
+  pushKnownReferenceCandidates(candidates, readObject(characterRecord.referenceImageUrls), 'selfCharacter.referenceImageUrls', userId);
+  pushKnownReferenceCandidates(candidates, readObject(characterRecord.referencePhotoNames), 'selfCharacter.referencePhotoNames', userId);
+  pushKnownReferenceCandidates(candidates, readObject(characterRecord.selfReferencePhotoNames), 'selfCharacter.selfReferencePhotoNames', userId);
+  pushKnownReferenceCandidates(candidates, characterRecord, 'selfCharacter', userId);
+  pushKnownReferenceCandidates(candidates, readObject(profileRecord.selfReferenceImageUrls), 'profile.selfReferenceImageUrls', userId);
+  pushKnownReferenceCandidates(candidates, readObject(profileRecord.selfReferencePhotoNames), 'profile.selfReferencePhotoNames', userId);
+  pushKnownReferenceCandidates(candidates, profileRecord, 'profile', userId);
+  pushKnownReferenceCandidates(candidates, readObject(stylePreferences.creatorSelfEditorDraft), 'selfCharacter.stylePreferences.creatorSelfEditorDraft', userId);
+  pushKnownReferenceCandidates(candidates, readObject(profileRecord.selfCharacterEditorDraft), 'profile.selfCharacterEditorDraft', userId);
 
-  return candidates;
+  collectNestedReferenceCandidates(candidates, characterRecord, 'selfCharacter', userId);
+  collectNestedReferenceCandidates(candidates, profileRecord, 'profile', userId);
+
+  return uniqueCandidates(candidates).sort((a, b) => slotPriority(a.slot) - slotPriority(b.slot));
 }
 
-function slotPriority(slot: ReferenceCandidate['slot']) {
+function slotPriority(slot: ReferenceSlot) {
   if (slot === 'frontFace') return 0;
   if (slot === 'fullBody') return 1;
   if (slot === 'leftAngle') return 2;
@@ -475,23 +423,6 @@ function slotPriority(slot: ReferenceCandidate['slot']) {
   if (slot === 'avatar') return 4;
   if (slot === 'image') return 5;
   return 6;
-}
-
-async function resolveCandidateUrl(candidate: ReferenceCandidate): Promise<ResolvedCandidate> {
-  const refreshedStorageUrl = await storagePathToUrl(candidate.value, candidate.bucket, candidate.userId);
-  if (refreshedStorageUrl) {
-    return {
-      url: refreshedStorageUrl.url,
-      source: refreshedStorageUrl.source,
-      rejectionReason: null,
-    };
-  }
-
-  return {
-    url: null,
-    source: null,
-    rejectionReason: rejectionReason(candidate.value),
-  };
 }
 
 function slotLabel(candidate: ReferenceCandidate): string {
@@ -505,7 +436,7 @@ function slotLabel(candidate: ReferenceCandidate): string {
 
 function addReferenceImageUrl(
   referenceImageUrls: Partial<ReferenceImageUrls>,
-  slot: ReferenceCandidate['slot'],
+  slot: ReferenceSlot,
   url: string,
 ) {
   if (
@@ -517,6 +448,148 @@ function addReferenceImageUrl(
   ) {
     referenceImageUrls[slot] = referenceImageUrls[slot] || url;
   }
+}
+
+function valueLooksLikeBareFileName(value: string): boolean {
+  return !value.includes('/') && /\.(png|jpe?g|webp|gif)$/i.test(value);
+}
+
+async function lookupMediaAssetUrl(
+  value: string,
+  userId?: string | null,
+): Promise<{ url: string; source: string } | null> {
+  if (!supabase || !userId) return null;
+  const client = supabase;
+
+  const cleanValue = cleanCandidateValue(value);
+  if (!cleanValue) return null;
+
+  const normalizedPath = normalizeStoragePath(cleanValue);
+  const fileName = normalizedPath.split('/').pop() ?? normalizedPath;
+  const lookups: Array<{
+    label: string;
+    query: () => Promise<{ data: unknown[] | null; error: unknown }>;
+  }> = [];
+
+  if (normalizedPath.includes('/')) {
+    lookups.push({
+      label: 'object_path',
+      query: async () => {
+        const { data, error } = await client
+          .from('media_assets')
+          .select('bucket, object_path')
+          .eq('user_id', userId)
+          .eq('object_path', normalizedPath)
+          .limit(1);
+        return { data, error };
+      },
+    });
+  }
+
+  lookups.push({
+    label: 'file_name',
+    query: async () => {
+      const { data, error } = await client
+        .from('media_assets')
+        .select('bucket, object_path')
+        .eq('user_id', userId)
+        .eq('file_name', fileName)
+        .order('updated_at', { ascending: false })
+        .limit(1);
+      return { data, error };
+    },
+  });
+
+  lookups.push({
+    label: 'object_path_suffix',
+    query: async () => {
+      const { data, error } = await client
+        .from('media_assets')
+        .select('bucket, object_path')
+        .eq('user_id', userId)
+        .ilike('object_path', `%${fileName}`)
+        .order('updated_at', { ascending: false })
+        .limit(1);
+      return { data, error };
+    },
+  });
+
+  for (const lookup of lookups) {
+    try {
+      const { data, error } = await lookup.query();
+      if (error) {
+        console.warn('[getSelfCharacterReferenceImage] media_assets lookup failed:', {
+          lookup: lookup.label,
+          value: cleanValue,
+          error,
+        });
+        continue;
+      }
+
+      const asset = Array.isArray(data) ? data[0] as Record<string, unknown> | undefined : undefined;
+      const bucket = typeof asset?.bucket === 'string' && bucketSet.has(asset.bucket)
+        ? asset.bucket as ReferenceBucket
+        : null;
+      const objectPath = typeof asset?.object_path === 'string' ? asset.object_path : null;
+
+      if (bucket && objectPath) {
+        const url = publicUrlForStoragePath({ bucket, objectPath });
+        if (url) {
+          return {
+            url,
+            source: `media_assets.${lookup.label}`,
+          };
+        }
+      }
+    } catch (error) {
+      console.warn('[getSelfCharacterReferenceImage] media_assets lookup crashed:', {
+        lookup: lookup.label,
+        value: cleanValue,
+        error,
+      });
+    }
+  }
+
+  return null;
+}
+
+async function resolveCandidateUrl(candidate: ReferenceCandidate): Promise<ResolvedCandidate> {
+  const value = cleanCandidateValue(candidate.value);
+  if (!value) {
+    return {
+      url: null,
+      source: null,
+      rejectionReason: rejectionReason(candidate.value),
+    };
+  }
+
+  const mediaAssetUrl = valueLooksLikeBareFileName(value)
+    ? await lookupMediaAssetUrl(value, candidate.userId)
+    : null;
+  const publicUrl = mediaAssetUrl?.url ?? toPublicSupabaseUrl(value);
+
+  if (publicUrl) {
+    return {
+      url: publicUrl,
+      source: mediaAssetUrl?.source ?? 'public-url',
+      rejectionReason: null,
+    };
+  }
+
+  const fallbackMediaAssetUrl = await lookupMediaAssetUrl(value, candidate.userId);
+  if (fallbackMediaAssetUrl?.url) {
+    return {
+      url: fallbackMediaAssetUrl.url,
+      source: fallbackMediaAssetUrl.source,
+      rejectionReason: null,
+    };
+  }
+
+  return {
+    url: null,
+    source: null,
+    rejectionReason: rejectionReason(candidate.value) ?? 'unresolved storage reference',
+  };
 }
 
 export async function getSelfCharacterReferenceImage(input: {
@@ -550,8 +623,7 @@ export async function getSelfCharacterReferenceImage(input: {
       null,
     imageUrl: referenceRecord.imageUrl ?? characterRecord.imageUrl ?? profileRecord.imageUrl ?? null,
   };
-  const candidates = buildReferenceCandidates(input.selfCharacter, input.profile)
-    .sort((a, b) => slotPriority(a.slot) - slotPriority(b.slot));
+  const candidates = buildReferenceCandidates(input.selfCharacter, input.profile);
   const inspectedFields = candidates.map((candidate) => ({
     label: candidate.label,
     slot: candidate.slot,
@@ -560,21 +632,15 @@ export async function getSelfCharacterReferenceImage(input: {
   }));
   const referenceImageUrls: Partial<ReferenceImageUrls> = {};
 
-  console.log('SELF CHARACTER RAW:', input.selfCharacter);
+  console.log('SELF CHARACTER RAW', input.selfCharacter);
   console.log('FIELDS CHECKED:', fieldsChecked);
-  console.log('REFERENCE CANDIDATES:', candidates.map((candidate) => ({
+  console.log('REFERENCE CANDIDATES', candidates.map((candidate) => ({
     label: candidate.label,
     slot: candidate.slot,
-    bucket: candidate.bucket,
     value: candidate.value,
     valuePreview: previewValue(candidate.value),
-    prefilterReason: rejectionReason(candidate.value),
+    rejectionReason: rejectionReason(candidate.value),
   })));
-  console.log('[getSelfCharacterReferenceImage] inspected fields', {
-    selfCharacterId: readObject(input.selfCharacter).id ?? null,
-    candidateCount: candidates.length,
-    inspectedFields,
-  });
 
   let selectedUrl: string | null = null;
   let selectedLabel: string | null = null;
@@ -582,6 +648,7 @@ export async function getSelfCharacterReferenceImage(input: {
 
   for (const candidate of candidates) {
     const resolved = await resolveCandidateUrl(candidate);
+
     if (!resolved.url) {
       console.log('REFERENCE CANDIDATE REJECTED:', {
         label: candidate.label,
@@ -599,15 +666,7 @@ export async function getSelfCharacterReferenceImage(input: {
       urlPreview: previewValue(resolved.url),
     });
 
-    if (
-      candidate.slot === 'frontFace' ||
-      candidate.slot === 'fullBody' ||
-      candidate.slot === 'leftAngle' ||
-      candidate.slot === 'rightAngle' ||
-      candidate.slot === 'expressive'
-    ) {
-      addReferenceImageUrl(referenceImageUrls, candidate.slot, resolved.url);
-    }
+    addReferenceImageUrl(referenceImageUrls, candidate.slot, resolved.url);
 
     if (!selectedUrl) {
       selectedUrl = resolved.url;
@@ -616,31 +675,12 @@ export async function getSelfCharacterReferenceImage(input: {
     }
   }
 
-  if (selectedUrl) {
-    console.log('[getSelfCharacterReferenceImage] selected reference image', {
-      label: selectedLabel,
-      slot: selectedSlot,
-      urlPreview: previewValue(selectedUrl),
-      referenceImageUrls: Object.keys(referenceImageUrls),
-    });
-
-    return {
-      url: selectedUrl,
-      label: selectedLabel,
-      slot: selectedSlot,
-      referenceImageUrls,
-      inspectedFields,
-    };
-  }
-
-  console.log('[getSelfCharacterReferenceImage] no valid reference image found', {
-    inspectedFields,
-  });
+  console.log('FINAL referenceImageUrl', selectedUrl);
 
   return {
-    url: null,
-    label: null,
-    slot: null,
+    url: selectedUrl,
+    label: selectedLabel,
+    slot: selectedSlot,
     referenceImageUrls,
     inspectedFields,
   };

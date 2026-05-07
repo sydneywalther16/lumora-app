@@ -265,6 +265,7 @@ export default function CreateVideo({
   const isTextFallbackMode = !hasSelfCharacter && !referenceLoading && selectedGenerationMode === 'text-to-video-fallback';
   const referenceThumbnailUrl = renderableReferenceImageUrl(primaryReferenceImage.url);
   const generatedReferenceThumbnailUrl = renderableReferenceImageUrl(generatedReferenceImageUrl);
+  const selfReferenceMissing = selfReferenceMode && !referenceLoading && !primaryReferenceImage.url;
   const actionBusy = busy || generationLoading || (!hasSelfCharacter && referenceLoading);
   const isSoraEngine = engine === 'sora-2' || engine === 'sora-2-pro';
   const engineRoutingMessage =
@@ -301,7 +302,7 @@ export default function CreateVideo({
     });
 
     if (!selectedReferenceImageUrl) {
-      const message = 'No valid reference image found — cannot run Kling';
+      const message = 'No valid reference image found - cannot run Kling';
       alert(message);
       setGenerationError(message);
       return;
@@ -605,7 +606,9 @@ export default function CreateVideo({
               {referenceLoading
                 ? 'Lumora is checking front, full-body, angle, avatar, and media URL fields.'
                 : selfReferenceMode
-                ? 'Reference image locked. Ready for likeness rendering.'
+                ? primaryReferenceImage.url
+                  ? 'Reference image locked. Ready for likeness rendering.'
+                  : 'Self character found, but no public reference photo URL was found. Re-save your self character photo.'
                 : isTextFallbackMode
                   ? 'Text-only fallback uses Luma and supports 5s or 9s renders.'
                   : 'Replicate will condition the video on the selected image.'}
@@ -619,7 +622,7 @@ export default function CreateVideo({
             />
           ) : selfReferenceMode ? (
             <div className="reference-mode-thumb reference-mode-placeholder" aria-hidden="true">
-              Reference image loaded
+              No public URL
             </div>
           ) : null}
           {primaryReferenceImage.label || selfReferenceMode ? (
@@ -658,6 +661,11 @@ export default function CreateVideo({
           </button>
         </div>
         {generationLoading ? <p className="muted">Rendering your concept...</p> : null}
+        {selfReferenceMissing ? (
+          <p style={{ color: '#f6c177' }}>
+            Self character found, but no public reference photo URL was found. Re-save your self character photo.
+          </p>
+        ) : null}
         {generationError ? <p style={{ color: '#f07178' }}>{generationError}</p> : null}
         {generationWarnings.length ? (
           <div className="generation-warning-list">
