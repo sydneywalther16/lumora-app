@@ -2,7 +2,7 @@ import type { CharacterProfile, ReferenceImageUrls } from './api';
 import type { LumoraProfile } from './profileStorage';
 import { supabase } from './supabase';
 
-type ReferenceBucket = 'character-reference-images' | 'avatars';
+type ReferenceBucket = 'character-reference-images';
 
 type ReferenceCandidate = {
   slot: keyof ReferenceImageUrls | 'avatar' | 'image' | 'media';
@@ -13,7 +13,7 @@ type ReferenceCandidate = {
 };
 
 type StoragePath = {
-  bucket: ReferenceBucket;
+  bucket: 'character-reference-images';
   objectPath: string;
 };
 
@@ -83,6 +83,13 @@ function isTransientOrLocalUrl(value: string): boolean {
   }
 }
 
+function cleanPermanentPublicUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const cleanUrl = value.trim().split('?')[0];
+  if (!cleanUrl.startsWith('https://')) return null;
+  return cleanUrl;
+}
+
 function rejectionReason(value: unknown): string | null {
   if (typeof value !== 'string' || !value.trim()) return 'empty';
 
@@ -94,7 +101,7 @@ function rejectionReason(value: unknown): string | null {
 
   try {
     const parsed = new URL(trimmed);
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return 'missing protocol';
+    if (parsed.protocol !== 'https:') return 'missing protocol';
     if (['localhost', '127.0.0.1', '0.0.0.0'].includes(parsed.hostname)) return 'relative path';
     return null;
   } catch {
@@ -107,7 +114,7 @@ function isValidPublicUrl(value: unknown): boolean {
 
   try {
     const parsed = new URL(value);
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+    return parsed.protocol === 'https:';
   } catch {
     return false;
   }
@@ -129,13 +136,6 @@ function normalizePotentialStoragePath(value: string): string {
 function bucketPrefixedPath(path: string): StoragePath | null {
   const normalized = normalizePotentialStoragePath(path);
 
-  if (normalized.startsWith('avatars/')) {
-    return {
-      bucket: 'avatars',
-      objectPath: normalized.slice('avatars/'.length),
-    };
-  }
-
   if (normalized.startsWith('character-reference-images/')) {
     return {
       bucket: 'character-reference-images',
@@ -149,6 +149,7 @@ function bucketPrefixedPath(path: string): StoragePath | null {
 function storagePathFromValue(value: unknown, bucket: ReferenceBucket): StoragePath | null {
   if (typeof value !== 'string') return null;
   if (isValidPublicUrl(value)) return null;
+  if (bucket !== 'character-reference-images') return null;
 
   const bucketPath = bucketPrefixedPath(value);
   if (bucketPath?.objectPath) return bucketPath;
@@ -158,36 +159,23 @@ function storagePathFromValue(value: unknown, bucket: ReferenceBucket): StorageP
 
   if (trimmed.startsWith(`${bucket}/`)) {
     return {
-      bucket,
+      bucket: 'character-reference-images',
       objectPath: trimmed.slice(bucket.length + 1),
-    };
-  }
-
-  if (/\.(png|jpe?g|webp|gif)$/i.test(trimmed)) {
-    return {
-      bucket,
-      objectPath: trimmed,
     };
   }
 
   return null;
 }
 
-function fallbackBuckets(bucket: ReferenceBucket): ReferenceBucket[] {
-  return bucket === 'avatars'
-    ? ['avatars', 'character-reference-images']
-    : ['character-reference-images', 'avatars'];
-}
-
 function fieldKeyLikeValue(value: string): boolean {
   return /^(?:profile|selfCharacter)\.[a-zA-Z0-9_.]+$/.test(value);
 }
 
-function storageObjectPathFromPublicUrl(value: string, bucket: ReferenceBucket): string | null {
-  return storagePathFromSupabaseUrl(value, bucket)?.objectPath ?? null;
+function storageObjectPathFromPublicUrl(value: string): string | null {
+  return storagePathFromSupabaseUrl(value)?.objectPath ?? null;
 }
 
-function storagePathFromSupabaseUrl(value: string, bucket: ReferenceBucket): StoragePath | null {
+function storagePathFromSupabaseUrl(value: string): StoragePath | null {
   try {
     const parsed = new URL(value);
     const marker = `/storage/v1/object/`;
@@ -199,20 +187,14 @@ function storagePathFromSupabaseUrl(value: string, bucket: ReferenceBucket): Sto
     const matchedBucket = bucketPathMatch?.[1];
     const matchedPath = bucketPathMatch?.[2];
 
-    if ((matchedBucket === 'avatars' || matchedBucket === 'character-reference-images') && matchedPath) {
+    if (matchedBucket === 'character-reference-images' && matchedPath) {
       return {
-        bucket: matchedBucket,
+        bucket: 'character-reference-images',
         objectPath: decodeURIComponent(matchedPath),
       };
     }
 
-    const candidateBucketMatch = objectPath.match(new RegExp(`^(?:public|sign)/${bucket}/(.+)$`));
-    return candidateBucketMatch?.[1]
-      ? {
-          bucket,
-          objectPath: decodeURIComponent(candidateBucketMatch[1]),
-        }
-      : null;
+    return null;
   } catch {
     return null;
   }
@@ -222,12 +204,18 @@ function storagePathToPublicUrl(storagePath: StoragePath): { url: string; source
   if (!supabase) return null;
 
   try {
-    const publicUrl = supabase.storage.from(storagePath.bucket).getPublicUrl(storagePath.objectPath).data.publicUrl;
-    if (isValidPublicUrl(publicUrl)) {
+    const publicUrl = supabase.storage
+      .from('character-reference-images')
+      .getPublicUrl(storagePath.objectPath)
+      .data.publicUrl;
+    const cleanUrl = cleanPermanentPublicUrl(publicUrl);
+
+    if (cleanUrl) {
       console.log('RESOLVED PUBLIC URL:', publicUrl);
+      console.log('FINAL CLEAN URL:', cleanUrl);
       return {
-        url: publicUrl,
-        source: `${storagePath.bucket}:${storagePath.objectPath}`,
+        url: cleanUrl,
+        source: `character-reference-images:${storagePath.objectPath}`,
       };
     }
   } catch (error) {
@@ -243,7 +231,7 @@ function storagePathToPublicUrl(storagePath: StoragePath): { url: string; source
 
 async function mediaAssetUrlFromFileName(
   value: string,
-  bucket: ReferenceBucket,
+  _bucket: ReferenceBucket,
   userId?: string | null,
 ): Promise<{ url: string; source: string } | null> {
   if (!supabase || !userId || fieldKeyLikeValue(value)) return null;
@@ -253,54 +241,40 @@ async function mediaAssetUrlFromFileName(
     return null;
   }
 
-  for (const candidateBucket of fallbackBuckets(bucket)) {
-    try {
-      const { data, error } = await supabase
-        .from('media_assets')
-        .select('bucket, object_path, public_url')
-        .eq('user_id', userId)
-        .eq('bucket', candidateBucket)
-        .eq('file_name', fileName)
-        .order('updated_at', { ascending: false })
-        .limit(1);
+  try {
+    const { data, error } = await supabase
+      .from('media_assets')
+      .select('bucket, object_path')
+      .eq('user_id', userId)
+      .eq('bucket', 'character-reference-images')
+      .eq('file_name', fileName)
+      .order('updated_at', { ascending: false })
+      .limit(1);
 
-      if (error) {
-        console.warn('[getSelfCharacterReferenceImage] Unable to resolve media asset filename:', {
-          bucket: candidateBucket,
-          fileName,
-          error,
-        });
-        continue;
-      }
-
-      const asset = Array.isArray(data) ? data[0] as Record<string, unknown> | undefined : undefined;
-      const objectPath = typeof asset?.object_path === 'string' ? asset.object_path : null;
-      const publicUrl = typeof asset?.public_url === 'string' && isValidPublicUrl(asset.public_url)
-        ? asset.public_url
-        : null;
-
-      if (publicUrl) {
-        console.log('RESOLVED PUBLIC URL:', publicUrl);
-        return {
-          url: publicUrl,
-          source: `${candidateBucket}:media_assets.public_url`,
-        };
-      }
-
-      if (objectPath) {
-        const resolved = storagePathToPublicUrl({
-          bucket: candidateBucket,
-          objectPath,
-        });
-        if (resolved) return resolved;
-      }
-    } catch (error) {
-      console.warn('[getSelfCharacterReferenceImage] Media asset lookup failed:', {
-        bucket: candidateBucket,
+    if (error) {
+      console.warn('[getSelfCharacterReferenceImage] Unable to resolve media asset filename:', {
+        bucket: 'character-reference-images',
         fileName,
         error,
       });
+      return null;
     }
+
+    const asset = Array.isArray(data) ? data[0] as Record<string, unknown> | undefined : undefined;
+    const objectPath = typeof asset?.object_path === 'string' ? asset.object_path : null;
+
+    if (objectPath) {
+      return storagePathToPublicUrl({
+        bucket: 'character-reference-images',
+        objectPath,
+      });
+    }
+  } catch (error) {
+    console.warn('[getSelfCharacterReferenceImage] Media asset lookup failed:', {
+      bucket: 'character-reference-images',
+      fileName,
+      error,
+    });
   }
 
   return null;
@@ -312,7 +286,7 @@ async function storagePathToUrl(
   userId?: string | null,
 ): Promise<{ url: string; source: string } | null> {
   const storagePath = typeof value === 'string' && isValidPublicUrl(value)
-    ? storagePathFromSupabaseUrl(value, bucket)
+    ? storagePathFromSupabaseUrl(value)
     : storagePathFromValue(value, bucket);
   if (storagePath) {
     const publicUrl = storagePathToPublicUrl(storagePath);
@@ -320,15 +294,13 @@ async function storagePathToUrl(
   }
 
   if (typeof value === 'string') {
-    for (const candidateBucket of fallbackBuckets(bucket)) {
-      const publicUrlObjectPath = storageObjectPathFromPublicUrl(value, candidateBucket);
-      if (publicUrlObjectPath) {
-        const resolved = storagePathToPublicUrl({
-          bucket: candidateBucket,
-          objectPath: publicUrlObjectPath,
-        });
-        if (resolved) return resolved;
-      }
+    const publicUrlObjectPath = storageObjectPathFromPublicUrl(value);
+    if (publicUrlObjectPath) {
+      const resolved = storagePathToPublicUrl({
+        bucket: 'character-reference-images',
+        objectPath: publicUrlObjectPath,
+      });
+      if (resolved) return resolved;
     }
   }
 
@@ -365,8 +337,8 @@ function pushKnownReferenceCandidates(
   pushCandidate(candidates, 'leftAngle', `${prefix}.leftAngleUrl`, source.leftAngleUrl, bucket, userId);
   pushCandidate(candidates, 'rightAngle', `${prefix}.rightAngle`, source.rightAngle, bucket, userId);
   pushCandidate(candidates, 'rightAngle', `${prefix}.rightAngleUrl`, source.rightAngleUrl, bucket, userId);
-  pushCandidate(candidates, 'avatar', `${prefix}.avatar`, source.avatar, 'avatars', userId);
-  pushCandidate(candidates, 'avatar', `${prefix}.avatarUrl`, source.avatarUrl, 'avatars', userId);
+  pushCandidate(candidates, 'avatar', `${prefix}.avatar`, source.avatar, 'character-reference-images', userId);
+  pushCandidate(candidates, 'avatar', `${prefix}.avatarUrl`, source.avatarUrl, 'character-reference-images', userId);
   pushCandidate(candidates, 'image', `${prefix}.imageUrl`, source.imageUrl, bucket, userId);
 }
 
@@ -392,7 +364,7 @@ function collectMediaUrlCandidates(
         key.toLowerCase().includes('avatar') ? 'avatar' : 'media',
         nextPrefix,
         entry,
-        key.toLowerCase().includes('avatar') ? 'avatars' : 'character-reference-images',
+        'character-reference-images',
       );
     }
 
@@ -424,7 +396,7 @@ function collectPermissiveStringCandidates(
         key.toLowerCase().includes('avatar') ? 'avatar' : 'media',
         nextPrefix,
         entry,
-        key.toLowerCase().includes('avatar') ? 'avatars' : 'character-reference-images',
+        'character-reference-images',
       );
     }
 
@@ -486,7 +458,7 @@ function buildReferenceCandidates(
     userId,
   );
   pushCandidate(candidates, 'avatar', 'profile.defaultSelfCharacterAvatar', profileRecord.defaultSelfCharacterAvatar, 'character-reference-images', userId);
-  pushCandidate(candidates, 'avatar', 'profile.avatar', profileRecord.avatar, 'avatars', userId);
+  pushCandidate(candidates, 'avatar', 'profile.avatar', profileRecord.avatar, 'character-reference-images', userId);
   collectMediaUrlCandidates(candidates, characterRecord, 'selfCharacter');
   collectMediaUrlCandidates(candidates, profileRecord, 'profile');
   collectPermissiveStringCandidates(candidates, characterRecord, 'selfCharacter');
@@ -511,14 +483,6 @@ async function resolveCandidateUrl(candidate: ReferenceCandidate): Promise<Resol
     return {
       url: refreshedStorageUrl.url,
       source: refreshedStorageUrl.source,
-      rejectionReason: null,
-    };
-  }
-
-  if (isValidPublicUrl(candidate.value) && typeof candidate.value === 'string') {
-    return {
-      url: candidate.value,
-      source: 'public-url',
       rejectionReason: null,
     };
   }

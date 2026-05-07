@@ -153,7 +153,11 @@ function objectRecord(value: unknown): Record<string, unknown> {
 function publicImageUrl(value: unknown): string {
   const url = textValue(value);
   if (!url || url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('file:')) return '';
-  return /^https?:\/\//i.test(url) ? url : '';
+  const cleanUrl = url.split('?')[0];
+  if (url.includes('expires=') || url.includes('token=')) {
+    console.log('REFERENCE URL HAD TEMP QUERY, USING CLEAN URL:', cleanUrl);
+  }
+  return cleanUrl.startsWith('https://') ? cleanUrl : '';
 }
 
 function referenceUrlMap(value: unknown): Record<string, string> {
@@ -390,6 +394,7 @@ async function runImageConditionedReplicate(input: {
           adapter: adapter.label,
           mode: 'image-to-video',
         });
+        console.log('SENDING IMAGE TO KLING:', input.referenceImageUrl);
 
         const output = await input.replicate.run(model, { input: adapter.input });
         const videoUrl = await outputUrl(output);

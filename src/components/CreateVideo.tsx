@@ -598,9 +598,7 @@ export default function CreateVideo({
               {referenceLoading
                 ? 'Lumora is checking front, full-body, angle, avatar, and media URL fields.'
                 : selfReferenceMode
-                ? primaryReferenceImage.url
-                  ? 'Kling image-to-video uses this reference first.'
-                  : 'Self likeness mode is on. Add or resave a Supabase reference photo if generation needs a fresh image URL.'
+                ? 'Reference image locked. Ready for likeness rendering.'
                 : isTextFallbackMode
                   ? 'Text-only fallback uses Luma and supports 5s or 9s renders.'
                   : 'Replicate will condition the video on the selected image.'}
