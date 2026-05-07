@@ -23,6 +23,7 @@ type CreateVideoProps = {
   referenceImageUrls?: Partial<ReferenceImageUrls> | null;
   referenceLoading?: boolean;
   referenceLabel?: string | null;
+  forceSelfMode?: boolean;
 };
 
 const stylePresets = ['Editorial Drama', 'Virtual Sitcom', 'Luxury POV', 'Cinematic Sunset'];
@@ -113,6 +114,12 @@ function normalizeVideoUrl(video: unknown): string | null {
 function cleanReferenceUrl(value?: string | null): string | null {
   if (!value || value.startsWith('data:') || value.startsWith('blob:')) return null;
   return value;
+}
+
+function renderableReferenceImageUrl(value?: string | null): string | null {
+  const cleaned = cleanReferenceUrl(value);
+  if (!cleaned) return null;
+  return /^https?:\/\//i.test(cleaned) || cleaned.startsWith('/') ? cleaned : null;
 }
 
 function pickReferenceImage(input: {
@@ -216,6 +223,7 @@ export default function CreateVideo({
   referenceImageUrls,
   referenceLoading = false,
   referenceLabel,
+  forceSelfMode = false,
 }: CreateVideoProps) {
   const { user, session, loading: sessionLoading, configured } = useSession();
   const authUser = session?.user ?? user;
@@ -243,16 +251,21 @@ export default function CreateVideo({
   const [generationWarnings, setGenerationWarnings] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [generationResult, setGenerationResult] = useState<GenerationResponse | null>(null);
-  const actionBusy = busy || generationLoading || referenceLoading;
   const primaryReferenceImage = pickReferenceImage({ referenceImageUrl, referenceImageUrls });
-  const selfReferenceMode = isDefaultSelfCharacter && Boolean(primaryReferenceImage.url);
+  const hasSelfCharacter = forceSelfMode || isDefaultSelfCharacter;
+  const selectedSelfReferenceImageUrl = primaryReferenceImage.url ||
+    (hasSelfCharacter ? cleanReferenceUrl(characterAvatar) || 'creator-self-reference' : null);
+  const selfReferenceMode = hasSelfCharacter;
   const selectedGenerationMode: GenerationMode = selfReferenceMode
     ? 'self-reference-video'
     : primaryReferenceImage.url
       ? 'image-to-video'
       : 'text-to-video-fallback';
   const referencePayload = referenceImagePayload(referenceImageUrls);
-  const isTextFallbackMode = !referenceLoading && selectedGenerationMode === 'text-to-video-fallback';
+  const isTextFallbackMode = !hasSelfCharacter && !referenceLoading && selectedGenerationMode === 'text-to-video-fallback';
+  const referenceThumbnailUrl = renderableReferenceImageUrl(primaryReferenceImage.url);
+  const generatedReferenceThumbnailUrl = renderableReferenceImageUrl(generatedReferenceImageUrl);
+  const actionBusy = busy || generationLoading || (!hasSelfCharacter && referenceLoading);
   const isSoraEngine = engine === 'sora-2' || engine === 'sora-2-pro';
   const engineRoutingMessage =
     isSoraEngine
@@ -268,7 +281,7 @@ export default function CreateVideo({
     const currentPrompt = activePrompt;
     const selectedAspectRatio = aspectRatio;
     const selectedEngine = engine;
-    const selectedReferenceImageUrl = primaryReferenceImage.url;
+    const selectedReferenceImageUrl = selectedSelfReferenceImageUrl;
     const selectedGenerationMode = selfReferenceMode
       ? 'self-reference-video'
       : selectedReferenceImageUrl
@@ -279,8 +292,13 @@ export default function CreateVideo({
       buildCharacterDescription({
         characterId,
         characterName,
-        isDefaultSelfCharacter,
+        isDefaultSelfCharacter: hasSelfCharacter,
       });
+
+    console.log('FORCED SELF MODE:', {
+      hasSelfCharacter,
+      referenceImageUrl: selectedReferenceImageUrl,
+    });
 
     setGenerationLoading(true);
     setGenerationError('');
@@ -462,7 +480,7 @@ export default function CreateVideo({
             characterAvatar,
             isDefaultSelfCharacter,
             generationMode: selectedGenerationMode,
-            referenceImageUrl: primaryReferenceImage.url,
+            referenceImageUrl: selectedSelfReferenceImageUrl,
             referenceImageUrls: referencePayload,
           },
         });
@@ -559,19 +577,19 @@ export default function CreateVideo({
         <div className="reference-mode-card">
           <div className="reference-mode-copy">
             <span className="eyebrow">
-              {referenceLoading
-                ? 'Checking self reference'
-                : selfReferenceMode
+              {selfReferenceMode
                   ? 'Self likeness mode'
+                : referenceLoading
+                  ? 'Checking self reference'
                   : isTextFallbackMode
                     ? 'Text-only fallback'
                     : 'Image-to-video'}
             </span>
             <strong>
-              {referenceLoading
-                ? 'Looking for saved self-character photos'
-                : selfReferenceMode
-                ? 'Using your saved self-character photo'
+              {selfReferenceMode
+                ? 'Using your saved self character'
+                : referenceLoading
+                  ? 'Looking for saved self-character photos'
                 : isTextFallbackMode
                   ? 'Likeness not guaranteed'
                   : 'Using a reference image'}
@@ -580,21 +598,29 @@ export default function CreateVideo({
               {referenceLoading
                 ? 'Lumora is checking front, full-body, angle, avatar, and media URL fields.'
                 : selfReferenceMode
-                ? 'Kling image-to-video uses this photo as the identity source.'
+                ? primaryReferenceImage.url
+                  ? 'Kling image-to-video uses this reference first.'
+                  : 'Lumora will force Kling image-to-video and pass the best saved self-character reference it can find.'
                 : isTextFallbackMode
                   ? 'Text-only fallback uses Luma and supports 5s or 9s renders.'
                   : 'Replicate will condition the video on the selected image.'}
             </span>
           </div>
-          {primaryReferenceImage.url ? (
+          {referenceThumbnailUrl ? (
             <img
-              src={primaryReferenceImage.url}
+              src={referenceThumbnailUrl}
               alt=""
               className="reference-mode-thumb"
             />
+          ) : selfReferenceMode ? (
+            <div className="reference-mode-thumb reference-mode-placeholder" aria-hidden="true">
+              Self
+            </div>
           ) : null}
-          {primaryReferenceImage.label ? (
-            <span className="tiny-pill reference-mode-pill">{referenceLabel || primaryReferenceImage.label}</span>
+          {primaryReferenceImage.label || selfReferenceMode ? (
+            <span className="tiny-pill reference-mode-pill">
+              {referenceLabel || primaryReferenceImage.label || 'Saved self character'}
+            </span>
           ) : null}
         </div>
 
@@ -614,10 +640,10 @@ export default function CreateVideo({
           <button type="button" className="primary-btn" onClick={handleGenerate} disabled={actionBusy}>
             {generationLoading
               ? 'Rendering...'
-              : referenceLoading
-                ? 'Checking self character...'
               : selfReferenceMode
                 ? 'Generate with self character'
+                : referenceLoading
+                  ? 'Checking self character...'
                 : isTextFallbackMode
                   ? 'Generate text-only fallback'
                   : 'Generate video'}
@@ -684,9 +710,9 @@ export default function CreateVideo({
           {generatedMode ? (
             <p className="muted">Generation mode: {generatedMode}</p>
           ) : null}
-          {generatedReferenceImageUrl ? (
+          {generatedReferenceThumbnailUrl ? (
             <div className="reference-result-row">
-              <img src={generatedReferenceImageUrl} alt="" />
+              <img src={generatedReferenceThumbnailUrl} alt="" />
               <span className="muted">Reference image used for likeness</span>
             </div>
           ) : null}

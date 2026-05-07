@@ -493,6 +493,15 @@ button {
   background: rgba(255, 255, 255, 0.06);
 }
 
+.reference-mode-placeholder {
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
 .reference-mode-pill {
   grid-column: 1 / -1;
   width: fit-content;

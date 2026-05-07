@@ -17,6 +17,7 @@ type GenerateVideoBody = {
   prompt?: unknown;
   characterDescription?: unknown;
   referenceImageUrl?: unknown;
+  referenceImages?: unknown;
   referenceImageUrls?: unknown;
   aspectRatio?: unknown;
   duration?: unknown;
@@ -151,8 +152,8 @@ function objectRecord(value: unknown): Record<string, unknown> {
 
 function publicImageUrl(value: unknown): string {
   const url = textValue(value);
-  if (!url || url.startsWith('data:') || url.startsWith('blob:')) return '';
-  return /^https?:\/\//i.test(url) ? url : '';
+  if (!url || url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('file:')) return '';
+  return url;
 }
 
 function referenceUrlMap(value: unknown): Record<string, string> {
@@ -180,6 +181,10 @@ function firstReferenceImageUrl(body: GenerateVideoBody): string {
   if (explicit) return explicit;
 
   const urls = referenceUrlMap(body.referenceImageUrls);
+  const referenceImages = Array.isArray(body.referenceImages)
+    ? body.referenceImages.map(publicImageUrl).find(Boolean)
+    : '';
+
   return (
     urls.frontFace ||
     urls.fullBody ||
@@ -187,6 +192,7 @@ function firstReferenceImageUrl(body: GenerateVideoBody): string {
     urls.rightAngle ||
     urls.expressive ||
     Object.values(urls).find(Boolean) ||
+    referenceImages ||
     ''
   );
 }
@@ -532,6 +538,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const aspectRatio = normalizeAspectRatio(body.aspectRatio);
     const duration = normalizeDuration(body.duration);
     const generationMode = generationModeFor(body.generationMode, referenceImageUrl);
+    console.log('LUMORA REFERENCE ROUTING', {
+      hasReferenceImage: Boolean(referenceImageUrl),
+      generationMode,
+      referenceImageUrlPreview: referenceImageUrl ? `${referenceImageUrl.slice(0, 64)}${referenceImageUrl.length > 64 ? '...' : ''}` : null,
+    });
     const warnings = [
       referenceImageUrl
         ? ''

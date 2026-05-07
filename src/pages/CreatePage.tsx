@@ -221,6 +221,7 @@ export default function CreatePage() {
     ? selectedCharacter
     : null;
   const activeSelfCharacter = usingDefaultSelf ? defaultSelfCharacter : selectedSelfCharacter;
+  const hasSelfCharacter = Boolean(activeSelfCharacter);
 
   const characterId = activeSelfCharacter ? CREATOR_SELF_CHARACTER_ID : selectedCharacter?.id ?? null;
   const characterName = activeSelfCharacter ? profile.displayName : selectedCharacter?.name ?? null;
@@ -288,6 +289,13 @@ export default function CreatePage() {
   useEffect(() => {
     console.log('FINAL referenceImageUrl:', referenceImageUrl);
   }, [referenceImageUrl]);
+
+  useEffect(() => {
+    console.log('FORCED SELF MODE:', {
+      hasSelfCharacter,
+      referenceImageUrl,
+    });
+  }, [hasSelfCharacter, referenceImageUrl]);
 
   if (sessionResolving) {
     return (
@@ -374,6 +382,7 @@ export default function CreatePage() {
         referenceImageUrls={referenceImageUrls}
         referenceLoading={referenceResolving}
         referenceLabel={selfReference.label}
+        forceSelfMode={hasSelfCharacter}
       />
       <CharacterCapture onCreated={() => setCharacterRefreshKey((value) => value + 1)} />
     </div>
