@@ -300,6 +300,13 @@ export default function CreateVideo({
       referenceImageUrl: selectedReferenceImageUrl,
     });
 
+    if (!selectedReferenceImageUrl) {
+      const message = 'No valid reference image found — cannot run Kling';
+      alert(message);
+      setGenerationError(message);
+      return;
+    }
+
     setGenerationLoading(true);
     setGenerationError('');
     setGeneratedVideoUrl(null);

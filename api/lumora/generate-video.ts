@@ -157,7 +157,7 @@ function publicImageUrl(value: unknown): string {
   if (url.includes('expires=') || url.includes('token=')) {
     console.log('REFERENCE URL HAD TEMP QUERY, USING CLEAN URL:', cleanUrl);
   }
-  return cleanUrl.startsWith('https://') ? cleanUrl : '';
+  return cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://') ? cleanUrl : '';
 }
 
 function referenceUrlMap(value: unknown): Record<string, string> {
@@ -210,13 +210,6 @@ function normalizeDuration(value: unknown): number {
   const numericValue = typeof value === 'number' ? value : Number(textValue(value));
   if (!Number.isFinite(numericValue)) return 8;
   return Math.min(20, Math.max(1, Math.round(numericValue)));
-}
-
-function generationModeFor(bodyMode: unknown, referenceImageUrl: string): GenerationMode {
-  const requestedMode = textValue(bodyMode);
-  if (!referenceImageUrl) return 'text-to-video-fallback';
-  if (requestedMode === 'image-to-video') return 'image-to-video';
-  return 'self-reference-video';
 }
 
 function buildFinalPrompt(input: {
@@ -291,63 +284,8 @@ async function outputUrl(output: unknown): Promise<string | null> {
   return null;
 }
 
-function imageToVideoModel(): ReplicateModelIdentifier {
-  return (process.env.REPLICATE_IMAGE_TO_VIDEO_MODEL || 'kwaivgi/kling-v2.1') as ReplicateModelIdentifier;
-}
-
-function imageToVideoFallbackModel(): ReplicateModelIdentifier {
-  return (process.env.REPLICATE_IMAGE_TO_VIDEO_MODEL_FALLBACK || 'kwaivgi/kling-v2.5-turbo-pro') as ReplicateModelIdentifier;
-}
-
-function textToVideoModel(): ReplicateModelIdentifier {
-  return (process.env.REPLICATE_VIDEO_MODEL || 'luma/ray-2-720p') as ReplicateModelIdentifier;
-}
-
-function imageInputs(input: {
-  finalPrompt: string;
-  referenceImageUrl: string;
-}): Array<{ label: string; input: Record<string, unknown> }> {
-  return [
-    {
-      label: 'start_image-minimal',
-      input: {
-        prompt: input.finalPrompt,
-        start_image: input.referenceImageUrl,
-      },
-    },
-  ];
-}
-
-function textFallbackInput(input: {
-  finalPrompt: string;
-  aspectRatio: string;
-  duration: number;
-  model: ReplicateModelIdentifier;
-}) {
-  if (input.model.includes('zeroscope')) {
-    return { prompt: input.finalPrompt };
-  }
-
-  return {
-    prompt: input.finalPrompt,
-    duration: replicateTextModelDuration(input.model, input.duration),
-    aspect_ratio: input.aspectRatio,
-    loop: false,
-  };
-}
-
 function normalizeLumaDuration(duration: number): 5 | 9 {
   return duration <= 5 ? 5 : 9;
-}
-
-function replicateTextModelDuration(model: ReplicateModelIdentifier, duration: number): number {
-  const modelSlug = model.toLowerCase();
-
-  if (modelSlug.includes('luma/ray-2')) {
-    return normalizeLumaDuration(duration);
-  }
-
-  return duration;
 }
 
 function modelErrorMessage(error: unknown): string {
@@ -364,125 +302,32 @@ function isBillingOrCreditError(error: unknown): boolean {
   return lower.includes('credit') || lower.includes('billing') || lower.includes('payment');
 }
 
-function isInputValidationError(error: unknown): boolean {
-  const lower = JSON.stringify(safeJsonValue(error) ?? '').toLowerCase();
-  return (
-    lower.includes('validation') ||
-    lower.includes('start_image') ||
-    lower.includes('invalid input') ||
-    lower.includes('input schema') ||
-    lower.includes('schema')
-  );
+function isValidHttpUrl(url: string) {
+  return typeof url === 'string' &&
+    (url.startsWith('http://') || url.startsWith('https://'));
 }
 
-async function runImageConditionedReplicate(input: {
+async function runReplicate(input: {
   replicate: ReplicateClient;
-  finalPrompt: string;
+  model: ReplicateModelIdentifier;
+  requestInput: Record<string, unknown>;
+  durationSent: number | null;
+  generationModeUsed: 'kling' | 'luma';
   referenceImageUrl: string;
 }) {
-  const primaryModel = imageToVideoModel();
-  const fallbackModel = imageToVideoFallbackModel();
-  const models = Array.from(new Set([primaryModel, fallbackModel]));
-  const attempts: unknown[] = [];
-
-  for (const model of models) {
-    for (const adapter of imageInputs(input)) {
-      try {
-        console.log('LUMORA PROVIDER', {
-          provider: 'replicate',
-          model,
-          adapter: adapter.label,
-          mode: 'image-to-video',
-        });
-        console.log('SENDING IMAGE TO KLING:', input.referenceImageUrl);
-
-        const output = await input.replicate.run(model, { input: adapter.input });
-        const videoUrl = await outputUrl(output);
-
-        attempts.push({
-          model,
-          adapter: adapter.label,
-          inputKeys: Object.keys(adapter.input),
-          success: Boolean(videoUrl),
-        });
-
-        if (videoUrl) {
-          return {
-            videoUrl,
-            model,
-            rawOutput: output,
-            attempts,
-            durationSent: null,
-          } satisfies ReplicateRunResult;
-        }
-
-        attempts.push({
-          model,
-          adapter: adapter.label,
-          error: 'No video URL returned',
-          rawOutput: safeJsonValue(output),
-        });
-      } catch (error) {
-        console.error('REPLICATE IMAGE MODEL ERROR:', error);
-        attempts.push({
-          model,
-          adapter: adapter.label,
-          error: modelErrorMessage(error),
-          details: safeJsonValue(error),
-        });
-
-        if (isBillingOrCreditError(error)) {
-          throw Object.assign(new Error(modelErrorMessage(error)), {
-            provider: 'replicate',
-            model,
-            details: safeJsonValue(error),
-            attempts,
-          });
-        }
-
-        if (isInputValidationError(error)) {
-          throw Object.assign(new Error('Kling image-to-video rejected start_image input.'), {
-            provider: 'replicate',
-            model,
-            details: safeJsonValue(error),
-            attempts,
-          });
-        }
-      }
-    }
-  }
-
-  throw Object.assign(new Error('Replicate image-to-video generation failed.'), {
-    provider: 'replicate',
-    model: primaryModel,
-    details: attempts,
-  });
-}
-
-async function runTextFallbackReplicate(input: {
-  replicate: ReplicateClient;
-  finalPrompt: string;
-  aspectRatio: string;
-  duration: number;
-}) {
-  const model = textToVideoModel();
-  const requestInput = textFallbackInput({
-    finalPrompt: input.finalPrompt,
-    aspectRatio: input.aspectRatio,
-    duration: input.duration,
-    model,
-  });
-
   console.log('LUMORA PROVIDER', {
     provider: 'replicate',
-    model,
-    mode: 'text-to-video-fallback',
-    requestedDuration: input.duration,
-    modelDuration: requestInput.duration ?? null,
+    model: input.model,
+    mode: input.generationModeUsed,
+    inputKeys: Object.keys(input.requestInput),
   });
 
+  if (input.generationModeUsed === 'kling') {
+    console.log('SENDING IMAGE TO KLING:', input.referenceImageUrl);
+  }
+
   try {
-    const output = await input.replicate.run(model, { input: requestInput });
+    const output = await input.replicate.run(input.model, { input: input.requestInput });
     const videoUrl = await outputUrl(output);
     if (!videoUrl) {
       throw new Error(`No video URL returned. Raw output: ${JSON.stringify(safeJsonValue(output))}`);
@@ -490,22 +335,22 @@ async function runTextFallbackReplicate(input: {
 
     return {
       videoUrl,
-      model,
+      model: input.model,
       rawOutput: output,
       attempts: [
         {
-          model,
-          inputKeys: Object.keys(requestInput),
+          model: input.model,
+          inputKeys: Object.keys(input.requestInput),
           success: true,
         },
       ],
-      durationSent: requestInput.duration ?? null,
+      durationSent: input.durationSent,
     } satisfies ReplicateRunResult;
   } catch (error) {
-    console.error('REPLICATE TEXT FALLBACK ERROR:', error);
+    console.error('REPLICATE ERROR:', error);
     throw Object.assign(new Error(modelErrorMessage(error)), {
       provider: 'replicate',
-      model,
+      model: input.model,
       details: safeJsonValue(error),
     });
   }
@@ -542,20 +387,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const referenceImageUrl = firstReferenceImageUrl(body);
     const aspectRatio = normalizeAspectRatio(body.aspectRatio);
     const duration = normalizeDuration(body.duration);
-    const generationMode = generationModeFor(body.generationMode, referenceImageUrl);
-    console.log('LUMORA REFERENCE ROUTING', {
-      hasReferenceImage: Boolean(referenceImageUrl),
-      generationMode,
-      referenceImageUrlPreview: referenceImageUrl ? `${referenceImageUrl.slice(0, 64)}${referenceImageUrl.length > 64 ? '...' : ''}` : null,
-    });
-    const warnings = [
-      referenceImageUrl
-        ? ''
-        : 'Add a self-character reference photo for accurate likeness. Text-only fallback, likeness not guaranteed.',
-      body.provider && textValue(body.provider) !== 'replicate'
-        ? 'Self-character likeness generation currently routes through Replicate image-to-video models.'
-        : '',
-    ].filter(Boolean);
     const finalPrompt = buildFinalPrompt({
       prompt,
       characterDescription: textValue(body.characterDescription),
@@ -565,22 +396,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       mood: textValue(body.mood),
       aspectRatio,
     });
+    const promptForModel = finalPrompt;
+
+    console.log('FINAL INPUT:', {
+      prompt: promptForModel,
+      referenceImageUrl,
+    });
+
+    if (!isValidHttpUrl(referenceImageUrl)) {
+      return sendJson(res, 400, {
+        error: 'Invalid reference image URL',
+        received: referenceImageUrl,
+      });
+    }
+
+    const useKling = !!referenceImageUrl;
+    const model = (
+      useKling
+        ? process.env.REPLICATE_IMAGE_TO_VIDEO_MODEL || 'kwaivgi/kling-v2.1'
+        : 'luma/ray-2-720p'
+    ) as ReplicateModelIdentifier;
+    const lumaDuration = normalizeLumaDuration(duration);
+    const requestInput = useKling
+      ? {
+          prompt: promptForModel,
+          start_image: referenceImageUrl,
+        }
+      : {
+          prompt: promptForModel,
+          duration: lumaDuration,
+          aspect_ratio: aspectRatio,
+        };
+    const generationModeUsed = useKling ? 'kling' : 'luma';
 
     const { default: Replicate } = await import('replicate');
     const replicate = new Replicate({ auth: token }) as ReplicateClient;
 
-    const result = referenceImageUrl
-      ? await runImageConditionedReplicate({
-          replicate,
-          finalPrompt,
-          referenceImageUrl,
-        })
-      : await runTextFallbackReplicate({
-          replicate,
-          finalPrompt,
-          aspectRatio,
-          duration,
-        });
+    const result = await runReplicate({
+      replicate,
+      model,
+      requestInput,
+      durationSent: useKling ? null : lumaDuration,
+      generationModeUsed,
+      referenceImageUrl,
+    });
 
     console.log('FINAL VIDEO URL:', result.videoUrl);
 
@@ -589,15 +448,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       videoUrl: result.videoUrl,
       provider: 'replicate',
       model: result.model,
-      displayEngine: referenceImageUrl ? 'kling' : 'text-to-video-fallback',
-      generationMode,
-      generationModeUsed: generationMode,
-      hasReferenceImage: Boolean(referenceImageUrl),
+      displayEngine: generationModeUsed,
+      generationMode: useKling ? 'self-reference-video' : 'text-to-video-fallback',
+      generationModeUsed,
+      hasReferenceImage: !!referenceImageUrl,
       modelUsed: result.model,
       durationSent: result.durationSent,
-      referenceImageUrl: referenceImageUrl || null,
-      finalPrompt,
-      warnings,
+      referenceImageUrl,
+      finalPrompt: promptForModel,
+      warnings: [],
       rawOutput: {
         provider: safeJsonValue(result.rawOutput),
         attempts: result.attempts,
