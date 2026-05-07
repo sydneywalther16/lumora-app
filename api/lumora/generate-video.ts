@@ -38,6 +38,7 @@ type ReplicateRunResult = {
   model: ReplicateModelIdentifier;
   rawOutput: unknown;
   attempts: unknown[];
+  durationSent: number | null;
 };
 
 function safeJsonValue(value: unknown, seen = new WeakSet<object>()): unknown {
@@ -325,11 +326,15 @@ function textFallbackInput(input: {
   };
 }
 
+function normalizeLumaDuration(duration: number): 5 | 9 {
+  return duration <= 5 ? 5 : 9;
+}
+
 function replicateTextModelDuration(model: ReplicateModelIdentifier, duration: number): number {
   const modelSlug = model.toLowerCase();
 
   if (modelSlug.includes('luma/ray-2')) {
-    return duration <= 7 ? 5 : 9;
+    return normalizeLumaDuration(duration);
   }
 
   return duration;
@@ -396,6 +401,7 @@ async function runImageConditionedReplicate(input: {
             model,
             rawOutput: output,
             attempts,
+            durationSent: null,
           } satisfies ReplicateRunResult;
         }
 
@@ -482,6 +488,7 @@ async function runTextFallbackReplicate(input: {
           success: true,
         },
       ],
+      durationSent: requestInput.duration ?? null,
     } satisfies ReplicateRunResult;
   } catch (error) {
     console.error('REPLICATE TEXT FALLBACK ERROR:', error);
@@ -568,6 +575,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       model: result.model,
       displayEngine: referenceImageUrl ? 'kling' : 'text-to-video-fallback',
       generationMode,
+      generationModeUsed: generationMode,
+      hasReferenceImage: Boolean(referenceImageUrl),
+      modelUsed: result.model,
+      durationSent: result.durationSent,
       referenceImageUrl: referenceImageUrl || null,
       finalPrompt,
       warnings,

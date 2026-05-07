@@ -580,9 +580,9 @@ export default function CreateVideo({
               {referenceLoading
                 ? 'Lumora is checking front, full-body, angle, avatar, and media URL fields.'
                 : selfReferenceMode
-                ? 'Replicate image-to-video will use this photo as the identity source.'
+                ? 'Kling image-to-video uses this photo as the identity source.'
                 : isTextFallbackMode
-                  ? 'Add a self-character reference photo for accurate likeness.'
+                  ? 'Text-only fallback uses Luma and supports 5s or 9s renders.'
                   : 'Replicate will condition the video on the selected image.'}
             </span>
           </div>

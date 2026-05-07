@@ -410,11 +410,15 @@ function normalizeSoraSeconds(duration: unknown): '4' | '8' | '12' {
   return '4';
 }
 
+function normalizeLumaDuration(duration: number): 5 | 9 {
+  return duration <= 5 ? 5 : 9;
+}
+
 function normalizeReplicateDuration(model: ReplicateModelIdentifier, duration: number): number {
   const modelSlug = model.toLowerCase();
 
   if (modelSlug.includes('luma/ray-2')) {
-    return duration <= 7 ? 5 : 9;
+    return normalizeLumaDuration(duration);
   }
 
   return duration;
