@@ -24,6 +24,7 @@ type CreateVideoProps = {
   referenceLoading?: boolean;
   referenceLabel?: string | null;
   forceSelfMode?: boolean;
+  onResaveReferencePhoto?: () => void;
 };
 
 const stylePresets = ['Editorial Drama', 'Virtual Sitcom', 'Luxury POV', 'Cinematic Sunset'];
@@ -224,6 +225,7 @@ export default function CreateVideo({
   referenceLoading = false,
   referenceLabel,
   forceSelfMode = false,
+  onResaveReferencePhoto,
 }: CreateVideoProps) {
   const { user, session, loading: sessionLoading, configured } = useSession();
   const authUser = session?.user ?? user;
@@ -608,11 +610,20 @@ export default function CreateVideo({
                 : selfReferenceMode
                 ? primaryReferenceImage.url
                   ? 'Reference image locked. Ready for likeness rendering.'
-                  : 'Self character found, but no public reference photo URL was found. Re-save your self character photo.'
+                  : 'Reference photo found but is not publicly accessible. Re-save your self character photo.'
                 : isTextFallbackMode
                   ? 'Text-only fallback uses Luma and supports 5s or 9s renders.'
                   : 'Replicate will condition the video on the selected image.'}
             </span>
+            {selfReferenceMode && onResaveReferencePhoto ? (
+              <button
+                type="button"
+                className="ghost-btn reference-resave-btn"
+                onClick={onResaveReferencePhoto}
+              >
+                Re-save reference photo
+              </button>
+            ) : null}
           </div>
           {referenceThumbnailUrl ? (
             <img
@@ -663,7 +674,7 @@ export default function CreateVideo({
         {generationLoading ? <p className="muted">Rendering your concept...</p> : null}
         {selfReferenceMissing ? (
           <p style={{ color: '#f6c177' }}>
-            Self character found, but no public reference photo URL was found. Re-save your self character photo.
+            Reference photo found but is not publicly accessible. Re-save your self character photo.
           </p>
         ) : null}
         {generationError ? <p style={{ color: '#f07178' }}>{generationError}</p> : null}

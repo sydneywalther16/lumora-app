@@ -484,6 +484,14 @@ button {
   gap: 5px;
 }
 
+.reference-resave-btn {
+  flex: none;
+  justify-self: start;
+  width: fit-content;
+  padding: 8px 12px;
+  font-size: 0.78rem;
+}
+
 .reference-mode-thumb {
   width: 72px;
   height: 72px;

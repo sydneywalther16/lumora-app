@@ -296,6 +296,16 @@ export default function CreatePage() {
     });
   }, [hasSelfCharacter, referenceImageUrl]);
 
+  function openReferencePhotoCapture() {
+    const captureSection = document.getElementById('character-capture');
+    if (captureSection) {
+      captureSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+
+    window.location.href = '/capture';
+  }
+
   if (sessionResolving) {
     return (
       <div className="page">
@@ -382,8 +392,11 @@ export default function CreatePage() {
         referenceLoading={referenceResolving}
         referenceLabel={selfReference.label}
         forceSelfMode={hasSelfCharacter}
+        onResaveReferencePhoto={openReferencePhotoCapture}
       />
-      <CharacterCapture onCreated={() => setCharacterRefreshKey((value) => value + 1)} />
+      <div id="character-capture">
+        <CharacterCapture onCreated={() => setCharacterRefreshKey((value) => value + 1)} />
+      </div>
     </div>
   );
 }

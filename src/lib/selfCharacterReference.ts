@@ -31,6 +31,13 @@ type ResolvedCandidate = {
   rejectionReason: string | null;
 };
 
+type PublicImageValidation = {
+  ok: boolean;
+  status: number | null;
+  contentType: string | null;
+  error: string | null;
+};
+
 export type SelfCharacterReferenceImage = {
   url: string | null;
   label: string | null;
@@ -212,44 +219,162 @@ function publicUrlForStoragePath(storagePath: StoragePath): string | null {
   return cleanHttpUrl(publicUrl);
 }
 
-export function toPublicSupabaseUrl(value: string): string | null {
+function uniqueStoragePaths(paths: StoragePath[]): StoragePath[] {
+  const seen = new Set<string>();
+
+  return paths.filter((path) => {
+    const key = `${path.bucket}/${path.objectPath}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function storagePathsForObjectPath(objectPath: string, preferredBucket?: ReferenceBucket): StoragePath[] {
+  const orderedBuckets = preferredBucket
+    ? [preferredBucket, ...SUPABASE_STORAGE_BUCKETS.filter((bucket) => bucket !== preferredBucket)]
+    : [...SUPABASE_STORAGE_BUCKETS];
+
+  return uniqueStoragePaths(
+    orderedBuckets.map((bucket) => ({
+      bucket,
+      objectPath,
+    })),
+  );
+}
+
+function uniqueUrls(urls: Array<string | null>): string[] {
+  const seen = new Set<string>();
+
+  return urls.flatMap((url) => {
+    if (!url || seen.has(url)) return [];
+    seen.add(url);
+    return [url];
+  });
+}
+
+function toPublicSupabaseUrlCandidates(value: string): string[] {
   const raw = cleanCandidateValue(value);
-  if (!raw) return null;
+  if (!raw) return [];
+  const candidates: Array<string | null> = [];
 
   const storageUrlPath = storagePathFromSupabaseUrl(raw);
   if (storageUrlPath) {
-    return publicUrlForStoragePath(storageUrlPath);
+    candidates.push(
+      ...storagePathsForObjectPath(storageUrlPath.objectPath, storageUrlPath.bucket)
+        .map(publicUrlForStoragePath),
+    );
+    return uniqueUrls(candidates);
   }
 
   const bucketPath = splitBucketPath(raw);
   if (bucketPath) {
-    return publicUrlForStoragePath(bucketPath);
+    candidates.push(
+      ...storagePathsForObjectPath(bucketPath.objectPath, bucketPath.bucket)
+        .map(publicUrlForStoragePath),
+    );
+    return uniqueUrls(candidates);
   }
 
   if (/^https?:\/\//i.test(raw)) {
-    return cleanHttpUrl(raw);
+    candidates.push(cleanHttpUrl(raw));
+    return uniqueUrls(candidates);
   }
 
   const normalized = normalizeStoragePath(raw);
   if (!normalized || normalized.includes(' ')) {
-    return null;
+    return [];
   }
 
   const canBeStorageObject =
     normalized.includes('/') ||
     /\.(png|jpe?g|webp|gif)$/i.test(normalized) ||
     SUPABASE_STORAGE_BUCKETS.some((bucket) => normalized.toLowerCase().includes(bucket));
-  if (!canBeStorageObject) return null;
+  if (!canBeStorageObject) return [];
 
-  for (const bucket of SUPABASE_STORAGE_BUCKETS) {
-    const publicUrl = publicUrlForStoragePath({
-      bucket,
-      objectPath: normalized,
-    });
-    if (publicUrl) return publicUrl;
+  candidates.push(
+    ...storagePathsForObjectPath(normalized)
+      .map(publicUrlForStoragePath),
+  );
+
+  return uniqueUrls(candidates);
+}
+
+export function toPublicSupabaseUrl(value: string): string | null {
+  return toPublicSupabaseUrlCandidates(value)[0] ?? null;
+}
+
+async function validatePublicImageUrl(url: string): Promise<PublicImageValidation> {
+  const methods: Array<'HEAD' | 'GET'> = ['HEAD', 'GET'];
+  let lastValidation: PublicImageValidation = {
+    ok: false,
+    status: null,
+    contentType: null,
+    error: null,
+  };
+
+  for (const method of methods) {
+    const controller = new AbortController();
+    const timeout = globalThis.setTimeout(() => controller.abort(), 10_000);
+
+    try {
+      console.log('VALIDATING REFERENCE URL', { url, method });
+      const response = await fetch(url, {
+        method,
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      const contentType = response.headers.get('content-type') ?? '';
+
+      console.log('REFERENCE FETCH STATUS', {
+        url,
+        method,
+        status: response.status,
+        ok: response.ok,
+      });
+      console.log('REFERENCE CONTENT TYPE', {
+        url,
+        method,
+        contentType,
+      });
+
+      if (method === 'GET') {
+        void response.body?.cancel();
+      }
+
+      lastValidation = {
+        ok: response.ok && contentType.toLowerCase().startsWith('image/'),
+        status: response.status,
+        contentType,
+        error: response.ok ? null : response.statusText,
+      };
+
+      if (lastValidation.ok) return lastValidation;
+    } catch (error) {
+      lastValidation = {
+        ok: false,
+        status: null,
+        contentType: null,
+        error: error instanceof Error ? error.message : 'Unable to fetch reference image.',
+      };
+      console.log('REFERENCE FETCH STATUS', {
+        url,
+        method,
+        status: null,
+        ok: false,
+        error: lastValidation.error,
+      });
+      console.log('REFERENCE CONTENT TYPE', {
+        url,
+        method,
+        contentType: null,
+      });
+    } finally {
+      globalThis.clearTimeout(timeout);
+    }
   }
 
-  return null;
+  return lastValidation;
 }
 
 function rejectionReason(value: unknown): string | null {
@@ -454,15 +579,15 @@ function valueLooksLikeBareFileName(value: string): boolean {
   return !value.includes('/') && /\.(png|jpe?g|webp|gif)$/i.test(value);
 }
 
-async function lookupMediaAssetUrl(
+async function lookupMediaAssetUrlCandidates(
   value: string,
   userId?: string | null,
-): Promise<{ url: string; source: string } | null> {
-  if (!supabase || !userId) return null;
+): Promise<Array<{ url: string; source: string }>> {
+  if (!supabase || !userId) return [];
   const client = supabase;
 
   const cleanValue = cleanCandidateValue(value);
-  if (!cleanValue) return null;
+  if (!cleanValue) return [];
 
   const normalizedPath = normalizeStoragePath(cleanValue);
   const fileName = normalizedPath.split('/').pop() ?? normalizedPath;
@@ -480,7 +605,7 @@ async function lookupMediaAssetUrl(
           .select('bucket, object_path')
           .eq('user_id', userId)
           .eq('object_path', normalizedPath)
-          .limit(1);
+          .limit(8);
         return { data, error };
       },
     });
@@ -495,7 +620,7 @@ async function lookupMediaAssetUrl(
         .eq('user_id', userId)
         .eq('file_name', fileName)
         .order('updated_at', { ascending: false })
-        .limit(1);
+        .limit(8);
       return { data, error };
     },
   });
@@ -509,10 +634,13 @@ async function lookupMediaAssetUrl(
         .eq('user_id', userId)
         .ilike('object_path', `%${fileName}`)
         .order('updated_at', { ascending: false })
-        .limit(1);
+        .limit(8);
       return { data, error };
     },
   });
+
+  const results: Array<{ url: string; source: string }> = [];
+  const seen = new Set<string>();
 
   for (const lookup of lookups) {
     try {
@@ -526,19 +654,22 @@ async function lookupMediaAssetUrl(
         continue;
       }
 
-      const asset = Array.isArray(data) ? data[0] as Record<string, unknown> | undefined : undefined;
-      const bucket = typeof asset?.bucket === 'string' && bucketSet.has(asset.bucket)
-        ? asset.bucket as ReferenceBucket
-        : null;
-      const objectPath = typeof asset?.object_path === 'string' ? asset.object_path : null;
+      const assets = Array.isArray(data) ? data as Array<Record<string, unknown>> : [];
+      for (const asset of assets) {
+        const bucket = typeof asset?.bucket === 'string' && bucketSet.has(asset.bucket)
+          ? asset.bucket as ReferenceBucket
+          : null;
+        const objectPath = typeof asset?.object_path === 'string' ? asset.object_path : null;
 
-      if (bucket && objectPath) {
-        const url = publicUrlForStoragePath({ bucket, objectPath });
-        if (url) {
-          return {
-            url,
-            source: `media_assets.${lookup.label}`,
-          };
+        if (bucket && objectPath) {
+          const url = publicUrlForStoragePath({ bucket, objectPath });
+          if (url && !seen.has(url)) {
+            seen.add(url);
+            results.push({
+              url,
+              source: `media_assets.${lookup.label}`,
+            });
+          }
         }
       }
     } catch (error) {
@@ -550,7 +681,7 @@ async function lookupMediaAssetUrl(
     }
   }
 
-  return null;
+  return results;
 }
 
 async function resolveCandidateUrl(candidate: ReferenceCandidate): Promise<ResolvedCandidate> {
@@ -563,32 +694,49 @@ async function resolveCandidateUrl(candidate: ReferenceCandidate): Promise<Resol
     };
   }
 
-  const mediaAssetUrl = valueLooksLikeBareFileName(value)
-    ? await lookupMediaAssetUrl(value, candidate.userId)
-    : null;
-  const publicUrl = mediaAssetUrl?.url ?? toPublicSupabaseUrl(value);
+  const publicUrlCandidates = toPublicSupabaseUrlCandidates(value).map((url) => ({
+    url,
+    source: 'public-url',
+  }));
+  const mediaAssetUrlCandidates = await lookupMediaAssetUrlCandidates(value, candidate.userId);
+  const orderedCandidates = valueLooksLikeBareFileName(value)
+    ? [...mediaAssetUrlCandidates, ...publicUrlCandidates]
+    : [...publicUrlCandidates, ...mediaAssetUrlCandidates];
+  const uniqueUrlCandidates = orderedCandidates.filter((urlCandidate, index, array) =>
+    array.findIndex((entry) => entry.url === urlCandidate.url) === index,
+  );
 
-  if (publicUrl) {
-    return {
-      url: publicUrl,
-      source: mediaAssetUrl?.source ?? 'public-url',
-      rejectionReason: null,
-    };
-  }
+  for (const urlCandidate of uniqueUrlCandidates) {
+    const validation = await validatePublicImageUrl(urlCandidate.url);
 
-  const fallbackMediaAssetUrl = await lookupMediaAssetUrl(value, candidate.userId);
-  if (fallbackMediaAssetUrl?.url) {
-    return {
-      url: fallbackMediaAssetUrl.url,
-      source: fallbackMediaAssetUrl.source,
-      rejectionReason: null,
-    };
+    if (validation.ok) {
+      return {
+        url: urlCandidate.url,
+        source: urlCandidate.source,
+        rejectionReason: null,
+      };
+    }
+
+    console.log('REFERENCE CANDIDATE REJECTED:', {
+      label: candidate.label,
+      slot: candidate.slot,
+      valuePreview: previewValue(candidate.value),
+      urlPreview: previewValue(urlCandidate.url),
+      reason: 'public fetch validation failed',
+      status: validation.status,
+      contentType: validation.contentType,
+      error: validation.error,
+    });
   }
 
   return {
     url: null,
     source: null,
-    rejectionReason: rejectionReason(candidate.value) ?? 'unresolved storage reference',
+    rejectionReason: rejectionReason(candidate.value) ?? (
+      uniqueUrlCandidates.length
+        ? 'reference image is not publicly accessible'
+        : 'unresolved storage reference'
+    ),
   };
 }
 

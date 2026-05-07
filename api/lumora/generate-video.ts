@@ -307,6 +307,77 @@ function isValidHttpUrl(url: string) {
     (url.startsWith('http://') || url.startsWith('https://'));
 }
 
+async function validateReferenceImageUrl(referenceImageUrl: string): Promise<{
+  ok: boolean;
+  status: number | null;
+  contentType: string | null;
+}> {
+  const methods: Array<'HEAD' | 'GET'> = ['HEAD', 'GET'];
+  let lastStatus: number | null = null;
+  let lastContentType: string | null = null;
+
+  for (const method of methods) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+
+    try {
+      console.log('VALIDATING REFERENCE URL', { referenceImageUrl, method });
+      const response = await fetch(referenceImageUrl, {
+        method,
+        signal: controller.signal,
+      });
+      const contentType = response.headers.get('content-type') ?? '';
+      lastStatus = response.status;
+      lastContentType = contentType;
+
+      console.log('REFERENCE FETCH STATUS', {
+        referenceImageUrl,
+        method,
+        status: response.status,
+        ok: response.ok,
+      });
+      console.log('REFERENCE CONTENT TYPE', {
+        referenceImageUrl,
+        method,
+        contentType,
+      });
+
+      if (method === 'GET') {
+        void response.body?.cancel();
+      }
+
+      if (response.ok && contentType.toLowerCase().startsWith('image/')) {
+        return {
+          ok: true,
+          status: response.status,
+          contentType,
+        };
+      }
+    } catch (error) {
+      console.log('REFERENCE FETCH STATUS', {
+        referenceImageUrl,
+        method,
+        status: null,
+        ok: false,
+        error: errorMessage(error),
+      });
+      console.log('REFERENCE CONTENT TYPE', {
+        referenceImageUrl,
+        method,
+        contentType: null,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  return {
+    ok: false,
+    status: lastStatus,
+    contentType: lastContentType,
+  };
+}
+
 async function runReplicate(input: {
   replicate: ReplicateClient;
   model: ReplicateModelIdentifier;
@@ -407,6 +478,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return sendJson(res, 400, {
         error: 'Invalid reference image URL',
         received: referenceImageUrl,
+      });
+    }
+
+    const referenceValidation = await validateReferenceImageUrl(referenceImageUrl);
+    if (!referenceValidation.ok) {
+      return sendJson(res, 400, {
+        error: 'Reference image is not publicly accessible',
+        referenceImageUrl,
+        status: referenceValidation.status,
+        contentType: referenceValidation.contentType,
       });
     }
 
