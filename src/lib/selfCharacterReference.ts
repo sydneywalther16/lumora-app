@@ -11,6 +11,17 @@ type ReferenceCandidate = {
   bucket: ReferenceBucket;
 };
 
+type StoragePath = {
+  bucket: ReferenceBucket;
+  objectPath: string;
+};
+
+type ResolvedCandidate = {
+  url: string | null;
+  source: string | null;
+  rejectionReason: string | null;
+};
+
 export type SelfCharacterReferenceImage = {
   url: string | null;
   label: string | null;
@@ -62,6 +73,25 @@ function isTransientOrLocalUrl(value: string): boolean {
   }
 }
 
+function rejectionReason(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return 'empty';
+
+  const trimmed = value.trim();
+  if (trimmed.startsWith('blob:')) return 'blob:';
+  if (trimmed.startsWith('data:')) return 'data:';
+  if (trimmed.startsWith('file:')) return 'relative path';
+  if (trimmed.startsWith('/') || trimmed.startsWith('./') || trimmed.startsWith('../')) return 'relative path';
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return 'missing protocol';
+    if (['localhost', '127.0.0.1', '0.0.0.0'].includes(parsed.hostname)) return 'relative path';
+    return null;
+  } catch {
+    return 'missing protocol';
+  }
+}
+
 function isValidPublicUrl(value: unknown): boolean {
   if (typeof value !== 'string' || isTransientOrLocalUrl(value)) return false;
 
@@ -79,25 +109,61 @@ function readObject(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function storagePathFromValue(value: unknown, bucket: ReferenceBucket): string | null {
-  if (typeof value !== 'string') return null;
-  if (isValidPublicUrl(value) || isTransientOrLocalUrl(value)) return null;
+function normalizePotentialStoragePath(value: string): string {
+  return value
+    .trim()
+    .replace(/^(\.\/|\.\.\/)+/, '')
+    .replace(/^\/+/, '');
+}
 
-  const trimmed = value.trim().replace(/^\/+/, '');
-  if (!trimmed || trimmed.includes(' ') || !trimmed.includes('/')) return null;
+function bucketPrefixedPath(path: string): StoragePath | null {
+  const normalized = normalizePotentialStoragePath(path);
 
-  if (trimmed.startsWith(`${bucket}/`)) {
-    return trimmed.slice(bucket.length + 1);
+  if (normalized.startsWith('avatars/')) {
+    return {
+      bucket: 'avatars',
+      objectPath: normalized.slice('avatars/'.length),
+    };
   }
 
-  if (/\.(png|jpe?g|webp|gif)$/i.test(trimmed)) {
-    return trimmed;
+  if (normalized.startsWith('character-reference-images/')) {
+    return {
+      bucket: 'character-reference-images',
+      objectPath: normalized.slice('character-reference-images/'.length),
+    };
   }
 
   return null;
 }
 
-function storagePathFromSupabaseUrl(value: string, bucket: ReferenceBucket): string | null {
+function storagePathFromValue(value: unknown, bucket: ReferenceBucket): StoragePath | null {
+  if (typeof value !== 'string') return null;
+  if (isValidPublicUrl(value)) return null;
+
+  const bucketPath = bucketPrefixedPath(value);
+  if (bucketPath?.objectPath) return bucketPath;
+
+  const trimmed = normalizePotentialStoragePath(value);
+  if (!trimmed || trimmed.includes(' ') || !trimmed.includes('/')) return null;
+
+  if (trimmed.startsWith(`${bucket}/`)) {
+    return {
+      bucket,
+      objectPath: trimmed.slice(bucket.length + 1),
+    };
+  }
+
+  if (/\.(png|jpe?g|webp|gif)$/i.test(trimmed)) {
+    return {
+      bucket,
+      objectPath: trimmed,
+    };
+  }
+
+  return null;
+}
+
+function storagePathFromSupabaseUrl(value: string, bucket: ReferenceBucket): StoragePath | null {
   try {
     const parsed = new URL(value);
     const marker = `/storage/v1/object/`;
@@ -105,34 +171,80 @@ function storagePathFromSupabaseUrl(value: string, bucket: ReferenceBucket): str
     if (markerIndex < 0) return null;
 
     const objectPath = parsed.pathname.slice(markerIndex + marker.length);
-    const bucketPathMatch = objectPath.match(new RegExp(`^(?:public|sign)/${bucket}/(.+)$`));
-    return bucketPathMatch?.[1] ? decodeURIComponent(bucketPathMatch[1]) : null;
+    const bucketPathMatch = objectPath.match(/^(?:public|sign)\/([^/]+)\/(.+)$/);
+    const matchedBucket = bucketPathMatch?.[1];
+    const matchedPath = bucketPathMatch?.[2];
+
+    if ((matchedBucket === 'avatars' || matchedBucket === 'character-reference-images') && matchedPath) {
+      return {
+        bucket: matchedBucket,
+        objectPath: decodeURIComponent(matchedPath),
+      };
+    }
+
+    const candidateBucketMatch = objectPath.match(new RegExp(`^(?:public|sign)/${bucket}/(.+)$`));
+    return candidateBucketMatch?.[1]
+      ? {
+          bucket,
+          objectPath: decodeURIComponent(candidateBucketMatch[1]),
+        }
+      : null;
   } catch {
     return null;
   }
 }
 
-async function storagePathToUrl(value: unknown, bucket: ReferenceBucket): Promise<string | null> {
-  const objectPath = typeof value === 'string' && isValidPublicUrl(value)
+async function storagePathToUrl(value: unknown, bucket: ReferenceBucket): Promise<{ url: string; source: string } | null> {
+  const storagePath = typeof value === 'string' && isValidPublicUrl(value)
     ? storagePathFromSupabaseUrl(value, bucket)
     : storagePathFromValue(value, bucket);
-  if (!objectPath || !supabase) return null;
+  if (!storagePath || !supabase) return null;
+
+  if (storagePath.bucket === 'avatars') {
+    try {
+      const publicUrl = supabase.storage.from(storagePath.bucket).getPublicUrl(storagePath.objectPath).data.publicUrl;
+      if (publicUrl) {
+        return {
+          url: publicUrl,
+          source: `${storagePath.bucket}:${storagePath.objectPath}`,
+        };
+      }
+    } catch (error) {
+      console.warn('[getSelfCharacterReferenceImage] Unable to create avatar public URL:', {
+        bucket: storagePath.bucket,
+        objectPath: storagePath.objectPath,
+        error,
+      });
+    }
+  }
 
   try {
     const { data, error } = await supabase.storage
-      .from(bucket)
-      .createSignedUrl(objectPath, 60 * 60 * 24);
+      .from(storagePath.bucket)
+      .createSignedUrl(storagePath.objectPath, 60 * 60 * 24);
 
-    if (!error && data?.signedUrl) return data.signedUrl;
+    if (!error && data?.signedUrl) {
+      return {
+        url: data.signedUrl,
+        source: `${storagePath.bucket}:${storagePath.objectPath}`,
+      };
+    }
   } catch (error) {
     console.warn('[getSelfCharacterReferenceImage] Unable to create signed reference URL:', {
-      bucket,
+      bucket: storagePath.bucket,
+      objectPath: storagePath.objectPath,
       error,
     });
   }
 
   try {
-    return supabase.storage.from(bucket).getPublicUrl(objectPath).data.publicUrl;
+    const publicUrl = supabase.storage.from(storagePath.bucket).getPublicUrl(storagePath.objectPath).data.publicUrl;
+    return publicUrl
+      ? {
+          url: publicUrl,
+          source: `${storagePath.bucket}:${storagePath.objectPath}`,
+        }
+      : null;
   } catch {
     return null;
   }
@@ -240,17 +352,54 @@ function slotPriority(slot: ReferenceCandidate['slot']) {
   return 6;
 }
 
-async function resolveCandidateUrl(candidate: ReferenceCandidate): Promise<string | null> {
+async function resolveCandidateUrl(candidate: ReferenceCandidate): Promise<ResolvedCandidate> {
   const refreshedStorageUrl = await storagePathToUrl(candidate.value, candidate.bucket);
-  if (refreshedStorageUrl) return refreshedStorageUrl;
-  if (isValidPublicUrl(candidate.value) && typeof candidate.value === 'string') return candidate.value;
-  return null;
+  if (refreshedStorageUrl) {
+    return {
+      url: refreshedStorageUrl.url,
+      source: refreshedStorageUrl.source,
+      rejectionReason: null,
+    };
+  }
+
+  if (isValidPublicUrl(candidate.value) && typeof candidate.value === 'string') {
+    return {
+      url: candidate.value,
+      source: 'public-url',
+      rejectionReason: null,
+    };
+  }
+
+  return {
+    url: null,
+    source: null,
+    rejectionReason: rejectionReason(candidate.value),
+  };
 }
 
 export async function getSelfCharacterReferenceImage(input: {
   selfCharacter: CharacterProfile | Record<string, unknown> | null | undefined;
   profile?: LumoraProfile | null;
 }): Promise<SelfCharacterReferenceImage> {
+  const characterRecord = readObject(input.selfCharacter);
+  const referenceRecord = readObject(characterRecord.referenceImageUrls);
+  const profileRecord = readObject(input.profile);
+  const profileReferenceRecord = readObject(profileRecord.selfReferenceImageUrls);
+  const fieldsChecked = {
+    frontFace: referenceRecord.frontFace ?? characterRecord.frontFace ?? profileReferenceRecord.frontFace ?? null,
+    frontFaceUrl: referenceRecord.frontFaceUrl ?? characterRecord.frontFaceUrl ?? profileReferenceRecord.frontFaceUrl ?? null,
+    frontImage: referenceRecord.frontImage ?? characterRecord.frontImage ?? profileReferenceRecord.frontImage ?? null,
+    fullBody: referenceRecord.fullBody ?? characterRecord.fullBody ?? profileReferenceRecord.fullBody ?? null,
+    leftAngle: referenceRecord.leftAngle ?? characterRecord.leftAngle ?? profileReferenceRecord.leftAngle ?? null,
+    rightAngle: referenceRecord.rightAngle ?? characterRecord.rightAngle ?? profileReferenceRecord.rightAngle ?? null,
+    avatar:
+      characterRecord.avatar ??
+      characterRecord.avatarUrl ??
+      profileRecord.defaultSelfCharacterAvatar ??
+      profileRecord.avatar ??
+      null,
+    imageUrl: referenceRecord.imageUrl ?? characterRecord.imageUrl ?? profileRecord.imageUrl ?? null,
+  };
   const candidates = buildReferenceCandidates(input.selfCharacter, input.profile)
     .sort((a, b) => slotPriority(a.slot) - slotPriority(b.slot));
   const inspectedFields = candidates.map((candidate) => ({
@@ -261,6 +410,16 @@ export async function getSelfCharacterReferenceImage(input: {
   }));
   const referenceImageUrls: Partial<ReferenceImageUrls> = {};
 
+  console.log('SELF CHARACTER RAW:', input.selfCharacter);
+  console.log('FIELDS CHECKED:', fieldsChecked);
+  console.log('REFERENCE CANDIDATES:', candidates.map((candidate) => ({
+    label: candidate.label,
+    slot: candidate.slot,
+    bucket: candidate.bucket,
+    value: candidate.value,
+    valuePreview: previewValue(candidate.value),
+    prefilterReason: rejectionReason(candidate.value),
+  })));
   console.log('[getSelfCharacterReferenceImage] inspected fields', {
     selfCharacterId: readObject(input.selfCharacter).id ?? null,
     candidateCount: candidates.length,
@@ -272,8 +431,23 @@ export async function getSelfCharacterReferenceImage(input: {
   let selectedSlot: string | null = null;
 
   for (const candidate of candidates) {
-    const url = await resolveCandidateUrl(candidate);
-    if (!url) continue;
+    const resolved = await resolveCandidateUrl(candidate);
+    if (!resolved.url) {
+      console.log('REFERENCE CANDIDATE REJECTED:', {
+        label: candidate.label,
+        slot: candidate.slot,
+        valuePreview: previewValue(candidate.value),
+        reason: resolved.rejectionReason,
+      });
+      continue;
+    }
+
+    console.log('REFERENCE CANDIDATE ACCEPTED:', {
+      label: candidate.label,
+      slot: candidate.slot,
+      source: resolved.source,
+      urlPreview: previewValue(resolved.url),
+    });
 
     if (
       candidate.slot === 'frontFace' ||
@@ -282,11 +456,11 @@ export async function getSelfCharacterReferenceImage(input: {
       candidate.slot === 'rightAngle' ||
       candidate.slot === 'expressive'
     ) {
-      referenceImageUrls[candidate.slot] = referenceImageUrls[candidate.slot] || url;
+      referenceImageUrls[candidate.slot] = referenceImageUrls[candidate.slot] || resolved.url;
     }
 
     if (!selectedUrl) {
-      selectedUrl = url;
+      selectedUrl = resolved.url;
       selectedLabel = candidate.slot === 'frontFace'
         ? 'Front face'
         : candidate.slot === 'fullBody'

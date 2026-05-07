@@ -285,6 +285,10 @@ export default function CreatePage() {
     };
   }, [activeSelfCharacter, profile]);
 
+  useEffect(() => {
+    console.log('FINAL referenceImageUrl:', referenceImageUrl);
+  }, [referenceImageUrl]);
+
   if (sessionResolving) {
     return (
       <div className="page">
