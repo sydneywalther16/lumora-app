@@ -97,10 +97,20 @@ export type MediaUploadInput = {
 
 export type ReferenceImageUrls = {
   frontFace: string;
+  frontFaceUrl?: string | null;
+  frontFacePath?: string | null;
   leftAngle: string;
+  leftAngleUrl?: string | null;
+  leftAnglePath?: string | null;
   rightAngle: string;
+  rightAngleUrl?: string | null;
+  rightAnglePath?: string | null;
   fullBody?: string | null;
+  fullBodyUrl?: string | null;
+  fullBodyPath?: string | null;
   expressive?: string | null;
+  expressiveUrl?: string | null;
+  expressivePath?: string | null;
 };
 
 export type CreatorSelfStylePreferences = {

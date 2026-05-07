@@ -177,10 +177,20 @@ export function saveCreatorSelfCharacter(payload: {
     // Clean media URLs - remove base64 data before storing
     const cleanedReferenceImageUrls: ReferenceImageUrls = {
       frontFace: cleanMediaUrl(payload.referenceImageUrls.frontFace) || '',
+      frontFaceUrl: cleanMediaUrl(payload.referenceImageUrls.frontFaceUrl ?? payload.referenceImageUrls.frontFace),
+      frontFacePath: cleanMediaUrl(payload.referenceImageUrls.frontFacePath),
       leftAngle: cleanMediaUrl(payload.referenceImageUrls.leftAngle) || '',
+      leftAngleUrl: cleanMediaUrl(payload.referenceImageUrls.leftAngleUrl ?? payload.referenceImageUrls.leftAngle),
+      leftAnglePath: cleanMediaUrl(payload.referenceImageUrls.leftAnglePath),
       rightAngle: cleanMediaUrl(payload.referenceImageUrls.rightAngle) || '',
+      rightAngleUrl: cleanMediaUrl(payload.referenceImageUrls.rightAngleUrl ?? payload.referenceImageUrls.rightAngle),
+      rightAnglePath: cleanMediaUrl(payload.referenceImageUrls.rightAnglePath),
       fullBody: cleanMediaUrl(payload.referenceImageUrls.fullBody),
+      fullBodyUrl: cleanMediaUrl(payload.referenceImageUrls.fullBodyUrl ?? payload.referenceImageUrls.fullBody),
+      fullBodyPath: cleanMediaUrl(payload.referenceImageUrls.fullBodyPath),
       expressive: cleanMediaUrl(payload.referenceImageUrls.expressive),
+      expressiveUrl: cleanMediaUrl(payload.referenceImageUrls.expressiveUrl ?? payload.referenceImageUrls.expressive),
+      expressivePath: cleanMediaUrl(payload.referenceImageUrls.expressivePath),
     };
     const cleanedSourceCaptureVideoUrl = cleanMediaUrl(payload.sourceCaptureVideoUrl);
     const cleanedVoiceSampleUrl = cleanMediaUrl(payload.voiceSampleUrl);
@@ -313,10 +323,20 @@ export function saveLocalCharacter(payload: {
     stylePreferences: payload.stylePreferences,
     referenceImageUrls: {
       frontFace: cleanMediaUrl(payload.referenceImageUrls.frontFace) || '',
+      frontFaceUrl: cleanMediaUrl(payload.referenceImageUrls.frontFaceUrl ?? payload.referenceImageUrls.frontFace),
+      frontFacePath: cleanMediaUrl(payload.referenceImageUrls.frontFacePath),
       leftAngle: cleanMediaUrl(payload.referenceImageUrls.leftAngle) || '',
+      leftAngleUrl: cleanMediaUrl(payload.referenceImageUrls.leftAngleUrl ?? payload.referenceImageUrls.leftAngle),
+      leftAnglePath: cleanMediaUrl(payload.referenceImageUrls.leftAnglePath),
       rightAngle: cleanMediaUrl(payload.referenceImageUrls.rightAngle) || '',
+      rightAngleUrl: cleanMediaUrl(payload.referenceImageUrls.rightAngleUrl ?? payload.referenceImageUrls.rightAngle),
+      rightAnglePath: cleanMediaUrl(payload.referenceImageUrls.rightAnglePath),
       fullBody: cleanMediaUrl(payload.referenceImageUrls.fullBody),
+      fullBodyUrl: cleanMediaUrl(payload.referenceImageUrls.fullBodyUrl ?? payload.referenceImageUrls.fullBody),
+      fullBodyPath: cleanMediaUrl(payload.referenceImageUrls.fullBodyPath),
       expressive: cleanMediaUrl(payload.referenceImageUrls.expressive),
+      expressiveUrl: cleanMediaUrl(payload.referenceImageUrls.expressiveUrl ?? payload.referenceImageUrls.expressive),
+      expressivePath: cleanMediaUrl(payload.referenceImageUrls.expressivePath),
     },
     sourceCaptureVideoUrl: cleanMediaUrl(payload.sourceCaptureVideoUrl),
     voiceSampleUrl: cleanMediaUrl(payload.voiceSampleUrl),

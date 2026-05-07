@@ -26,9 +26,20 @@ export type LumoraStorageBucket =
   | 'post-thumbnails';
 
 type DbRow = Record<string, any>;
+type ReferencePhotoSlot = 'frontFace' | 'leftAngle' | 'rightAngle';
 
 const CREATOR_SELF_CHARACTER_ID = 'creator-self';
-const publicBuckets: LumoraStorageBucket[] = ['avatars', 'generated-videos', 'post-thumbnails'];
+const publicBuckets: LumoraStorageBucket[] = [
+  'avatars',
+  'character-reference-images',
+  'generated-videos',
+  'post-thumbnails',
+];
+const referenceSlotFilePrefixes: Record<ReferencePhotoSlot, string> = {
+  frontFace: 'front-face',
+  leftAngle: 'left-angle',
+  rightAngle: 'right-angle',
+};
 
 function getClient() {
   if (!supabase) {
@@ -122,11 +133,24 @@ function safeFileName(fileName: string) {
     .replace(/^-+|-+$/g, '') || 'upload';
 }
 
+function fileExtension(file: File) {
+  const fromName = file.name.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') ?? '';
+  if (fromName) return fromName;
+
+  const fromType = file.type.split('/').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') ?? '';
+  if (fromType === 'jpeg') return 'jpg';
+  return fromType || 'jpg';
+}
+
+function publicUrlForObjectPath(bucket: LumoraStorageBucket, objectPath: string): string {
+  return getClient().storage.from(bucket).getPublicUrl(objectPath).data.publicUrl.split('?')[0];
+}
+
 function publicOrSignedUrl(bucket: LumoraStorageBucket, objectPath: string): Promise<string> | string {
   const client = getClient();
 
   if (publicBuckets.includes(bucket)) {
-    return client.storage.from(bucket).getPublicUrl(objectPath).data.publicUrl;
+    return publicUrlForObjectPath(bucket, objectPath);
   }
 
   return client.storage
@@ -180,6 +204,63 @@ export async function uploadLumoraMedia(input: {
   );
 
   if (assetError) throw assetError;
+
+  return {
+    url,
+    objectPath,
+    fileName: input.file.name,
+  };
+}
+
+export async function uploadCharacterReferencePhoto(input: {
+  userId: string;
+  file: File;
+  slot: ReferencePhotoSlot;
+  usage?: string;
+  entityType?: string;
+  entityId?: string;
+}) {
+  const client = getClient();
+  const bucket: LumoraStorageBucket = 'character-reference-images';
+  const extension = fileExtension(input.file);
+  const objectPath = `${input.userId}/${referenceSlotFilePrefixes[input.slot]}-${Date.now()}.${extension}`;
+  const { error: uploadError } = await client.storage
+    .from(bucket)
+    .upload(objectPath, input.file, {
+      contentType: input.file.type || undefined,
+      upsert: false,
+    });
+
+  if (uploadError) throw uploadError;
+
+  const url = publicUrlForObjectPath(bucket, objectPath);
+  const { error: assetError } = await client.from('media_assets').upsert(
+    {
+      user_id: input.userId,
+      bucket,
+      object_path: objectPath,
+      public_url: url,
+      signed_url: null,
+      file_name: input.file.name,
+      content_type: input.file.type || null,
+      size_bytes: input.file.size,
+      usage: input.usage ?? `self-${input.slot}-reference`,
+      entity_type: input.entityType ?? null,
+      entity_id: input.entityId ?? null,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'bucket,object_path' },
+  );
+
+  if (assetError) throw assetError;
+
+  if (input.slot === 'frontFace') {
+    console.log('UPLOADED FRONT FACE URL', {
+      authUserId: input.userId,
+      objectPath,
+      url,
+    });
+  }
 
   return {
     url,
@@ -412,12 +493,28 @@ function mapStylePreferences(value: unknown): CreatorSelfStylePreferences {
 
 function mapReferenceImages(value: unknown): ReferenceImageUrls {
   const record = stringRecord(value);
+  const frontFaceUrl = record.frontFaceUrl ?? record.frontFace ?? '';
+  const leftAngleUrl = record.leftAngleUrl ?? record.leftAngle ?? '';
+  const rightAngleUrl = record.rightAngleUrl ?? record.rightAngle ?? '';
+  const fullBodyUrl = record.fullBodyUrl ?? record.fullBody ?? null;
+  const expressiveUrl = record.expressiveUrl ?? record.expressive ?? null;
+
   return {
-    frontFace: record.frontFace ?? '',
-    leftAngle: record.leftAngle ?? '',
-    rightAngle: record.rightAngle ?? '',
-    fullBody: record.fullBody ?? null,
-    expressive: record.expressive ?? null,
+    frontFace: frontFaceUrl,
+    frontFaceUrl,
+    frontFacePath: record.frontFacePath ?? null,
+    leftAngle: leftAngleUrl,
+    leftAngleUrl,
+    leftAnglePath: record.leftAnglePath ?? null,
+    rightAngle: rightAngleUrl,
+    rightAngleUrl,
+    rightAnglePath: record.rightAnglePath ?? null,
+    fullBody: fullBodyUrl,
+    fullBodyUrl,
+    fullBodyPath: record.fullBodyPath ?? null,
+    expressive: expressiveUrl,
+    expressiveUrl,
+    expressivePath: record.expressivePath ?? null,
   };
 }
 
@@ -433,12 +530,28 @@ function mapReferencePhotoNames(value: unknown): Partial<Record<keyof ReferenceI
 }
 
 function cleanReferenceImageUrls(value: ReferenceImageUrls): ReferenceImageUrls {
+  const frontFace = storageUrl(value.frontFaceUrl ?? value.frontFace, 'Front reference photo') ?? '';
+  const leftAngle = storageUrl(value.leftAngleUrl ?? value.leftAngle, 'Left reference photo') ?? '';
+  const rightAngle = storageUrl(value.rightAngleUrl ?? value.rightAngle, 'Right reference photo') ?? '';
+  const fullBody = storageUrl(value.fullBodyUrl ?? value.fullBody, 'Full body reference photo');
+  const expressive = storageUrl(value.expressiveUrl ?? value.expressive, 'Expressive reference photo');
+
   return {
-    frontFace: storageUrl(value.frontFace, 'Front reference photo') ?? '',
-    leftAngle: storageUrl(value.leftAngle, 'Left reference photo') ?? '',
-    rightAngle: storageUrl(value.rightAngle, 'Right reference photo') ?? '',
-    fullBody: storageUrl(value.fullBody, 'Full body reference photo'),
-    expressive: storageUrl(value.expressive, 'Expressive reference photo'),
+    frontFace,
+    frontFaceUrl: frontFace,
+    frontFacePath: storageUrl(value.frontFacePath, 'Front reference photo path'),
+    leftAngle,
+    leftAngleUrl: leftAngle,
+    leftAnglePath: storageUrl(value.leftAnglePath, 'Left reference photo path'),
+    rightAngle,
+    rightAngleUrl: rightAngle,
+    rightAnglePath: storageUrl(value.rightAnglePath, 'Right reference photo path'),
+    fullBody,
+    fullBodyUrl: fullBody,
+    fullBodyPath: storageUrl(value.fullBodyPath, 'Full body reference photo path'),
+    expressive,
+    expressiveUrl: expressive,
+    expressivePath: storageUrl(value.expressivePath, 'Expressive reference photo path'),
   };
 }
 
@@ -521,6 +634,10 @@ export async function loadSupabaseCharacters(userId: string): Promise<CharacterP
     authUserId: userId,
     loaded: Boolean(selfResult.data),
     selfCharacterUserId: selfResult.data ? stringValue(selfResult.data.user_id) : null,
+  });
+  console.log('LOADED SELF CHARACTER REFERENCES', {
+    authUserId: userId,
+    references: selfResult.data ? jsonRecord(selfResult.data.reference_image_urls) : null,
   });
 
   const fictionalCharacters = (charactersResult.data ?? []).map(mapCharacterRow);
@@ -643,13 +760,19 @@ export async function saveSupabaseCreatorSelfCharacter(input: {
     selfCharacterUserId: stringValue(selfData.user_id),
     avatarUrlExists: Boolean(jsonRecord(selfData.reference_image_urls).frontFace),
   });
+  console.log('SAVED SELF CHARACTER REFERENCES', {
+    authUserId: input.userId,
+    references: jsonRecord(selfData.reference_image_urls),
+  });
 
   const nextProfile: LumoraProfile = {
     ...input.profile,
     defaultSelfCharacterId: CREATOR_SELF_CHARACTER_ID,
     defaultSelfCharacterName: input.name,
     defaultSelfCharacterAvatar:
-      storageUrl(input.profile.avatar, 'Profile avatar') || stringValue(referenceImageUrls.frontFace),
+      stringValue(referenceImageUrls.frontFaceUrl) ||
+      stringValue(referenceImageUrls.frontFace) ||
+      storageUrl(input.profile.avatar, 'Profile avatar'),
     selfReferenceImageUrls: referenceImageUrls,
     selfReferencePhotoNames: referencePhotoNames,
     selfCaptureVideoName: input.sourceCaptureVideoName ?? null,

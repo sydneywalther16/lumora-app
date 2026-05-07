@@ -54,20 +54,25 @@ export type SelfCharacterReferenceImage = {
 const knownImageKeys = new Set([
   'frontFace',
   'frontFaceUrl',
+  'frontFacePath',
   'frontImage',
   'frontImageUrl',
+  'frontImagePath',
   'front',
   'face',
   'primary',
   'fullBody',
   'fullBodyUrl',
+  'fullBodyPath',
   'body',
   'full',
   'leftAngle',
   'leftAngleUrl',
+  'leftAnglePath',
   'left',
   'rightAngle',
   'rightAngleUrl',
+  'rightAnglePath',
   'right',
   'avatar',
   'avatarUrl',
@@ -430,20 +435,25 @@ function pushKnownReferenceCandidates(
 ) {
   pushCandidate(candidates, 'frontFace', `${prefix}.frontFace`, source.frontFace, userId);
   pushCandidate(candidates, 'frontFace', `${prefix}.frontFaceUrl`, source.frontFaceUrl, userId);
+  pushCandidate(candidates, 'frontFace', `${prefix}.frontFacePath`, source.frontFacePath, userId);
   pushCandidate(candidates, 'frontFace', `${prefix}.frontImage`, source.frontImage, userId);
   pushCandidate(candidates, 'frontFace', `${prefix}.frontImageUrl`, source.frontImageUrl, userId);
+  pushCandidate(candidates, 'frontFace', `${prefix}.frontImagePath`, source.frontImagePath, userId);
   pushCandidate(candidates, 'frontFace', `${prefix}.front`, source.front, userId);
   pushCandidate(candidates, 'frontFace', `${prefix}.face`, source.face, userId);
   pushCandidate(candidates, 'frontFace', `${prefix}.primary`, source.primary, userId);
   pushCandidate(candidates, 'fullBody', `${prefix}.fullBody`, source.fullBody, userId);
   pushCandidate(candidates, 'fullBody', `${prefix}.fullBodyUrl`, source.fullBodyUrl, userId);
+  pushCandidate(candidates, 'fullBody', `${prefix}.fullBodyPath`, source.fullBodyPath, userId);
   pushCandidate(candidates, 'fullBody', `${prefix}.body`, source.body, userId);
   pushCandidate(candidates, 'fullBody', `${prefix}.full`, source.full, userId);
   pushCandidate(candidates, 'leftAngle', `${prefix}.leftAngle`, source.leftAngle, userId);
   pushCandidate(candidates, 'leftAngle', `${prefix}.leftAngleUrl`, source.leftAngleUrl, userId);
+  pushCandidate(candidates, 'leftAngle', `${prefix}.leftAnglePath`, source.leftAnglePath, userId);
   pushCandidate(candidates, 'leftAngle', `${prefix}.left`, source.left, userId);
   pushCandidate(candidates, 'rightAngle', `${prefix}.rightAngle`, source.rightAngle, userId);
   pushCandidate(candidates, 'rightAngle', `${prefix}.rightAngleUrl`, source.rightAngleUrl, userId);
+  pushCandidate(candidates, 'rightAngle', `${prefix}.rightAnglePath`, source.rightAnglePath, userId);
   pushCandidate(candidates, 'rightAngle', `${prefix}.right`, source.right, userId);
   pushCandidate(candidates, 'avatar', `${prefix}.avatar`, source.avatar, userId);
   pushCandidate(candidates, 'avatar', `${prefix}.avatarUrl`, source.avatarUrl, userId);
@@ -759,6 +769,7 @@ export async function getSelfCharacterReferenceImage(input: {
       profileReferencePhotoNames.frontFace ??
       null,
     frontFaceUrl: referenceRecord.frontFaceUrl ?? characterRecord.frontFaceUrl ?? profileReferenceRecord.frontFaceUrl ?? null,
+    frontFacePath: referenceRecord.frontFacePath ?? characterRecord.frontFacePath ?? profileReferenceRecord.frontFacePath ?? null,
     frontImage: referenceRecord.frontImage ?? characterRecord.frontImage ?? profileReferenceRecord.frontImage ?? null,
     fullBody: referenceRecord.fullBody ?? characterRecord.fullBody ?? profileReferenceRecord.fullBody ?? null,
     leftAngle: referenceRecord.leftAngle ?? characterRecord.leftAngle ?? profileReferenceRecord.leftAngle ?? null,

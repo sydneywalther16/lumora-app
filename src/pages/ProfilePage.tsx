@@ -27,6 +27,7 @@ import {
   loadSupabaseProjects,
   saveSupabaseCreatorSelfCharacter,
   saveSupabaseProfile,
+  uploadCharacterReferencePhoto,
   uploadLumoraMedia,
 } from '../lib/supabaseAppData';
 import {
@@ -56,10 +57,13 @@ type CreatorSelfFeatures = {
 
 type SelfCharacterForm = {
   frontFace: string;
+  frontFacePath: string;
   frontFaceName: string;
   leftAngle: string;
+  leftAnglePath: string;
   leftAngleName: string;
   rightAngle: string;
+  rightAnglePath: string;
   rightAngleName: string;
   selfieVideoName: string;
   selfieVideoUrl: string | null;
@@ -84,6 +88,7 @@ type SelfCharacterEditorDraft = SelfCharacterForm &
 
 type ReferencePhotoField = 'frontFace' | 'leftAngle' | 'rightAngle';
 type ReferencePhotoNameField = 'frontFaceName' | 'leftAngleName' | 'rightAngleName';
+type ReferencePhotoPathField = 'frontFacePath' | 'leftAnglePath' | 'rightAnglePath';
 type SelfCharacterFormSource = Partial<Omit<SelfCharacterForm, 'features' | 'style'>> & {
   features?: Partial<CreatorSelfFeatures>;
   style?: Partial<CreatorSelfStylePreferences>;
@@ -97,6 +102,12 @@ const referencePhotoNameFields: Record<ReferencePhotoField, ReferencePhotoNameFi
   frontFace: 'frontFaceName',
   leftAngle: 'leftAngleName',
   rightAngle: 'rightAngleName',
+};
+
+const referencePhotoPathFields: Record<ReferencePhotoField, ReferencePhotoPathField> = {
+  frontFace: 'frontFacePath',
+  leftAngle: 'leftAnglePath',
+  rightAngle: 'rightAnglePath',
 };
 
 const emptyCreatorSelfFeatures: CreatorSelfFeatures = {
@@ -417,10 +428,13 @@ function parseSelfCharacterEditorDraft(value: unknown): SelfCharacterEditorDraft
 
   return {
     frontFace: readString(record.frontFace),
+    frontFacePath: readString(record.frontFacePath),
     frontFaceName: readString(record.frontFaceName),
     leftAngle: readString(record.leftAngle),
+    leftAnglePath: readString(record.leftAnglePath),
     leftAngleName: readString(record.leftAngleName),
     rightAngle: readString(record.rightAngle),
+    rightAnglePath: readString(record.rightAnglePath),
     rightAngleName: readString(record.rightAngleName),
     selfieVideoName: readString(record.selfieVideoName),
     selfieVideoUrl: firstNullableString(readString(record.selfieVideoUrl)),
@@ -459,10 +473,13 @@ function createSelfCharacterEditorDraft(form: SelfCharacterForm): SelfCharacterE
 
   return {
     frontFace: form.frontFace,
+    frontFacePath: form.frontFacePath,
     frontFaceName: form.frontFaceName,
     leftAngle: form.leftAngle,
+    leftAnglePath: form.leftAnglePath,
     leftAngleName: form.leftAngleName,
     rightAngle: form.rightAngle,
+    rightAnglePath: form.rightAnglePath,
     rightAngleName: form.rightAngleName,
     selfieVideoName: form.selfieVideoName,
     selfieVideoUrl: form.selfieVideoUrl,
@@ -536,17 +553,21 @@ function buildCreatorSelfCharacterSource(character: CharacterProfile | null): Se
   const editorDraft = getCharacterEditorDraft(character);
   const formValues = getCreatorSelfFormValues(character);
   const stylePreferences = readObjectRecord(character.stylePreferences);
+  const referencePhotoNames = readObjectRecord(character.referencePhotoNames);
   const compactFeatures = compactStringRecord(formValues.features);
   const compactStyle = compactStringRecord(formValues.style);
 
   return {
     ...editorDraft,
-    frontFace: firstString(character.referenceImageUrls.frontFace, editorDraft?.frontFace),
-    frontFaceName: firstString(editorDraft?.frontFaceName, character.referenceImageUrls.frontFace ? 'Saved front photo' : ''),
-    leftAngle: firstString(character.referenceImageUrls.leftAngle, editorDraft?.leftAngle),
-    leftAngleName: firstString(editorDraft?.leftAngleName, character.referenceImageUrls.leftAngle ? 'Saved left angle photo' : ''),
-    rightAngle: firstString(character.referenceImageUrls.rightAngle, editorDraft?.rightAngle),
-    rightAngleName: firstString(editorDraft?.rightAngleName, character.referenceImageUrls.rightAngle ? 'Saved right angle photo' : ''),
+    frontFace: firstString(character.referenceImageUrls.frontFaceUrl, character.referenceImageUrls.frontFace, editorDraft?.frontFace),
+    frontFacePath: firstString(character.referenceImageUrls.frontFacePath, editorDraft?.frontFacePath),
+    frontFaceName: firstString(readString(referencePhotoNames.frontFace), editorDraft?.frontFaceName, character.referenceImageUrls.frontFace ? 'Saved front photo' : ''),
+    leftAngle: firstString(character.referenceImageUrls.leftAngleUrl, character.referenceImageUrls.leftAngle, editorDraft?.leftAngle),
+    leftAnglePath: firstString(character.referenceImageUrls.leftAnglePath, editorDraft?.leftAnglePath),
+    leftAngleName: firstString(readString(referencePhotoNames.leftAngle), editorDraft?.leftAngleName, character.referenceImageUrls.leftAngle ? 'Saved left angle photo' : ''),
+    rightAngle: firstString(character.referenceImageUrls.rightAngleUrl, character.referenceImageUrls.rightAngle, editorDraft?.rightAngle),
+    rightAnglePath: firstString(character.referenceImageUrls.rightAnglePath, editorDraft?.rightAnglePath),
+    rightAngleName: firstString(readString(referencePhotoNames.rightAngle), editorDraft?.rightAngleName, character.referenceImageUrls.rightAngle ? 'Saved right angle photo' : ''),
     selfieVideoName: firstString(editorDraft?.selfieVideoName, character.sourceCaptureVideoUrl ? 'Saved selfie video' : ''),
     selfieVideoUrl: firstNullableString(character.sourceCaptureVideoUrl, editorDraft?.selfieVideoUrl),
     voiceSampleName: firstString(
@@ -591,11 +612,14 @@ function buildProfileSelfCharacterSource(profile: LumoraProfile): SelfCharacterF
 
   return {
     ...editorDraft,
-    frontFace: firstString(readString(referenceImageUrls.frontFace), profile.defaultSelfCharacterAvatar, profile.avatar, editorDraft?.frontFace),
+    frontFace: firstString(readString(referenceImageUrls.frontFaceUrl), readString(referenceImageUrls.frontFace), profile.defaultSelfCharacterAvatar, profile.avatar, editorDraft?.frontFace),
+    frontFacePath: firstString(readString(referenceImageUrls.frontFacePath), editorDraft?.frontFacePath),
     frontFaceName: firstString(readString(referencePhotoNames.frontFace), editorDraft?.frontFaceName),
-    leftAngle: firstString(readString(referenceImageUrls.leftAngle), editorDraft?.leftAngle),
+    leftAngle: firstString(readString(referenceImageUrls.leftAngleUrl), readString(referenceImageUrls.leftAngle), editorDraft?.leftAngle),
+    leftAnglePath: firstString(readString(referenceImageUrls.leftAnglePath), editorDraft?.leftAnglePath),
     leftAngleName: firstString(readString(referencePhotoNames.leftAngle), editorDraft?.leftAngleName),
-    rightAngle: firstString(readString(referenceImageUrls.rightAngle), editorDraft?.rightAngle),
+    rightAngle: firstString(readString(referenceImageUrls.rightAngleUrl), readString(referenceImageUrls.rightAngle), editorDraft?.rightAngle),
+    rightAnglePath: firstString(readString(referenceImageUrls.rightAnglePath), editorDraft?.rightAnglePath),
     rightAngleName: firstString(readString(referencePhotoNames.rightAngle), editorDraft?.rightAngleName),
     selfieVideoName: firstString(profile.selfCaptureVideoName, editorDraft?.selfieVideoName),
     selfieVideoUrl: firstNullableString(profile.selfCaptureVideoUrl, editorDraft?.selfieVideoUrl),
@@ -631,10 +655,13 @@ function mergeSelfCharacterFormSources(...sources: SelfCharacterFormSource[]): S
 
   return {
     frontFace: findStringField('frontFace'),
+    frontFacePath: findStringField('frontFacePath'),
     frontFaceName: findStringField('frontFaceName'),
     leftAngle: findStringField('leftAngle'),
+    leftAnglePath: findStringField('leftAnglePath'),
     leftAngleName: findStringField('leftAngleName'),
     rightAngle: findStringField('rightAngle'),
+    rightAnglePath: findStringField('rightAnglePath'),
     rightAngleName: findStringField('rightAngleName'),
     selfieVideoName: findStringField('selfieVideoName'),
     selfieVideoUrl: findNullableStringField('selfieVideoUrl'),
@@ -679,10 +706,13 @@ function buildSelfCharacterForm(profile: LumoraProfile, character: CharacterProf
 function buildBlankSelfCharacterForm(): SelfCharacterForm {
   return {
     frontFace: '',
+    frontFacePath: '',
     frontFaceName: '',
     leftAngle: '',
+    leftAnglePath: '',
     leftAngleName: '',
     rightAngle: '',
+    rightAnglePath: '',
     rightAngleName: '',
     selfieVideoName: '',
     selfieVideoUrl: null,
@@ -1737,17 +1767,29 @@ export default function ProfilePage() {
     if (!file) return;
 
     try {
-      const dataUrl = authUserId
-        ? (await uploadLumoraMedia({
-            userId: authUserId,
-            bucket: 'character-reference-images',
-            file,
-            folder: `self/${field}`,
-            usage: `self-${field}-reference`,
-          })).url
-        : await readFileAsDataUrl(file);
       const nameField = referencePhotoNameFields[field];
-      setSelfForm((current) => ({ ...current, [field]: dataUrl, [nameField]: file.name }));
+      const pathField = referencePhotoPathFields[field];
+
+      if (authUserId) {
+        const upload = await uploadCharacterReferencePhoto({
+          userId: authUserId,
+          file,
+          slot: field,
+          usage: `self-${field}-reference`,
+          entityType: 'self_character',
+          entityId: CREATOR_SELF_CHARACTER_ID,
+        });
+        setSelfForm((current) => ({
+          ...current,
+          [field]: upload.url,
+          [pathField]: upload.objectPath,
+          [nameField]: upload.fileName,
+        }));
+        return;
+      }
+
+      const dataUrl = await readFileAsDataUrl(file);
+      setSelfForm((current) => ({ ...current, [field]: dataUrl, [pathField]: '', [nameField]: file.name }));
     } catch (error) {
       setSelfCharacterStatus(error instanceof Error ? error.message : 'Unable to upload reference photo.');
     }
@@ -1867,8 +1909,14 @@ export default function ProfilePage() {
       try {
         const referenceImageUrls = {
           frontFace: selfForm.frontFace,
+          frontFaceUrl: selfForm.frontFace,
+          frontFacePath: selfForm.frontFacePath || null,
           leftAngle: selfForm.leftAngle,
+          leftAngleUrl: selfForm.leftAngle,
+          leftAnglePath: selfForm.leftAnglePath || null,
           rightAngle: selfForm.rightAngle,
+          rightAngleUrl: selfForm.rightAngle,
+          rightAnglePath: selfForm.rightAnglePath || null,
         };
         const stylePreferences = {
           creatorSelfFeatures: compactFeatures,
@@ -1937,8 +1985,14 @@ export default function ProfilePage() {
         name: displayName,
         referenceImageUrls: {
           frontFace: selfForm.frontFace,
+          frontFaceUrl: selfForm.frontFace,
+          frontFacePath: selfForm.frontFacePath || null,
           leftAngle: selfForm.leftAngle,
+          leftAngleUrl: selfForm.leftAngle,
+          leftAnglePath: selfForm.leftAnglePath || null,
           rightAngle: selfForm.rightAngle,
+          rightAngleUrl: selfForm.rightAngle,
+          rightAnglePath: selfForm.rightAnglePath || null,
         },
         sourceCaptureVideoUrl: selfForm.selfieVideoUrl,
         voiceSampleUrl: selfForm.voiceSampleUrl,
@@ -1965,8 +2019,14 @@ export default function ProfilePage() {
         defaultSelfCharacterAvatar: profile.avatar || selfForm.frontFace,
         selfReferenceImageUrls: {
           frontFace: selfForm.frontFace || null,
+          frontFaceUrl: selfForm.frontFace || null,
+          frontFacePath: selfForm.frontFacePath || null,
           leftAngle: selfForm.leftAngle || null,
+          leftAngleUrl: selfForm.leftAngle || null,
+          leftAnglePath: selfForm.leftAnglePath || null,
           rightAngle: selfForm.rightAngle || null,
+          rightAngleUrl: selfForm.rightAngle || null,
+          rightAnglePath: selfForm.rightAnglePath || null,
         },
         selfReferencePhotoNames: {
           frontFace: selfForm.frontFaceName || null,
@@ -2057,8 +2117,14 @@ export default function ProfilePage() {
             name: localCreatorSelf.name || savedProfile.displayName,
             referenceImageUrls: {
               frontFace: localSelfForm.frontFace,
+              frontFaceUrl: localSelfForm.frontFace,
+              frontFacePath: localSelfForm.frontFacePath || null,
               leftAngle: localSelfForm.leftAngle,
+              leftAngleUrl: localSelfForm.leftAngle,
+              leftAnglePath: localSelfForm.leftAnglePath || null,
               rightAngle: localSelfForm.rightAngle,
+              rightAngleUrl: localSelfForm.rightAngle,
+              rightAnglePath: localSelfForm.rightAnglePath || null,
             },
             referencePhotoNames: {
               frontFace: localSelfForm.frontFaceName || null,
@@ -2383,7 +2449,7 @@ export default function ProfilePage() {
                   >
                     <ImagePreview src={selfForm[field]} fallback="Required" />
                   </div>
-                  <strong>{selfForm[field] ? 'Saved' : 'Required'}</strong>
+                  <strong>{selfForm[field] ? 'Uploaded / Ready' : 'Required'}</strong>
                   <span className="muted">
                     {selfForm[referencePhotoNameFields[field]] ||
                       (selfForm[field] ? 'Saved reference photo' : 'No file selected')}
@@ -2565,7 +2631,10 @@ export default function ProfilePage() {
                 flex: '0 0 auto',
               }}
             >
-              <ImagePreview src={creatorSelfCharacter.referenceImageUrls.frontFace} fallback="Self" />
+              <ImagePreview
+                src={creatorSelfCharacter.referenceImageUrls.frontFaceUrl || creatorSelfCharacter.referenceImageUrls.frontFace}
+                fallback="Self"
+              />
             </div>
             <div style={{ minWidth: 0, flex: 1 }}>
               <strong style={{ display: 'block' }}>{creatorSelfCharacter.name}</strong>

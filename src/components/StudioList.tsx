@@ -161,6 +161,7 @@ export default function StudioList({ jobs }: Props) {
       : job.characterName || currentCharacter?.name || null;
     const characterAvatar =
       job.characterAvatar ||
+      currentCharacter?.referenceImageUrls.frontFaceUrl ||
       currentCharacter?.referenceImageUrls.frontFace ||
       (isDefaultSelfCharacter ? profile.defaultSelfCharacterAvatar : null);
 

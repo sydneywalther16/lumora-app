@@ -83,8 +83,8 @@ export default function CharacterLibrary({
               onClick={() => onSelect?.(character)}
             >
               <span className="character-avatar">
-                {character.referenceImageUrls.frontFace ? (
-                  <img src={character.referenceImageUrls.frontFace} alt="" />
+                {character.referenceImageUrls.frontFaceUrl || character.referenceImageUrls.frontFace ? (
+                  <img src={character.referenceImageUrls.frontFaceUrl || character.referenceImageUrls.frontFace} alt="" />
                 ) : (
                   characterInitial(character.name)
                 )}

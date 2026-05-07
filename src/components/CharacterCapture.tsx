@@ -3,6 +3,7 @@ import { type PrivacySetting, type ReferenceImageUrls } from '../lib/api';
 import { saveLocalCharacter } from '../lib/characterStorage';
 import {
   saveSupabaseCharacter,
+  uploadCharacterReferencePhoto,
   uploadLumoraMedia,
 } from '../lib/supabaseAppData';
 import { useSession } from '../hooks/useSession';
@@ -84,25 +85,22 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
 
       if (authUser) {
         const [frontUpload, leftUpload, rightUpload] = await Promise.all([
-          uploadLumoraMedia({
+          uploadCharacterReferencePhoto({
             userId: authUser.id,
-            bucket: 'character-reference-images',
             file: frontFace,
-            folder: 'fictional/front',
+            slot: 'frontFace',
             usage: 'character-front-reference',
           }),
-          uploadLumoraMedia({
+          uploadCharacterReferencePhoto({
             userId: authUser.id,
-            bucket: 'character-reference-images',
             file: leftAngle,
-            folder: 'fictional/left',
+            slot: 'leftAngle',
             usage: 'character-left-reference',
           }),
-          uploadLumoraMedia({
+          uploadCharacterReferencePhoto({
             userId: authUser.id,
-            bucket: 'character-reference-images',
             file: rightAngle,
-            folder: 'fictional/right',
+            slot: 'rightAngle',
             usage: 'character-right-reference',
           }),
         ]);
@@ -134,8 +132,14 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
           stylePreferences,
           referenceImageUrls: {
             frontFace: frontUpload.url,
+            frontFaceUrl: frontUpload.url,
+            frontFacePath: frontUpload.objectPath,
             leftAngle: leftUpload.url,
+            leftAngleUrl: leftUpload.url,
+            leftAnglePath: leftUpload.objectPath,
             rightAngle: rightUpload.url,
+            rightAngleUrl: rightUpload.url,
+            rightAnglePath: rightUpload.objectPath,
             expressive: null,
           },
           referencePhotoNames: {
@@ -205,17 +209,20 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
       <div className="reference-grid">
         <label className="reference-upload">
           <span>Front face</span>
-          <strong>{frontFace?.name ?? 'Required'}</strong>
+          <strong>{frontFace ? 'Uploaded / Ready' : 'Required'}</strong>
+          <span className="muted">{frontFace?.name ?? 'No file selected'}</span>
           <input type="file" accept="image/*" onChange={(event) => setFrontFace(event.target.files?.[0] ?? null)} />
         </label>
         <label className="reference-upload">
           <span>Left angle</span>
-          <strong>{leftAngle?.name ?? 'Required'}</strong>
+          <strong>{leftAngle ? 'Uploaded / Ready' : 'Required'}</strong>
+          <span className="muted">{leftAngle?.name ?? 'No file selected'}</span>
           <input type="file" accept="image/*" onChange={(event) => setLeftAngle(event.target.files?.[0] ?? null)} />
         </label>
         <label className="reference-upload">
           <span>Right angle</span>
-          <strong>{rightAngle?.name ?? 'Required'}</strong>
+          <strong>{rightAngle ? 'Uploaded / Ready' : 'Required'}</strong>
+          <span className="muted">{rightAngle?.name ?? 'No file selected'}</span>
           <input type="file" accept="image/*" onChange={(event) => setRightAngle(event.target.files?.[0] ?? null)} />
         </label>
       </div>

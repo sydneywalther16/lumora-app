@@ -45,9 +45,15 @@ function buildDefaultSelfCharacter(profile: LumoraProfile): CharacterProfile {
     visibility: 'private',
     stylePreferences: {},
     referenceImageUrls: {
-      frontFace: profile.defaultSelfCharacterAvatar ?? '',
-      leftAngle: profile.defaultSelfCharacterAvatar ?? '',
-      rightAngle: profile.defaultSelfCharacterAvatar ?? '',
+      frontFace: profile.selfReferenceImageUrls?.frontFaceUrl ?? profile.defaultSelfCharacterAvatar ?? '',
+      frontFaceUrl: profile.selfReferenceImageUrls?.frontFaceUrl ?? profile.defaultSelfCharacterAvatar ?? null,
+      frontFacePath: profile.selfReferenceImageUrls?.frontFacePath ?? null,
+      leftAngle: profile.selfReferenceImageUrls?.leftAngleUrl ?? profile.defaultSelfCharacterAvatar ?? '',
+      leftAngleUrl: profile.selfReferenceImageUrls?.leftAngleUrl ?? profile.defaultSelfCharacterAvatar ?? null,
+      leftAnglePath: profile.selfReferenceImageUrls?.leftAnglePath ?? null,
+      rightAngle: profile.selfReferenceImageUrls?.rightAngleUrl ?? profile.defaultSelfCharacterAvatar ?? '',
+      rightAngleUrl: profile.selfReferenceImageUrls?.rightAngleUrl ?? profile.defaultSelfCharacterAvatar ?? null,
+      rightAnglePath: profile.selfReferenceImageUrls?.rightAnglePath ?? null,
       fullBody: typeof profileReferenceImages.fullBody === 'string' ? profileReferenceImages.fullBody : null,
     },
     sourceCaptureVideoUrl: profile.selfCaptureVideoUrl ?? null,
@@ -181,7 +187,11 @@ export default function CreatePage() {
                 ...remoteProfile,
                 defaultSelfCharacterId: CREATOR_SELF_CHARACTER_ID,
                 defaultSelfCharacterName: remoteSelfCharacter.name,
-                defaultSelfCharacterAvatar: remoteSelfCharacter.referenceImageUrls.frontFace || remoteProfile.avatar || null,
+                defaultSelfCharacterAvatar:
+                  remoteSelfCharacter.referenceImageUrls.frontFaceUrl ||
+                  remoteSelfCharacter.referenceImageUrls.frontFace ||
+                  remoteProfile.avatar ||
+                  null,
               }
             : remoteProfile;
 
@@ -226,7 +236,10 @@ export default function CreatePage() {
   const characterId = activeSelfCharacter ? CREATOR_SELF_CHARACTER_ID : selectedCharacter?.id ?? null;
   const characterName = activeSelfCharacter ? profile.displayName : selectedCharacter?.name ?? null;
   const characterAvatar = activeSelfCharacter
-    ? profile.defaultSelfCharacterAvatar ?? null
+    ? activeSelfCharacter.referenceImageUrls.frontFaceUrl ??
+      activeSelfCharacter.referenceImageUrls.frontFace ??
+      profile.defaultSelfCharacterAvatar ??
+      null
     : selectedCharacter?.referenceImageUrls.frontFace ?? null;
   const isDefaultSelfCharacter = Boolean(activeSelfCharacter);
   const characterDescription = activeSelfCharacter

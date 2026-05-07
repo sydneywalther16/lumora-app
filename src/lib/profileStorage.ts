@@ -3,9 +3,17 @@ import type { StudioProject } from './projectStorage';
 
 type SelfReferenceImageUrls = {
   frontFace?: string | null;
+  frontFaceUrl?: string | null;
+  frontFacePath?: string | null;
   leftAngle?: string | null;
+  leftAngleUrl?: string | null;
+  leftAnglePath?: string | null;
   rightAngle?: string | null;
+  rightAngleUrl?: string | null;
+  rightAnglePath?: string | null;
   fullBody?: string | null;
+  fullBodyUrl?: string | null;
+  fullBodyPath?: string | null;
 };
 
 type SelfReferencePhotoNames = {
@@ -93,9 +101,17 @@ function readReferenceMetadata(value: unknown): SelfReferenceImageUrls | null {
 
   return {
     frontFace: typeof record.frontFace === 'string' ? record.frontFace : null,
+    frontFaceUrl: typeof record.frontFaceUrl === 'string' ? record.frontFaceUrl : null,
+    frontFacePath: typeof record.frontFacePath === 'string' ? record.frontFacePath : null,
     leftAngle: typeof record.leftAngle === 'string' ? record.leftAngle : null,
+    leftAngleUrl: typeof record.leftAngleUrl === 'string' ? record.leftAngleUrl : null,
+    leftAnglePath: typeof record.leftAnglePath === 'string' ? record.leftAnglePath : null,
     rightAngle: typeof record.rightAngle === 'string' ? record.rightAngle : null,
+    rightAngleUrl: typeof record.rightAngleUrl === 'string' ? record.rightAngleUrl : null,
+    rightAnglePath: typeof record.rightAnglePath === 'string' ? record.rightAnglePath : null,
     fullBody: typeof record.fullBody === 'string' ? record.fullBody : null,
+    fullBodyUrl: typeof record.fullBodyUrl === 'string' ? record.fullBodyUrl : null,
+    fullBodyPath: typeof record.fullBodyPath === 'string' ? record.fullBodyPath : null,
   };
 }
 
