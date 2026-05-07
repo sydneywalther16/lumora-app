@@ -116,7 +116,9 @@ function cleanCandidateValue(value: unknown): string | null {
   if (
     lowerValue.startsWith('blob:') ||
     lowerValue.startsWith('data:') ||
-    lowerValue.startsWith('file:')
+    lowerValue.startsWith('file:') ||
+    lowerValue.includes('localhost') ||
+    lowerValue.includes('undefined')
   ) {
     return null;
   }
@@ -310,76 +312,50 @@ export function toPublicSupabaseUrl(value: string): string | null {
 }
 
 async function validatePublicImageUrl(url: string): Promise<PublicImageValidation> {
-  const methods: Array<'HEAD' | 'GET'> = ['HEAD', 'GET'];
-  let lastValidation: PublicImageValidation = {
-    ok: false,
-    status: null,
-    contentType: null,
-    error: null,
-  };
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort(), 10_000);
 
-  for (const method of methods) {
-    const controller = new AbortController();
-    const timeout = globalThis.setTimeout(() => controller.abort(), 10_000);
+  try {
+    console.log('VALIDATING REFERENCE URL', { url, method: 'HEAD' });
+    const response = await fetch(url, {
+      method: 'HEAD',
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    const contentType = response.headers.get('content-type') ?? '';
+    const validation = {
+      ok: response.status === 200 && contentType.toLowerCase().startsWith('image/'),
+      status: response.status,
+      contentType,
+      error: response.status === 200 ? null : response.statusText,
+    };
 
-    try {
-      console.log('VALIDATING REFERENCE URL', { url, method });
-      const response = await fetch(url, {
-        method,
-        cache: 'no-store',
-        signal: controller.signal,
-      });
-      const contentType = response.headers.get('content-type') ?? '';
+    console.log('VALIDATION RESULT', {
+      url,
+      status: validation.status,
+      contentType: validation.contentType,
+      ok: validation.ok,
+    });
 
-      console.log('REFERENCE FETCH STATUS', {
-        url,
-        method,
-        status: response.status,
-        ok: response.ok,
-      });
-      console.log('REFERENCE CONTENT TYPE', {
-        url,
-        method,
-        contentType,
-      });
+    return validation;
+  } catch (error) {
+    const validation = {
+      ok: false,
+      status: null,
+      contentType: null,
+      error: error instanceof Error ? error.message : 'Unable to fetch reference image.',
+    };
 
-      if (method === 'GET') {
-        void response.body?.cancel();
-      }
+    console.log('VALIDATION RESULT', {
+      url,
+      ok: false,
+      error: validation.error,
+    });
 
-      lastValidation = {
-        ok: response.ok && contentType.toLowerCase().startsWith('image/'),
-        status: response.status,
-        contentType,
-        error: response.ok ? null : response.statusText,
-      };
-
-      if (lastValidation.ok) return lastValidation;
-    } catch (error) {
-      lastValidation = {
-        ok: false,
-        status: null,
-        contentType: null,
-        error: error instanceof Error ? error.message : 'Unable to fetch reference image.',
-      };
-      console.log('REFERENCE FETCH STATUS', {
-        url,
-        method,
-        status: null,
-        ok: false,
-        error: lastValidation.error,
-      });
-      console.log('REFERENCE CONTENT TYPE', {
-        url,
-        method,
-        contentType: null,
-      });
-    } finally {
-      globalThis.clearTimeout(timeout);
-    }
+    return validation;
+  } finally {
+    globalThis.clearTimeout(timeout);
   }
-
-  return lastValidation;
 }
 
 function rejectionReason(value: unknown): string | null {
@@ -547,7 +523,19 @@ function buildReferenceCandidates(
   collectNestedReferenceCandidates(candidates, characterRecord, 'selfCharacter', userId);
   collectNestedReferenceCandidates(candidates, profileRecord, 'profile', userId);
 
-  return uniqueCandidates(candidates).sort((a, b) => slotPriority(a.slot) - slotPriority(b.slot));
+  return uniqueCandidates(candidates).sort((a, b) => candidatePriority(a) - candidatePriority(b));
+}
+
+function candidatePriority(candidate: ReferenceCandidate) {
+  const label = candidate.label.toLowerCase();
+  if (label.endsWith('.frontfaceurl')) return 0;
+  if (label.endsWith('.avatarurl')) return 1;
+  if (label.endsWith('.imageurl')) return 2;
+  if (label.endsWith('.frontface')) return 3;
+  if (label.endsWith('.frontfacepath')) return 4;
+  if (label.endsWith('.frontimageurl')) return 5;
+  if (label.endsWith('.frontimage')) return 6;
+  return 20 + slotPriority(candidate.slot);
 }
 
 function slotPriority(slot: ReferenceSlot) {
@@ -720,6 +708,11 @@ async function resolveCandidateUrl(candidate: ReferenceCandidate): Promise<Resol
     const validation = await validatePublicImageUrl(urlCandidate.url);
 
     if (validation.ok) {
+      console.log('RESOLVED URL', {
+        label: candidate.label,
+        slot: candidate.slot,
+        url: urlCandidate.url,
+      });
       return {
         url: urlCandidate.url,
         source: urlCandidate.source,

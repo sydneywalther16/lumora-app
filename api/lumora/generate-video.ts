@@ -153,6 +153,8 @@ function objectRecord(value: unknown): Record<string, unknown> {
 function publicImageUrl(value: unknown): string {
   const url = textValue(value);
   if (!url || url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('file:')) return '';
+  const lowerUrl = url.toLowerCase();
+  if (lowerUrl.includes('localhost') || lowerUrl.includes('undefined')) return '';
   const cleanUrl = url.split('?')[0];
   if (url.includes('expires=') || url.includes('token=')) {
     console.log('REFERENCE URL HAD TEMP QUERY, USING CLEAN URL:', cleanUrl);
@@ -165,11 +167,11 @@ function referenceUrlMap(value: unknown): Record<string, string> {
   const nested = objectRecord(record.referenceImageUrls);
   const source = Object.keys(nested).length > 0 ? nested : record;
   const aliases: Record<string, string[]> = {
-    frontFace: ['frontFace', 'front', 'face', 'primary'],
-    fullBody: ['fullBody', 'body', 'full'],
-    leftAngle: ['leftAngle', 'left'],
-    rightAngle: ['rightAngle', 'right'],
-    expressive: ['expressive', 'expression'],
+    frontFace: ['frontFaceUrl', 'frontFace', 'frontImageUrl', 'frontImage', 'front', 'face', 'primary'],
+    fullBody: ['fullBodyUrl', 'fullBody', 'body', 'full'],
+    leftAngle: ['leftAngleUrl', 'leftAngle', 'left'],
+    rightAngle: ['rightAngleUrl', 'rightAngle', 'right'],
+    expressive: ['expressiveUrl', 'expressive', 'expression'],
   };
 
   return Object.fromEntries(
@@ -312,70 +314,45 @@ async function validateReferenceImageUrl(referenceImageUrl: string): Promise<{
   status: number | null;
   contentType: string | null;
 }> {
-  const methods: Array<'HEAD' | 'GET'> = ['HEAD', 'GET'];
-  let lastStatus: number | null = null;
-  let lastContentType: string | null = null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
 
-  for (const method of methods) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    console.log('VALIDATING REFERENCE URL', { referenceImageUrl, method: 'HEAD' });
+    const response = await fetch(referenceImageUrl, {
+      method: 'HEAD',
+      signal: controller.signal,
+    });
+    const contentType = response.headers.get('content-type') ?? '';
+    const validation = {
+      ok: response.status === 200 && contentType.toLowerCase().startsWith('image/'),
+      status: response.status,
+      contentType,
+    };
 
-    try {
-      console.log('VALIDATING REFERENCE URL', { referenceImageUrl, method });
-      const response = await fetch(referenceImageUrl, {
-        method,
-        signal: controller.signal,
-      });
-      const contentType = response.headers.get('content-type') ?? '';
-      lastStatus = response.status;
-      lastContentType = contentType;
+    console.log('VALIDATION RESULT', {
+      referenceImageUrl,
+      status: validation.status,
+      contentType: validation.contentType,
+      ok: validation.ok,
+    });
 
-      console.log('REFERENCE FETCH STATUS', {
-        referenceImageUrl,
-        method,
-        status: response.status,
-        ok: response.ok,
-      });
-      console.log('REFERENCE CONTENT TYPE', {
-        referenceImageUrl,
-        method,
-        contentType,
-      });
+    return validation;
+  } catch (error) {
+    console.log('VALIDATION RESULT', {
+      referenceImageUrl,
+      ok: false,
+      error: errorMessage(error),
+    });
 
-      if (method === 'GET') {
-        void response.body?.cancel();
-      }
-
-      if (response.ok && contentType.toLowerCase().startsWith('image/')) {
-        return {
-          ok: true,
-          status: response.status,
-          contentType,
-        };
-      }
-    } catch (error) {
-      console.log('REFERENCE FETCH STATUS', {
-        referenceImageUrl,
-        method,
-        status: null,
-        ok: false,
-        error: errorMessage(error),
-      });
-      console.log('REFERENCE CONTENT TYPE', {
-        referenceImageUrl,
-        method,
-        contentType: null,
-      });
-    } finally {
-      clearTimeout(timeout);
-    }
+    return {
+      ok: false,
+      status: null,
+      contentType: null,
+    };
+  } finally {
+    clearTimeout(timeout);
   }
-
-  return {
-    ok: false,
-    status: lastStatus,
-    contentType: lastContentType,
-  };
 }
 
 async function runReplicate(input: {
@@ -484,7 +461,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const referenceValidation = await validateReferenceImageUrl(referenceImageUrl);
     if (!referenceValidation.ok) {
       return sendJson(res, 400, {
-        error: 'Reference image is not publicly accessible',
+        error: 'Reference image not accessible',
         referenceImageUrl,
         status: referenceValidation.status,
         contentType: referenceValidation.contentType,
@@ -509,6 +486,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           aspect_ratio: aspectRatio,
         };
     const generationModeUsed = useKling ? 'kling' : 'luma';
+
+    if (useKling) {
+      console.log('FINAL INPUT SENT TO KLING', requestInput);
+    }
 
     const { default: Replicate } = await import('replicate');
     const replicate = new Replicate({ auth: token }) as ReplicateClient;

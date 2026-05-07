@@ -69,6 +69,8 @@ function buildDefaultSelfCharacter(profile: LumoraProfile): CharacterProfile {
 
 function cleanReferenceUrl(value?: string | null): string | null {
   if (!value || value.startsWith('data:') || value.startsWith('blob:')) return null;
+  const lowerValue = value.toLowerCase();
+  if (lowerValue.includes('localhost') || lowerValue.includes('undefined')) return null;
   return /^https?:\/\//i.test(value) ? value : null;
 }
 
@@ -79,10 +81,15 @@ function pickPrimaryReferenceImage(
   if (!urls) return cleanReferenceUrl(fallbackUrl);
 
   return (
+    cleanReferenceUrl(urls.frontFaceUrl) ||
     cleanReferenceUrl(urls.frontFace) ||
+    cleanReferenceUrl(urls.fullBodyUrl) ||
     cleanReferenceUrl(urls.fullBody) ||
+    cleanReferenceUrl(urls.leftAngleUrl) ||
     cleanReferenceUrl(urls.leftAngle) ||
+    cleanReferenceUrl(urls.rightAngleUrl) ||
     cleanReferenceUrl(urls.rightAngle) ||
+    cleanReferenceUrl(urls.expressiveUrl) ||
     cleanReferenceUrl(urls.expressive) ||
     cleanReferenceUrl(fallbackUrl)
   );
@@ -149,7 +156,6 @@ function buildSelfCharacterDescription(
 export default function CreatePage() {
   const { user, session, loading, configured } = useSession();
   const authUser = session?.user ?? user;
-  const sessionResolving = configured && loading && !authUser;
   const [characterRefreshKey, setCharacterRefreshKey] = useState(0);
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterProfile | null>(null);
   const [defaultSelfCharacter, setDefaultSelfCharacter] = useState<CharacterProfile | null>(null);
@@ -161,6 +167,7 @@ export default function CreatePage() {
     inspectedFields: [],
   });
   const [selfReferenceLoading, setSelfReferenceLoading] = useState(false);
+  const [creatorDataLoading, setCreatorDataLoading] = useState(true);
   const [profile, setProfile] = useState<LumoraProfile>({
     displayName: 'Creator',
     username: 'lumora.creator',
@@ -172,9 +179,11 @@ export default function CreatePage() {
 
     async function loadDefaultSelfCharacter() {
       if (configured && loading && !authUser) {
+        setCreatorDataLoading(true);
         return;
       }
 
+      setCreatorDataLoading(true);
       if (authUser) {
         try {
           const [remoteProfile, remoteCharacters] = await Promise.all([
@@ -202,6 +211,8 @@ export default function CreatePage() {
         } catch (error) {
           console.error('Unable to load Supabase creator self for Create:', error);
           return;
+        } finally {
+          if (active) setCreatorDataLoading(false);
         }
       }
 
@@ -215,6 +226,7 @@ export default function CreatePage() {
       setDefaultSelfCharacter(
         hasDefaultSelfCharacter ? storedSelfCharacter ?? buildDefaultSelfCharacter(loadedProfile) : null,
       );
+      setCreatorDataLoading(false);
     }
 
     void loadDefaultSelfCharacter();
@@ -255,6 +267,7 @@ export default function CreatePage() {
     : selectedCharacter?.referenceImageUrls ?? null;
   const referenceResolving =
     Boolean(activeSelfCharacter) && (selfReferenceLoading || selfReference.inspectedFields.length === 0);
+  const pageLoading = (configured && loading && !authUser) || creatorDataLoading;
 
   useEffect(() => {
     let active = true;
@@ -319,7 +332,7 @@ export default function CreatePage() {
     window.location.href = '/capture';
   }
 
-  if (sessionResolving) {
+  if (pageLoading) {
     return (
       <div className="page">
         <section className="headline-card">

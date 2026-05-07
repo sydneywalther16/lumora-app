@@ -36,9 +36,9 @@ const publicBuckets: LumoraStorageBucket[] = [
   'post-thumbnails',
 ];
 const referenceSlotFilePrefixes: Record<ReferencePhotoSlot, string> = {
-  frontFace: 'front-face',
-  leftAngle: 'left-angle',
-  rightAngle: 'right-angle',
+  frontFace: 'front',
+  leftAngle: 'left',
+  rightAngle: 'right',
 };
 
 function getClient() {
@@ -146,6 +146,35 @@ function publicUrlForObjectPath(bucket: LumoraStorageBucket, objectPath: string)
   return getClient().storage.from(bucket).getPublicUrl(objectPath).data.publicUrl.split('?')[0];
 }
 
+async function validateUploadedReferencePhoto(url: string) {
+  try {
+    const response = await fetch(url, {
+      method: 'HEAD',
+      cache: 'no-store',
+    });
+    const contentType = response.headers.get('content-type') ?? '';
+    const ok = response.status === 200 && contentType.toLowerCase().startsWith('image/');
+
+    console.log('VALIDATION RESULT', {
+      url,
+      status: response.status,
+      contentType,
+      ok,
+    });
+
+    if (!ok) {
+      throw new Error(`Reference photo public URL failed validation (${response.status || 'no status'}).`);
+    }
+  } catch (error) {
+    console.log('VALIDATION RESULT', {
+      url,
+      ok: false,
+      error: error instanceof Error ? error.message : 'Unknown validation error',
+    });
+    throw new Error('Reference photo uploaded but is not publicly accessible. Apply the character-reference-images public bucket migration and re-save the photo.');
+  }
+}
+
 function publicOrSignedUrl(bucket: LumoraStorageBucket, objectPath: string): Promise<string> | string {
   const client = getClient();
 
@@ -234,6 +263,8 @@ export async function uploadCharacterReferencePhoto(input: {
   if (uploadError) throw uploadError;
 
   const url = publicUrlForObjectPath(bucket, objectPath);
+  await validateUploadedReferencePhoto(url);
+
   const { error: assetError } = await client.from('media_assets').upsert(
     {
       user_id: input.userId,

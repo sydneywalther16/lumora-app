@@ -114,6 +114,8 @@ function normalizeVideoUrl(video: unknown): string | null {
 
 function cleanReferenceUrl(value?: string | null): string | null {
   if (!value || value.startsWith('data:') || value.startsWith('blob:')) return null;
+  const lowerValue = value.toLowerCase();
+  if (lowerValue.includes('localhost') || lowerValue.includes('undefined')) return null;
   return /^https?:\/\//i.test(value) ? value : null;
 }
 
@@ -134,10 +136,15 @@ function pickReferenceImage(input: {
   if (!urls) return { url: null, label: null };
 
   const orderedSlots: Array<keyof ReferenceImageUrls> = [
+    'frontFaceUrl',
     'frontFace',
+    'fullBodyUrl',
     'fullBody',
+    'leftAngleUrl',
     'leftAngle',
+    'rightAngleUrl',
     'rightAngle',
+    'expressiveUrl',
     'expressive',
   ];
 
@@ -158,14 +165,17 @@ function referenceImagePayload(urls?: Partial<ReferenceImageUrls> | null) {
   if (!urls) return undefined;
 
   return {
-    front: cleanReferenceUrl(urls.frontFace),
-    frontFace: cleanReferenceUrl(urls.frontFace),
-    fullBody: cleanReferenceUrl(urls.fullBody),
-    left: cleanReferenceUrl(urls.leftAngle),
-    leftAngle: cleanReferenceUrl(urls.leftAngle),
-    right: cleanReferenceUrl(urls.rightAngle),
-    rightAngle: cleanReferenceUrl(urls.rightAngle),
-    expressive: cleanReferenceUrl(urls.expressive),
+    front: cleanReferenceUrl(urls.frontFaceUrl ?? urls.frontFace),
+    frontFace: cleanReferenceUrl(urls.frontFaceUrl ?? urls.frontFace),
+    frontFaceUrl: cleanReferenceUrl(urls.frontFaceUrl ?? urls.frontFace),
+    fullBody: cleanReferenceUrl(urls.fullBodyUrl ?? urls.fullBody),
+    left: cleanReferenceUrl(urls.leftAngleUrl ?? urls.leftAngle),
+    leftAngle: cleanReferenceUrl(urls.leftAngleUrl ?? urls.leftAngle),
+    leftAngleUrl: cleanReferenceUrl(urls.leftAngleUrl ?? urls.leftAngle),
+    right: cleanReferenceUrl(urls.rightAngleUrl ?? urls.rightAngle),
+    rightAngle: cleanReferenceUrl(urls.rightAngleUrl ?? urls.rightAngle),
+    rightAngleUrl: cleanReferenceUrl(urls.rightAngleUrl ?? urls.rightAngle),
+    expressive: cleanReferenceUrl(urls.expressiveUrl ?? urls.expressive),
   };
 }
 
@@ -255,8 +265,9 @@ export default function CreateVideo({
   const [generationResult, setGenerationResult] = useState<GenerationResponse | null>(null);
   const primaryReferenceImage = pickReferenceImage({ referenceImageUrl, referenceImageUrls });
   const hasSelfCharacter = forceSelfMode || isDefaultSelfCharacter;
-  const selectedSelfReferenceImageUrl = primaryReferenceImage.url ||
-    (hasSelfCharacter ? cleanReferenceUrl(characterAvatar) : null);
+  const selectedSelfReferenceImageUrl = hasSelfCharacter
+    ? primaryReferenceImage.url
+    : primaryReferenceImage.url || cleanReferenceUrl(characterAvatar);
   const selfReferenceMode = hasSelfCharacter;
   const selectedGenerationMode: GenerationMode = selfReferenceMode
     ? 'self-reference-video'
@@ -268,7 +279,8 @@ export default function CreateVideo({
   const referenceThumbnailUrl = renderableReferenceImageUrl(primaryReferenceImage.url);
   const generatedReferenceThumbnailUrl = renderableReferenceImageUrl(generatedReferenceImageUrl);
   const selfReferenceMissing = selfReferenceMode && !referenceLoading && !primaryReferenceImage.url;
-  const actionBusy = busy || generationLoading || (!hasSelfCharacter && referenceLoading);
+  const generateBusy = busy || generationLoading || referenceLoading || selfReferenceMissing;
+  const saveBusy = busy || generationLoading;
   const isSoraEngine = engine === 'sora-2' || engine === 'sora-2-pro';
   const engineRoutingMessage =
     isSoraEngine
@@ -304,8 +316,7 @@ export default function CreateVideo({
     });
 
     if (!selectedReferenceImageUrl) {
-      const message = 'No valid reference image found - cannot run Kling';
-      alert(message);
+      const message = 'Reference photo not publicly accessible';
       setGenerationError(message);
       return;
     }
@@ -408,8 +419,8 @@ export default function CreateVideo({
         displayEngine: nextDisplayEngine,
         referenceImageUrl: nextReferenceImageUrl,
         message: nextGenerationMode === 'text-to-video-fallback'
-          ? 'Replicate text-only fallback render created. Likeness is not guaranteed.'
-          : 'Replicate self-reference video render created.',
+          ? 'Text-only fallback render created. Likeness is not guaranteed.'
+          : 'Kling self-reference video render created.',
         createdAt: now,
       };
       setGenerationResult(result);
@@ -610,10 +621,10 @@ export default function CreateVideo({
                 : selfReferenceMode
                 ? primaryReferenceImage.url
                   ? 'Reference image locked. Ready for likeness rendering.'
-                  : 'Reference photo found but is not publicly accessible. Re-save your self character photo.'
+                  : 'Reference photo not publicly accessible'
                 : isTextFallbackMode
                   ? 'Text-only fallback uses Luma and supports 5s or 9s renders.'
-                  : 'Replicate will condition the video on the selected image.'}
+                  : 'Kling will condition the video on the selected image.'}
             </span>
             {selfReferenceMode && onResaveReferencePhoto ? (
               <button
@@ -633,7 +644,7 @@ export default function CreateVideo({
             />
           ) : selfReferenceMode ? (
             <div className="reference-mode-thumb reference-mode-placeholder" aria-hidden="true">
-              No public URL
+              Needs re-save
             </div>
           ) : null}
           {primaryReferenceImage.label || selfReferenceMode ? (
@@ -656,7 +667,7 @@ export default function CreateVideo({
         ) : null}
 
         <div className="button-row">
-          <button type="button" className="primary-btn" onClick={handleGenerate} disabled={actionBusy}>
+          <button type="button" className="primary-btn" onClick={handleGenerate} disabled={generateBusy}>
             {generationLoading
               ? 'Rendering...'
               : selfReferenceMode
@@ -667,14 +678,14 @@ export default function CreateVideo({
                   ? 'Generate text-only fallback'
                   : 'Generate video'}
           </button>
-          <button type="button" className="ghost-btn" onClick={() => void handleSaveDraft()} disabled={actionBusy}>
+          <button type="button" className="ghost-btn" onClick={() => void handleSaveDraft()} disabled={saveBusy}>
             Save draft
           </button>
         </div>
         {generationLoading ? <p className="muted">Rendering your concept...</p> : null}
         {selfReferenceMissing ? (
           <p style={{ color: '#f6c177' }}>
-            Reference photo found but is not publicly accessible. Re-save your self character photo.
+            Reference photo not publicly accessible. Re-save your self character photo.
           </p>
         ) : null}
         {generationError ? <p style={{ color: '#f07178' }}>{generationError}</p> : null}
