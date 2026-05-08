@@ -11,13 +11,13 @@ type VercelResponse = ServerResponse & {
 };
 
 type ReplicateModelIdentifier = `${string}/${string}` | `${string}/${string}:${string}`;
-type GenerationMode = 'self-reference-video' | 'image-to-video' | 'text-to-video-fallback';
 
 type GenerateVideoBody = {
   prompt?: unknown;
   characterDescription?: unknown;
   referenceImageUrl?: unknown;
   referenceImages?: unknown;
+  additionalReferenceImageUrls?: unknown;
   referenceImageUrls?: unknown;
   aspectRatio?: unknown;
   duration?: unknown;
@@ -203,42 +203,53 @@ function firstReferenceImageUrl(body: GenerateVideoBody): string {
   );
 }
 
+function additionalReferenceImageUrls(body: GenerateVideoBody, primaryReference: string): string[] {
+  const urls = referenceUrlMap(body.referenceImageUrls);
+  const explicitAdditional = Array.isArray(body.additionalReferenceImageUrls)
+    ? body.additionalReferenceImageUrls.map(publicImageUrl)
+    : [];
+  const referenceImages = Array.isArray(body.referenceImages)
+    ? body.referenceImages.map(publicImageUrl)
+    : [];
+  const candidates = [
+    ...explicitAdditional,
+    urls.leftAngle,
+    urls.rightAngle,
+    ...referenceImages,
+  ];
+  const seen = new Set<string>();
+
+  return candidates.flatMap((url) => {
+    if (!url || url === primaryReference || seen.has(url)) return [];
+    seen.add(url);
+    return [url];
+  });
+}
+
 function normalizeAspectRatio(value: unknown): string {
   const aspectRatio = textValue(value);
   return ['9:16', '16:9', '1:1'].includes(aspectRatio) ? aspectRatio : '9:16';
 }
 
-function normalizeDuration(value: unknown): number {
-  const numericValue = typeof value === 'number' ? value : Number(textValue(value));
-  if (!Number.isFinite(numericValue)) return 8;
-  return Math.min(20, Math.max(1, Math.round(numericValue)));
-}
-
 function buildFinalPrompt(input: {
   prompt: string;
   characterDescription: string;
-  referenceImageUrl: string;
   style: string;
   camera: string;
   mood: string;
   aspectRatio: string;
 }) {
-  const identityInstruction = input.referenceImageUrl
-    ? 'Use the reference image as the identity source. Preserve the same person, face shape, hairstyle, hair color, skin tone, makeup style, and overall appearance. Do not change identity. Keep the person consistent across frames.'
-    : 'Text-only fallback, likeness not guaranteed. Follow the saved self-character traits as closely as possible.';
-
   return [
-    identityInstruction,
-    input.characterDescription,
-    input.prompt,
+    'Use the provided reference images as the identity source. Preserve the exact same person across all frames. Maintain facial structure, skin tone, hair, and features. Do not change identity.',
+    `${input.characterDescription} ${input.prompt}`.trim(),
     input.style ? `Style: ${input.style}` : '',
     input.camera ? `Camera: ${input.camera}` : '',
     input.mood ? `Mood: ${input.mood}` : '',
     input.aspectRatio === '9:16' ? 'vertical video' : `${input.aspectRatio} video`,
-    'cinematic lighting, realistic motion, high detail, TikTok style',
+    'Cinematic lighting, realistic motion, high detail.',
   ]
     .filter(Boolean)
-    .join(', ');
+    .join('\n\n');
 }
 
 function maybeUrl(value: unknown): string | null {
@@ -286,10 +297,6 @@ async function outputUrl(output: unknown): Promise<string | null> {
   return null;
 }
 
-function normalizeLumaDuration(duration: number): 5 | 9 {
-  return duration <= 5 ? 5 : 9;
-}
-
 function modelErrorMessage(error: unknown): string {
   const message = errorMessage(error);
   const lower = message.toLowerCase();
@@ -306,7 +313,7 @@ function isBillingOrCreditError(error: unknown): boolean {
 
 function isValidHttpUrl(url: string) {
   return typeof url === 'string' &&
-    (url.startsWith('http://') || url.startsWith('https://'));
+    url.startsWith('https://');
 }
 
 async function validateReferenceImageUrl(referenceImageUrl: string): Promise<{
@@ -374,34 +381,66 @@ async function runReplicate(input: {
     console.log('SENDING IMAGE TO KLING:', input.referenceImageUrl);
   }
 
-  try {
-    const output = await input.replicate.run(input.model, { input: input.requestInput });
-    const videoUrl = await outputUrl(output);
-    if (!videoUrl) {
-      throw new Error(`No video URL returned. Raw output: ${JSON.stringify(safeJsonValue(output))}`);
-    }
+  const attempts: unknown[] = [];
+  const shouldTryStartImageOnly =
+    Array.isArray(input.requestInput.reference_images) &&
+    input.requestInput.reference_images.length > 0;
+  const requestInputs = shouldTryStartImageOnly
+    ? [
+        input.requestInput,
+        Object.fromEntries(
+          Object.entries(input.requestInput).filter(([key]) => key !== 'reference_images'),
+        ),
+      ]
+    : [input.requestInput];
 
-    return {
-      videoUrl,
-      model: input.model,
-      rawOutput: output,
-      attempts: [
-        {
-          model: input.model,
-          inputKeys: Object.keys(input.requestInput),
-          success: true,
+  for (const [index, requestInput] of requestInputs.entries()) {
+    try {
+      const output = await input.replicate.run(input.model, { input: requestInput });
+      const videoUrl = await outputUrl(output);
+      if (!videoUrl) {
+        throw new Error(`No video URL returned. Raw output: ${JSON.stringify(safeJsonValue(output))}`);
+      }
+
+      attempts.push({
+        model: input.model,
+        inputKeys: Object.keys(requestInput),
+        success: true,
+      });
+
+      return {
+        videoUrl,
+        model: input.model,
+        rawOutput: output,
+        attempts,
+        durationSent: input.durationSent,
+      } satisfies ReplicateRunResult;
+    } catch (error) {
+      console.error('REPLICATE ERROR:', error);
+      attempts.push({
+        model: input.model,
+        inputKeys: Object.keys(requestInput),
+        success: false,
+        details: safeJsonValue(error),
+      });
+
+      if (index < requestInputs.length - 1) {
+        console.warn('Kling rejected reference_images; retrying with start_image only.');
+        continue;
+      }
+
+      throw Object.assign(new Error(modelErrorMessage(error)), {
+        provider: 'replicate',
+        model: input.model,
+        details: {
+          error: safeJsonValue(error),
+          attempts,
         },
-      ],
-      durationSent: input.durationSent,
-    } satisfies ReplicateRunResult;
-  } catch (error) {
-    console.error('REPLICATE ERROR:', error);
-    throw Object.assign(new Error(modelErrorMessage(error)), {
-      provider: 'replicate',
-      model: input.model,
-      details: safeJsonValue(error),
-    });
+      });
+    }
   }
+
+  throw new Error('Replicate generation failed without a completed attempt.');
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -433,12 +472,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const referenceImageUrl = firstReferenceImageUrl(body);
+    const additionalReferences = additionalReferenceImageUrls(body, referenceImageUrl);
     const aspectRatio = normalizeAspectRatio(body.aspectRatio);
-    const duration = normalizeDuration(body.duration);
     const finalPrompt = buildFinalPrompt({
       prompt,
       characterDescription: textValue(body.characterDescription),
-      referenceImageUrl,
       style: textValue(body.style),
       camera: textValue(body.camera),
       mood: textValue(body.mood),
@@ -449,6 +487,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log('FINAL INPUT:', {
       prompt: promptForModel,
       referenceImageUrl,
+      additionalReferences,
     });
 
     if (!isValidHttpUrl(referenceImageUrl)) {
@@ -456,6 +495,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         error: 'Invalid reference image URL',
         received: referenceImageUrl,
       });
+    }
+
+    for (const additionalReference of additionalReferences) {
+      if (!isValidHttpUrl(additionalReference)) {
+        return sendJson(res, 400, {
+          error: 'Invalid additional reference image URL',
+          received: additionalReference,
+        });
+      }
     }
 
     const referenceValidation = await validateReferenceImageUrl(referenceImageUrl);
@@ -468,28 +516,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const useKling = !!referenceImageUrl;
-    const model = (
-      useKling
-        ? process.env.REPLICATE_IMAGE_TO_VIDEO_MODEL || 'kwaivgi/kling-v2.1'
-        : 'luma/ray-2-720p'
-    ) as ReplicateModelIdentifier;
-    const lumaDuration = normalizeLumaDuration(duration);
-    const requestInput = useKling
-      ? {
-          prompt: promptForModel,
-          start_image: referenceImageUrl,
-        }
-      : {
-          prompt: promptForModel,
-          duration: lumaDuration,
-          aspect_ratio: aspectRatio,
-        };
-    const generationModeUsed = useKling ? 'kling' : 'luma';
-
-    if (useKling) {
-      console.log('FINAL INPUT SENT TO KLING', requestInput);
+    for (const additionalReference of additionalReferences) {
+      const additionalValidation = await validateReferenceImageUrl(additionalReference);
+      if (!additionalValidation.ok) {
+        return sendJson(res, 400, {
+          error: 'Additional reference image not accessible',
+          referenceImageUrl: additionalReference,
+          status: additionalValidation.status,
+          contentType: additionalValidation.contentType,
+        });
+      }
     }
+
+    const model = (process.env.REPLICATE_IMAGE_TO_VIDEO_MODEL || 'kwaivgi/kling-v2.1') as ReplicateModelIdentifier;
+    const requestInput = {
+      prompt: promptForModel,
+      start_image: referenceImageUrl,
+      ...(additionalReferences.length ? { reference_images: additionalReferences } : {}),
+    };
+    const generationModeUsed = 'kling';
+
+    console.log('GENERATION DEBUG', {
+      referenceImageUrl,
+      additionalReferences,
+      modelUsed: model,
+      finalPrompt: promptForModel,
+      generationModeUsed,
+    });
+    console.log('FINAL INPUT SENT TO KLING', requestInput);
 
     const { default: Replicate } = await import('replicate');
     const replicate = new Replicate({ auth: token }) as ReplicateClient;
@@ -498,7 +552,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       replicate,
       model,
       requestInput,
-      durationSent: useKling ? null : lumaDuration,
+      durationSent: null,
       generationModeUsed,
       referenceImageUrl,
     });
@@ -511,12 +565,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       provider: 'replicate',
       model: result.model,
       displayEngine: generationModeUsed,
-      generationMode: useKling ? 'self-reference-video' : 'text-to-video-fallback',
+      generationMode: 'self-reference-video',
       generationModeUsed,
-      hasReferenceImage: !!referenceImageUrl,
+      hasReferenceImage: true,
       modelUsed: result.model,
       durationSent: result.durationSent,
       referenceImageUrl,
+      additionalReferenceImageUrls: additionalReferences,
       finalPrompt: promptForModel,
       warnings: [],
       rawOutput: {

@@ -21,6 +21,7 @@ type CreateVideoProps = {
   characterDescription?: string;
   referenceImageUrl?: string | null;
   referenceImageUrls?: Partial<ReferenceImageUrls> | null;
+  additionalReferenceImageUrls?: string[];
   referenceLoading?: boolean;
   referenceLabel?: string | null;
   forceSelfMode?: boolean;
@@ -232,6 +233,7 @@ export default function CreateVideo({
   characterDescription,
   referenceImageUrl,
   referenceImageUrls,
+  additionalReferenceImageUrls = [],
   referenceLoading = false,
   referenceLabel,
   forceSelfMode = false,
@@ -342,11 +344,8 @@ export default function CreateVideo({
           characterId,
           characterDescription: selectedCharacterDescription,
           referenceImageUrl: selectedReferenceImageUrl,
-          referenceImages: referencePayload
-            ? ['frontFace', 'leftAngle', 'rightAngle', 'fullBody']
-            : selectedReferenceImageUrl
-              ? [selectedReferenceImageUrl]
-              : [],
+          additionalReferenceImageUrls,
+          referenceImages: additionalReferenceImageUrls,
           referenceImageUrls: referencePayload,
           aspectRatio: selectedAspectRatio,
           duration,
@@ -620,8 +619,8 @@ export default function CreateVideo({
                 ? 'Lumora is checking front, full-body, angle, avatar, and media URL fields.'
                 : selfReferenceMode
                 ? primaryReferenceImage.url
-                  ? 'Reference image locked. Ready for likeness rendering.'
-                  : 'Reference photo not publicly accessible'
+                  ? 'Identity locked. Rendering your likeness.'
+                  : 'Upload a valid reference photo to continue'
                 : isTextFallbackMode
                   ? 'Text-only fallback uses Luma and supports 5s or 9s renders.'
                   : 'Kling will condition the video on the selected image.'}
@@ -671,7 +670,7 @@ export default function CreateVideo({
             {generationLoading
               ? 'Rendering...'
               : selfReferenceMode
-                ? 'Generate with self character'
+                ? 'Generate with your likeness'
                 : referenceLoading
                   ? 'Checking self character...'
                 : isTextFallbackMode
@@ -685,7 +684,7 @@ export default function CreateVideo({
         {generationLoading ? <p className="muted">Rendering your concept...</p> : null}
         {selfReferenceMissing ? (
           <p style={{ color: '#f6c177' }}>
-            Reference photo not publicly accessible. Re-save your self character photo.
+            Upload a valid reference photo to continue.
           </p>
         ) : null}
         {generationError ? <p style={{ color: '#f07178' }}>{generationError}</p> : null}

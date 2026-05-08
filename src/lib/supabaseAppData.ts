@@ -133,15 +133,6 @@ function safeFileName(fileName: string) {
     .replace(/^-+|-+$/g, '') || 'upload';
 }
 
-function fileExtension(file: File) {
-  const fromName = file.name.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') ?? '';
-  if (fromName) return fromName;
-
-  const fromType = file.type.split('/').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') ?? '';
-  if (fromType === 'jpeg') return 'jpg';
-  return fromType || 'jpg';
-}
-
 function publicUrlForObjectPath(bucket: LumoraStorageBucket, objectPath: string): string {
   return getClient().storage.from(bucket).getPublicUrl(objectPath).data.publicUrl.split('?')[0];
 }
@@ -251,8 +242,7 @@ export async function uploadCharacterReferencePhoto(input: {
 }) {
   const client = getClient();
   const bucket: LumoraStorageBucket = 'character-reference-images';
-  const extension = fileExtension(input.file);
-  const objectPath = `${input.userId}/${referenceSlotFilePrefixes[input.slot]}-${Date.now()}.${extension}`;
+  const objectPath = `${input.userId}/${referenceSlotFilePrefixes[input.slot]}-${Date.now()}.png`;
   const { error: uploadError } = await client.storage
     .from(bucket)
     .upload(objectPath, input.file, {
@@ -263,7 +253,16 @@ export async function uploadCharacterReferencePhoto(input: {
   if (uploadError) throw uploadError;
 
   const url = publicUrlForObjectPath(bucket, objectPath);
-  await validateUploadedReferencePhoto(url);
+  try {
+    await validateUploadedReferencePhoto(url);
+  } catch (firstError) {
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 800));
+    try {
+      await validateUploadedReferencePhoto(url);
+    } catch {
+      throw firstError;
+    }
+  }
 
   const { error: assetError } = await client.from('media_assets').upsert(
     {

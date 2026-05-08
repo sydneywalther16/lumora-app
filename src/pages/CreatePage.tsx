@@ -161,6 +161,8 @@ export default function CreatePage() {
   const [defaultSelfCharacter, setDefaultSelfCharacter] = useState<CharacterProfile | null>(null);
   const [selfReference, setSelfReference] = useState<SelfCharacterReferenceImage>({
     url: null,
+    primary: null,
+    additional: [],
     label: null,
     slot: null,
     referenceImageUrls: {},
@@ -276,6 +278,8 @@ export default function CreatePage() {
       if (!activeSelfCharacter) {
         setSelfReference({
           url: null,
+          primary: null,
+          additional: [],
           label: null,
           slot: null,
           referenceImageUrls: {},
@@ -415,6 +419,7 @@ export default function CreatePage() {
         characterDescription={characterDescription}
         referenceImageUrl={referenceImageUrl}
         referenceImageUrls={referenceImageUrls}
+        additionalReferenceImageUrls={activeSelfCharacter ? selfReference.additional : []}
         referenceLoading={referenceResolving}
         referenceLabel={selfReference.label}
         forceSelfMode={hasSelfCharacter}

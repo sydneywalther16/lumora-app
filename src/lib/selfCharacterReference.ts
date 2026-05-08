@@ -40,6 +40,8 @@ type PublicImageValidation = {
 
 export type SelfCharacterReferenceImage = {
   url: string | null;
+  primary: string | null;
+  additional: string[];
   label: string | null;
   slot: string | null;
   referenceImageUrls: Partial<ReferenceImageUrls>;
@@ -562,15 +564,28 @@ function addReferenceImageUrl(
   slot: ReferenceSlot,
   url: string,
 ) {
-  if (
-    slot === 'frontFace' ||
-    slot === 'fullBody' ||
-    slot === 'leftAngle' ||
-    slot === 'rightAngle' ||
-    slot === 'expressive'
-  ) {
+  if (slot === 'frontFace') {
+    referenceImageUrls.frontFace = referenceImageUrls.frontFace || url;
+    referenceImageUrls.frontFaceUrl = referenceImageUrls.frontFaceUrl || url;
+  } else if (slot === 'leftAngle') {
+    referenceImageUrls.leftAngle = referenceImageUrls.leftAngle || url;
+    referenceImageUrls.leftAngleUrl = referenceImageUrls.leftAngleUrl || url;
+  } else if (slot === 'rightAngle') {
+    referenceImageUrls.rightAngle = referenceImageUrls.rightAngle || url;
+    referenceImageUrls.rightAngleUrl = referenceImageUrls.rightAngleUrl || url;
+  } else if (slot === 'fullBody' || slot === 'expressive') {
     referenceImageUrls[slot] = referenceImageUrls[slot] || url;
   }
+}
+
+function uniqueHttpUrls(values: Array<string | null | undefined>, exclude?: string | null): string[] {
+  const seen = new Set<string>();
+
+  return values.flatMap((value) => {
+    if (!value || !value.startsWith('http') || value === exclude || seen.has(value)) return [];
+    seen.add(value);
+    return [value];
+  });
 }
 
 function valueLooksLikeBareFileName(value: string): boolean {
@@ -828,12 +843,35 @@ export async function getSelfCharacterReferenceImage(input: {
   }
 
   console.log('FINAL referenceImageUrl', selectedUrl);
+  const additional = uniqueHttpUrls(
+    [
+      referenceImageUrls.leftAngleUrl,
+      referenceImageUrls.leftAngle,
+      referenceImageUrls.rightAngleUrl,
+      referenceImageUrls.rightAngle,
+    ],
+    selectedUrl,
+  );
 
   return {
     url: selectedUrl,
+    primary: selectedUrl,
+    additional,
     label: selectedLabel,
     slot: selectedSlot,
     referenceImageUrls,
     inspectedFields,
+  };
+}
+
+export async function getReferenceImages(
+  selfCharacter: CharacterProfile | Record<string, unknown> | null | undefined,
+  profile?: LumoraProfile | null,
+): Promise<{ primary: string | null; additional: string[] }> {
+  const resolved = await getSelfCharacterReferenceImage({ selfCharacter, profile });
+
+  return {
+    primary: resolved.primary,
+    additional: resolved.additional,
   };
 }
