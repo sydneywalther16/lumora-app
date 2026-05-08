@@ -1,4 +1,4 @@
-import type { GenerationMode, VideoEngine } from './api';
+import type { GenerationMode, LumoraIdentityFeedback, ReferenceImageUrls, VideoEngine } from './api';
 
 export type StudioProject = {
   id: string;
@@ -14,7 +14,11 @@ export type StudioProject = {
   aspectRatio?: string | null;
   model?: string | null;
   generationMode?: GenerationMode | null;
+  identityId?: string | null;
+  keyframeUrl?: string | null;
   referenceImageUrl?: string | null;
+  referenceImageUrls?: Partial<ReferenceImageUrls> | null;
+  likenessFeedback?: LumoraIdentityFeedback | null;
   characterId: string | null;
   characterName: string | null;
   characterAvatar?: string | null;
@@ -72,7 +76,17 @@ export function loadStudioProjects(): StudioProject[] {
         aspectRatio: typeof project.aspectRatio === 'string' ? project.aspectRatio : null,
         model: typeof project.model === 'string' ? project.model : null,
         generationMode: typeof project.generationMode === 'string' ? project.generationMode as GenerationMode : null,
+        identityId: typeof project.identityId === 'string' ? project.identityId : null,
+        keyframeUrl: typeof project.keyframeUrl === 'string' ? project.keyframeUrl : null,
         referenceImageUrl: typeof project.referenceImageUrl === 'string' ? project.referenceImageUrl : null,
+        referenceImageUrls:
+          project.referenceImageUrls && typeof project.referenceImageUrls === 'object'
+            ? project.referenceImageUrls as Partial<ReferenceImageUrls>
+            : null,
+        likenessFeedback:
+          project.likenessFeedback && typeof project.likenessFeedback === 'object'
+            ? project.likenessFeedback as LumoraIdentityFeedback
+            : null,
         characterId: typeof project.characterId === 'string' ? project.characterId : null,
         characterAvatar: typeof project.characterAvatar === 'string' ? project.characterAvatar : null,
         isDefaultSelfCharacter:
@@ -96,6 +110,7 @@ export function saveStudioProject(project: StudioProject) {
     {
       ...project,
       videoUrl: cleanMediaUrl(project.videoUrl),
+      keyframeUrl: cleanOptionalMediaUrl(project.keyframeUrl),
       referenceImageUrl: cleanOptionalMediaUrl(project.referenceImageUrl),
       characterAvatar: cleanOptionalMediaUrl(project.characterAvatar),
       creatorAvatar: cleanOptionalMediaUrl(project.creatorAvatar),

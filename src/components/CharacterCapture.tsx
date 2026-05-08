@@ -47,7 +47,9 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
   const [frontFace, setFrontFace] = useState<File | null>(null);
   const [leftAngle, setLeftAngle] = useState<File | null>(null);
   const [rightAngle, setRightAngle] = useState<File | null>(null);
+  const [fullBody, setFullBody] = useState<File | null>(null);
   const [selfieVideo, setSelfieVideo] = useState<File | null>(null);
+  const [selfieVideo2, setSelfieVideo2] = useState<File | null>(null);
   const [voiceSample, setVoiceSample] = useState<File | null>(null);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
@@ -104,6 +106,14 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
             usage: 'character-right-reference',
           }),
         ]);
+        const fullBodyUpload = fullBody
+          ? await uploadCharacterReferencePhoto({
+              userId: authUser.id,
+              file: fullBody,
+              slot: 'fullBody',
+              usage: 'character-full-body-reference',
+            })
+          : null;
 
         const videoUpload = selfieVideo
           ? await uploadLumoraMedia({
@@ -112,6 +122,15 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
               file: selfieVideo,
               folder: 'fictional/capture',
               usage: 'character-capture-video',
+            })
+          : null;
+        const videoUpload2 = selfieVideo2
+          ? await uploadLumoraMedia({
+              userId: authUser.id,
+              bucket: 'self-capture-videos',
+              file: selfieVideo2,
+              folder: 'fictional/capture',
+              usage: 'character-capture-video-2',
             })
           : null;
         const voiceUpload = voiceSample
@@ -129,7 +148,10 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
           name: name.trim(),
           consentConfirmed,
           visibility,
-          stylePreferences,
+          stylePreferences: {
+            ...stylePreferences,
+            videoReferenceUrl2: videoUpload2?.url ?? '',
+          },
           referenceImageUrls: {
             frontFace: frontUpload.url,
             frontFaceUrl: frontUpload.url,
@@ -140,12 +162,16 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
             rightAngle: rightUpload.url,
             rightAngleUrl: rightUpload.url,
             rightAnglePath: rightUpload.objectPath,
+            fullBody: fullBodyUpload?.url ?? null,
+            fullBodyUrl: fullBodyUpload?.url ?? null,
+            fullBodyPath: fullBodyUpload?.objectPath ?? null,
             expressive: null,
           },
           referencePhotoNames: {
             frontFace: frontUpload.fileName,
             leftAngle: leftUpload.fileName,
             rightAngle: rightUpload.fileName,
+            fullBody: fullBodyUpload?.fileName ?? null,
           },
           sourceCaptureVideoUrl: videoUpload?.url ?? null,
           sourceCaptureVideoName: videoUpload?.fileName ?? null,
@@ -157,6 +183,7 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
           frontFace: await readFileAsDataUrl(frontFace),
           leftAngle: await readFileAsDataUrl(leftAngle),
           rightAngle: await readFileAsDataUrl(rightAngle),
+          fullBody: fullBody ? await readFileAsDataUrl(fullBody) : null,
           expressive: null,
         };
 
@@ -183,7 +210,9 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
       setFrontFace(null);
       setLeftAngle(null);
       setRightAngle(null);
+      setFullBody(null);
       setSelfieVideo(null);
+      setSelfieVideo2(null);
       setVoiceSample(null);
       setStatus(authUser ? 'Character saved to your account.' : 'Character saved locally.');
       onCreated?.();
@@ -199,6 +228,9 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
       <div>
         <span className="eyebrow">capture</span>
         <h3>Character capture</h3>
+        <p className="muted" style={{ margin: '8px 0 0' }}>
+          Build a reusable photorealistic character from your reference photos and videos.
+        </p>
       </div>
 
       <label className="field-block">
@@ -225,11 +257,22 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
           <span className="muted">{rightAngle?.name ?? 'No file selected'}</span>
           <input type="file" accept="image/*" onChange={(event) => setRightAngle(event.target.files?.[0] ?? null)} />
         </label>
+        <label className="reference-upload">
+          <span>Full body</span>
+          <strong>{fullBody ? 'Uploaded / Ready' : 'Optional'}</strong>
+          <span className="muted">{fullBody?.name ?? 'No file selected'}</span>
+          <input type="file" accept="image/*" onChange={(event) => setFullBody(event.target.files?.[0] ?? null)} />
+        </label>
       </div>
 
       <label className="field-block">
-        <span>Selfie video</span>
+        <span>Selfie video 1</span>
         <input type="file" accept="video/*" onChange={(event) => setSelfieVideo(event.target.files?.[0] ?? null)} />
+      </label>
+
+      <label className="field-block">
+        <span>Selfie video 2</span>
+        <input type="file" accept="video/*" onChange={(event) => setSelfieVideo2(event.target.files?.[0] ?? null)} />
       </label>
 
       <label className="field-block">
@@ -272,7 +315,7 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
           checked={consentConfirmed}
           onChange={(event) => setConsentConfirmed(event.target.checked)}
         />
-        <span>I confirm I am uploading myself or I have explicit permission to create this character.</span>
+        <span>I confirm I own or have permission to use these reference images/videos.</span>
       </label>
 
       <button type="button" className="primary-btn full-width" onClick={handleSubmit} disabled={busy}>

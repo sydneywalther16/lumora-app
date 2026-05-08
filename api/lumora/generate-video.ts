@@ -14,7 +14,9 @@ type ReplicateModelIdentifier = `${string}/${string}` | `${string}/${string}:${s
 
 type GenerateVideoBody = {
   prompt?: unknown;
+  identityId?: unknown;
   characterDescription?: unknown;
+  keyframeUrl?: unknown;
   referenceImageUrl?: unknown;
   referenceImages?: unknown;
   additionalReferenceImageUrls?: unknown;
@@ -183,6 +185,9 @@ function referenceUrlMap(value: unknown): Record<string, string> {
 }
 
 function firstReferenceImageUrl(body: GenerateVideoBody): string {
+  const keyframe = publicImageUrl(body.keyframeUrl);
+  if (keyframe) return keyframe;
+
   const explicit = publicImageUrl(body.referenceImageUrl);
   if (explicit) return explicit;
 
@@ -215,6 +220,7 @@ function additionalReferenceImageUrls(body: GenerateVideoBody, primaryReference:
     ...explicitAdditional,
     urls.leftAngle,
     urls.rightAngle,
+    urls.fullBody,
     ...referenceImages,
   ];
   const seen = new Set<string>();
@@ -240,7 +246,7 @@ function buildFinalPrompt(input: {
   aspectRatio: string;
 }) {
   return [
-    'Use the provided reference images as the identity source. Preserve the exact same person across all frames. Maintain facial structure, skin tone, hair, and features. Do not change identity.',
+    'Create a new photorealistic character render based on the provided identity references. Do not simply animate or copy the source photo. Use the references only to preserve identity: face shape, hair color, hairstyle, skin tone, eye area, proportions, makeup style, and overall likeness. Place this same person into the requested new scene.',
     `${input.characterDescription} ${input.prompt}`.trim(),
     input.style ? `Style: ${input.style}` : '',
     input.camera ? `Camera: ${input.camera}` : '',
@@ -367,7 +373,7 @@ async function runReplicate(input: {
   model: ReplicateModelIdentifier;
   requestInput: Record<string, unknown>;
   durationSent: number | null;
-  generationModeUsed: 'kling' | 'luma';
+  generationModeUsed: 'identity-keyframe-to-video' | 'reference-photo-animation-fallback';
   referenceImageUrl: string;
 }) {
   console.log('LUMORA PROVIDER', {
@@ -377,7 +383,7 @@ async function runReplicate(input: {
     inputKeys: Object.keys(input.requestInput),
   });
 
-  if (input.generationModeUsed === 'kling') {
+  if (input.generationModeUsed) {
     console.log('SENDING IMAGE TO KLING:', input.referenceImageUrl);
   }
 
@@ -472,6 +478,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const referenceImageUrl = firstReferenceImageUrl(body);
+    const keyframeUrl = publicImageUrl(body.keyframeUrl);
     const additionalReferences = additionalReferenceImageUrls(body, referenceImageUrl);
     const aspectRatio = normalizeAspectRatio(body.aspectRatio);
     const finalPrompt = buildFinalPrompt({
@@ -487,6 +494,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log('FINAL INPUT:', {
       prompt: promptForModel,
       referenceImageUrl,
+      keyframeUrl,
       additionalReferences,
     });
 
@@ -534,7 +542,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       start_image: referenceImageUrl,
       ...(additionalReferences.length ? { reference_images: additionalReferences } : {}),
     };
-    const generationModeUsed = 'kling';
+    const generationModeUsed = keyframeUrl ? 'identity-keyframe-to-video' : 'reference-photo-animation-fallback';
 
     console.log('GENERATION DEBUG', {
       referenceImageUrl,
@@ -542,6 +550,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       modelUsed: model,
       finalPrompt: promptForModel,
       generationModeUsed,
+      identityId: textValue(body.identityId),
     });
     console.log('FINAL INPUT SENT TO KLING', requestInput);
 
@@ -565,11 +574,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       provider: 'replicate',
       model: result.model,
       displayEngine: generationModeUsed,
-      generationMode: 'self-reference-video',
+      generationMode: generationModeUsed,
       generationModeUsed,
       hasReferenceImage: true,
       modelUsed: result.model,
       durationSent: result.durationSent,
+      identityId: textValue(body.identityId) || null,
+      keyframeUrl: keyframeUrl || null,
       referenceImageUrl,
       additionalReferenceImageUrls: additionalReferences,
       finalPrompt: promptForModel,

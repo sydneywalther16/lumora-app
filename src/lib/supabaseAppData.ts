@@ -1,6 +1,8 @@
 import type {
   CharacterProfile,
   CreatorSelfStylePreferences,
+  LumoraIdentityFeedback,
+  LumoraIdentityProfile,
   LumoraPost,
   PrivacySetting,
   ReferenceImageUrls,
@@ -26,7 +28,7 @@ export type LumoraStorageBucket =
   | 'post-thumbnails';
 
 type DbRow = Record<string, any>;
-type ReferencePhotoSlot = 'frontFace' | 'leftAngle' | 'rightAngle';
+type ReferencePhotoSlot = 'frontFace' | 'leftAngle' | 'rightAngle' | 'fullBody';
 
 const CREATOR_SELF_CHARACTER_ID = 'creator-self';
 const publicBuckets: LumoraStorageBucket[] = [
@@ -39,6 +41,7 @@ const referenceSlotFilePrefixes: Record<ReferencePhotoSlot, string> = {
   frontFace: 'front',
   leftAngle: 'left',
   rightAngle: 'right',
+  fullBody: 'full-body',
 };
 
 function getClient() {
@@ -559,6 +562,36 @@ function mapReferencePhotoNames(value: unknown): Partial<Record<keyof ReferenceI
   };
 }
 
+function mapIdentityProfile(value: unknown): LumoraIdentityProfile | null {
+  const record = jsonRecord(value);
+  if (typeof record.identityId !== 'string') return null;
+
+  return {
+    identityId: record.identityId,
+    userId: stringValue(record.userId),
+    frontFaceUrl: nullableString(record.frontFaceUrl),
+    leftAngleUrl: nullableString(record.leftAngleUrl),
+    rightAngleUrl: nullableString(record.rightAngleUrl),
+    fullBodyUrl: nullableString(record.fullBodyUrl),
+    videoReferenceUrls: Array.isArray(record.videoReferenceUrls)
+      ? record.videoReferenceUrls.filter((item): item is string => typeof item === 'string')
+      : [],
+    appearanceSummary: stringValue(record.appearanceSummary),
+    userPreferences: stringRecord(record.userPreferences),
+    dislikedTraits: Array.isArray(record.dislikedTraits)
+      ? record.dislikedTraits.filter((item): item is string => typeof item === 'string')
+      : [],
+    likenessNotes: Array.isArray(record.likenessNotes)
+      ? record.likenessNotes.filter((item): item is string => typeof item === 'string')
+      : [],
+    preferredTraits: Array.isArray(record.preferredTraits)
+      ? record.preferredTraits.filter((item): item is string => typeof item === 'string')
+      : [],
+    version: typeof record.version === 'number' ? record.version : 1,
+    status: record.status === 'building' || record.status === 'needs_refs' ? record.status : 'ready',
+  };
+}
+
 function cleanReferenceImageUrls(value: ReferenceImageUrls): ReferenceImageUrls {
   const frontFace = storageUrl(value.frontFaceUrl ?? value.frontFace, 'Front reference photo') ?? '';
   const leftAngle = storageUrl(value.leftAngleUrl ?? value.leftAngle, 'Left reference photo') ?? '';
@@ -586,6 +619,8 @@ function cleanReferenceImageUrls(value: ReferenceImageUrls): ReferenceImageUrls 
 }
 
 function mapCharacterRow(row: DbRow): CharacterProfile {
+  const stylePreferences = jsonRecord(row.style_preferences);
+
   return {
     id: stringValue(row.id),
     ownerUserId: stringValue(row.owner_user_id),
@@ -593,13 +628,14 @@ function mapCharacterRow(row: DbRow): CharacterProfile {
     status: row.status ?? 'ready',
     consentConfirmed: booleanValue(row.consent_confirmed),
     visibility: (row.visibility ?? 'private') as PrivacySetting,
-    stylePreferences: jsonRecord(row.style_preferences),
+    stylePreferences,
     referenceImageUrls: mapReferenceImages(row.reference_image_urls),
     referencePhotoNames: mapReferencePhotoNames(row.reference_photo_names),
     sourceCaptureVideoUrl: nullableString(row.source_capture_video_url),
     voiceSampleUrl: nullableString(row.voice_sample_url),
     voiceSampleName: nullableString(row.voice_sample_name),
     voiceSampleNumbers: nullableString(row.voice_sample_numbers),
+    identityProfile: mapIdentityProfile(stylePreferences.identityProfile),
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
     isSelf: booleanValue(row.is_self),
@@ -608,6 +644,7 @@ function mapCharacterRow(row: DbRow): CharacterProfile {
 }
 
 function mapSelfCharacterRow(row: DbRow): CharacterProfile {
+  const identityProfile = mapIdentityProfile(row.identity_profile ?? jsonRecord(row.style_preferences).identityProfile);
   const stylePreferences = {
     ...jsonRecord(row.style_preferences),
     creatorSelfFeatures: jsonRecord(row.creator_self_features),
@@ -633,6 +670,7 @@ function mapSelfCharacterRow(row: DbRow): CharacterProfile {
     voiceSampleUrl: nullableString(row.voice_sample_url),
     voiceSampleName: nullableString(row.voice_sample_name),
     voiceSampleNumbers: nullableString(row.voice_sample_numbers),
+    identityProfile,
     creatorSelfFeatures: stringRecord(row.creator_self_features),
     creatorSelfStylePreferences: mapStylePreferences(row.creator_self_style_preferences),
     createdAt: toIso(row.created_at),
@@ -734,6 +772,7 @@ export async function saveSupabaseCreatorSelfCharacter(input: {
   creatorSelfFeatures: Record<string, string | undefined>;
   creatorSelfStylePreferences: CreatorSelfStylePreferences;
   stylePreferences?: Record<string, unknown>;
+  identityProfile?: LumoraIdentityProfile | null;
   editorDraft?: Record<string, unknown> | null;
 }): Promise<{ profile: LumoraProfile; character: CharacterProfile }> {
   const client = getClient();
@@ -743,6 +782,7 @@ export async function saveSupabaseCreatorSelfCharacter(input: {
   const editorDraft = stripBase64Media(input.editorDraft) ?? null;
   const referenceImageUrls = cleanJsonRecord(cleanReferenceImageUrls(input.referenceImageUrls));
   const referencePhotoNames = cleanJsonRecord(input.referencePhotoNames);
+  const identityProfile = cleanJsonRecord(input.identityProfile);
 
   const { data: selfData, error: selfError } = await client
     .from('self_characters')
@@ -759,6 +799,7 @@ export async function saveSupabaseCreatorSelfCharacter(input: {
           creatorSelfFeatures: features,
           creatorSelfStylePreferences: style,
           creatorSelfEditorDraft: editorDraft,
+          identityProfile,
         },
         reference_image_urls: referenceImageUrls,
         reference_photo_names: referencePhotoNames,
@@ -830,6 +871,35 @@ export async function saveSupabaseCreatorSelfCharacter(input: {
   };
 }
 
+export async function saveSupabaseIdentityFeedback(input: {
+  userId: string;
+  identityProfile: LumoraIdentityProfile;
+}): Promise<void> {
+  const client = getClient();
+  const { data, error } = await client
+    .from('self_characters')
+    .select('style_preferences')
+    .eq('user_id', input.userId)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  const stylePreferences = {
+    ...jsonRecord(data?.style_preferences),
+    identityProfile: cleanJsonRecord(input.identityProfile),
+  };
+
+  const { error: updateError } = await client
+    .from('self_characters')
+    .update({
+      style_preferences: stylePreferences,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('user_id', input.userId);
+
+  if (updateError) throw updateError;
+}
+
 export async function loadSupabaseProjects(userId: string): Promise<StudioProject[]> {
   const client = getClient();
   const { data, error } = await client
@@ -858,10 +928,14 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
     display_engine: project.displayEngine ?? null,
     model: project.model ?? null,
     generation_mode: project.generationMode ?? null,
+    identity_id: project.identityId ?? null,
+    keyframe_url: storageUrl(project.keyframeUrl, 'Generated identity keyframe'),
     output_type: 'video',
     video_url: storageUrl(project.videoUrl, 'Generated project video'),
     cover_asset_url: storageUrl(project.videoUrl, 'Generated project video'),
     reference_image_url: storageUrl(project.referenceImageUrl, 'Project reference image'),
+    reference_image_urls: cleanJsonRecord(project.referenceImageUrls),
+    likeness_feedback: cleanJsonRecord(project.likenessFeedback),
     character_id: project.characterId,
     character_name: project.characterName,
     character_avatar: storageUrl(project.characterAvatar, 'Project character avatar'),
@@ -874,6 +948,10 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
   };
   const removableProjectColumns = [
     'reference_image_url',
+    'reference_image_urls',
+    'keyframe_url',
+    'identity_id',
+    'likeness_feedback',
     'generation_mode',
     'display_engine',
     'model',
@@ -922,7 +1000,13 @@ function mapProjectRow(row: DbRow): StudioProject {
     aspectRatio: nullableString(row.aspect_ratio),
     model: nullableString(row.model),
     generationMode: nullableString(row.generation_mode) as StudioProject['generationMode'],
+    identityId: nullableString(row.identity_id),
+    keyframeUrl: nullableString(row.keyframe_url),
     referenceImageUrl: nullableString(row.reference_image_url),
+    referenceImageUrls: jsonRecord(row.reference_image_urls) as Partial<ReferenceImageUrls>,
+    likenessFeedback: isObject(row.likeness_feedback)
+      ? row.likeness_feedback as LumoraIdentityFeedback
+      : null,
     characterId: nullableString(row.character_id),
     characterName: nullableString(row.character_name),
     characterAvatar: nullableString(row.character_avatar),

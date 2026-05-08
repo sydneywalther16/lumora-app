@@ -86,7 +86,12 @@ export type CharacterStatus = 'draft' | 'processing' | 'ready' | 'failed';
 export type PrivacySetting = 'private' | 'approved_only' | 'public';
 export type VideoEngine = 'sora-2' | 'sora-2-pro' | 'replicate' | 'veo' | 'runway' | 'mock' | 'openai';
 export type VideoAspectRatio = '9:16' | '16:9' | '1:1';
-export type GenerationMode = 'self-reference-video' | 'image-to-video' | 'text-to-video-fallback';
+export type GenerationMode =
+  | 'self-reference-video'
+  | 'image-to-video'
+  | 'text-to-video-fallback'
+  | 'identity-keyframe-to-video'
+  | 'reference-photo-animation-fallback';
 
 export type MediaUploadInput = {
   url?: string;
@@ -113,6 +118,42 @@ export type ReferenceImageUrls = {
   expressivePath?: string | null;
 };
 
+export type LumoraIdentityStatus = 'ready' | 'needs_refs' | 'building';
+
+export type LumoraIdentityFeedbackChoice =
+  | 'looks_like_me'
+  | 'hair_wrong'
+  | 'face_shape_wrong'
+  | 'skin_tone_wrong'
+  | 'makeup_wrong'
+  | 'too_realistic'
+  | 'not_realistic_enough'
+  | 'wrong_age'
+  | 'wrong_body_type';
+
+export type LumoraIdentityFeedback = {
+  choices: LumoraIdentityFeedbackChoice[];
+  customNote?: string;
+  createdAt: string;
+};
+
+export type LumoraIdentityProfile = {
+  identityId: string;
+  userId: string;
+  frontFaceUrl: string | null;
+  leftAngleUrl: string | null;
+  rightAngleUrl: string | null;
+  fullBodyUrl?: string | null;
+  videoReferenceUrls: string[];
+  appearanceSummary: string;
+  userPreferences: Record<string, string>;
+  dislikedTraits: string[];
+  likenessNotes: string[];
+  preferredTraits?: string[];
+  version: number;
+  status: LumoraIdentityStatus;
+};
+
 export type CreatorSelfStylePreferences = {
   everydayStyle?: string;
   glamStyle?: string;
@@ -135,6 +176,7 @@ export type CharacterProfile = {
   voiceSampleUrl: string | null;
   voiceSampleName?: string | null;
   voiceSampleNumbers?: string | null;
+  identityProfile?: LumoraIdentityProfile | null;
   creatorSelfFeatures?: Record<string, string>;
   creatorSelfStylePreferences?: CreatorSelfStylePreferences;
   createdAt: string;

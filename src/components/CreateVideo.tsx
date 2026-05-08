@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import {
   type GenerationMode,
+  type LumoraIdentityFeedback,
+  type LumoraIdentityFeedbackChoice,
+  type LumoraIdentityProfile,
   type GenerationResponse,
   type ReferenceImageUrls,
   type VideoAspectRatio,
@@ -25,6 +28,8 @@ type CreateVideoProps = {
   referenceLoading?: boolean;
   referenceLabel?: string | null;
   forceSelfMode?: boolean;
+  identityProfile?: LumoraIdentityProfile | null;
+  onLikenessFeedback?: (feedback: LumoraIdentityFeedback) => void | Promise<void>;
   onResaveReferencePhoto?: () => void;
 };
 
@@ -58,12 +63,35 @@ type GenerateVideoApiResponse = {
   rawOutput?: unknown;
   referenceImageNote?: string;
   referenceImageUrl?: unknown;
+  keyframeUrl?: unknown;
   generationMode?: GenerationMode;
   displayEngine?: string;
   warnings?: unknown;
   error?: string;
   details?: unknown;
 };
+
+type KeyframeApiResponse = {
+  keyframeUrl?: unknown;
+  finalPrompt?: string;
+  provider?: string;
+  model?: string;
+  warnings?: unknown;
+  error?: string;
+  details?: unknown;
+};
+
+const likenessFeedbackOptions: Array<{ value: LumoraIdentityFeedbackChoice; label: string }> = [
+  { value: 'looks_like_me', label: 'looks like me' },
+  { value: 'hair_wrong', label: 'hair wrong' },
+  { value: 'face_shape_wrong', label: 'face shape wrong' },
+  { value: 'skin_tone_wrong', label: 'skin tone wrong' },
+  { value: 'makeup_wrong', label: 'makeup wrong' },
+  { value: 'too_realistic', label: 'too realistic' },
+  { value: 'not_realistic_enough', label: 'not realistic enough' },
+  { value: 'wrong_age', label: 'wrong age' },
+  { value: 'wrong_body_type', label: 'wrong body type' },
+];
 
 function createLocalGenerationId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -164,19 +192,21 @@ function pickReferenceImage(input: {
 
 function referenceImagePayload(urls?: Partial<ReferenceImageUrls> | null) {
   if (!urls) return undefined;
+  const optionalUrl = (value?: string | null) => cleanReferenceUrl(value) ?? undefined;
 
   return {
-    front: cleanReferenceUrl(urls.frontFaceUrl ?? urls.frontFace),
-    frontFace: cleanReferenceUrl(urls.frontFaceUrl ?? urls.frontFace),
-    frontFaceUrl: cleanReferenceUrl(urls.frontFaceUrl ?? urls.frontFace),
-    fullBody: cleanReferenceUrl(urls.fullBodyUrl ?? urls.fullBody),
-    left: cleanReferenceUrl(urls.leftAngleUrl ?? urls.leftAngle),
-    leftAngle: cleanReferenceUrl(urls.leftAngleUrl ?? urls.leftAngle),
-    leftAngleUrl: cleanReferenceUrl(urls.leftAngleUrl ?? urls.leftAngle),
-    right: cleanReferenceUrl(urls.rightAngleUrl ?? urls.rightAngle),
-    rightAngle: cleanReferenceUrl(urls.rightAngleUrl ?? urls.rightAngle),
-    rightAngleUrl: cleanReferenceUrl(urls.rightAngleUrl ?? urls.rightAngle),
-    expressive: cleanReferenceUrl(urls.expressiveUrl ?? urls.expressive),
+    front: optionalUrl(urls.frontFaceUrl ?? urls.frontFace),
+    frontFace: optionalUrl(urls.frontFaceUrl ?? urls.frontFace),
+    frontFaceUrl: optionalUrl(urls.frontFaceUrl ?? urls.frontFace),
+    fullBody: optionalUrl(urls.fullBodyUrl ?? urls.fullBody),
+    fullBodyUrl: optionalUrl(urls.fullBodyUrl ?? urls.fullBody),
+    left: optionalUrl(urls.leftAngleUrl ?? urls.leftAngle),
+    leftAngle: optionalUrl(urls.leftAngleUrl ?? urls.leftAngle),
+    leftAngleUrl: optionalUrl(urls.leftAngleUrl ?? urls.leftAngle),
+    right: optionalUrl(urls.rightAngleUrl ?? urls.rightAngle),
+    rightAngle: optionalUrl(urls.rightAngleUrl ?? urls.rightAngle),
+    rightAngleUrl: optionalUrl(urls.rightAngleUrl ?? urls.rightAngle),
+    expressive: optionalUrl(urls.expressiveUrl ?? urls.expressive),
   };
 }
 
@@ -237,6 +267,8 @@ export default function CreateVideo({
   referenceLoading = false,
   referenceLabel,
   forceSelfMode = false,
+  identityProfile,
+  onLikenessFeedback,
   onResaveReferencePhoto,
 }: CreateVideoProps) {
   const { user, session, loading: sessionLoading, configured } = useSession();
@@ -263,6 +295,10 @@ export default function CreateVideo({
   const [generatedReferenceImageUrl, setGeneratedReferenceImageUrl] = useState<string | null>(null);
   const [generatedMode, setGeneratedMode] = useState<GenerationMode | null>(null);
   const [generationWarnings, setGenerationWarnings] = useState<string[]>([]);
+  const [generatedKeyframeUrl, setGeneratedKeyframeUrl] = useState<string | null>(null);
+  const [selectedFeedbackChoices, setSelectedFeedbackChoices] = useState<LumoraIdentityFeedbackChoice[]>([]);
+  const [feedbackNote, setFeedbackNote] = useState('');
+  const [feedbackStatus, setFeedbackStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [generationResult, setGenerationResult] = useState<GenerationResponse | null>(null);
   const primaryReferenceImage = pickReferenceImage({ referenceImageUrl, referenceImageUrls });
@@ -280,13 +316,27 @@ export default function CreateVideo({
   const isTextFallbackMode = !hasSelfCharacter && !referenceLoading && selectedGenerationMode === 'text-to-video-fallback';
   const referenceThumbnailUrl = renderableReferenceImageUrl(primaryReferenceImage.url);
   const generatedReferenceThumbnailUrl = renderableReferenceImageUrl(generatedReferenceImageUrl);
+  const identityReady = identityProfile?.status === 'ready';
+  const identityStatusLabel = !identityProfile
+    ? 'Needs references'
+    : identityProfile.status === 'building'
+      ? 'Building identity'
+      : identityProfile.status === 'ready'
+        ? 'Identity ready'
+        : 'Needs references';
+  const identityReferenceThumbs = [
+    identityProfile?.frontFaceUrl,
+    identityProfile?.leftAngleUrl,
+    identityProfile?.rightAngleUrl,
+    identityProfile?.fullBodyUrl,
+  ].filter((url): url is string => Boolean(renderableReferenceImageUrl(url)));
   const canGenerate = true;
   const generateBusy = canGenerate ? busy || generationLoading || referenceLoading : true;
   const saveBusy = busy || generationLoading;
   const isSoraEngine = engine === 'sora-2' || engine === 'sora-2-pro';
   const engineRoutingMessage =
     isSoraEngine
-      ? 'Self likeness mode currently routes through Replicate image-to-video. Sora remains optional elsewhere.'
+      ? 'Lumora Identity Character currently routes through Replicate image-to-video. Sora remains optional elsewhere.'
       : 'Kling runs through Replicate and uses your self-character reference image first.';
 
   async function handleGenerate() {
@@ -327,17 +377,70 @@ export default function CreateVideo({
     setGeneratedReferenceImageUrl(null);
     setGeneratedMode(null);
     setGenerationWarnings([]);
+    setGeneratedKeyframeUrl(null);
     setGenerationResult(null);
     setStatus('');
 
     try {
+      let keyframeUrl: string | null = null;
+      let keyframeFinalPrompt = '';
+      let keyframeWarnings: string[] = [];
+      let keyframeModel = '';
+      let videoGenerationMode: GenerationMode = selfReferenceMode
+        ? 'reference-photo-animation-fallback'
+        : selectedGenerationMode;
+
+      if (selfReferenceMode && selectedReferenceImageUrl && identityProfile) {
+        const keyframeRes = await fetch('/api/lumora/generate-identity-keyframe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: currentPrompt,
+            identityId: identityProfile.identityId,
+            frontFaceUrl: identityProfile.frontFaceUrl || selectedReferenceImageUrl,
+            leftAngleUrl: identityProfile.leftAngleUrl,
+            rightAngleUrl: identityProfile.rightAngleUrl,
+            videoReferenceUrls: identityProfile.videoReferenceUrls,
+            appearanceSummary: identityProfile.appearanceSummary,
+            preferences: identityProfile.userPreferences,
+            dislikes: identityProfile.dislikedTraits,
+            likenessNotes: identityProfile.likenessNotes,
+            style: selectedStyle,
+          }),
+        });
+        const keyframeText = await keyframeRes.text();
+        const { data: keyframeData, parseError: keyframeParseError } = parseGenerateResponse(keyframeText) as {
+          data: KeyframeApiResponse;
+          parseError: string | null;
+        };
+
+        if (keyframeRes.ok && !keyframeParseError) {
+          keyframeUrl = normalizeVideoUrl(keyframeData.keyframeUrl);
+          keyframeFinalPrompt = keyframeData.finalPrompt || '';
+          keyframeWarnings = formatWarnings(keyframeData.warnings);
+          keyframeModel = keyframeData.model || '';
+
+          if (keyframeUrl) {
+            videoGenerationMode = 'identity-keyframe-to-video';
+          }
+        } else {
+          const keyframeMessage = keyframeData.error || keyframeParseError || 'Identity keyframe provider not configured yet.';
+          keyframeWarnings = [
+            `${keyframeMessage} Using reference photo animation fallback.`,
+          ];
+          videoGenerationMode = 'reference-photo-animation-fallback';
+        }
+      }
+
       const res = await fetch('/api/lumora/generate-video', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: currentPrompt,
           characterId,
+          identityId: identityProfile?.identityId,
           characterDescription: selectedCharacterDescription,
+          keyframeUrl,
           referenceImageUrl: selectedReferenceImageUrl,
           additionalReferenceImageUrls,
           referenceImages: additionalReferenceImageUrls,
@@ -348,7 +451,7 @@ export default function CreateVideo({
           audio: true,
           provider: 'replicate',
           engine: selectedEngine,
-          generationMode: selectedGenerationMode,
+          generationMode: videoGenerationMode,
         }),
       });
 
@@ -370,11 +473,13 @@ export default function CreateVideo({
 
       const nextVideoUrl = normalizeVideoUrl(data.videoUrl ?? data.video);
       const generationProvider = data.provider === 'openai' ? 'openai' : 'replicate';
-      const nextGenerationMode = data.generationMode || selectedGenerationMode;
+      const nextGenerationMode = data.generationMode || videoGenerationMode;
       const nextDisplayEngine =
         data.displayEngine || (nextGenerationMode === 'text-to-video-fallback' ? 'text fallback' : 'kling');
       const nextReferenceImageUrl = cleanReferenceUrl(normalizeVideoUrl(data.referenceImageUrl) || selectedReferenceImageUrl);
+      const nextKeyframeUrl = cleanReferenceUrl(normalizeVideoUrl(data.keyframeUrl) || keyframeUrl);
       const nextWarnings = [
+        ...keyframeWarnings,
         ...formatWarnings(data.warnings),
         ...(data.referenceImageNote ? [data.referenceImageNote] : []),
       ];
@@ -385,14 +490,15 @@ export default function CreateVideo({
         return;
       }
 
-      const nextFinalPrompt = data.finalPrompt || currentPrompt;
+      const nextFinalPrompt = data.finalPrompt || keyframeFinalPrompt || currentPrompt;
       setGeneratedVideoUrl(nextVideoUrl);
       setFinalGeneratedPrompt(nextFinalPrompt);
-      setGeneratedModel(data.model || '');
+      setGeneratedModel(data.model || keyframeModel || '');
       setGeneratedDisplayEngine(nextDisplayEngine);
       setGeneratedReferenceImageUrl(nextReferenceImageUrl);
       setGeneratedMode(nextGenerationMode);
       setGenerationWarnings(nextWarnings);
+      setGeneratedKeyframeUrl(nextKeyframeUrl);
 
       const profile = authUser ? await loadSupabaseProfile(authUser.id) : loadLumoraProfile();
       const now = new Date().toISOString();
@@ -414,6 +520,8 @@ export default function CreateVideo({
         referenceImageUrl: nextReferenceImageUrl,
         message: nextGenerationMode === 'text-to-video-fallback'
           ? 'Text-only fallback render created. Likeness is not guaranteed.'
+          : nextGenerationMode === 'identity-keyframe-to-video'
+            ? 'Lumora Identity Character keyframe render created.'
           : 'Kling self-reference video render created.',
         createdAt: now,
       };
@@ -434,7 +542,10 @@ export default function CreateVideo({
           model: data.model || null,
           displayEngine: nextDisplayEngine,
           generationMode: nextGenerationMode,
+          identityId: identityProfile?.identityId ?? null,
+          keyframeUrl: nextKeyframeUrl,
           referenceImageUrl: nextReferenceImageUrl,
+          referenceImageUrls: referencePayload,
           characterId,
           characterName,
           characterAvatar,
@@ -508,6 +619,32 @@ export default function CreateVideo({
       setStatus(error instanceof Error ? error.message : 'Unable to save draft.');
     } finally {
       setBusy(false);
+    }
+  }
+
+  function toggleFeedbackChoice(choice: LumoraIdentityFeedbackChoice) {
+    setSelectedFeedbackChoices((current) =>
+      current.includes(choice)
+        ? current.filter((item) => item !== choice)
+        : [...current, choice],
+    );
+  }
+
+  async function handleSubmitLikenessFeedback() {
+    if (!onLikenessFeedback || (!selectedFeedbackChoices.length && !feedbackNote.trim())) return;
+
+    setFeedbackStatus('Saving likeness feedback...');
+    try {
+      await onLikenessFeedback({
+        choices: selectedFeedbackChoices,
+        customNote: feedbackNote.trim() || undefined,
+        createdAt: new Date().toISOString(),
+      });
+      setFeedbackStatus('Feedback saved for future Lumora Identity Character prompts.');
+      setSelectedFeedbackChoices([]);
+      setFeedbackNote('');
+    } catch (error) {
+      setFeedbackStatus(error instanceof Error ? error.message : 'Unable to save likeness feedback.');
     }
   }
 
@@ -593,7 +730,7 @@ export default function CreateVideo({
           <div className="reference-mode-copy">
             <span className="eyebrow">
               {selfReferenceMode
-                  ? 'Self likeness mode'
+                  ? 'Lumora Identity Character'
                 : referenceLoading
                   ? 'Checking self reference'
                   : isTextFallbackMode
@@ -602,7 +739,7 @@ export default function CreateVideo({
             </span>
             <strong>
               {selfReferenceMode
-                ? 'Using your saved self character'
+                ? 'Generate new scenes from your reusable identity'
                 : referenceLoading
                   ? 'Looking for saved self-character photos'
                 : isTextFallbackMode
@@ -614,12 +751,20 @@ export default function CreateVideo({
                 ? 'Lumora is checking front, full-body, angle, avatar, and media URL fields.'
                 : selfReferenceMode
                 ? primaryReferenceImage.url
-                  ? 'Identity locked. Rendering your likeness.'
-                  : 'Sending your saved reference to Kling.'
+                  ? 'Build a reusable photorealistic character from your reference photos and videos.'
+                  : 'Lumora Identity Character references will be sent when available.'
                 : isTextFallbackMode
                   ? 'Text-only fallback uses Luma and supports 5s or 9s renders.'
                   : 'Kling will condition the video on the selected image.'}
             </span>
+            {selfReferenceMode ? (
+              <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }}>
+                <span className="tiny-pill" style={{ width: 'fit-content' }}>{identityStatusLabel}</span>
+                <span className="muted">
+                  Lumora will use your feedback to improve future prompts and character consistency.
+                </span>
+              </div>
+            ) : null}
             {selfReferenceMode && onResaveReferencePhoto ? (
               <button
                 type="button"
@@ -638,7 +783,7 @@ export default function CreateVideo({
             />
           ) : selfReferenceMode ? (
             <div className="reference-mode-thumb reference-mode-placeholder" aria-hidden="true">
-              Reference
+              Identity
             </div>
           ) : null}
           {primaryReferenceImage.label || selfReferenceMode ? (
@@ -660,12 +805,42 @@ export default function CreateVideo({
           </div>
         ) : null}
 
+        {selfReferenceMode ? (
+          <div className="field-block">
+            <span>Lumora Identity Character</span>
+            <div className="reference-grid" style={{ gap: '8px' }}>
+              {identityReferenceThumbs.length ? (
+                identityReferenceThumbs.map((url) => (
+                  <div key={url} className="reference-upload" style={{ padding: '8px', minHeight: 'unset' }}>
+                    <img
+                      src={url}
+                      alt=""
+                      style={{
+                        width: '100%',
+                        aspectRatio: '1',
+                        objectFit: 'cover',
+                        borderRadius: '14px',
+                        display: 'block',
+                      }}
+                    />
+                  </div>
+                ))
+              ) : (
+                <div className="reference-upload" style={{ padding: '14px' }}>
+                  <strong>{identityReady ? 'Identity ready' : 'Needs references'}</strong>
+                  <span className="muted">Add front, left, and right references to improve consistency.</span>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+
         <div className="button-row">
           <button type="button" className="primary-btn" onClick={handleGenerate} disabled={false} aria-busy={generateBusy}>
             {generationLoading
               ? 'Rendering...'
               : selfReferenceMode
-                ? 'Generate with your likeness'
+                ? 'Generate new scene with my Lumora character'
                 : referenceLoading
                   ? 'Checking self character...'
                 : isTextFallbackMode
@@ -734,6 +909,12 @@ export default function CreateVideo({
           {generatedMode ? (
             <p className="muted">Generation mode: {generatedMode}</p>
           ) : null}
+          {generatedKeyframeUrl ? (
+            <div className="reference-result-row">
+              <img src={generatedKeyframeUrl} alt="" />
+              <span className="muted">Identity keyframe generated for this scene</span>
+            </div>
+          ) : null}
           {generatedReferenceThumbnailUrl ? (
             <div className="reference-result-row">
               <img src={generatedReferenceThumbnailUrl} alt="" />
@@ -749,6 +930,39 @@ export default function CreateVideo({
               playsInline
               style={{ width: '100%', borderRadius: 12 }}
             />
+          ) : null}
+          {selfReferenceMode && onLikenessFeedback ? (
+            <div style={{ display: 'grid', gap: '10px', marginTop: '12px' }}>
+              <strong>Improve likeness</strong>
+              <p className="muted" style={{ margin: 0 }}>
+                Lumora will use your feedback to improve future prompts and character consistency.
+              </p>
+              <div className="chip-row wrap">
+                {likenessFeedbackOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`chip ${selectedFeedbackChoices.includes(option.value) ? 'active' : ''}`}
+                    onClick={() => toggleFeedbackChoice(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <label className="field-block">
+                <span>Custom note</span>
+                <textarea
+                  value={feedbackNote}
+                  onChange={(event) => setFeedbackNote(event.target.value)}
+                  rows={3}
+                  placeholder="Add a likeness note"
+                />
+              </label>
+              <button type="button" className="ghost-btn" onClick={() => void handleSubmitLikenessFeedback()}>
+                Save likeness feedback
+              </button>
+              {feedbackStatus ? <p className="muted">{feedbackStatus}</p> : null}
+            </div>
           ) : null}
         </section>
       ) : null}

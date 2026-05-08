@@ -35,6 +35,10 @@ import {
   loadLocalProfileAvatarUrl,
   saveLocalProfileAvatar,
 } from '../lib/localAvatarStorage';
+import {
+  buildLumoraIdentityProfile,
+  identityProfileToStylePreferences,
+} from '../lib/identityCharacter';
 
 type Draft = { id: string; title: string; prompt: string; createdAt: string };
 type ProfileDebugInfo = {
@@ -65,8 +69,13 @@ type SelfCharacterForm = {
   rightAngle: string;
   rightAnglePath: string;
   rightAngleName: string;
+  fullBody: string;
+  fullBodyPath: string;
+  fullBodyName: string;
   selfieVideoName: string;
   selfieVideoUrl: string | null;
+  selfieVideo2Name: string;
+  selfieVideo2Url: string | null;
   voiceSampleName: string;
   voiceSampleUrl: string | null;
   voiceSampleNumbers: string;
@@ -86,9 +95,9 @@ type SelfCharacterEditorDraft = SelfCharacterForm &
   creatorSelfStylePreferences?: Required<CreatorSelfStylePreferences>;
 };
 
-type ReferencePhotoField = 'frontFace' | 'leftAngle' | 'rightAngle';
-type ReferencePhotoNameField = 'frontFaceName' | 'leftAngleName' | 'rightAngleName';
-type ReferencePhotoPathField = 'frontFacePath' | 'leftAnglePath' | 'rightAnglePath';
+type ReferencePhotoField = 'frontFace' | 'leftAngle' | 'rightAngle' | 'fullBody';
+type ReferencePhotoNameField = 'frontFaceName' | 'leftAngleName' | 'rightAngleName' | 'fullBodyName';
+type ReferencePhotoPathField = 'frontFacePath' | 'leftAnglePath' | 'rightAnglePath' | 'fullBodyPath';
 type SelfCharacterFormSource = Partial<Omit<SelfCharacterForm, 'features' | 'style'>> & {
   features?: Partial<CreatorSelfFeatures>;
   style?: Partial<CreatorSelfStylePreferences>;
@@ -102,12 +111,14 @@ const referencePhotoNameFields: Record<ReferencePhotoField, ReferencePhotoNameFi
   frontFace: 'frontFaceName',
   leftAngle: 'leftAngleName',
   rightAngle: 'rightAngleName',
+  fullBody: 'fullBodyName',
 };
 
 const referencePhotoPathFields: Record<ReferencePhotoField, ReferencePhotoPathField> = {
   frontFace: 'frontFacePath',
   leftAngle: 'leftAnglePath',
   rightAngle: 'rightAnglePath',
+  fullBody: 'fullBodyPath',
 };
 
 const emptyCreatorSelfFeatures: CreatorSelfFeatures = {
@@ -436,8 +447,13 @@ function parseSelfCharacterEditorDraft(value: unknown): SelfCharacterEditorDraft
     rightAngle: readString(record.rightAngle),
     rightAnglePath: readString(record.rightAnglePath),
     rightAngleName: readString(record.rightAngleName),
+    fullBody: readString(record.fullBody),
+    fullBodyPath: readString(record.fullBodyPath),
+    fullBodyName: readString(record.fullBodyName),
     selfieVideoName: readString(record.selfieVideoName),
     selfieVideoUrl: firstNullableString(readString(record.selfieVideoUrl)),
+    selfieVideo2Name: readString(record.selfieVideo2Name),
+    selfieVideo2Url: firstNullableString(readString(record.selfieVideo2Url)),
     voiceSampleName: readString(record.voiceSampleName),
     voiceSampleUrl: firstNullableString(readString(record.voiceSampleUrl)),
     voiceSampleNumbers: readString(record.voiceSampleNumbers),
@@ -481,8 +497,13 @@ function createSelfCharacterEditorDraft(form: SelfCharacterForm): SelfCharacterE
     rightAngle: form.rightAngle,
     rightAnglePath: form.rightAnglePath,
     rightAngleName: form.rightAngleName,
+    fullBody: form.fullBody,
+    fullBodyPath: form.fullBodyPath,
+    fullBodyName: form.fullBodyName,
     selfieVideoName: form.selfieVideoName,
     selfieVideoUrl: form.selfieVideoUrl,
+    selfieVideo2Name: form.selfieVideo2Name,
+    selfieVideo2Url: form.selfieVideo2Url,
     voiceSampleName: form.voiceSampleName,
     voiceSampleUrl: form.voiceSampleUrl,
     voiceSampleNumbers: form.voiceSampleNumbers,
@@ -519,7 +540,9 @@ function cleanMediaFromDraft(draft: SelfCharacterEditorDraft): SelfCharacterEdit
     frontFace: cleanMediaUrl(draft.frontFace) || '',
     leftAngle: cleanMediaUrl(draft.leftAngle) || '',
     rightAngle: cleanMediaUrl(draft.rightAngle) || '',
+    fullBody: cleanMediaUrl(draft.fullBody) || '',
     selfieVideoUrl: cleanMediaUrl(draft.selfieVideoUrl),
+    selfieVideo2Url: cleanMediaUrl(draft.selfieVideo2Url),
     voiceSampleUrl: cleanMediaUrl(draft.voiceSampleUrl),
   };
 }
@@ -568,8 +591,13 @@ function buildCreatorSelfCharacterSource(character: CharacterProfile | null): Se
     rightAngle: firstString(character.referenceImageUrls.rightAngleUrl, character.referenceImageUrls.rightAngle, editorDraft?.rightAngle),
     rightAnglePath: firstString(character.referenceImageUrls.rightAnglePath, editorDraft?.rightAnglePath),
     rightAngleName: firstString(readString(referencePhotoNames.rightAngle), editorDraft?.rightAngleName, character.referenceImageUrls.rightAngle ? 'Saved right angle photo' : ''),
+    fullBody: firstString(character.referenceImageUrls.fullBodyUrl, character.referenceImageUrls.fullBody, editorDraft?.fullBody),
+    fullBodyPath: firstString(character.referenceImageUrls.fullBodyPath, editorDraft?.fullBodyPath),
+    fullBodyName: firstString(readString(referencePhotoNames.fullBody), editorDraft?.fullBodyName, character.referenceImageUrls.fullBody ? 'Saved full body photo' : ''),
     selfieVideoName: firstString(editorDraft?.selfieVideoName, character.sourceCaptureVideoUrl ? 'Saved selfie video' : ''),
     selfieVideoUrl: firstNullableString(character.sourceCaptureVideoUrl, editorDraft?.selfieVideoUrl),
+    selfieVideo2Name: firstString(readString(stylePreferences.selfieVideo2Name), editorDraft?.selfieVideo2Name),
+    selfieVideo2Url: firstNullableString(readString(stylePreferences.selfieVideo2Url), editorDraft?.selfieVideo2Url),
     voiceSampleName: firstString(
       character.voiceSampleName,
       editorDraft?.voiceSampleName,
@@ -621,8 +649,13 @@ function buildProfileSelfCharacterSource(profile: LumoraProfile): SelfCharacterF
     rightAngle: firstString(readString(referenceImageUrls.rightAngleUrl), readString(referenceImageUrls.rightAngle), editorDraft?.rightAngle),
     rightAnglePath: firstString(readString(referenceImageUrls.rightAnglePath), editorDraft?.rightAnglePath),
     rightAngleName: firstString(readString(referencePhotoNames.rightAngle), editorDraft?.rightAngleName),
+    fullBody: firstString(readString(referenceImageUrls.fullBodyUrl), readString(referenceImageUrls.fullBody), editorDraft?.fullBody),
+    fullBodyPath: firstString(readString(referenceImageUrls.fullBodyPath), editorDraft?.fullBodyPath),
+    fullBodyName: firstString(readString(referencePhotoNames.fullBody), editorDraft?.fullBodyName),
     selfieVideoName: firstString(profile.selfCaptureVideoName, editorDraft?.selfieVideoName),
     selfieVideoUrl: firstNullableString(profile.selfCaptureVideoUrl, editorDraft?.selfieVideoUrl),
+    selfieVideo2Name: firstString(readString(readObjectRecord(profileRecord.selfCharacterEditorDraft)?.selfieVideo2Name), editorDraft?.selfieVideo2Name),
+    selfieVideo2Url: firstNullableString(readString(readObjectRecord(profileRecord.selfCharacterEditorDraft)?.selfieVideo2Url), editorDraft?.selfieVideo2Url),
     voiceSampleName: firstString(profile.selfVoiceSampleName, editorDraft?.voiceSampleName),
     voiceSampleUrl: firstNullableString(profile.selfVoiceSampleUrl, editorDraft?.voiceSampleUrl),
     voiceSampleNumbers: firstString(profile.selfVoiceSampleNumbers, editorDraft?.voiceSampleNumbers),
@@ -663,8 +696,13 @@ function mergeSelfCharacterFormSources(...sources: SelfCharacterFormSource[]): S
     rightAngle: findStringField('rightAngle'),
     rightAnglePath: findStringField('rightAnglePath'),
     rightAngleName: findStringField('rightAngleName'),
+    fullBody: findStringField('fullBody'),
+    fullBodyPath: findStringField('fullBodyPath'),
+    fullBodyName: findStringField('fullBodyName'),
     selfieVideoName: findStringField('selfieVideoName'),
     selfieVideoUrl: findNullableStringField('selfieVideoUrl'),
+    selfieVideo2Name: findStringField('selfieVideo2Name'),
+    selfieVideo2Url: findNullableStringField('selfieVideo2Url'),
     voiceSampleName: findStringField('voiceSampleName'),
     voiceSampleUrl: findNullableStringField('voiceSampleUrl'),
     voiceSampleNumbers: findStringField('voiceSampleNumbers') || defaults.voiceSampleNumbers,
@@ -714,8 +752,13 @@ function buildBlankSelfCharacterForm(): SelfCharacterForm {
     rightAngle: '',
     rightAnglePath: '',
     rightAngleName: '',
+    fullBody: '',
+    fullBodyPath: '',
+    fullBodyName: '',
     selfieVideoName: '',
     selfieVideoUrl: null,
+    selfieVideo2Name: '',
+    selfieVideo2Url: null,
     voiceSampleName: '',
     voiceSampleUrl: null,
     voiceSampleNumbers: generateSelfVoiceSampleNumbers(),
@@ -1585,6 +1628,16 @@ export default function ProfilePage() {
   ).length;
   const selfCharacterFormTitle = creatorSelfCharacter ? 'Edit self character' : 'Create self character';
   const selfCharacterActionLabel = creatorSelfCharacter ? 'Save self character' : 'Create self character';
+  const creatorIdentityProfile = creatorSelfCharacter
+    ? buildLumoraIdentityProfile({
+        userId: authUserId || 'local',
+        selfCharacter: creatorSelfCharacter,
+        profile,
+        referenceImageUrls: creatorSelfCharacter.referenceImageUrls,
+        primaryReferenceImageUrl:
+          creatorSelfCharacter.referenceImageUrls.frontFaceUrl || creatorSelfCharacter.referenceImageUrls.frontFace,
+      })
+    : null;
   function openProfileEditor() {
     setProfileDraft(profile);
     setSaveMessage(null);
@@ -1795,7 +1848,10 @@ export default function ProfilePage() {
     }
   }
 
-  async function handleSelfVideoUpload(event: ChangeEvent<HTMLInputElement>) {
+  async function handleSelfVideoUpload(
+    event: ChangeEvent<HTMLInputElement>,
+    slot: 'primary' | 'secondary' = 'primary',
+  ) {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -1806,13 +1862,14 @@ export default function ProfilePage() {
             bucket: 'self-capture-videos',
             file,
             folder: 'self/capture',
-            usage: 'self-capture-video',
+            usage: slot === 'primary' ? 'self-capture-video' : 'self-capture-video-2',
           })).url
         : await readFileAsDataUrl(file);
       setSelfForm((current) => ({
         ...current,
-        selfieVideoName: file.name,
-        selfieVideoUrl: dataUrl,
+        ...(slot === 'primary'
+          ? { selfieVideoName: file.name, selfieVideoUrl: dataUrl }
+          : { selfieVideo2Name: file.name, selfieVideo2Url: dataUrl }),
         selfCaptureCompleted: Boolean(current.selfCaptureConsent),
       }));
     } catch (error) {
@@ -1904,30 +1961,61 @@ export default function ProfilePage() {
     const compactStyle = compactStringRecord(selfForm.style);
     const finalEditorDraft = saveSelfCharacterEditorDraft(selfForm) ?? createSelfCharacterEditorDraft(selfForm);
     const displayName = profile.displayName.trim() || 'Creator';
+    const referenceImageUrls = {
+      frontFace: selfForm.frontFace,
+      frontFaceUrl: selfForm.frontFace,
+      frontFacePath: selfForm.frontFacePath || null,
+      leftAngle: selfForm.leftAngle,
+      leftAngleUrl: selfForm.leftAngle,
+      leftAnglePath: selfForm.leftAnglePath || null,
+      rightAngle: selfForm.rightAngle,
+      rightAngleUrl: selfForm.rightAngle,
+      rightAnglePath: selfForm.rightAnglePath || null,
+      fullBody: selfForm.fullBody || null,
+      fullBodyUrl: selfForm.fullBody || null,
+      fullBodyPath: selfForm.fullBodyPath || null,
+    };
+    const baseStylePreferences = {
+      creatorSelfFeatures: compactFeatures,
+      creatorSelfStylePreferences: compactStyle,
+      creatorSelfEditorDraft: finalEditorDraft,
+      selfCaptureNumbers: selfForm.selfCaptureNumbers || null,
+      selfCaptureConsent: selfForm.selfCaptureConsent,
+      selfCaptureCompleted: selfForm.selfCaptureCompleted,
+      selfVoiceSampleConsent: Boolean(selfForm.voiceSampleConsent),
+      selfieVideo2Name: selfForm.selfieVideo2Name || null,
+      selfieVideo2Url: selfForm.selfieVideo2Url,
+    };
+    const identityDraftCharacter: CharacterProfile = {
+      id: CREATOR_SELF_CHARACTER_ID,
+      ownerUserId: authUserId || 'local',
+      name: displayName,
+      status: 'ready',
+      consentConfirmed: true,
+      visibility: 'private',
+      stylePreferences: baseStylePreferences,
+      referenceImageUrls,
+      sourceCaptureVideoUrl: selfForm.selfieVideoUrl,
+      voiceSampleUrl: selfForm.voiceSampleUrl,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isSelf: true,
+      isCreatorSelf: true,
+      creatorSelfFeatures: compactFeatures,
+      creatorSelfStylePreferences: compactStyle,
+    };
+    const identityProfile = buildLumoraIdentityProfile({
+      userId: authUserId || 'local',
+      selfCharacter: identityDraftCharacter,
+      profile,
+      referenceImageUrls,
+      primaryReferenceImageUrl: selfForm.frontFace,
+      additionalReferenceImageUrls: [selfForm.leftAngle, selfForm.rightAngle].filter(Boolean),
+    });
+    const stylePreferences = identityProfileToStylePreferences(baseStylePreferences, identityProfile);
 
     if (authUserId) {
       try {
-        const referenceImageUrls = {
-          frontFace: selfForm.frontFace,
-          frontFaceUrl: selfForm.frontFace,
-          frontFacePath: selfForm.frontFacePath || null,
-          leftAngle: selfForm.leftAngle,
-          leftAngleUrl: selfForm.leftAngle,
-          leftAnglePath: selfForm.leftAnglePath || null,
-          rightAngle: selfForm.rightAngle,
-          rightAngleUrl: selfForm.rightAngle,
-          rightAnglePath: selfForm.rightAnglePath || null,
-        };
-        const stylePreferences = {
-          creatorSelfFeatures: compactFeatures,
-          creatorSelfStylePreferences: compactStyle,
-          creatorSelfEditorDraft: finalEditorDraft,
-          selfCaptureNumbers: selfForm.selfCaptureNumbers || null,
-          selfCaptureConsent: selfForm.selfCaptureConsent,
-          selfCaptureCompleted: selfForm.selfCaptureCompleted,
-          selfVoiceSampleConsent: Boolean(selfForm.voiceSampleConsent),
-        };
-
         const saved = await saveSupabaseCreatorSelfCharacter({
           userId: authUserId,
           profile,
@@ -1937,6 +2025,7 @@ export default function ProfilePage() {
             frontFace: selfForm.frontFaceName || null,
             leftAngle: selfForm.leftAngleName || null,
             rightAngle: selfForm.rightAngleName || null,
+            fullBody: selfForm.fullBodyName || null,
           },
           sourceCaptureVideoUrl: selfForm.selfieVideoUrl,
           sourceCaptureVideoName: selfForm.selfieVideoName || null,
@@ -1950,6 +2039,7 @@ export default function ProfilePage() {
           creatorSelfFeatures: compactFeatures,
           creatorSelfStylePreferences: compactStyle,
           stylePreferences,
+          identityProfile,
           editorDraft: finalEditorDraft,
         });
         const remoteCharacters = await loadSupabaseCharacters(authUserId);
@@ -1984,31 +2074,16 @@ export default function ProfilePage() {
       const selfCharacter = saveCreatorSelfCharacter({
         name: displayName,
         referenceImageUrls: {
-          frontFace: selfForm.frontFace,
-          frontFaceUrl: selfForm.frontFace,
-          frontFacePath: selfForm.frontFacePath || null,
-          leftAngle: selfForm.leftAngle,
-          leftAngleUrl: selfForm.leftAngle,
-          leftAnglePath: selfForm.leftAnglePath || null,
-          rightAngle: selfForm.rightAngle,
-          rightAngleUrl: selfForm.rightAngle,
-          rightAnglePath: selfForm.rightAnglePath || null,
+          ...referenceImageUrls,
         },
         sourceCaptureVideoUrl: selfForm.selfieVideoUrl,
         voiceSampleUrl: selfForm.voiceSampleUrl,
         voiceSampleName: selfForm.voiceSampleName || null,
         voiceSampleNumbers: selfForm.voiceSampleNumbers || null,
-        stylePreferences: {
-          creatorSelfFeatures: compactFeatures,
-          creatorSelfStylePreferences: compactStyle,
-          creatorSelfEditorDraft: finalEditorDraft,
-          selfCaptureNumbers: selfForm.selfCaptureNumbers || null,
-          selfCaptureConsent: selfForm.selfCaptureConsent,
-          selfCaptureCompleted: selfForm.selfCaptureCompleted,
-          selfVoiceSampleConsent: Boolean(selfForm.voiceSampleConsent),
-        },
+        stylePreferences,
         creatorSelfFeatures: compactFeatures,
         creatorSelfStylePreferences: compactStyle,
+        identityProfile,
       });
 
       // Save profile with self character metadata
@@ -2027,11 +2102,15 @@ export default function ProfilePage() {
           rightAngle: selfForm.rightAngle || null,
           rightAngleUrl: selfForm.rightAngle || null,
           rightAnglePath: selfForm.rightAnglePath || null,
+          fullBody: selfForm.fullBody || null,
+          fullBodyUrl: selfForm.fullBody || null,
+          fullBodyPath: selfForm.fullBodyPath || null,
         },
         selfReferencePhotoNames: {
           frontFace: selfForm.frontFaceName || null,
           leftAngle: selfForm.leftAngleName || null,
           rightAngle: selfForm.rightAngleName || null,
+          fullBody: selfForm.fullBodyName || null,
         },
         selfCaptureVideoName: selfForm.selfieVideoName || null,
         selfCaptureVideoUrl: selfForm.selfieVideoUrl,
@@ -2422,7 +2501,7 @@ export default function ProfilePage() {
             <div>
               <strong>Reference photos</strong>
               <p className="muted" style={{ marginTop: '8px' }}>
-                Front, left, and right photos are required for your self character.
+                Front, left, and right photos are required. A full body photo is optional for stronger scene consistency.
               </p>
             </div>
 
@@ -2431,6 +2510,7 @@ export default function ProfilePage() {
                 ['frontFace', 'Front photo'],
                 ['leftAngle', 'Left angle'],
                 ['rightAngle', 'Right angle'],
+                ['fullBody', 'Full body'],
               ] as const).map(([field, label]) => (
                 <label className="reference-upload" key={field}>
                   <span>{label}</span>
@@ -2447,9 +2527,9 @@ export default function ProfilePage() {
                       margin: '8px 0',
                     }}
                   >
-                    <ImagePreview src={selfForm[field]} fallback="Required" />
+                    <ImagePreview src={selfForm[field]} fallback={field === 'fullBody' ? 'Optional' : 'Required'} />
                   </div>
-                  <strong>{selfForm[field] ? 'Uploaded / Ready' : 'Required'}</strong>
+                  <strong>{selfForm[field] ? 'Uploaded / Ready' : field === 'fullBody' ? 'Optional' : 'Required'}</strong>
                   <span className="muted">
                     {selfForm[referencePhotoNameFields[field]] ||
                       (selfForm[field] ? 'Saved reference photo' : 'No file selected')}
@@ -2473,9 +2553,14 @@ export default function ProfilePage() {
                     </div>
                   </div>
                   <label className="field-group">
-                    <span className="eyebrow">Selfie video</span>
-                    <input type="file" accept="video/*" onChange={(event) => void handleSelfVideoUpload(event)} />
+                    <span className="eyebrow">Selfie video 1</span>
+                    <input type="file" accept="video/*" onChange={(event) => void handleSelfVideoUpload(event, 'primary')} />
                     <span className="muted">{selfForm.selfieVideoName || 'Upload or record a selfie video'}</span>
+                  </label>
+                  <label className="field-group">
+                    <span className="eyebrow">Selfie video 2</span>
+                    <input type="file" accept="video/*" onChange={(event) => void handleSelfVideoUpload(event, 'secondary')} />
+                    <span className="muted">{selfForm.selfieVideo2Name || 'Optional second selfie video'}</span>
                   </label>
                   <div style={{ display: 'grid', gap: '12px' }}>
                     <div>
@@ -2507,7 +2592,7 @@ export default function ProfilePage() {
                       checked={selfForm.selfCaptureConsent}
                       onChange={(event) => handleSelfCaptureConsent(event.target.checked)}
                     />
-                    <span>I confirm this is me and I consent to using this video to create my self character.</span>
+                    <span>I confirm I own or have permission to use these reference images/videos.</span>
                   </label>
                 </>
               ) : (
@@ -2604,6 +2689,20 @@ export default function ProfilePage() {
             <p className="muted" style={{ margin: 0 }}>
               Save changes to your self character photos, voice, features, and style.
             </p>
+            <div style={{ display: 'grid', gap: '10px', padding: '16px', borderRadius: '18px', background: 'rgba(255,255,255,0.04)' }}>
+              <span className="eyebrow">Build My Lumora Character</span>
+              <strong>
+                {selfForm.frontFace && selfForm.leftAngle && selfForm.rightAngle
+                  ? 'Identity ready'
+                  : 'Needs references'}
+              </strong>
+              <p className="muted" style={{ margin: 0 }}>
+                Build a reusable photorealistic character from your reference photos and videos.
+              </p>
+              <p className="muted" style={{ margin: 0 }}>
+                Lumora will use your feedback to improve future prompts and character consistency.
+              </p>
+            </div>
             <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
               Draft autosaved locally
             </p>
@@ -2639,11 +2738,14 @@ export default function ProfilePage() {
             <div style={{ minWidth: 0, flex: 1 }}>
               <strong style={{ display: 'block' }}>{creatorSelfCharacter.name}</strong>
               <p className="muted" style={{ margin: '6px 0 0' }}>
-                Default self character
+                Lumora Identity Character
+              </p>
+              <p className="muted" style={{ margin: '6px 0 0' }}>
+                Build a reusable photorealistic character from your reference photos and videos.
               </p>
             </div>
             <span className="tiny-pill" style={{ background: '#2a1f3d' }}>
-              Ready
+              {creatorIdentityProfile?.status === 'ready' ? 'Identity ready' : 'Needs references'}
             </span>
           </div>
         </section>

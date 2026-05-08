@@ -1,4 +1,4 @@
-import { type CharacterProfile, type CreatorSelfStylePreferences, type PrivacySetting, type ReferenceImageUrls } from './api';
+import { type CharacterProfile, type CreatorSelfStylePreferences, type LumoraIdentityProfile, type PrivacySetting, type ReferenceImageUrls } from './api';
 
 const STORAGE_KEY = 'lumora_characters';
 export const CREATOR_SELF_CHARACTER_ID = 'creator-self';
@@ -156,6 +156,7 @@ export function saveCreatorSelfCharacter(payload: {
   stylePreferences?: Record<string, unknown>;
   creatorSelfFeatures?: Record<string, string>;
   creatorSelfStylePreferences?: CreatorSelfStylePreferences;
+  identityProfile?: LumoraIdentityProfile | null;
 }): CharacterProfile {
   try {
     const now = new Date().toISOString();
@@ -203,7 +204,11 @@ export function saveCreatorSelfCharacter(payload: {
       voiceUrl: cleanedVoiceSampleUrl ? '✓' : '✗',
     });
 
-    const stylePreferences = payload.stylePreferences ?? previousSelfCharacter?.stylePreferences ?? {};
+    const stylePreferences = {
+      ...(previousSelfCharacter?.stylePreferences ?? {}),
+      ...(payload.stylePreferences ?? {}),
+      ...(payload.identityProfile ? { identityProfile: payload.identityProfile } : {}),
+    };
     const creatorSelfFeatures =
       payload.creatorSelfFeatures ?? previousSelfCharacter?.creatorSelfFeatures ?? {};
     const creatorSelfStylePreferences =
@@ -222,6 +227,7 @@ export function saveCreatorSelfCharacter(payload: {
       voiceSampleUrl: cleanedVoiceSampleUrl,
       voiceSampleName: payload.voiceSampleName ?? previousSelfCharacter?.voiceSampleName ?? null,
       voiceSampleNumbers: payload.voiceSampleNumbers ?? previousSelfCharacter?.voiceSampleNumbers ?? null,
+      identityProfile: payload.identityProfile ?? previousSelfCharacter?.identityProfile ?? null,
       creatorSelfFeatures,
       creatorSelfStylePreferences,
       createdAt: previousSelfCharacter?.createdAt ?? now,

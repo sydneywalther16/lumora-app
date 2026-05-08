@@ -849,6 +849,8 @@ export async function getSelfCharacterReferenceImage(input: {
       referenceImageUrls.leftAngle,
       referenceImageUrls.rightAngleUrl,
       referenceImageUrls.rightAngle,
+      referenceImageUrls.fullBodyUrl,
+      referenceImageUrls.fullBody,
     ],
     selectedUrl,
   );

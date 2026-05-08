@@ -3,26 +3,37 @@ import CharacterCapture from '../components/CharacterCapture';
 import CharacterLibrary from '../components/CharacterLibrary';
 import CreateVideo from '../components/CreateVideo';
 import {
-  CREATOR_SELF_CHARACTER_ID,
   getCreatorSelfCharacter,
+  getStoredCharacters,
   isCreatorSelfCharacter,
+  saveStoredCharacters,
 } from '../lib/characterStorage';
 import { loadLumoraProfile, type LumoraProfile } from '../lib/profileStorage';
 import { type CharacterProfile } from '../lib/api';
 import { useSession } from '../hooks/useSession';
-import { loadSupabaseCharacters, loadSupabaseProfile } from '../lib/supabaseAppData';
-
-const FORCED_REFERENCE =
-  "https://duwuoszxtbpirfujotia.supabase.co/storage/v1/object/public/character-reference-images/manual/front-1778271310361.jpg";
+import {
+  loadSupabaseCharacters,
+  loadSupabaseProfile,
+  saveSupabaseIdentityFeedback,
+} from '../lib/supabaseAppData';
+import { getSelfCharacterReferenceImage, type SelfCharacterReferenceImage } from '../lib/selfCharacterReference';
+import {
+  buildLumoraIdentityProfile,
+  identityProfileToStylePreferences,
+  mergeIdentityFeedback,
+} from '../lib/identityCharacter';
+import type { LumoraIdentityFeedback } from '../lib/api';
 
 export default function CreatePage() {
-  const { user, session, loading, configured } = useSession();
+  const { user, session } = useSession();
   const authUser = session?.user ?? user;
 
   const [characterRefreshKey, setCharacterRefreshKey] = useState(0);
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterProfile | null>(null);
   const [defaultSelfCharacter, setDefaultSelfCharacter] = useState<CharacterProfile | null>(null);
   const [creatorDataLoading, setCreatorDataLoading] = useState(true);
+  const [resolvedReference, setResolvedReference] = useState<SelfCharacterReferenceImage | null>(null);
+  const [referenceLoading, setReferenceLoading] = useState(false);
 
   const [profile, setProfile] = useState<LumoraProfile>({
     displayName: 'Creator',
@@ -82,15 +93,92 @@ export default function CreatePage() {
 
   const hasSelfCharacter = Boolean(activeSelfCharacter);
 
+  useEffect(() => {
+    let active = true;
+
+    async function resolveSelfReference() {
+      if (!activeSelfCharacter) {
+        setResolvedReference(null);
+        setReferenceLoading(false);
+        return;
+      }
+
+      setReferenceLoading(true);
+      try {
+        const resolved = await getSelfCharacterReferenceImage({
+          selfCharacter: activeSelfCharacter,
+          profile,
+        });
+        if (active) {
+          setResolvedReference(resolved);
+        }
+      } catch (error) {
+        console.error('Unable to resolve Lumora Identity Character references:', error);
+        if (active) setResolvedReference(null);
+      } finally {
+        if (active) setReferenceLoading(false);
+      }
+    }
+
+    void resolveSelfReference();
+
+    return () => {
+      active = false;
+    };
+  }, [activeSelfCharacter, profile]);
+
   const referenceImageUrl = hasSelfCharacter
-    ? FORCED_REFERENCE
-    : selectedCharacter?.referenceImageUrls?.frontFaceUrl ?? null;
+    ? resolvedReference?.primary ?? null
+    : selectedCharacter?.referenceImageUrls?.frontFaceUrl ?? selectedCharacter?.referenceImageUrls?.frontFace ?? null;
+  const referenceImageUrls = hasSelfCharacter
+    ? resolvedReference?.referenceImageUrls ?? activeSelfCharacter?.referenceImageUrls ?? null
+    : selectedCharacter?.referenceImageUrls ?? null;
+  const additionalReferenceImageUrls = hasSelfCharacter
+    ? resolvedReference?.additional ?? []
+    : [];
+  const identityProfile = hasSelfCharacter
+    ? buildLumoraIdentityProfile({
+        userId: authUser?.id ?? 'local',
+        selfCharacter: activeSelfCharacter,
+        profile,
+        referenceImageUrls,
+        primaryReferenceImageUrl: referenceImageUrl,
+        additionalReferenceImageUrls,
+      })
+    : null;
 
   const pageLoading = creatorDataLoading;
 
   useEffect(() => {
-    console.log("FORCED IMAGE USED:", referenceImageUrl);
+    console.log("FINAL referenceImageUrl:", referenceImageUrl);
   }, [referenceImageUrl]);
+
+  async function handleLikenessFeedback(feedback: LumoraIdentityFeedback) {
+    if (!identityProfile || !activeSelfCharacter) return;
+
+    const nextIdentityProfile = mergeIdentityFeedback(identityProfile, feedback);
+
+    if (authUser) {
+      await saveSupabaseIdentityFeedback({
+        userId: authUser.id,
+        identityProfile: nextIdentityProfile,
+      });
+      const remoteCharacters = await loadSupabaseCharacters(authUser.id);
+      setDefaultSelfCharacter(remoteCharacters.find(isCreatorSelfCharacter) ?? defaultSelfCharacter);
+      return;
+    }
+
+    const nextCharacters = getStoredCharacters().map((character) => {
+      if (!isCreatorSelfCharacter(character)) return character;
+      return {
+        ...character,
+        identityProfile: nextIdentityProfile,
+        stylePreferences: identityProfileToStylePreferences(character.stylePreferences, nextIdentityProfile),
+      };
+    });
+    saveStoredCharacters(nextCharacters);
+    setDefaultSelfCharacter(nextCharacters.find(isCreatorSelfCharacter) ?? defaultSelfCharacter);
+  }
 
   if (pageLoading) {
     return (
@@ -117,14 +205,18 @@ export default function CreatePage() {
         characterName={activeSelfCharacter?.name ?? profile.displayName}
         characterAvatar={referenceImageUrl}
         isDefaultSelfCharacter={hasSelfCharacter}
-        characterDescription=""
+        characterDescription={identityProfile?.appearanceSummary ?? ""}
         referenceImageUrl={referenceImageUrl}
-        referenceImageUrls={null}
-        additionalReferenceImageUrls={[]}
-        referenceLoading={false}
-        referenceLabel="FORCED"
+        referenceImageUrls={referenceImageUrls}
+        additionalReferenceImageUrls={additionalReferenceImageUrls}
+        referenceLoading={referenceLoading}
+        referenceLabel={identityProfile ? 'Lumora Identity Character' : null}
         forceSelfMode={hasSelfCharacter}
-        onResaveReferencePhoto={() => {}}
+        identityProfile={identityProfile}
+        onLikenessFeedback={(feedback) => void handleLikenessFeedback(feedback)}
+        onResaveReferencePhoto={() => {
+          window.location.hash = 'character-capture';
+        }}
       />
 
       <div id="character-capture">
