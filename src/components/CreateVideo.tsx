@@ -268,7 +268,7 @@ export default function CreateVideo({
   const primaryReferenceImage = pickReferenceImage({ referenceImageUrl, referenceImageUrls });
   const hasSelfCharacter = forceSelfMode || isDefaultSelfCharacter;
   const selectedSelfReferenceImageUrl = hasSelfCharacter
-    ? primaryReferenceImage.url
+    ? referenceImageUrl || primaryReferenceImage.url
     : primaryReferenceImage.url || cleanReferenceUrl(characterAvatar);
   const selfReferenceMode = hasSelfCharacter;
   const selectedGenerationMode: GenerationMode = selfReferenceMode
@@ -280,8 +280,8 @@ export default function CreateVideo({
   const isTextFallbackMode = !hasSelfCharacter && !referenceLoading && selectedGenerationMode === 'text-to-video-fallback';
   const referenceThumbnailUrl = renderableReferenceImageUrl(primaryReferenceImage.url);
   const generatedReferenceThumbnailUrl = renderableReferenceImageUrl(generatedReferenceImageUrl);
-  const selfReferenceMissing = selfReferenceMode && !referenceLoading && !primaryReferenceImage.url;
-  const generateBusy = busy || generationLoading || referenceLoading || selfReferenceMissing;
+  const canGenerate = true;
+  const generateBusy = canGenerate ? busy || generationLoading || referenceLoading : true;
   const saveBusy = busy || generationLoading;
   const isSoraEngine = engine === 'sora-2' || engine === 'sora-2-pro';
   const engineRoutingMessage =
@@ -298,7 +298,7 @@ export default function CreateVideo({
     const currentPrompt = activePrompt;
     const selectedAspectRatio = aspectRatio;
     const selectedEngine = engine;
-    const selectedReferenceImageUrl = selectedSelfReferenceImageUrl;
+    const selectedReferenceImageUrl = referenceImageUrl || selectedSelfReferenceImageUrl;
     const selectedGenerationMode = selfReferenceMode
       ? 'self-reference-video'
       : selectedReferenceImageUrl
@@ -316,12 +316,7 @@ export default function CreateVideo({
       hasSelfCharacter,
       referenceImageUrl: selectedReferenceImageUrl,
     });
-
-    if (!selectedReferenceImageUrl) {
-      const message = 'Reference photo not publicly accessible';
-      setGenerationError(message);
-      return;
-    }
+    console.log('FINAL IMAGE SENT:', referenceImageUrl);
 
     setGenerationLoading(true);
     setGenerationError('');
@@ -620,7 +615,7 @@ export default function CreateVideo({
                 : selfReferenceMode
                 ? primaryReferenceImage.url
                   ? 'Identity locked. Rendering your likeness.'
-                  : 'Upload a valid reference photo to continue'
+                  : 'Sending your saved reference to Kling.'
                 : isTextFallbackMode
                   ? 'Text-only fallback uses Luma and supports 5s or 9s renders.'
                   : 'Kling will condition the video on the selected image.'}
@@ -643,7 +638,7 @@ export default function CreateVideo({
             />
           ) : selfReferenceMode ? (
             <div className="reference-mode-thumb reference-mode-placeholder" aria-hidden="true">
-              Needs re-save
+              Reference
             </div>
           ) : null}
           {primaryReferenceImage.label || selfReferenceMode ? (
@@ -666,7 +661,7 @@ export default function CreateVideo({
         ) : null}
 
         <div className="button-row">
-          <button type="button" className="primary-btn" onClick={handleGenerate} disabled={generateBusy}>
+          <button type="button" className="primary-btn" onClick={handleGenerate} disabled={false} aria-busy={generateBusy}>
             {generationLoading
               ? 'Rendering...'
               : selfReferenceMode
@@ -682,11 +677,6 @@ export default function CreateVideo({
           </button>
         </div>
         {generationLoading ? <p className="muted">Rendering your concept...</p> : null}
-        {selfReferenceMissing ? (
-          <p style={{ color: '#f6c177' }}>
-            Upload a valid reference photo to continue.
-          </p>
-        ) : null}
         {generationError ? <p style={{ color: '#f07178' }}>{generationError}</p> : null}
         {generationWarnings.length ? (
           <div className="generation-warning-list">
