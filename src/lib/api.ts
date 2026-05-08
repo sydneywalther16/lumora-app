@@ -173,6 +173,10 @@ export type CharacterProfile = {
   referenceImageUrls: ReferenceImageUrls;
   referencePhotoNames?: Partial<Record<keyof ReferenceImageUrls, string | null>>;
   sourceCaptureVideoUrl: string | null;
+  sourceCaptureVideoPath?: string | null;
+  sourceCaptureVideo2Url?: string | null;
+  sourceCaptureVideo2Path?: string | null;
+  sourceCaptureVideo2Name?: string | null;
   voiceSampleUrl: string | null;
   voiceSampleName?: string | null;
   voiceSampleNumbers?: string | null;

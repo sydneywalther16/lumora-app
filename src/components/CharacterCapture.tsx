@@ -151,6 +151,7 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
           stylePreferences: {
             ...stylePreferences,
             videoReferenceUrl2: videoUpload2?.url ?? '',
+            videoReferencePath2: videoUpload2?.objectPath ?? '',
           },
           referenceImageUrls: {
             frontFace: frontUpload.url,

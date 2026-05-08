@@ -153,6 +153,8 @@ export function buildLumoraIdentityProfile(input: IdentityBuildInput): LumoraIde
   const stylePreferences = recordValue(input.selfCharacter?.stylePreferences);
   const videoReferenceUrls = uniqueUrls([
     input.selfCharacter?.sourceCaptureVideoUrl,
+    input.selfCharacter?.sourceCaptureVideo2Url,
+    typeof stylePreferences.selfieVideo2Url === 'string' ? stylePreferences.selfieVideo2Url : null,
     typeof stylePreferences.selfCaptureVideo2Url === 'string' ? stylePreferences.selfCaptureVideo2Url : null,
   ]);
   const userPreferences = compactRecord({
@@ -180,7 +182,7 @@ export function buildLumoraIdentityProfile(input: IdentityBuildInput): LumoraIde
     likenessNotes: existing?.likenessNotes ?? [],
     preferredTraits: existing?.preferredTraits ?? [],
     version: existing?.version ?? 1,
-    status: frontFaceUrl && leftAngleUrl && rightAngleUrl ? 'ready' : 'needs_refs',
+    status: frontFaceUrl ? 'ready' : 'needs_refs',
   };
 }
 

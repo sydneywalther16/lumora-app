@@ -632,6 +632,10 @@ function mapCharacterRow(row: DbRow): CharacterProfile {
     referenceImageUrls: mapReferenceImages(row.reference_image_urls),
     referencePhotoNames: mapReferencePhotoNames(row.reference_photo_names),
     sourceCaptureVideoUrl: nullableString(row.source_capture_video_url),
+    sourceCaptureVideoPath: nullableString(jsonRecord(row.style_preferences).selfieVideoPath),
+    sourceCaptureVideo2Url: nullableString(jsonRecord(row.style_preferences).selfieVideo2Url),
+    sourceCaptureVideo2Path: nullableString(jsonRecord(row.style_preferences).selfieVideo2Path),
+    sourceCaptureVideo2Name: nullableString(jsonRecord(row.style_preferences).selfieVideo2Name),
     voiceSampleUrl: nullableString(row.voice_sample_url),
     voiceSampleName: nullableString(row.voice_sample_name),
     voiceSampleNumbers: nullableString(row.voice_sample_numbers),
@@ -645,7 +649,7 @@ function mapCharacterRow(row: DbRow): CharacterProfile {
 
 function mapSelfCharacterRow(row: DbRow): CharacterProfile {
   const identityProfile = mapIdentityProfile(row.identity_profile ?? jsonRecord(row.style_preferences).identityProfile);
-  const stylePreferences = {
+  const stylePreferences: Record<string, unknown> = {
     ...jsonRecord(row.style_preferences),
     creatorSelfFeatures: jsonRecord(row.creator_self_features),
     creatorSelfStylePreferences: jsonRecord(row.creator_self_style_preferences),
@@ -667,6 +671,10 @@ function mapSelfCharacterRow(row: DbRow): CharacterProfile {
     referenceImageUrls: mapReferenceImages(row.reference_image_urls),
     referencePhotoNames: mapReferencePhotoNames(row.reference_photo_names),
     sourceCaptureVideoUrl: nullableString(row.source_capture_video_url),
+    sourceCaptureVideoPath: nullableString(stylePreferences.selfieVideoPath),
+    sourceCaptureVideo2Url: nullableString(stylePreferences.selfieVideo2Url),
+    sourceCaptureVideo2Path: nullableString(stylePreferences.selfieVideo2Path),
+    sourceCaptureVideo2Name: nullableString(stylePreferences.selfieVideo2Name),
     voiceSampleUrl: nullableString(row.voice_sample_url),
     voiceSampleName: nullableString(row.voice_sample_name),
     voiceSampleNumbers: nullableString(row.voice_sample_numbers),
@@ -762,6 +770,10 @@ export async function saveSupabaseCreatorSelfCharacter(input: {
   referencePhotoNames?: Record<string, string | null>;
   sourceCaptureVideoUrl: string | null;
   sourceCaptureVideoName?: string | null;
+  sourceCaptureVideoPath?: string | null;
+  sourceCaptureVideo2Url?: string | null;
+  sourceCaptureVideo2Name?: string | null;
+  sourceCaptureVideo2Path?: string | null;
   selfCaptureNumbers?: string | null;
   selfCaptureConsent: boolean;
   selfCaptureCompleted: boolean;
@@ -783,46 +795,67 @@ export async function saveSupabaseCreatorSelfCharacter(input: {
   const referenceImageUrls = cleanJsonRecord(cleanReferenceImageUrls(input.referenceImageUrls));
   const referencePhotoNames = cleanJsonRecord(input.referencePhotoNames);
   const identityProfile = cleanJsonRecord(input.identityProfile);
+  console.log('SAVING SELF CHARACTER REFERENCES', {
+    authUserId: input.userId,
+    referenceImageUrls,
+    referencePhotoNames,
+    selfieVideoUrl: Boolean(input.sourceCaptureVideoUrl),
+    selfieVideo2Url: Boolean(input.sourceCaptureVideo2Url),
+  });
 
-  const { data: selfData, error: selfError } = await client
+  const selfPayload = {
+    user_id: input.userId,
+    id: CREATOR_SELF_CHARACTER_ID,
+    name: input.name,
+    status: 'ready',
+    consent_confirmed: true,
+    visibility: 'private',
+    style_preferences: {
+      ...cleanJsonRecord(input.stylePreferences),
+      creatorSelfFeatures: features,
+      creatorSelfStylePreferences: style,
+      creatorSelfEditorDraft: editorDraft,
+      identityProfile,
+      selfieVideoPath: storageUrl(input.sourceCaptureVideoPath, 'Self capture video path'),
+      selfieVideo2Url: storageUrl(input.sourceCaptureVideo2Url, 'Second self capture video'),
+      selfieVideo2Name: input.sourceCaptureVideo2Name ?? null,
+      selfieVideo2Path: storageUrl(input.sourceCaptureVideo2Path, 'Second self capture video path'),
+    },
+    reference_image_urls: referenceImageUrls,
+    reference_photo_names: referencePhotoNames,
+    identity_profile: identityProfile,
+    source_capture_video_url: storageUrl(input.sourceCaptureVideoUrl, 'Self capture video'),
+    source_capture_video_name: input.sourceCaptureVideoName ?? null,
+    self_capture_numbers: input.selfCaptureNumbers ?? null,
+    self_capture_consent: input.selfCaptureConsent,
+    self_capture_completed: input.selfCaptureCompleted,
+    self_capture_captured_at: input.sourceCaptureVideoUrl ? now : null,
+    voice_sample_url: storageUrl(input.voiceSampleUrl, 'Self voice sample'),
+    voice_sample_name: input.voiceSampleName ?? null,
+    voice_sample_numbers: input.voiceSampleNumbers ?? null,
+    voice_sample_consent: input.voiceSampleConsent,
+    voice_sample_captured_at: input.voiceSampleUrl ? now : null,
+    creator_self_features: features,
+    creator_self_style_preferences: style,
+    editor_draft: editorDraft,
+    updated_at: now,
+  };
+  let selfResult = await client
     .from('self_characters')
-    .upsert(
-      {
-        user_id: input.userId,
-        id: CREATOR_SELF_CHARACTER_ID,
-        name: input.name,
-        status: 'ready',
-        consent_confirmed: true,
-        visibility: 'private',
-        style_preferences: {
-          ...cleanJsonRecord(input.stylePreferences),
-          creatorSelfFeatures: features,
-          creatorSelfStylePreferences: style,
-          creatorSelfEditorDraft: editorDraft,
-          identityProfile,
-        },
-        reference_image_urls: referenceImageUrls,
-        reference_photo_names: referencePhotoNames,
-        source_capture_video_url: storageUrl(input.sourceCaptureVideoUrl, 'Self capture video'),
-        source_capture_video_name: input.sourceCaptureVideoName ?? null,
-        self_capture_numbers: input.selfCaptureNumbers ?? null,
-        self_capture_consent: input.selfCaptureConsent,
-        self_capture_completed: input.selfCaptureCompleted,
-        self_capture_captured_at: input.sourceCaptureVideoUrl ? now : null,
-        voice_sample_url: storageUrl(input.voiceSampleUrl, 'Self voice sample'),
-        voice_sample_name: input.voiceSampleName ?? null,
-        voice_sample_numbers: input.voiceSampleNumbers ?? null,
-        voice_sample_consent: input.voiceSampleConsent,
-        voice_sample_captured_at: input.voiceSampleUrl ? now : null,
-        creator_self_features: features,
-        creator_self_style_preferences: style,
-        editor_draft: editorDraft,
-        updated_at: now,
-      },
-      { onConflict: 'user_id' },
-    )
+    .upsert(selfPayload, { onConflict: 'user_id' })
     .select('*')
     .single();
+
+  if (selfResult.error && isMissingColumnError(selfResult.error, 'identity_profile')) {
+    const { identity_profile: _identityProfileColumn, ...fallbackPayload } = selfPayload;
+    selfResult = await client
+      .from('self_characters')
+      .upsert(fallbackPayload, { onConflict: 'user_id' })
+      .select('*')
+      .single();
+  }
+
+  const { data: selfData, error: selfError } = selfResult;
 
   if (selfError) throw selfError;
 

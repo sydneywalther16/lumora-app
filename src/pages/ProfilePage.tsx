@@ -74,8 +74,10 @@ type SelfCharacterForm = {
   fullBodyName: string;
   selfieVideoName: string;
   selfieVideoUrl: string | null;
+  selfieVideoPath: string;
   selfieVideo2Name: string;
   selfieVideo2Url: string | null;
+  selfieVideo2Path: string;
   voiceSampleName: string;
   voiceSampleUrl: string | null;
   voiceSampleNumbers: string;
@@ -452,8 +454,10 @@ function parseSelfCharacterEditorDraft(value: unknown): SelfCharacterEditorDraft
     fullBodyName: readString(record.fullBodyName),
     selfieVideoName: readString(record.selfieVideoName),
     selfieVideoUrl: firstNullableString(readString(record.selfieVideoUrl)),
+    selfieVideoPath: readString(record.selfieVideoPath),
     selfieVideo2Name: readString(record.selfieVideo2Name),
     selfieVideo2Url: firstNullableString(readString(record.selfieVideo2Url)),
+    selfieVideo2Path: readString(record.selfieVideo2Path),
     voiceSampleName: readString(record.voiceSampleName),
     voiceSampleUrl: firstNullableString(readString(record.voiceSampleUrl)),
     voiceSampleNumbers: readString(record.voiceSampleNumbers),
@@ -502,8 +506,10 @@ function createSelfCharacterEditorDraft(form: SelfCharacterForm): SelfCharacterE
     fullBodyName: form.fullBodyName,
     selfieVideoName: form.selfieVideoName,
     selfieVideoUrl: form.selfieVideoUrl,
+    selfieVideoPath: form.selfieVideoPath,
     selfieVideo2Name: form.selfieVideo2Name,
     selfieVideo2Url: form.selfieVideo2Url,
+    selfieVideo2Path: form.selfieVideo2Path,
     voiceSampleName: form.voiceSampleName,
     voiceSampleUrl: form.voiceSampleUrl,
     voiceSampleNumbers: form.voiceSampleNumbers,
@@ -542,7 +548,9 @@ function cleanMediaFromDraft(draft: SelfCharacterEditorDraft): SelfCharacterEdit
     rightAngle: cleanMediaUrl(draft.rightAngle) || '',
     fullBody: cleanMediaUrl(draft.fullBody) || '',
     selfieVideoUrl: cleanMediaUrl(draft.selfieVideoUrl),
+    selfieVideoPath: cleanMediaUrl(draft.selfieVideoPath) || '',
     selfieVideo2Url: cleanMediaUrl(draft.selfieVideo2Url),
+    selfieVideo2Path: cleanMediaUrl(draft.selfieVideo2Path) || '',
     voiceSampleUrl: cleanMediaUrl(draft.voiceSampleUrl),
   };
 }
@@ -596,8 +604,10 @@ function buildCreatorSelfCharacterSource(character: CharacterProfile | null): Se
     fullBodyName: firstString(readString(referencePhotoNames.fullBody), editorDraft?.fullBodyName, character.referenceImageUrls.fullBody ? 'Saved full body photo' : ''),
     selfieVideoName: firstString(editorDraft?.selfieVideoName, character.sourceCaptureVideoUrl ? 'Saved selfie video' : ''),
     selfieVideoUrl: firstNullableString(character.sourceCaptureVideoUrl, editorDraft?.selfieVideoUrl),
-    selfieVideo2Name: firstString(readString(stylePreferences.selfieVideo2Name), editorDraft?.selfieVideo2Name),
-    selfieVideo2Url: firstNullableString(readString(stylePreferences.selfieVideo2Url), editorDraft?.selfieVideo2Url),
+    selfieVideoPath: firstString(character.sourceCaptureVideoPath, readString(stylePreferences.selfieVideoPath), editorDraft?.selfieVideoPath),
+    selfieVideo2Name: firstString(character.sourceCaptureVideo2Name, readString(stylePreferences.selfieVideo2Name), editorDraft?.selfieVideo2Name),
+    selfieVideo2Url: firstNullableString(character.sourceCaptureVideo2Url, readString(stylePreferences.selfieVideo2Url), editorDraft?.selfieVideo2Url),
+    selfieVideo2Path: firstString(character.sourceCaptureVideo2Path, readString(stylePreferences.selfieVideo2Path), editorDraft?.selfieVideo2Path),
     voiceSampleName: firstString(
       character.voiceSampleName,
       editorDraft?.voiceSampleName,
@@ -654,8 +664,10 @@ function buildProfileSelfCharacterSource(profile: LumoraProfile): SelfCharacterF
     fullBodyName: firstString(readString(referencePhotoNames.fullBody), editorDraft?.fullBodyName),
     selfieVideoName: firstString(profile.selfCaptureVideoName, editorDraft?.selfieVideoName),
     selfieVideoUrl: firstNullableString(profile.selfCaptureVideoUrl, editorDraft?.selfieVideoUrl),
+    selfieVideoPath: firstString(editorDraft?.selfieVideoPath),
     selfieVideo2Name: firstString(readString(readObjectRecord(profileRecord.selfCharacterEditorDraft)?.selfieVideo2Name), editorDraft?.selfieVideo2Name),
     selfieVideo2Url: firstNullableString(readString(readObjectRecord(profileRecord.selfCharacterEditorDraft)?.selfieVideo2Url), editorDraft?.selfieVideo2Url),
+    selfieVideo2Path: firstString(readString(readObjectRecord(profileRecord.selfCharacterEditorDraft)?.selfieVideo2Path), editorDraft?.selfieVideo2Path),
     voiceSampleName: firstString(profile.selfVoiceSampleName, editorDraft?.voiceSampleName),
     voiceSampleUrl: firstNullableString(profile.selfVoiceSampleUrl, editorDraft?.voiceSampleUrl),
     voiceSampleNumbers: firstString(profile.selfVoiceSampleNumbers, editorDraft?.voiceSampleNumbers),
@@ -701,8 +713,10 @@ function mergeSelfCharacterFormSources(...sources: SelfCharacterFormSource[]): S
     fullBodyName: findStringField('fullBodyName'),
     selfieVideoName: findStringField('selfieVideoName'),
     selfieVideoUrl: findNullableStringField('selfieVideoUrl'),
+    selfieVideoPath: findStringField('selfieVideoPath'),
     selfieVideo2Name: findStringField('selfieVideo2Name'),
     selfieVideo2Url: findNullableStringField('selfieVideo2Url'),
+    selfieVideo2Path: findStringField('selfieVideo2Path'),
     voiceSampleName: findStringField('voiceSampleName'),
     voiceSampleUrl: findNullableStringField('voiceSampleUrl'),
     voiceSampleNumbers: findStringField('voiceSampleNumbers') || defaults.voiceSampleNumbers,
@@ -757,8 +771,10 @@ function buildBlankSelfCharacterForm(): SelfCharacterForm {
     fullBodyName: '',
     selfieVideoName: '',
     selfieVideoUrl: null,
+    selfieVideoPath: '',
     selfieVideo2Name: '',
     selfieVideo2Url: null,
+    selfieVideo2Path: '',
     voiceSampleName: '',
     voiceSampleUrl: null,
     voiceSampleNumbers: generateSelfVoiceSampleNumbers(),
@@ -817,11 +833,29 @@ function ProfileTextField({
   );
 }
 
-function ImagePreview({ src, fallback }: { src?: string | null; fallback: string }) {
-  return src ? (
-    <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+function ImagePreview({
+  src,
+  fallback,
+  errorMessage,
+}: {
+  src?: string | null;
+  fallback: string;
+  errorMessage?: string;
+}) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const failed = Boolean(src && failedSrc === src);
+
+  return src && !failed ? (
+    <img
+      src={src}
+      alt=""
+      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+      onError={() => setFailedSrc(src)}
+    />
   ) : (
-    <span style={{ color: '#d3cdf3', fontSize: '1rem' }}>{fallback}</span>
+    <span style={{ color: '#d3cdf3', fontSize: '1rem', padding: '8px', textAlign: 'center' }}>
+      {failed ? errorMessage ?? fallback : fallback}
+    </span>
   );
 }
 
@@ -1812,6 +1846,123 @@ export default function ProfilePage() {
     }
   }
 
+  async function persistSelfCharacterReferences(nextForm: SelfCharacterForm, statusMessage: string) {
+    const compactFeatures = compactStringRecord(nextForm.features);
+    const compactStyle = compactStringRecord(nextForm.style);
+    const finalEditorDraft = saveSelfCharacterEditorDraft(nextForm) ?? createSelfCharacterEditorDraft(nextForm);
+    const displayName = profile.displayName.trim() || 'Creator';
+    const referenceImageUrls = {
+      frontFace: nextForm.frontFace,
+      frontFaceUrl: nextForm.frontFace,
+      frontFacePath: nextForm.frontFacePath || null,
+      leftAngle: nextForm.leftAngle,
+      leftAngleUrl: nextForm.leftAngle,
+      leftAnglePath: nextForm.leftAnglePath || null,
+      rightAngle: nextForm.rightAngle,
+      rightAngleUrl: nextForm.rightAngle,
+      rightAnglePath: nextForm.rightAnglePath || null,
+      fullBody: nextForm.fullBody || null,
+      fullBodyUrl: nextForm.fullBody || null,
+      fullBodyPath: nextForm.fullBodyPath || null,
+    };
+    const baseStylePreferences = {
+      creatorSelfFeatures: compactFeatures,
+      creatorSelfStylePreferences: compactStyle,
+      creatorSelfEditorDraft: finalEditorDraft,
+      selfCaptureNumbers: nextForm.selfCaptureNumbers || null,
+      selfCaptureConsent: nextForm.selfCaptureConsent,
+      selfCaptureCompleted: nextForm.selfCaptureCompleted,
+      selfVoiceSampleConsent: Boolean(nextForm.voiceSampleConsent),
+      selfieVideoPath: nextForm.selfieVideoPath || null,
+      selfieVideo2Name: nextForm.selfieVideo2Name || null,
+      selfieVideo2Url: nextForm.selfieVideo2Url,
+      selfieVideo2Path: nextForm.selfieVideo2Path || null,
+    };
+    const identityDraftCharacter: CharacterProfile = {
+      id: CREATOR_SELF_CHARACTER_ID,
+      ownerUserId: authUserId || 'local',
+      name: displayName,
+      status: 'ready',
+      consentConfirmed: true,
+      visibility: 'private',
+      stylePreferences: baseStylePreferences,
+      referenceImageUrls,
+      sourceCaptureVideoUrl: nextForm.selfieVideoUrl,
+      sourceCaptureVideoPath: nextForm.selfieVideoPath || null,
+      sourceCaptureVideo2Url: nextForm.selfieVideo2Url,
+      sourceCaptureVideo2Path: nextForm.selfieVideo2Path || null,
+      sourceCaptureVideo2Name: nextForm.selfieVideo2Name || null,
+      voiceSampleUrl: nextForm.voiceSampleUrl,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isSelf: true,
+      isCreatorSelf: true,
+      creatorSelfFeatures: compactFeatures,
+      creatorSelfStylePreferences: compactStyle,
+    };
+    const identityProfile = buildLumoraIdentityProfile({
+      userId: authUserId || 'local',
+      selfCharacter: identityDraftCharacter,
+      profile,
+      referenceImageUrls,
+      primaryReferenceImageUrl: nextForm.frontFace,
+      additionalReferenceImageUrls: [nextForm.leftAngle, nextForm.rightAngle, nextForm.fullBody].filter(Boolean),
+    });
+    const stylePreferences = identityProfileToStylePreferences(baseStylePreferences, identityProfile);
+
+    if (!authUserId) {
+      saveSelfCharacterEditorDraft(nextForm);
+      setSelfCharacterStatus(statusMessage);
+      return;
+    }
+
+    console.log('SAVING SELF CHARACTER REFERENCES', {
+      authUserId,
+      referenceImageUrls,
+      selfieVideoPath: nextForm.selfieVideoPath || null,
+      selfieVideo2Path: nextForm.selfieVideo2Path || null,
+    });
+
+    const saved = await saveSupabaseCreatorSelfCharacter({
+      userId: authUserId,
+      profile,
+      name: displayName,
+      referenceImageUrls,
+      referencePhotoNames: {
+        frontFace: nextForm.frontFaceName || null,
+        leftAngle: nextForm.leftAngleName || null,
+        rightAngle: nextForm.rightAngleName || null,
+        fullBody: nextForm.fullBodyName || null,
+      },
+      sourceCaptureVideoUrl: nextForm.selfieVideoUrl,
+      sourceCaptureVideoName: nextForm.selfieVideoName || null,
+      sourceCaptureVideoPath: nextForm.selfieVideoPath || null,
+      sourceCaptureVideo2Url: nextForm.selfieVideo2Url,
+      sourceCaptureVideo2Name: nextForm.selfieVideo2Name || null,
+      sourceCaptureVideo2Path: nextForm.selfieVideo2Path || null,
+      selfCaptureNumbers: nextForm.selfCaptureNumbers || null,
+      selfCaptureConsent: nextForm.selfCaptureConsent,
+      selfCaptureCompleted: nextForm.selfCaptureCompleted,
+      voiceSampleUrl: nextForm.voiceSampleUrl,
+      voiceSampleName: nextForm.voiceSampleName || null,
+      voiceSampleNumbers: nextForm.voiceSampleNumbers || null,
+      voiceSampleConsent: nextForm.voiceSampleConsent,
+      creatorSelfFeatures: compactFeatures,
+      creatorSelfStylePreferences: compactStyle,
+      stylePreferences,
+      identityProfile,
+      editorDraft: finalEditorDraft,
+    });
+    const remoteCharacters = await loadSupabaseCharacters(authUserId);
+
+    setProfile(saved.profile);
+    setProfileDraft(saved.profile);
+    setCharacters(remoteCharacters.length ? remoteCharacters : [saved.character]);
+    setSyncLocalProfileAvailable(false);
+    setSyncLocalSelfAvailable(false);
+    setSelfCharacterStatus(statusMessage);
+  }
+
   async function handleSelfImageUpload(
     event: ChangeEvent<HTMLInputElement>,
     field: ReferencePhotoField,
@@ -1832,19 +1983,41 @@ export default function ProfilePage() {
           entityType: 'self_character',
           entityId: CREATOR_SELF_CHARACTER_ID,
         });
-        setSelfForm((current) => ({
-          ...current,
+        const nextForm = {
+          ...selfForm,
           [field]: upload.url,
           [pathField]: upload.objectPath,
           [nameField]: upload.fileName,
-        }));
+        };
+        setSelfForm(nextForm);
+        await persistSelfCharacterReferences(nextForm, `${upload.fileName} saved.`);
         return;
       }
 
       const dataUrl = await readFileAsDataUrl(file);
-      setSelfForm((current) => ({ ...current, [field]: dataUrl, [pathField]: '', [nameField]: file.name }));
+      const nextForm = { ...selfForm, [field]: dataUrl, [pathField]: '', [nameField]: file.name };
+      setSelfForm(nextForm);
+      saveSelfCharacterEditorDraft(nextForm);
     } catch (error) {
       setSelfCharacterStatus(error instanceof Error ? error.message : 'Unable to upload reference photo.');
+    }
+  }
+
+  async function handleRemoveSelfImage(field: ReferencePhotoField) {
+    const nameField = referencePhotoNameFields[field];
+    const pathField = referencePhotoPathFields[field];
+    const nextForm = {
+      ...selfForm,
+      [field]: '',
+      [pathField]: '',
+      [nameField]: '',
+    };
+
+    setSelfForm(nextForm);
+    try {
+      await persistSelfCharacterReferences(nextForm, `${field === 'frontFace' ? 'Front face' : field === 'leftAngle' ? 'Left angle' : field === 'rightAngle' ? 'Right angle' : 'Full body'} reference removed.`);
+    } catch (error) {
+      setSelfCharacterStatus(error instanceof Error ? error.message : 'Unable to remove reference photo.');
     }
   }
 
@@ -1856,22 +2029,29 @@ export default function ProfilePage() {
     if (!file) return;
 
     try {
-      const dataUrl = authUserId
-        ? (await uploadLumoraMedia({
+      const upload = authUserId
+        ? await uploadLumoraMedia({
             userId: authUserId,
             bucket: 'self-capture-videos',
             file,
             folder: 'self/capture',
             usage: slot === 'primary' ? 'self-capture-video' : 'self-capture-video-2',
-          })).url
-        : await readFileAsDataUrl(file);
-      setSelfForm((current) => ({
-        ...current,
+          })
+        : null;
+      const dataUrl = upload?.url ?? await readFileAsDataUrl(file);
+      const nextForm = {
+        ...selfForm,
         ...(slot === 'primary'
-          ? { selfieVideoName: file.name, selfieVideoUrl: dataUrl }
-          : { selfieVideo2Name: file.name, selfieVideo2Url: dataUrl }),
-        selfCaptureCompleted: Boolean(current.selfCaptureConsent),
-      }));
+          ? { selfieVideoName: file.name, selfieVideoUrl: dataUrl, selfieVideoPath: upload?.objectPath ?? '' }
+          : { selfieVideo2Name: file.name, selfieVideo2Url: dataUrl, selfieVideo2Path: upload?.objectPath ?? '' }),
+        selfCaptureCompleted: Boolean(selfForm.selfCaptureConsent),
+      };
+      setSelfForm(nextForm);
+      if (authUserId) {
+        await persistSelfCharacterReferences(nextForm, `${slot === 'primary' ? 'Selfie video 1' : 'Selfie video 2'} saved.`);
+      } else {
+        saveSelfCharacterEditorDraft(nextForm);
+      }
     } catch (error) {
       setSelfCharacterStatus(error instanceof Error ? error.message : 'Unable to upload self capture video.');
     }
@@ -1983,8 +2163,10 @@ export default function ProfilePage() {
       selfCaptureConsent: selfForm.selfCaptureConsent,
       selfCaptureCompleted: selfForm.selfCaptureCompleted,
       selfVoiceSampleConsent: Boolean(selfForm.voiceSampleConsent),
+      selfieVideoPath: selfForm.selfieVideoPath || null,
       selfieVideo2Name: selfForm.selfieVideo2Name || null,
       selfieVideo2Url: selfForm.selfieVideo2Url,
+      selfieVideo2Path: selfForm.selfieVideo2Path || null,
     };
     const identityDraftCharacter: CharacterProfile = {
       id: CREATOR_SELF_CHARACTER_ID,
@@ -2029,6 +2211,10 @@ export default function ProfilePage() {
           },
           sourceCaptureVideoUrl: selfForm.selfieVideoUrl,
           sourceCaptureVideoName: selfForm.selfieVideoName || null,
+          sourceCaptureVideoPath: selfForm.selfieVideoPath || null,
+          sourceCaptureVideo2Url: selfForm.selfieVideo2Url,
+          sourceCaptureVideo2Name: selfForm.selfieVideo2Name || null,
+          sourceCaptureVideo2Path: selfForm.selfieVideo2Path || null,
           selfCaptureNumbers: selfForm.selfCaptureNumbers || null,
           selfCaptureConsent: selfForm.selfCaptureConsent,
           selfCaptureCompleted: selfForm.selfCaptureCompleted,
@@ -2204,11 +2390,15 @@ export default function ProfilePage() {
               rightAngle: localSelfForm.rightAngle,
               rightAngleUrl: localSelfForm.rightAngle,
               rightAnglePath: localSelfForm.rightAnglePath || null,
+              fullBody: localSelfForm.fullBody || null,
+              fullBodyUrl: localSelfForm.fullBody || null,
+              fullBodyPath: localSelfForm.fullBodyPath || null,
             },
             referencePhotoNames: {
               frontFace: localSelfForm.frontFaceName || null,
               leftAngle: localSelfForm.leftAngleName || null,
               rightAngle: localSelfForm.rightAngleName || null,
+              fullBody: localSelfForm.fullBodyName || null,
             },
             sourceCaptureVideoUrl: isTransientMediaUrl(localSelfForm.selfieVideoUrl)
               ? null
@@ -2216,6 +2406,14 @@ export default function ProfilePage() {
             sourceCaptureVideoName: isTransientMediaUrl(localSelfForm.selfieVideoUrl)
               ? null
               : localSelfForm.selfieVideoName || null,
+            sourceCaptureVideoPath: localSelfForm.selfieVideoPath || null,
+            sourceCaptureVideo2Url: isTransientMediaUrl(localSelfForm.selfieVideo2Url)
+              ? null
+              : localSelfForm.selfieVideo2Url,
+            sourceCaptureVideo2Name: isTransientMediaUrl(localSelfForm.selfieVideo2Url)
+              ? null
+              : localSelfForm.selfieVideo2Name || null,
+            sourceCaptureVideo2Path: localSelfForm.selfieVideo2Path || null,
             selfCaptureNumbers: localSelfForm.selfCaptureNumbers || null,
             selfCaptureConsent: localSelfForm.selfCaptureConsent,
             selfCaptureCompleted: localSelfForm.selfCaptureCompleted,
@@ -2237,6 +2435,10 @@ export default function ProfilePage() {
               selfCaptureConsent: localSelfForm.selfCaptureConsent,
               selfCaptureCompleted: localSelfForm.selfCaptureCompleted,
               selfVoiceSampleConsent: Boolean(localSelfForm.voiceSampleConsent),
+              selfieVideoPath: localSelfForm.selfieVideoPath || null,
+              selfieVideo2Name: localSelfForm.selfieVideo2Name || null,
+              selfieVideo2Url: isTransientMediaUrl(localSelfForm.selfieVideo2Url) ? null : localSelfForm.selfieVideo2Url,
+              selfieVideo2Path: localSelfForm.selfieVideo2Path || null,
             },
             editorDraft: finalEditorDraft,
           });
@@ -2516,6 +2718,7 @@ export default function ProfilePage() {
                   <span>{label}</span>
                   <div
                     style={{
+                      position: 'relative',
                       width: '100%',
                       aspectRatio: '1',
                       borderRadius: '16px',
@@ -2527,9 +2730,40 @@ export default function ProfilePage() {
                       margin: '8px 0',
                     }}
                   >
-                    <ImagePreview src={selfForm[field]} fallback={field === 'fullBody' ? 'Optional' : 'Required'} />
+                    <ImagePreview
+                      src={selfForm[field]}
+                      fallback={field === 'fullBody' ? 'Optional' : 'Required'}
+                      errorMessage="Reference photo could not be loaded. Re-upload this photo."
+                    />
+                    {selfForm[field] ? (
+                      <button
+                        type="button"
+                        aria-label={`Remove ${label.toLowerCase()} reference`}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          void handleRemoveSelfImage(field);
+                        }}
+                        style={{
+                          position: 'absolute',
+                          top: '8px',
+                          right: '8px',
+                          width: '30px',
+                          height: '30px',
+                          borderRadius: '50%',
+                          border: '1px solid rgba(255,255,255,0.18)',
+                          background: 'rgba(5,4,11,0.78)',
+                          color: '#fff',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        X
+                      </button>
+                    ) : null}
                   </div>
-                  <strong>{selfForm[field] ? 'Uploaded / Ready' : field === 'fullBody' ? 'Optional' : 'Required'}</strong>
+                  <strong>
+                    {label}: {selfForm[field] ? 'Uploaded / Ready' : field === 'fullBody' ? 'Optional' : 'Required'}
+                  </strong>
                   <span className="muted">
                     {selfForm[referencePhotoNameFields[field]] ||
                       (selfForm[field] ? 'Saved reference photo' : 'No file selected')}

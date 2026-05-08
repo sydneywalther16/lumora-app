@@ -127,14 +127,20 @@ export default function CreatePage() {
     };
   }, [activeSelfCharacter, profile]);
 
+  const savedSelfReferenceUrls = activeSelfCharacter?.referenceImageUrls ?? null;
+  const savedFrontFaceUrl = savedSelfReferenceUrls?.frontFaceUrl ?? savedSelfReferenceUrls?.frontFace ?? null;
   const referenceImageUrl = hasSelfCharacter
-    ? resolvedReference?.primary ?? null
+    ? resolvedReference?.primary ?? savedFrontFaceUrl
     : selectedCharacter?.referenceImageUrls?.frontFaceUrl ?? selectedCharacter?.referenceImageUrls?.frontFace ?? null;
   const referenceImageUrls = hasSelfCharacter
     ? resolvedReference?.referenceImageUrls ?? activeSelfCharacter?.referenceImageUrls ?? null
     : selectedCharacter?.referenceImageUrls ?? null;
   const additionalReferenceImageUrls = hasSelfCharacter
-    ? resolvedReference?.additional ?? []
+    ? resolvedReference?.additional ?? [
+        savedSelfReferenceUrls?.leftAngleUrl ?? savedSelfReferenceUrls?.leftAngle,
+        savedSelfReferenceUrls?.rightAngleUrl ?? savedSelfReferenceUrls?.rightAngle,
+        savedSelfReferenceUrls?.fullBodyUrl ?? savedSelfReferenceUrls?.fullBody,
+      ].filter((url): url is string => Boolean(url))
     : [];
   const identityProfile = hasSelfCharacter
     ? buildLumoraIdentityProfile({
