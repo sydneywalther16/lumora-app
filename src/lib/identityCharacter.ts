@@ -6,6 +6,10 @@ import type {
   ReferenceImageUrls,
 } from './api';
 import type { LumoraProfile } from './profileStorage';
+import {
+  buildIdentityProfile,
+  mergeIdentityFeedbackIntoProfile,
+} from './identityEmbedding';
 
 type IdentityBuildInput = {
   userId: string | null;
@@ -83,6 +87,7 @@ export function getIdentityProfileFromCharacter(
   return {
     identityId: source.identityId,
     userId: typeof source.userId === 'string' ? source.userId : selfCharacter?.ownerUserId || 'local',
+    createdAt: typeof source.createdAt === 'string' ? source.createdAt : undefined,
     frontFaceUrl: cleanHttpUrl(typeof source.frontFaceUrl === 'string' ? source.frontFaceUrl : null),
     leftAngleUrl: cleanHttpUrl(typeof source.leftAngleUrl === 'string' ? source.leftAngleUrl : null),
     rightAngleUrl: cleanHttpUrl(typeof source.rightAngleUrl === 'string' ? source.rightAngleUrl : null),
@@ -90,6 +95,15 @@ export function getIdentityProfileFromCharacter(
     videoReferenceUrls: Array.isArray(source.videoReferenceUrls)
       ? uniqueUrls(source.videoReferenceUrls as Array<string | null>)
       : [],
+    references: recordValue(source.references) as LumoraIdentityProfile['references'],
+    detectedFeatures: recordValue(source.detectedFeatures) as LumoraIdentityProfile['detectedFeatures'],
+    canonicalReferenceSet: Array.isArray(source.canonicalReferenceSet)
+      ? uniqueUrls(source.canonicalReferenceSet as Array<string | null>)
+      : [],
+    primaryIdentityImageUrl: cleanHttpUrl(typeof source.primaryIdentityImageUrl === 'string' ? source.primaryIdentityImageUrl : null),
+    identityPrompt: typeof source.identityPrompt === 'string' ? source.identityPrompt : '',
+    generationConsistencyPrompt: typeof source.generationConsistencyPrompt === 'string' ? source.generationConsistencyPrompt : '',
+    keyframeUrl: cleanHttpUrl(typeof source.keyframeUrl === 'string' ? source.keyframeUrl : null),
     appearanceSummary: typeof source.appearanceSummary === 'string' ? source.appearanceSummary : '',
     userPreferences: stringRecord(source.userPreferences),
     dislikedTraits: Array.isArray(source.dislikedTraits)
@@ -98,9 +112,15 @@ export function getIdentityProfileFromCharacter(
     likenessNotes: Array.isArray(source.likenessNotes)
       ? source.likenessNotes.filter((item): item is string => typeof item === 'string')
       : [],
+    identityFeedback: Array.isArray(source.identityFeedback)
+      ? source.identityFeedback.filter((item): item is NonNullable<LumoraIdentityProfile['identityFeedback']>[number] => Boolean(item && typeof item === 'object'))
+      : [],
     preferredTraits: Array.isArray(source.preferredTraits)
       ? source.preferredTraits.filter((item): item is string => typeof item === 'string')
       : [],
+    identityStrength: typeof source.identityStrength === 'number' ? source.identityStrength : 0,
+    successfulGenerations: typeof source.successfulGenerations === 'number' ? source.successfulGenerations : 0,
+    feedbackIterations: typeof source.feedbackIterations === 'number' ? source.feedbackIterations : 0,
     version: typeof source.version === 'number' ? source.version : 1,
     status: source.status === 'building' || source.status === 'needs_refs' ? source.status : 'ready',
   };
@@ -168,8 +188,29 @@ export function buildLumoraIdentityProfile(input: IdentityBuildInput): LumoraIde
   ]
     .flatMap((value) => value ? value.split(',').map((item) => item.trim()) : [])
     .filter(Boolean);
+  const embeddedProfile = buildIdentityProfile({
+    identityId: existing?.identityId || identityIdFor(input.userId, input.selfCharacter),
+    userId: input.userId || input.selfCharacter?.ownerUserId || 'local',
+    frontFaceUrl,
+    leftAngleUrl,
+    rightAngleUrl,
+    fullBodyUrl,
+    selfieVideoUrl: videoReferenceUrls[0],
+    selfieVideo2Url: videoReferenceUrls[1],
+    appearanceSummary: buildAppearanceSummary(input),
+    userPreferences,
+    dislikedTraits: Array.from(new Set(dislikedTraits)),
+    likenessNotes: existing?.likenessNotes ?? [],
+    identityFeedback: existing?.identityFeedback ?? [],
+    keyframeUrl: existing?.keyframeUrl,
+    successfulGenerations: existing?.successfulGenerations ?? 0,
+    feedbackIterations: existing?.feedbackIterations ?? existing?.identityFeedback?.length ?? 0,
+    version: existing?.version ?? 1,
+    createdAt: existing?.createdAt,
+  });
 
   return {
+    ...embeddedProfile,
     identityId: existing?.identityId || identityIdFor(input.userId, input.selfCharacter),
     userId: input.userId || input.selfCharacter?.ownerUserId || 'local',
     frontFaceUrl,
@@ -181,6 +222,7 @@ export function buildLumoraIdentityProfile(input: IdentityBuildInput): LumoraIde
     userPreferences,
     dislikedTraits: Array.from(new Set(dislikedTraits)),
     likenessNotes: existing?.likenessNotes ?? [],
+    identityFeedback: existing?.identityFeedback ?? embeddedProfile.identityFeedback,
     preferredTraits: existing?.preferredTraits ?? [],
     version: existing?.version ?? 1,
     status: frontFaceUrl ? 'ready' : 'needs_refs',
@@ -198,7 +240,7 @@ export function mergeIdentityFeedback(
     feedback.customNote?.trim() ?? '',
   ].filter(Boolean);
 
-  return {
+  const nextProfile = {
     ...identityProfile,
     likenessNotes: Array.from(new Set(notes)).slice(-24),
     dislikedTraits: Array.from(
@@ -211,7 +253,17 @@ export function mergeIdentityFeedback(
       ? Array.from(new Set([...(identityProfile.preferredTraits ?? []), 'current likeness direction']))
       : identityProfile.preferredTraits,
     version: identityProfile.version + 1,
-    status: 'ready',
+    status: 'ready' as const,
+  };
+
+  const feedbackProfile = mergeIdentityFeedbackIntoProfile(nextProfile, feedback);
+
+  return {
+    ...nextProfile,
+    identityFeedback: feedbackProfile.identityFeedback,
+    identityStrength: feedbackProfile.identityStrength,
+    feedbackIterations: feedbackProfile.feedbackIterations,
+    version: feedbackProfile.version,
   };
 }
 

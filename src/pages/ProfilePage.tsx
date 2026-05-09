@@ -14,7 +14,7 @@ import {
   saveLumoraProfile,
   type LumoraProfile,
 } from '../lib/profileStorage';
-import type { CharacterProfile, CreatorSelfStylePreferences, LumoraPost } from '../lib/api';
+import type { CharacterProfile, CreatorSelfStylePreferences, LumoraIdentityProfile, LumoraPost } from '../lib/api';
 import type { StudioProject } from '../lib/projectStorage';
 import { useSession } from '../hooks/useSession';
 import { supabase } from '../lib/supabase';
@@ -835,6 +835,22 @@ function buildBlankSelfCharacterForm(): SelfCharacterForm {
   };
 }
 
+function buildSelfFormAppearanceSummary(form: SelfCharacterForm): string {
+  return [
+    form.features.hairColorStyle ? `Hair: ${form.features.hairColorStyle}.` : '',
+    form.features.eyeColor ? `Eyes: ${form.features.eyeColor}.` : '',
+    form.features.skinTone ? `Skin tone: ${form.features.skinTone}.` : '',
+    form.features.bodyBuild ? `Body/build: ${form.features.bodyBuild}.` : '',
+    form.features.signatureMakeup ? `Signature makeup: ${form.features.signatureMakeup}.` : '',
+    form.features.distinctiveFeatures ? `Distinctive features: ${form.features.distinctiveFeatures}.` : '',
+    form.style.everydayStyle ? `Everyday style: ${form.style.everydayStyle}.` : '',
+    form.style.glamStyle ? `Glam style: ${form.style.glamStyle}.` : '',
+    form.style.videoWardrobe ? `Wardrobe preference: ${form.style.videoWardrobe}.` : '',
+    form.style.colorsToFavor ? `Colors to favor: ${form.style.colorsToFavor}.` : '',
+    form.style.colorsToAvoid ? `Avoid: ${form.style.colorsToAvoid}.` : '',
+  ].filter(Boolean).join(' ');
+}
+
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="list-stack" style={{ marginTop: '22px' }}>
@@ -1583,6 +1599,8 @@ export default function ProfilePage() {
   const [showSelfCaptureRedo, setShowSelfCaptureRedo] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [selfCharacterStatus, setSelfCharacterStatus] = useState<string | null>(null);
+  const [identityBuildStatus, setIdentityBuildStatus] = useState<string | null>(null);
+  const [buildingIdentity, setBuildingIdentity] = useState(false);
   const [syncLocalProfileAvailable, setSyncLocalProfileAvailable] = useState(false);
   const [syncLocalSelfAvailable, setSyncLocalSelfAvailable] = useState(false);
   const [syncingLocal, setSyncingLocal] = useState(false);
@@ -1750,9 +1768,22 @@ export default function ProfilePage() {
         profile,
         referenceImageUrls: creatorSelfCharacter.referenceImageUrls,
         primaryReferenceImageUrl:
+          creatorSelfCharacter.referenceImageUrls.manualReferenceImageUrl ||
           creatorSelfCharacter.referenceImageUrls.frontFaceUrl || creatorSelfCharacter.referenceImageUrls.frontFace,
       })
     : null;
+  const identityConfidence = Math.round(creatorIdentityProfile?.identityStrength ?? 0);
+  const identityLifecycleLabel = !creatorIdentityProfile
+    ? 'Needs references'
+    : creatorIdentityProfile.status === 'building'
+      ? 'Building identity'
+      : (creatorIdentityProfile.feedbackIterations ?? 0) > 0
+        ? 'Identity learning'
+        : ((creatorIdentityProfile.keyframeUrl && creatorIdentityProfile.keyframeUrl !== creatorIdentityProfile.frontFaceUrl) || identityConfidence >= 70)
+          ? 'Identity stabilized'
+          : creatorIdentityProfile.status === 'ready'
+            ? 'Identity ready'
+            : 'Needs references';
   function openProfileEditor() {
     setProfileDraft(profile);
     setSaveMessage(null);
@@ -1927,7 +1958,11 @@ export default function ProfilePage() {
     }
   }
 
-  async function persistSelfCharacterReferences(nextForm: SelfCharacterForm, statusMessage: string) {
+  async function persistSelfCharacterReferences(
+    nextForm: SelfCharacterForm,
+    statusMessage: string,
+    identityProfileOverride?: LumoraIdentityProfile | null,
+  ) {
     const compactFeatures = compactStringRecord(nextForm.features);
     const compactStyle = compactStringRecord(nextForm.style);
     const finalEditorDraft = saveSelfCharacterEditorDraft(nextForm) ?? createSelfCharacterEditorDraft(nextForm);
@@ -1983,14 +2018,29 @@ export default function ProfilePage() {
       creatorSelfFeatures: compactFeatures,
       creatorSelfStylePreferences: compactStyle,
     };
-    const identityProfile = buildLumoraIdentityProfile({
+    const builtIdentityProfile = buildLumoraIdentityProfile({
       userId: authUserId || 'local',
       selfCharacter: identityDraftCharacter,
       profile,
       referenceImageUrls,
-      primaryReferenceImageUrl: nextForm.frontFace,
+      primaryReferenceImageUrl: nextForm.manualReferenceImageUrl || nextForm.frontFace,
       additionalReferenceImageUrls: [nextForm.leftAngle, nextForm.rightAngle, nextForm.fullBody].filter(Boolean),
     });
+    const identityProfile = identityProfileOverride
+      ? {
+          ...builtIdentityProfile,
+          ...identityProfileOverride,
+          references: identityProfileOverride.references ?? builtIdentityProfile.references,
+          detectedFeatures: identityProfileOverride.detectedFeatures ?? builtIdentityProfile.detectedFeatures,
+          canonicalReferenceSet: identityProfileOverride.canonicalReferenceSet ?? builtIdentityProfile.canonicalReferenceSet,
+          identityPrompt: identityProfileOverride.identityPrompt || builtIdentityProfile.identityPrompt,
+          generationConsistencyPrompt:
+            identityProfileOverride.generationConsistencyPrompt || builtIdentityProfile.generationConsistencyPrompt,
+          keyframeUrl: identityProfileOverride.keyframeUrl ?? builtIdentityProfile.keyframeUrl,
+          identityStrength: identityProfileOverride.identityStrength ?? builtIdentityProfile.identityStrength,
+          status: identityProfileOverride.status ?? builtIdentityProfile.status,
+        }
+      : builtIdentityProfile;
     const stylePreferences = identityProfileToStylePreferences(baseStylePreferences, identityProfile);
 
     if (!authUserId) {
@@ -2215,6 +2265,68 @@ export default function ProfilePage() {
     }));
   }
 
+  async function handleBuildIdentityCharacter() {
+    const primaryReference = selfForm.manualReferenceImageUrl || selfForm.frontFace;
+    if (!primaryReference || !primaryReference.startsWith('https://')) {
+      setIdentityBuildStatus('Add a public HTTPS front photo or manual working reference URL before building identity.');
+      return;
+    }
+
+    setBuildingIdentity(true);
+    setIdentityBuildStatus('Building identity...');
+
+    try {
+      const response = await fetch('/api/lumora/build-identity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identityId: creatorIdentityProfile?.identityId,
+          userId: authUserId || 'local',
+          frontFaceUrl: primaryReference,
+          leftAngleUrl: selfForm.leftAngle || null,
+          rightAngleUrl: selfForm.rightAngle || null,
+          fullBodyUrl: selfForm.fullBody || null,
+          selfieVideoUrl: selfForm.selfieVideoUrl,
+          selfieVideo2Url: selfForm.selfieVideo2Url,
+          appearanceSummary: buildSelfFormAppearanceSummary(selfForm),
+          userPreferences: compactStringRecord(selfForm.style),
+          dislikedTraits: compactStringRecord(selfForm.style).colorsToAvoid
+            ? compactStringRecord(selfForm.style).colorsToAvoid?.split(',').map((item) => item.trim()).filter(Boolean)
+            : [],
+          likenessNotes: creatorIdentityProfile?.likenessNotes ?? [],
+          identityFeedback: creatorIdentityProfile?.identityFeedback ?? [],
+        }),
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) as {
+        identityProfile?: LumoraIdentityProfile;
+        error?: string;
+        warnings?: string[];
+      } : {};
+
+      if (!response.ok || !data.identityProfile) {
+        throw new Error(data.error || 'Unable to build Lumora identity profile.');
+      }
+
+      await persistSelfCharacterReferences(
+        selfForm,
+        data.identityProfile.keyframeUrl && !data.warnings?.length
+          ? 'Identity stabilized. Master keyframe saved.'
+          : 'Identity profile saved. Image-animation fallback remains available.',
+        data.identityProfile,
+      );
+      setIdentityBuildStatus(
+        data.warnings?.length
+          ? `Identity learning. ${data.warnings[0]}`
+          : 'Identity stabilized.',
+      );
+    } catch (error) {
+      setIdentityBuildStatus(error instanceof Error ? error.message : 'Unable to build Lumora identity.');
+    } finally {
+      setBuildingIdentity(false);
+    }
+  }
+
   async function handleSaveSelfCharacter() {
     if (!isManualReferenceUrlReady(selfForm.manualReferenceImageUrl) && (!selfForm.frontFace || !selfForm.leftAngle || !selfForm.rightAngle)) {
       setSelfCharacterStatus('Add front, left, and right photos or a manual HTTPS reference URL to save your self character.');
@@ -2277,7 +2389,7 @@ export default function ProfilePage() {
       selfCharacter: identityDraftCharacter,
       profile,
       referenceImageUrls,
-      primaryReferenceImageUrl: selfForm.frontFace,
+      primaryReferenceImageUrl: selfForm.manualReferenceImageUrl || selfForm.frontFace,
       additionalReferenceImageUrls: [selfForm.leftAngle, selfForm.rightAngle].filter(Boolean),
     });
     const stylePreferences = identityProfileToStylePreferences(baseStylePreferences, identityProfile);
@@ -3067,13 +3179,24 @@ export default function ProfilePage() {
             </p>
             <div style={{ display: 'grid', gap: '10px', padding: '16px', borderRadius: '18px', background: 'rgba(255,255,255,0.04)' }}>
               <span className="eyebrow">Build My Lumora Character</span>
-              <strong>{selfCharacterReferencesReady ? 'Identity ready' : 'Needs references'}</strong>
+              <strong>
+                {buildingIdentity ? 'Building identity' : selfCharacterReferencesReady ? 'Identity ready' : 'Needs references'}
+              </strong>
               <p className="muted" style={{ margin: 0 }}>
                 Build a reusable photorealistic character from your reference photos and videos.
               </p>
               <p className="muted" style={{ margin: 0 }}>
                 Lumora will use your feedback to improve future prompts and character consistency.
               </p>
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={() => void handleBuildIdentityCharacter()}
+                disabled={buildingIdentity}
+              >
+                {buildingIdentity ? 'Building identity...' : creatorIdentityProfile?.keyframeUrl ? 'Improve My Character' : 'Build My Lumora Character'}
+              </button>
+              {identityBuildStatus ? <p className="muted" style={{ margin: 0 }}>{identityBuildStatus}</p> : null}
             </div>
             <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
               Draft autosaved locally
@@ -3120,9 +3243,12 @@ export default function ProfilePage() {
               <p className="muted" style={{ margin: '6px 0 0' }}>
                 Build a reusable photorealistic character from your reference photos and videos.
               </p>
+              <p className="muted" style={{ margin: '6px 0 0' }}>
+                Identity confidence: {identityConfidence}%
+              </p>
             </div>
             <span className="tiny-pill" style={{ background: '#2a1f3d' }}>
-              {creatorIdentityProfile?.status === 'ready' ? 'Identity ready' : 'Needs references'}
+              {identityLifecycleLabel}
             </span>
           </div>
         </section>

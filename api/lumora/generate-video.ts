@@ -15,11 +15,15 @@ type ReplicateModelIdentifier = `${string}/${string}` | `${string}/${string}:${s
 type GenerateVideoBody = {
   prompt?: unknown;
   identityId?: unknown;
+  identityPrompt?: unknown;
+  consistencyPrompt?: unknown;
+  generationConsistencyPrompt?: unknown;
   characterDescription?: unknown;
   keyframeUrl?: unknown;
   referenceImageUrl?: unknown;
   referenceImages?: unknown;
   additionalReferenceImageUrls?: unknown;
+  canonicalReferenceSet?: unknown;
   referenceImageUrls?: unknown;
   aspectRatio?: unknown;
   duration?: unknown;
@@ -169,6 +173,7 @@ function referenceUrlMap(value: unknown): Record<string, string> {
   const nested = objectRecord(record.referenceImageUrls);
   const source = Object.keys(nested).length > 0 ? nested : record;
   const aliases: Record<string, string[]> = {
+    manualReferenceImageUrl: ['manualReferenceImageUrl'],
     frontFace: ['frontFaceUrl', 'frontFace', 'frontImageUrl', 'frontImage', 'front', 'face', 'primary'],
     fullBody: ['fullBodyUrl', 'fullBody', 'body', 'full'],
     leftAngle: ['leftAngleUrl', 'leftAngle', 'left'],
@@ -197,6 +202,7 @@ function firstReferenceImageUrl(body: GenerateVideoBody): string {
     : '';
 
   return (
+    urls.manualReferenceImageUrl ||
     urls.frontFace ||
     urls.fullBody ||
     urls.leftAngle ||
@@ -216,7 +222,11 @@ function additionalReferenceImageUrls(body: GenerateVideoBody, primaryReference:
   const referenceImages = Array.isArray(body.referenceImages)
     ? body.referenceImages.map(publicImageUrl)
     : [];
+  const canonicalReferences = Array.isArray(body.canonicalReferenceSet)
+    ? body.canonicalReferenceSet.map(publicImageUrl)
+    : [];
   const candidates = [
+    ...canonicalReferences,
     ...explicitAdditional,
     urls.leftAngle,
     urls.rightAngle,
@@ -240,13 +250,16 @@ function normalizeAspectRatio(value: unknown): string {
 function buildFinalPrompt(input: {
   prompt: string;
   characterDescription: string;
+  identityPrompt: string;
+  consistencyPrompt: string;
   style: string;
   camera: string;
   mood: string;
   aspectRatio: string;
 }) {
   return [
-    'Create a new photorealistic character render based on the provided identity references. Do not simply animate or copy the source photo. Use the references only to preserve identity: face shape, hair color, hairstyle, skin tone, eye area, proportions, makeup style, and overall likeness. Place this same person into the requested new scene.',
+    input.consistencyPrompt || 'Create a new photorealistic character render based on the provided identity references. Do not simply animate or copy the source photo. Use the references only to preserve identity: face shape, hair color, hairstyle, skin tone, eye area, proportions, makeup style, and overall likeness. Place this same person into the requested new scene.',
+    input.identityPrompt ? `Identity prompt: ${input.identityPrompt}` : '',
     `${input.characterDescription} ${input.prompt}`.trim(),
     input.style ? `Style: ${input.style}` : '',
     input.camera ? `Camera: ${input.camera}` : '',
@@ -484,6 +497,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const finalPrompt = buildFinalPrompt({
       prompt,
       characterDescription: textValue(body.characterDescription),
+      identityPrompt: textValue(body.identityPrompt),
+      consistencyPrompt: textValue(body.consistencyPrompt) || textValue(body.generationConsistencyPrompt),
       style: textValue(body.style),
       camera: textValue(body.camera),
       mood: textValue(body.mood),

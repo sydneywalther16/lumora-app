@@ -15,6 +15,9 @@ export type StudioProject = {
   model?: string | null;
   generationMode?: GenerationMode | null;
   identityId?: string | null;
+  identityPrompt?: string | null;
+  consistencyPrompt?: string | null;
+  canonicalReferenceSet?: string[] | null;
   keyframeUrl?: string | null;
   referenceImageUrl?: string | null;
   referenceImageUrls?: Partial<ReferenceImageUrls> | null;
@@ -77,6 +80,11 @@ export function loadStudioProjects(): StudioProject[] {
         model: typeof project.model === 'string' ? project.model : null,
         generationMode: typeof project.generationMode === 'string' ? project.generationMode as GenerationMode : null,
         identityId: typeof project.identityId === 'string' ? project.identityId : null,
+        identityPrompt: typeof project.identityPrompt === 'string' ? project.identityPrompt : null,
+        consistencyPrompt: typeof project.consistencyPrompt === 'string' ? project.consistencyPrompt : null,
+        canonicalReferenceSet: Array.isArray(project.canonicalReferenceSet)
+          ? project.canonicalReferenceSet.filter((item): item is string => typeof item === 'string')
+          : null,
         keyframeUrl: typeof project.keyframeUrl === 'string' ? project.keyframeUrl : null,
         referenceImageUrl: typeof project.referenceImageUrl === 'string' ? project.referenceImageUrl : null,
         referenceImageUrls:

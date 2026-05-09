@@ -138,19 +138,49 @@ export type LumoraIdentityFeedback = {
   createdAt: string;
 };
 
+export type LumoraDetectedIdentityFeatures = {
+  hairColor: string;
+  eyeColor: string;
+  skinTone: string;
+  faceShape: string;
+  bodyFrame: string;
+  estimatedAgeRange: string;
+  genderPresentation: string;
+  styleTags: string[];
+};
+
 export type LumoraIdentityProfile = {
   identityId: string;
   userId: string;
+  createdAt?: string;
   frontFaceUrl: string | null;
   leftAngleUrl: string | null;
   rightAngleUrl: string | null;
   fullBodyUrl?: string | null;
   videoReferenceUrls: string[];
+  references?: {
+    frontFaceUrl: string | null;
+    leftAngleUrl: string | null;
+    rightAngleUrl: string | null;
+    fullBodyUrl?: string | null;
+    selfieVideoUrl?: string | null;
+    selfieVideo2Url?: string | null;
+  };
+  detectedFeatures?: LumoraDetectedIdentityFeatures;
+  canonicalReferenceSet?: string[];
+  primaryIdentityImageUrl?: string | null;
+  identityPrompt?: string;
+  generationConsistencyPrompt?: string;
+  keyframeUrl?: string | null;
   appearanceSummary: string;
   userPreferences: Record<string, string>;
   dislikedTraits: string[];
   likenessNotes: string[];
+  identityFeedback?: Array<LumoraIdentityFeedback & { id?: string; sentiment?: 'positive' | 'negative' | 'neutral' }>;
   preferredTraits?: string[];
+  identityStrength?: number;
+  successfulGenerations?: number;
+  feedbackIterations?: number;
   version: number;
   status: LumoraIdentityStatus;
 };

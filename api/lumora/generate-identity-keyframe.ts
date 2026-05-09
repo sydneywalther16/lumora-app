@@ -13,6 +13,10 @@ type VercelResponse = ServerResponse & {
 type KeyframeBody = {
   prompt?: unknown;
   identityId?: unknown;
+  identityPrompt?: unknown;
+  consistencyPrompt?: unknown;
+  generationConsistencyPrompt?: unknown;
+  canonicalReferenceSet?: unknown;
   frontFaceUrl?: unknown;
   leftAngleUrl?: unknown;
   rightAngleUrl?: unknown;
@@ -107,6 +111,8 @@ function buildFinalPrompt(body: KeyframeBody) {
     'Create a new photorealistic character render based on the provided identity references.',
     'Do not simply animate or copy the source photo. Use the references only to preserve identity: face shape, hair color, hairstyle, skin tone, eye area, proportions, makeup style, and overall likeness.',
     'Place this same person into the requested new scene.',
+    textValue(body.consistencyPrompt) || textValue(body.generationConsistencyPrompt),
+    textValue(body.identityPrompt) ? `Identity prompt: ${textValue(body.identityPrompt)}` : '',
     textValue(body.appearanceSummary),
     textValue(body.prompt),
     textValue(body.style) ? `Style: ${textValue(body.style)}` : '',

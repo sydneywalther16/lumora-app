@@ -330,9 +330,13 @@ export default function CreateVideo({
     ? 'Needs references'
     : identityProfile.status === 'building'
       ? 'Building identity'
-      : identityProfile.status === 'ready'
-        ? 'Identity ready'
-        : 'Needs references';
+      : (identityProfile.feedbackIterations ?? 0) > 0
+        ? 'Identity learning'
+        : (identityProfile.keyframeUrl && identityProfile.keyframeUrl !== identityProfile.frontFaceUrl) || (identityProfile.identityStrength ?? 0) >= 70
+          ? 'Identity stabilized'
+          : identityProfile.status === 'ready'
+            ? 'Identity ready'
+            : 'Needs references';
   const identityReferenceCards = [
     {
       label: 'Front photo',
@@ -445,15 +449,15 @@ export default function CreateVideo({
     setStatus('');
 
     try {
-      let keyframeUrl: string | null = null;
+      let keyframeUrl: string | null = cleanReferenceUrl(identityProfile?.keyframeUrl ?? null);
       let keyframeFinalPrompt = '';
       let keyframeWarnings: string[] = [];
       let keyframeModel = '';
       let videoGenerationMode: GenerationMode = selfReferenceMode
-        ? 'reference-photo-animation-fallback'
+        ? keyframeUrl ? 'identity-keyframe-to-video' : 'reference-photo-animation-fallback'
         : selectedGenerationMode;
 
-      if (selfReferenceMode && selectedReferenceImageUrl && identityProfile) {
+      if (selfReferenceMode && !keyframeUrl && selectedReferenceImageUrl && identityProfile) {
         const keyframeRes = await fetch('/api/lumora/generate-identity-keyframe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -465,6 +469,9 @@ export default function CreateVideo({
             rightAngleUrl: identityProfile.rightAngleUrl,
             videoReferenceUrls: identityProfile.videoReferenceUrls,
             appearanceSummary: identityProfile.appearanceSummary,
+            identityPrompt: identityProfile.identityPrompt,
+            consistencyPrompt: identityProfile.generationConsistencyPrompt,
+            canonicalReferenceSet: identityProfile.canonicalReferenceSet,
             preferences: identityProfile.userPreferences,
             dislikes: identityProfile.dislikedTraits,
             likenessNotes: identityProfile.likenessNotes,
@@ -503,9 +510,12 @@ export default function CreateVideo({
           characterId,
           identityId: identityProfile?.identityId,
           characterDescription: selectedCharacterDescription,
+          identityPrompt: identityProfile?.identityPrompt,
+          consistencyPrompt: identityProfile?.generationConsistencyPrompt,
           keyframeUrl,
           referenceImageUrl: selectedReferenceImageUrl,
           additionalReferenceImageUrls,
+          canonicalReferenceSet: identityProfile?.canonicalReferenceSet,
           referenceImages: additionalReferenceImageUrls,
           referenceImageUrls: referencePayload,
           aspectRatio: selectedAspectRatio,
@@ -606,6 +616,9 @@ export default function CreateVideo({
           displayEngine: nextDisplayEngine,
           generationMode: nextGenerationMode,
           identityId: identityProfile?.identityId ?? null,
+          identityPrompt: identityProfile?.identityPrompt ?? null,
+          consistencyPrompt: identityProfile?.generationConsistencyPrompt ?? null,
+          canonicalReferenceSet: identityProfile?.canonicalReferenceSet ?? null,
           keyframeUrl: nextKeyframeUrl,
           referenceImageUrl: nextReferenceImageUrl,
           referenceImageUrls: referencePayload,

@@ -577,10 +577,19 @@ function mapReferencePhotoNames(value: unknown): Partial<Record<keyof ReferenceI
 function mapIdentityProfile(value: unknown): LumoraIdentityProfile | null {
   const record = jsonRecord(value);
   if (typeof record.identityId !== 'string') return null;
+  const references = jsonRecord(record.references);
+  const detectedFeatures = jsonRecord(record.detectedFeatures);
+  const canonicalReferenceSet = Array.isArray(record.canonicalReferenceSet)
+    ? record.canonicalReferenceSet.filter((item): item is string => typeof item === 'string')
+    : [];
+  const identityFeedback = Array.isArray(record.identityFeedback)
+    ? record.identityFeedback.filter((item): item is NonNullable<LumoraIdentityProfile['identityFeedback']>[number] => isObject(item))
+    : [];
 
   return {
     identityId: record.identityId,
     userId: stringValue(record.userId),
+    createdAt: nullableString(record.createdAt) ?? undefined,
     frontFaceUrl: nullableString(record.frontFaceUrl),
     leftAngleUrl: nullableString(record.leftAngleUrl),
     rightAngleUrl: nullableString(record.rightAngleUrl),
@@ -588,6 +597,35 @@ function mapIdentityProfile(value: unknown): LumoraIdentityProfile | null {
     videoReferenceUrls: Array.isArray(record.videoReferenceUrls)
       ? record.videoReferenceUrls.filter((item): item is string => typeof item === 'string')
       : [],
+    references: Object.keys(references).length
+      ? {
+          frontFaceUrl: nullableString(references.frontFaceUrl),
+          leftAngleUrl: nullableString(references.leftAngleUrl),
+          rightAngleUrl: nullableString(references.rightAngleUrl),
+          fullBodyUrl: nullableString(references.fullBodyUrl),
+          selfieVideoUrl: nullableString(references.selfieVideoUrl),
+          selfieVideo2Url: nullableString(references.selfieVideo2Url),
+        }
+      : undefined,
+    detectedFeatures: Object.keys(detectedFeatures).length
+      ? {
+          hairColor: stringValue(detectedFeatures.hairColor) || 'unspecified',
+          eyeColor: stringValue(detectedFeatures.eyeColor) || 'unspecified',
+          skinTone: stringValue(detectedFeatures.skinTone) || 'unspecified',
+          faceShape: stringValue(detectedFeatures.faceShape) || 'unspecified',
+          bodyFrame: stringValue(detectedFeatures.bodyFrame) || 'unspecified',
+          estimatedAgeRange: stringValue(detectedFeatures.estimatedAgeRange) || 'unspecified',
+          genderPresentation: stringValue(detectedFeatures.genderPresentation) || 'unspecified',
+          styleTags: Array.isArray(detectedFeatures.styleTags)
+            ? detectedFeatures.styleTags.filter((item): item is string => typeof item === 'string')
+            : [],
+        }
+      : undefined,
+    canonicalReferenceSet,
+    primaryIdentityImageUrl: nullableString(record.primaryIdentityImageUrl),
+    identityPrompt: stringValue(record.identityPrompt),
+    generationConsistencyPrompt: stringValue(record.generationConsistencyPrompt),
+    keyframeUrl: nullableString(record.keyframeUrl),
     appearanceSummary: stringValue(record.appearanceSummary),
     userPreferences: stringRecord(record.userPreferences),
     dislikedTraits: Array.isArray(record.dislikedTraits)
@@ -596,9 +634,13 @@ function mapIdentityProfile(value: unknown): LumoraIdentityProfile | null {
     likenessNotes: Array.isArray(record.likenessNotes)
       ? record.likenessNotes.filter((item): item is string => typeof item === 'string')
       : [],
+    identityFeedback,
     preferredTraits: Array.isArray(record.preferredTraits)
       ? record.preferredTraits.filter((item): item is string => typeof item === 'string')
       : [],
+    identityStrength: typeof record.identityStrength === 'number' ? record.identityStrength : 0,
+    successfulGenerations: typeof record.successfulGenerations === 'number' ? record.successfulGenerations : 0,
+    feedbackIterations: typeof record.feedbackIterations === 'number' ? record.feedbackIterations : identityFeedback.length,
     version: typeof record.version === 'number' ? record.version : 1,
     status: record.status === 'building' || record.status === 'needs_refs' ? record.status : 'ready',
   };
@@ -938,14 +980,26 @@ export async function saveSupabaseIdentityFeedback(input: {
     identityProfile: cleanJsonRecord(input.identityProfile),
   };
 
-  const { error: updateError } = await client
+  let updateResult = await client
     .from('self_characters')
     .update({
       style_preferences: stylePreferences,
+      identity_profile: cleanJsonRecord(input.identityProfile),
       updated_at: new Date().toISOString(),
     })
     .eq('user_id', input.userId);
 
+  if (updateResult.error && isMissingColumnError(updateResult.error, 'identity_profile')) {
+    updateResult = await client
+      .from('self_characters')
+      .update({
+        style_preferences: stylePreferences,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', input.userId);
+  }
+
+  const updateError = updateResult.error;
   if (updateError) throw updateError;
 }
 
