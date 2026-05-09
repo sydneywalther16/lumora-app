@@ -39,7 +39,7 @@ import {
   buildLumoraIdentityProfile,
   identityProfileToStylePreferences,
 } from '../lib/identityCharacter';
-import { getWorkingReferenceUrl } from '../lib/selfCharacterReference';
+import { resolveRenderableReferenceUrl } from '../lib/selfCharacterReference';
 
 type Draft = { id: string; title: string; prompt: string; createdAt: string };
 type ProfileDebugInfo = {
@@ -851,24 +851,43 @@ function ImagePreview({
   fallback: string;
   errorMessage?: string;
 }) {
-  const [failedSrc, setFailedSrc] = useState<string | null>(null);
-  const resolvedSrc = getWorkingReferenceUrl(src);
-  const failed = Boolean(resolvedSrc && failedSrc === resolvedSrc);
+  const resolvedUrl = resolveRenderableReferenceUrl(src);
 
-  return resolvedSrc && !failed ? (
-    <img
-      src={resolvedSrc}
-      alt=""
-      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-      onError={() => {
-        console.error('FAILED PREVIEW URL:', resolvedSrc);
-        setFailedSrc(resolvedSrc);
+  return (
+    <div
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden',
+        display: 'grid',
+        placeItems: 'center',
       }}
-    />
-  ) : (
-    <span style={{ color: '#d3cdf3', fontSize: '1rem', padding: '8px', textAlign: 'center' }}>
-      {failed ? 'Preview unavailable' : fallback}
-    </span>
+    >
+      {resolvedUrl ? (
+        <img
+          src={resolvedUrl}
+          alt={fallback}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 1,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+          }}
+          onLoad={() => console.log('LOADED PREVIEW:', resolvedUrl)}
+          onError={() => {
+            console.error('FAILED PREVIEW:', resolvedUrl);
+            console.error('FAILED PREVIEW URL:', resolvedUrl);
+          }}
+        />
+      ) : (
+        <span style={{ color: '#d3cdf3', fontSize: '1rem', padding: '8px', textAlign: 'center', zIndex: 0 }}>
+          {fallback}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -2749,7 +2768,7 @@ export default function ProfilePage() {
                     >
                       <ImagePreview
                         src={previewSource}
-                        fallback={hasReference ? 'Preview unavailable' : field === 'fullBody' ? 'Optional' : 'Required'}
+                        fallback={field === 'fullBody' ? 'Optional' : 'Required'}
                         errorMessage="Reference photo could not be loaded. Re-upload this photo."
                       />
                       {hasReference ? (
@@ -2772,6 +2791,7 @@ export default function ProfilePage() {
                             background: 'rgba(5,4,11,0.78)',
                             color: '#fff',
                             cursor: 'pointer',
+                            zIndex: 2,
                           }}
                         >
                           X

@@ -45,43 +45,60 @@ function LocalReferencePreview({
   label: string;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [failedUrl, setFailedUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!file) {
       setPreviewUrl(null);
-      setFailedUrl(null);
       return;
     }
 
     const objectUrl = URL.createObjectURL(file);
     setPreviewUrl(objectUrl);
-    setFailedUrl(null);
 
     return () => {
       URL.revokeObjectURL(objectUrl);
     };
   }, [file]);
 
-  if (!previewUrl || failedUrl === previewUrl) {
-    return (
-      <span style={{ color: '#d3cdf3', fontSize: '0.95rem', padding: '8px', textAlign: 'center' }}>
-        {failedUrl ? 'Preview unavailable' : fallback}
-      </span>
-    );
-  }
+  const resolvedUrl = previewUrl;
+  console.log('REFERENCE OBJECT:', file);
+  console.log('RESOLVED URL:', resolvedUrl);
 
   return (
-    <img
-      src={previewUrl}
-      alt={label}
-      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-      onError={(event) => {
-        console.error('FAILED PREVIEW URL:', previewUrl);
-        event.currentTarget.style.display = 'none';
-        setFailedUrl(previewUrl);
+    <div
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden',
+        display: 'grid',
+        placeItems: 'center',
       }}
-    />
+    >
+      {resolvedUrl ? (
+        <img
+          src={resolvedUrl}
+          alt={label}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 1,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+          }}
+          onLoad={() => console.log('LOADED PREVIEW:', resolvedUrl)}
+          onError={() => {
+            console.error('FAILED PREVIEW:', resolvedUrl);
+            console.error('FAILED PREVIEW URL:', resolvedUrl);
+          }}
+        />
+      ) : (
+        <span style={{ color: '#d3cdf3', fontSize: '0.95rem', padding: '8px', textAlign: 'center' }}>
+          {fallback}
+        </span>
+      )}
+    </div>
   );
 }
 

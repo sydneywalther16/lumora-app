@@ -12,7 +12,7 @@ import {
 import { saveStudioProject, type StudioProject } from '../lib/projectStorage';
 import { loadLumoraProfile } from '../lib/profileStorage';
 import { loadSupabaseProfile, saveSupabaseDraft, saveSupabaseProject } from '../lib/supabaseAppData';
-import { getWorkingReferenceUrl } from '../lib/selfCharacterReference';
+import { resolveRenderableReferenceUrl } from '../lib/selfCharacterReference';
 import { useSession } from '../hooks/useSession';
 import { useAppStore } from '../store/useAppStore';
 
@@ -150,14 +150,14 @@ function cleanReferenceUrl(value?: string | null): string | null {
 }
 
 function renderableReferenceImageUrl(value?: string | null): string | null {
-  return getWorkingReferenceUrl(value);
+  return resolveRenderableReferenceUrl(value);
 }
 
 function pickReferenceImage(input: {
   referenceImageUrl?: string | null;
   referenceImageUrls?: Partial<ReferenceImageUrls> | null;
 }): { url: string | null; label: string | null } {
-  const explicitUrl = getWorkingReferenceUrl(input.referenceImageUrl);
+  const explicitUrl = resolveRenderableReferenceUrl(input.referenceImageUrl);
   if (explicitUrl) return { url: explicitUrl, label: 'Selected reference' };
 
   const urls = input.referenceImageUrls;
@@ -182,7 +182,7 @@ function pickReferenceImage(input: {
   ];
 
   for (const slot of orderedSlots) {
-    const url = getWorkingReferenceUrl(urls[slot]);
+    const url = resolveRenderableReferenceUrl(urls[slot]);
     if (url) {
       return {
         url,
@@ -196,7 +196,7 @@ function pickReferenceImage(input: {
 
 function referenceImagePayload(urls?: Partial<ReferenceImageUrls> | null) {
   if (!urls) return undefined;
-  const optionalUrl = (value?: string | null) => getWorkingReferenceUrl(value) ?? undefined;
+  const optionalUrl = (value?: string | null) => resolveRenderableReferenceUrl(value) ?? undefined;
 
   return {
     front: optionalUrl(urls.frontFaceUrl ?? urls.frontFacePath ?? urls.frontFace),
@@ -225,35 +225,42 @@ function ReferencePreviewImage({
   className?: string;
   style?: CSSProperties;
 }) {
-  const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const previewUrl = getWorkingReferenceUrl(src);
-  const failed = Boolean(previewUrl && failedUrl === previewUrl);
+  const resolvedUrl = resolveRenderableReferenceUrl(src);
 
-  if (!previewUrl || failed) {
-    return (
-      <div className={className} style={{
+  return (
+    <div
+      className={className}
+      style={{
         ...style,
+        position: 'relative',
+        overflow: 'hidden',
         display: 'grid',
         placeItems: 'center',
         background: 'rgba(255,255,255,0.08)',
-      }}>
-        <span className="muted" style={{ textAlign: 'center', padding: '8px' }}>Preview unavailable</span>
-      </div>
-    );
-  }
-
-  return (
-    <img
-      src={previewUrl}
-      alt={alt}
-      className={className}
-      style={style}
-      onError={(event) => {
-        console.error('FAILED PREVIEW URL:', previewUrl);
-        event.currentTarget.style.display = 'none';
-        setFailedUrl(previewUrl);
       }}
-    />
+    >
+      {resolvedUrl ? (
+        <img
+          src={resolvedUrl}
+          alt={alt}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 1,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+          }}
+          onLoad={() => console.log('LOADED PREVIEW:', resolvedUrl)}
+          onError={() => {
+            console.error('FAILED PREVIEW:', resolvedUrl);
+            console.error('FAILED PREVIEW URL:', resolvedUrl);
+          }}
+        />
+      ) : (
+        <span className="muted" style={{ textAlign: 'center', padding: '8px' }}>Preview unavailable</span>
+      )}
+    </div>
   );
 }
 
@@ -351,8 +358,8 @@ export default function CreateVideo({
   const primaryReferenceImage = pickReferenceImage({ referenceImageUrl, referenceImageUrls });
   const hasSelfCharacter = forceSelfMode || isDefaultSelfCharacter;
   const selectedSelfReferenceImageUrl = hasSelfCharacter
-    ? getWorkingReferenceUrl(referenceImageUrl) || getWorkingReferenceUrl(primaryReferenceImage.url)
-    : getWorkingReferenceUrl(primaryReferenceImage.url) || getWorkingReferenceUrl(characterAvatar);
+    ? resolveRenderableReferenceUrl(referenceImageUrl) || resolveRenderableReferenceUrl(primaryReferenceImage.url)
+    : resolveRenderableReferenceUrl(primaryReferenceImage.url) || resolveRenderableReferenceUrl(characterAvatar);
   const selfReferenceMode = hasSelfCharacter;
   const selectedGenerationMode: GenerationMode = selfReferenceMode
     ? 'self-reference-video'
@@ -372,10 +379,30 @@ export default function CreateVideo({
         ? 'Identity ready'
         : 'Needs references';
   const identityReferenceThumbs = [
-    getWorkingReferenceUrl(identityProfile?.frontFaceUrl),
-    getWorkingReferenceUrl(identityProfile?.leftAngleUrl),
-    getWorkingReferenceUrl(identityProfile?.rightAngleUrl),
-    getWorkingReferenceUrl(identityProfile?.fullBodyUrl),
+    resolveRenderableReferenceUrl(
+      identityProfile?.frontFaceUrl ??
+        referenceImageUrls?.frontFaceUrl ??
+        referenceImageUrls?.frontFacePath ??
+        referenceImageUrls?.frontFace,
+    ),
+    resolveRenderableReferenceUrl(
+      identityProfile?.leftAngleUrl ??
+        referenceImageUrls?.leftAngleUrl ??
+        referenceImageUrls?.leftAnglePath ??
+        referenceImageUrls?.leftAngle,
+    ),
+    resolveRenderableReferenceUrl(
+      identityProfile?.rightAngleUrl ??
+        referenceImageUrls?.rightAngleUrl ??
+        referenceImageUrls?.rightAnglePath ??
+        referenceImageUrls?.rightAngle,
+    ),
+    resolveRenderableReferenceUrl(
+      identityProfile?.fullBodyUrl ??
+        referenceImageUrls?.fullBodyUrl ??
+        referenceImageUrls?.fullBodyPath ??
+        referenceImageUrls?.fullBody,
+    ),
   ].filter((url): url is string => Boolean(url));
   const canGenerate = true;
   const generateBusy = canGenerate ? busy || generationLoading || referenceLoading : true;
@@ -395,7 +422,7 @@ export default function CreateVideo({
     const currentPrompt = activePrompt;
     const selectedAspectRatio = aspectRatio;
     const selectedEngine = engine;
-    const selectedReferenceImageUrl = getWorkingReferenceUrl(referenceImageUrl) || selectedSelfReferenceImageUrl;
+    const selectedReferenceImageUrl = resolveRenderableReferenceUrl(referenceImageUrl) || selectedSelfReferenceImageUrl;
     const selectedGenerationMode = selfReferenceMode
       ? 'self-reference-video'
       : selectedReferenceImageUrl

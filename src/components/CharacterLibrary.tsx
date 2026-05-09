@@ -3,7 +3,7 @@ import { type CharacterProfile } from '../lib/api';
 import { getStoredCharacters, isCreatorSelfCharacter } from '../lib/characterStorage';
 import { useSession } from '../hooks/useSession';
 import { loadSupabaseCharacters } from '../lib/supabaseAppData';
-import { getWorkingReferenceUrl } from '../lib/selfCharacterReference';
+import { resolveRenderableReferenceUrl } from '../lib/selfCharacterReference';
 
 type CharacterLibraryProps = {
   selectedCharacterId?: string | null;
@@ -16,30 +16,43 @@ function characterInitial(name: string) {
 }
 
 function CharacterAvatarPreview({ character }: { character: CharacterProfile }) {
-  const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const previewUrl = getWorkingReferenceUrl(
+  const resolvedUrl = resolveRenderableReferenceUrl(
     character.referenceImageUrls.frontFaceUrl ||
       character.referenceImageUrls.frontFacePath ||
       character.referenceImageUrls.frontFace,
   );
-  const failed = Boolean(previewUrl && failedUrl === previewUrl);
-
-  if (failed) {
-    return <span style={{ fontSize: '0.62rem', lineHeight: 1.1 }}>Preview unavailable</span>;
-  }
-
-  if (!previewUrl) return <>{characterInitial(character.name)}</>;
 
   return (
-    <img
-      src={previewUrl}
-      alt=""
-      onError={(event) => {
-        console.error('FAILED PREVIEW URL:', previewUrl);
-        event.currentTarget.style.display = 'none';
-        setFailedUrl(previewUrl);
+    <div
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden',
       }}
-    />
+    >
+      {resolvedUrl ? (
+        <img
+          src={resolvedUrl}
+          alt=""
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 1,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+          }}
+          onLoad={() => console.log('LOADED PREVIEW:', resolvedUrl)}
+          onError={() => {
+            console.error('FAILED PREVIEW:', resolvedUrl);
+            console.error('FAILED PREVIEW URL:', resolvedUrl);
+          }}
+        />
+      ) : (
+        characterInitial(character.name)
+      )}
+    </div>
   );
 }
 

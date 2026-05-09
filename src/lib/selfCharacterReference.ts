@@ -411,8 +411,15 @@ export function getWorkingReferenceUrl(reference: unknown): string | null {
   return previewUrl;
 }
 
-export function resolveReferencePreviewUrl(reference: unknown): string | null {
+export function resolveRenderableReferenceUrl(reference: unknown): string | null {
   const resolvedUrl = getWorkingReferenceUrl(reference);
+  console.log('REFERENCE OBJECT:', reference);
+  console.log('RESOLVED URL:', resolvedUrl);
+  return resolvedUrl;
+}
+
+export function resolveReferencePreviewUrl(reference: unknown): string | null {
+  const resolvedUrl = resolveRenderableReferenceUrl(reference);
   console.log('REFERENCE PREVIEW URL:', {
     inputPreview: previewValue(referenceValueForPreview(reference)),
     resolvedUrl,
