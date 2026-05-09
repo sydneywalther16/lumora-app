@@ -29,13 +29,14 @@ import {
 import type { LumoraIdentityFeedback } from '../lib/api';
 
 export default function CreatePage() {
-  const { user, session } = useSession();
+  const { user, session, loading: sessionLoading, configured: supabaseConfigured } = useSession();
   const authUser = session?.user ?? user;
 
   const [characterRefreshKey, setCharacterRefreshKey] = useState(0);
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterProfile | null>(null);
   const [defaultSelfCharacter, setDefaultSelfCharacter] = useState<CharacterProfile | null>(null);
   const [creatorDataLoading, setCreatorDataLoading] = useState(true);
+  const [isHydrated, setIsHydrated] = useState(false);
   const [resolvedReference, setResolvedReference] = useState<SelfCharacterReferenceImage | null>(null);
   const [referenceLoading, setReferenceLoading] = useState(false);
 
@@ -50,15 +51,19 @@ export default function CreatePage() {
 
     async function loadData() {
       setCreatorDataLoading(true);
+      setIsHydrated(false);
+
+      if (supabaseConfigured && sessionLoading && !authUser) {
+        return;
+      }
 
       if (authUser) {
         try {
-          const [remoteProfile, remoteCharacters] = await Promise.all([
-            loadSupabaseProfile(authUser.id),
-            loadSupabaseCharacters(authUser.id),
-          ]);
-
+          const remoteProfile = await loadSupabaseProfile(authUser.id);
+          const remoteCharacters = await loadSupabaseCharacters(authUser.id);
           const selfChar = remoteCharacters.find(isCreatorSelfCharacter) ?? null;
+          console.log('HYDRATED SELF CHARACTER:', selfChar);
+          console.log('PROFILE SOURCE:', 'supabase');
 
           if (!active) return;
 
@@ -66,18 +71,28 @@ export default function CreatePage() {
           setDefaultSelfCharacter(selfChar);
         } catch (err) {
           console.error("Failed to load creator data:", err);
+          if (active) {
+            setDefaultSelfCharacter(null);
+            console.log('PROFILE SOURCE:', 'default');
+          }
         } finally {
-          if (active) setCreatorDataLoading(false);
+          if (active) {
+            setCreatorDataLoading(false);
+            setIsHydrated(true);
+          }
         }
       } else {
         const localProfile = loadLumoraProfile();
         const localSelf = getCreatorSelfCharacter();
+        console.log('HYDRATED SELF CHARACTER:', localSelf);
+        console.log('PROFILE SOURCE:', 'local');
 
         if (!active) return;
 
         setProfile(localProfile);
         setDefaultSelfCharacter(localSelf);
         setCreatorDataLoading(false);
+        setIsHydrated(true);
       }
     }
 
@@ -86,7 +101,7 @@ export default function CreatePage() {
     return () => {
       active = false;
     };
-  }, [authUser, characterRefreshKey]);
+  }, [authUser, characterRefreshKey, sessionLoading, supabaseConfigured]);
 
   const activeSelfCharacter =
     !selectedCharacter && defaultSelfCharacter
@@ -101,7 +116,7 @@ export default function CreatePage() {
     let active = true;
 
     async function resolveSelfReference() {
-      if (!activeSelfCharacter) {
+      if (!isHydrated || !activeSelfCharacter) {
         setResolvedReference(null);
         setReferenceLoading(false);
         return;
@@ -129,7 +144,7 @@ export default function CreatePage() {
     return () => {
       active = false;
     };
-  }, [activeSelfCharacter, profile]);
+  }, [activeSelfCharacter, isHydrated, profile]);
 
   const savedSelfReferenceUrls = activeSelfCharacter?.referenceImageUrls ?? null;
   const savedFrontFaceUrl = resolveRenderableReferenceUrl(savedSelfReferenceUrls?.frontFaceUrl)
@@ -167,7 +182,7 @@ export default function CreatePage() {
       })
     : null;
 
-  const pageLoading = creatorDataLoading;
+  const pageLoading = creatorDataLoading || !isHydrated;
 
   useEffect(() => {
     console.log("FINAL referenceImageUrl:", referenceImageUrl);
@@ -232,6 +247,7 @@ export default function CreatePage() {
         referenceLoading={referenceLoading}
         referenceLabel={identityProfile ? 'Lumora Identity Character' : null}
         forceSelfMode={hasSelfCharacter}
+        isHydrated={isHydrated}
         identityProfile={identityProfile}
         onLikenessFeedback={(feedback) => void handleLikenessFeedback(feedback)}
         onResaveReferencePhoto={() => {

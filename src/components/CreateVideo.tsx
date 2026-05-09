@@ -30,6 +30,7 @@ type CreateVideoProps = {
   referenceLoading?: boolean;
   referenceLabel?: string | null;
   forceSelfMode?: boolean;
+  isHydrated?: boolean;
   identityProfile?: LumoraIdentityProfile | null;
   onLikenessFeedback?: (feedback: LumoraIdentityFeedback) => void | Promise<void>;
   onResaveReferencePhoto?: () => void;
@@ -272,6 +273,7 @@ export default function CreateVideo({
   referenceLoading = false,
   referenceLabel,
   forceSelfMode = false,
+  isHydrated = true,
   identityProfile,
   onLikenessFeedback,
   onResaveReferencePhoto,
@@ -833,13 +835,15 @@ export default function CreateVideo({
               </button>
             ) : null}
           </div>
-          <div className="reference-mode-thumb">
-            <SelfReferencePreview
-              label="Selected reference"
-              reference={normalizedSelectedReference}
-              required={selfReferenceMode}
-            />
-          </div>
+          {isHydrated ? (
+            <div className="reference-mode-thumb">
+              <SelfReferencePreview
+                label="Selected reference"
+                reference={normalizedSelectedReference}
+                required={selfReferenceMode}
+              />
+            </div>
+          ) : null}
           {primaryReferenceImage.label || selfReferenceMode ? (
             <span className="tiny-pill reference-mode-pill">
               {referenceLabel || primaryReferenceImage.label || 'Saved self character'}
@@ -859,7 +863,7 @@ export default function CreateVideo({
           </div>
         ) : null}
 
-        {selfReferenceMode ? (
+        {selfReferenceMode && isHydrated ? (
           <div className="field-block">
             <span>Lumora Identity Character</span>
             <div className="reference-grid" style={{ gap: '8px' }}>

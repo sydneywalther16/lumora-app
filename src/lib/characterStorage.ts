@@ -62,40 +62,7 @@ export function cleanupCreatorSelfMetadata(profile: { displayName: string; defau
       saveStoredCharacters([...cleanedCharacters, selfCharacter]);
       console.log('[cleanupCreatorSelfMetadata] Cleaned up existing creator-self');
     } else {
-      // Recovery: if profile has defaultSelfCharacterId but no creator-self in storage, recover from profile
-      if (profile.defaultSelfCharacterId === CREATOR_SELF_CHARACTER_ID) {
-        console.log('[cleanupCreatorSelfMetadata] RECOVERY: Profile has defaultSelfCharacterId but creator-self missing from storage, recovering...');
-        const recoveredSelfCharacter: CharacterProfile = {
-          id: CREATOR_SELF_CHARACTER_ID,
-          ownerUserId: 'local',
-          name: profile.displayName || 'My Self Character',
-          status: 'ready',
-          consentConfirmed: true,
-          visibility: 'private',
-          stylePreferences: {},
-          referenceImageUrls: {
-            frontFace:
-              cleanMediaUrl(profile.selfReferenceImageUrls?.frontFace) ||
-              cleanMediaUrl(profile.defaultSelfCharacterAvatar) ||
-              cleanMediaUrl(profile.avatar) ||
-              '',
-            leftAngle: profile.selfReferenceImageUrls?.leftAngle || '',
-            rightAngle: profile.selfReferenceImageUrls?.rightAngle || '',
-          },
-          sourceCaptureVideoUrl: profile.selfReferenceImageUrls?.selfCaptureVideoUrl || null,
-          voiceSampleUrl: null,
-          voiceSampleName: null,
-          voiceSampleNumbers: null,
-          creatorSelfFeatures: {},
-          creatorSelfStylePreferences: {},
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          isSelf: true,
-          isCreatorSelf: true,
-        };
-        saveStoredCharacters([...characters, recoveredSelfCharacter]);
-        console.log('[cleanupCreatorSelfMetadata] Successfully recovered creator-self from profile');
-      }
+      console.log('[cleanupCreatorSelfMetadata] No local creator-self found; skipping automatic fallback injection');
     }
   } catch (e) {
     console.log('[cleanupCreatorSelfMetadata] error:', e);

@@ -1560,6 +1560,7 @@ export default function ProfilePage() {
   const [syncLocalProfileAvailable, setSyncLocalProfileAvailable] = useState(false);
   const [syncLocalSelfAvailable, setSyncLocalSelfAvailable] = useState(false);
   const [syncingLocal, setSyncingLocal] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
   const [debugInfo, setDebugInfo] = useState<ProfileDebugInfo>({
     authUserId: null,
     loadedProfileId: null,
@@ -1600,6 +1601,8 @@ export default function ProfilePage() {
   }, [editingSelfCharacter, selfForm]);
 
   async function refreshProfileData() {
+    setIsHydrated(false);
+
     if (supabaseConfigured && sessionLoading) {
       setDebugInfo((current) => ({
         ...current,
@@ -1611,22 +1614,22 @@ export default function ProfilePage() {
 
     if (authUserId) {
       try {
+        const loadedProfile = await loadSupabaseProfile(authUserId);
+        const loadedCharacters = await loadSupabaseCharacters(authUserId);
+        const loadedCreatorSelf = findCreatorSelfCharacter(loadedCharacters);
+        console.log('HYDRATED SELF CHARACTER:', loadedCreatorSelf);
+        console.log('PROFILE SOURCE:', 'supabase');
         const [
-          loadedProfile,
-          loadedCharacters,
           loadedPosts,
           loadedProjects,
           loadedDrafts,
           supabaseProfileExists,
         ] = await Promise.all([
-          loadSupabaseProfile(authUserId),
-          loadSupabaseCharacters(authUserId),
           loadSupabaseProfilePosts(authUserId),
           loadSupabaseProjects(authUserId),
           loadSupabaseDrafts(authUserId),
           hasSupabaseProfile(authUserId),
         ]);
-        const loadedCreatorSelf = findCreatorSelfCharacter(loadedCharacters);
         const normalizedProfile: LumoraProfile = loadedCreatorSelf
           ? {
               ...loadedProfile,
@@ -1634,6 +1637,7 @@ export default function ProfilePage() {
               defaultSelfCharacterName: loadedCreatorSelf.name,
               defaultSelfCharacterAvatar:
                 loadedProfile.defaultSelfCharacterAvatar ||
+                loadedCreatorSelf.referenceImageUrls.frontFaceUrl ||
                 loadedCreatorSelf.referenceImageUrls.frontFace ||
                 loadedProfile.avatar ||
                 null,
@@ -1660,6 +1664,7 @@ export default function ProfilePage() {
           selfCharacterUserId: loadedCreatorSelf?.ownerUserId ?? null,
           source: 'supabase',
         });
+        setIsHydrated(true);
         return;
       } catch (error) {
         console.error('Unable to load Supabase profile data:', error);
@@ -1675,6 +1680,8 @@ export default function ProfilePage() {
           authUserId,
           source: 'default',
         }));
+        setCharacters([]);
+        setIsHydrated(true);
         return;
       }
     }
@@ -1685,6 +1692,8 @@ export default function ProfilePage() {
     cleanupCreatorSelfMetadata(loadedProfile);
     const loadedCharacters = getStoredCharacters();
     const loadedCreatorSelf = findCreatorSelfCharacter(loadedCharacters);
+    console.log('HYDRATED SELF CHARACTER:', loadedCreatorSelf);
+    console.log('PROFILE SOURCE:', typeof window !== 'undefined' && localStorage.getItem('lumora_profile') ? 'local' : 'default');
     setProfile(loadedProfile);
     setProfileDraft(loadedProfile);
     setCharacters(loadedCharacters);
@@ -1699,9 +1708,10 @@ export default function ProfilePage() {
       selfCharacterUserId: loadedCreatorSelf?.ownerUserId ?? null,
       source: typeof window !== 'undefined' && localStorage.getItem('lumora_profile') ? 'local' : 'default',
     });
+    setIsHydrated(true);
   }
 
-  const creatorSelfCharacter = findCreatorSelfCharacter(characters);
+  const creatorSelfCharacter = isHydrated ? findCreatorSelfCharacter(characters) : null;
   const fictionalCharacterCount = characters.filter(
     (character) => character.id !== CREATOR_SELF_CHARACTER_ID && character.isCreatorSelf !== true
   ).length;
@@ -1750,10 +1760,10 @@ export default function ProfilePage() {
 
     if (authUserId) {
       try {
-        const [remoteProfile, remoteCharacters] = await Promise.all([
-          loadSupabaseProfile(authUserId),
-          loadSupabaseCharacters(authUserId),
-        ]);
+        const remoteProfile = await loadSupabaseProfile(authUserId);
+        const remoteCharacters = await loadSupabaseCharacters(authUserId);
+        console.log('HYDRATED SELF CHARACTER:', findCreatorSelfCharacter(remoteCharacters));
+        console.log('PROFILE SOURCE:', 'supabase');
         latestProfile = remoteProfile;
         latestCharacters = remoteCharacters;
         setProfile(remoteProfile);
@@ -2723,7 +2733,7 @@ export default function ProfilePage() {
         </section>
       ) : null}
 
-      {editingSelfCharacter ? (
+      {editingSelfCharacter && isHydrated ? (
         <section
           ref={selfCharacterEditorRef}
           className="headline-card compact"
