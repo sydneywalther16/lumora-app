@@ -2532,7 +2532,7 @@ export default function ProfilePage() {
   }
 
   const showSelfCaptureControls = !selfForm.selfCaptureCompleted || showSelfCaptureRedo;
-  const debugSource = authUserId && debugInfo.source === 'local' ? 'supabase' : debugInfo.source;
+  const debugSource = authUserId ? 'supabase' : debugInfo.source;
 
   return (
     <div className="page" style={{ paddingBottom: '40px' }}>

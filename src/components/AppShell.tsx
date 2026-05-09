@@ -10,6 +10,7 @@ const routeTitles: Record<string, string> = {
   '/studio': 'Studio',
   '/inbox': 'Inbox',
   '/profile': 'Profile',
+  '/auth/callback': 'Signing in',
 };
 
 export default function AppShell() {

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
-import { rememberAuthRedirectPath } from '../../hooks/useSession';
+import { AUTH_CALLBACK_PATH, getAuthCallbackUrl, rememberAuthRedirectPath } from '../../hooks/useSession';
 import { supabase } from '../../lib/supabase';
 
 type Props = {
@@ -24,9 +24,20 @@ export default function AuthCard(props: Props = {}) {
       return;
     }
 
+    const returnTo = rememberAuthRedirectPath();
+    const callbackUrl = getAuthCallbackUrl();
+
+    if (!callbackUrl.endsWith(AUTH_CALLBACK_PATH)) {
+      console.warn('AUTH REDIRECT URL WARNING', {
+        callbackUrl,
+        expectedPath: AUTH_CALLBACK_PATH,
+        returnTo,
+      });
+    }
+
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
-      options: { emailRedirectTo: `${window.location.origin}${rememberAuthRedirectPath()}` },
+      options: { emailRedirectTo: callbackUrl },
     });
     setMessage(error ? error.message : 'Check your email for a sign-in link.');
   }
@@ -48,7 +59,7 @@ export default function AuthCard(props: Props = {}) {
   }
 
   if (loading && !user) {
-    return <section className="headline-card"><p>Checking session…</p></section>;
+    return <section className="headline-card"><p>Checking session...</p></section>;
   }
 
   if (!user) {

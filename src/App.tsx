@@ -7,6 +7,7 @@ import CharacterCapturePage from './pages/CharacterCapturePage';
 import StudioPage from './pages/StudioPage';
 import InboxPage from './pages/InboxPage';
 import ProfilePage from './pages/ProfilePage';
+import AuthCallbackPage from './pages/AuthCallbackPage';
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
         <Route path="/studio" element={<StudioPage />} />
         <Route path="/inbox" element={<InboxPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/auth/callback" element={<AuthCallbackPage />} />
       </Route>
     </Routes>
   );

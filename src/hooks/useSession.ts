@@ -16,6 +16,7 @@ type SessionState = {
 type SessionSnapshot = Omit<SessionState, 'refreshSession'>;
 type SupabaseClient = NonNullable<typeof supabase>;
 
+export const AUTH_CALLBACK_PATH = '/auth/callback';
 const AUTH_REDIRECT_STORAGE_KEY = 'lumora_auth_redirect_path';
 const authParamNames = [
   'access_token',
@@ -80,11 +81,24 @@ export function rememberAuthRedirectPath(path = currentRoutePath()): string {
   return redirectPath;
 }
 
+export function getAuthCallbackUrl(): string {
+  if (typeof window === 'undefined') return AUTH_CALLBACK_PATH;
+  return `${window.location.origin}${AUTH_CALLBACK_PATH}`;
+}
+
 function consumeRememberedRedirectPath(fallbackPath: string): string {
   if (typeof window === 'undefined') return fallbackPath;
 
   const rememberedPath = sanitizeRedirectPath(localStorage.getItem(AUTH_REDIRECT_STORAGE_KEY));
   return rememberedPath ?? fallbackPath;
+}
+
+export function consumeAuthRedirectPath(fallbackPath = '/profile'): string {
+  if (typeof window === 'undefined') return fallbackPath;
+
+  const redirectPath = consumeRememberedRedirectPath(fallbackPath);
+  localStorage.removeItem(AUTH_REDIRECT_STORAGE_KEY);
+  return redirectPath;
 }
 
 function hasAuthRedirectParams(): boolean {
@@ -114,6 +128,22 @@ async function exchangeRedirectSession(client: SupabaseClient): Promise<Session 
   const searchParams = authSearchParams();
   const hashParams = authHashParams();
   const code = searchParams.get('code');
+  const hasUrlSessionParams = Boolean(code || hashParams.get('access_token'));
+
+  if (hasUrlSessionParams) {
+    const { data, error } = await client.auth.getSession();
+    if (error) {
+      console.error('AUTH SESSION URL DETECTION FAILED', error);
+    }
+
+    if (data.session) {
+      console.log('AUTH CODE EXCHANGED', {
+        authUserId: data.session.user.id,
+        format: 'auto-detected',
+      });
+      return data.session;
+    }
+  }
 
   if (code) {
     const { data, error } = await client.auth.exchangeCodeForSession(code);
@@ -159,7 +189,7 @@ function cleanAuthUrl() {
   if (typeof window === 'undefined') return;
 
   const fallbackPath = routeWithoutAuthParams(new URL(window.location.href));
-  const redirectPath = consumeRememberedRedirectPath(fallbackPath);
+  const redirectPath = consumeAuthRedirectPath(fallbackPath);
   window.history.replaceState({}, document.title, redirectPath);
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
@@ -274,6 +304,17 @@ async function hydrateSession(source: SessionSource = 'refresh'): Promise<Sessio
   }
 
   const redirectParamsPresent = hasAuthRedirectParams();
+  if (
+    redirectParamsPresent &&
+    typeof window !== 'undefined' &&
+    window.location.pathname !== AUTH_CALLBACK_PATH
+  ) {
+    console.warn('AUTH REDIRECT URL WARNING', {
+      callbackPath: window.location.pathname,
+      expectedPath: AUTH_CALLBACK_PATH,
+      href: window.location.href,
+    });
+  }
   emitSessionState({ ...currentSnapshot, loading: true });
 
   const nextSource: SessionSource = redirectParamsPresent ? 'url-redirect' : source;
