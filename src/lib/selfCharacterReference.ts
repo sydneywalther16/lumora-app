@@ -93,6 +93,7 @@ const knownImageKeys = new Set([
 
 const bucketSet = new Set<string>(SUPABASE_STORAGE_BUCKETS);
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const CHARACTER_REFERENCE_BUCKET = 'character-reference-images';
 
 function previewValue(value: unknown): string | null {
   if (typeof value !== 'string' || !value) return null;
@@ -313,28 +314,109 @@ export function toPublicSupabaseUrl(value: string): string | null {
   return toPublicSupabaseUrlCandidates(value)[0] ?? null;
 }
 
-export function resolveReferencePreviewUrl(reference: unknown): string | null {
-  const record = readObject(reference);
-  const value = typeof reference === 'string'
-    ? reference
-    : stringValue(
-        record.frontFaceUrl ??
-          record.leftAngleUrl ??
-          record.rightAngleUrl ??
-          record.fullBodyUrl ??
-          record.url ??
-          record.publicUrl ??
-          record.objectPath ??
-          record.path ??
-          record.fileName,
-      );
-  const resolvedUrl = value ? (cleanHttpUrl(value) ?? toPublicSupabaseUrl(value)) : null;
+function referenceValueForPreview(reference: unknown): string {
+  if (typeof reference === 'string') return reference.trim();
 
+  const record = readObject(reference);
+  return stringValue(
+    record.frontFaceUrl ??
+      record.leftAngleUrl ??
+      record.rightAngleUrl ??
+      record.fullBodyUrl ??
+      record.url ??
+      record.publicUrl ??
+      record.frontFacePath ??
+      record.leftAnglePath ??
+      record.rightAnglePath ??
+      record.fullBodyPath ??
+      record.objectPath ??
+      record.path ??
+      record.fileName,
+  );
+}
+
+function stripCharacterReferenceBucket(value: string): string {
+  let cleanPath = normalizeStoragePath(value)
+    .replace(/\\/g, '/')
+    .replace(/^storage\/v1\/object\/(?:public|sign)\//, '');
+  cleanPath = cleanPath.split('?')[0].split('#')[0];
+
+  while (
+    cleanPath === CHARACTER_REFERENCE_BUCKET ||
+    cleanPath.startsWith(`${CHARACTER_REFERENCE_BUCKET}/`)
+  ) {
+    cleanPath = cleanPath.slice(CHARACTER_REFERENCE_BUCKET.length).replace(/^\/+/, '');
+  }
+
+  return cleanPath;
+}
+
+function encodePreviewPath(value: string): string {
+  return stripCharacterReferenceBucket(value)
+    .split('/')
+    .filter(Boolean)
+    .map((part) => encodeURIComponent(decodePath(part)))
+    .join('/');
+}
+
+export function getWorkingReferenceUrl(reference: unknown): string | null {
+  const rawReference = referenceValueForPreview(reference);
+  console.log('RAW REFERENCE:', rawReference || null);
+
+  if (!rawReference) {
+    console.log('FINAL PREVIEW URL:', null);
+    return null;
+  }
+
+  if (rawReference.startsWith('https://')) {
+    console.log('FINAL PREVIEW URL:', rawReference);
+    return rawReference;
+  }
+
+  const lowerValue = rawReference.toLowerCase();
+  if (
+    lowerValue.startsWith('blob:') ||
+    lowerValue.startsWith('data:') ||
+    lowerValue.startsWith('file:') ||
+    lowerValue.startsWith('http://') ||
+    lowerValue.includes('localhost') ||
+    lowerValue.includes('undefined') ||
+    /^(?:profile|selfCharacter)\.[a-zA-Z0-9_.]+$/.test(rawReference)
+  ) {
+    console.log('FINAL PREVIEW URL:', null);
+    return null;
+  }
+
+  if (!supabaseUrl) {
+    console.log('FINAL PREVIEW URL:', null);
+    return null;
+  }
+
+  const cleanPath = stripCharacterReferenceBucket(rawReference);
+  const looksLikeStoragePath =
+    cleanPath.includes('/') ||
+    /\.(png|jpe?g|webp|gif|heic|heif)$/i.test(cleanPath);
+
+  if (!cleanPath || !looksLikeStoragePath) {
+    console.log('FINAL PREVIEW URL:', null);
+    return null;
+  }
+
+  const encodedPath = encodePreviewPath(cleanPath);
+  const previewUrl = encodedPath
+    ? `${supabaseUrl.replace(/\/+$/, '')}/storage/v1/object/public/${CHARACTER_REFERENCE_BUCKET}/${encodedPath}`
+    : null;
+
+  console.log('FINAL PREVIEW URL:', previewUrl);
+  return previewUrl;
+}
+
+export function resolveReferencePreviewUrl(reference: unknown): string | null {
+  const resolvedUrl = getWorkingReferenceUrl(reference);
   console.log('REFERENCE PREVIEW URL:', {
-    inputPreview: previewValue(value),
+    inputPreview: previewValue(referenceValueForPreview(reference)),
     resolvedUrl,
   });
-
   return resolvedUrl;
 }
 

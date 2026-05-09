@@ -39,7 +39,7 @@ import {
   buildLumoraIdentityProfile,
   identityProfileToStylePreferences,
 } from '../lib/identityCharacter';
-import { resolveReferencePreviewUrl } from '../lib/selfCharacterReference';
+import { getWorkingReferenceUrl } from '../lib/selfCharacterReference';
 
 type Draft = { id: string; title: string; prompt: string; createdAt: string };
 type ProfileDebugInfo = {
@@ -123,6 +123,14 @@ const referencePhotoPathFields: Record<ReferencePhotoField, ReferencePhotoPathFi
   rightAngle: 'rightAnglePath',
   fullBody: 'fullBodyPath',
 };
+
+function selfReferencePreviewSource(form: SelfCharacterForm, field: ReferencePhotoField): string {
+  return form[field] || form[referencePhotoPathFields[field]];
+}
+
+function hasSelfReferenceSource(form: SelfCharacterForm, field: ReferencePhotoField): boolean {
+  return Boolean(selfReferencePreviewSource(form, field));
+}
 
 const emptyCreatorSelfFeatures: CreatorSelfFeatures = {
   hairColorStyle: '',
@@ -844,7 +852,7 @@ function ImagePreview({
   errorMessage?: string;
 }) {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
-  const resolvedSrc = resolveReferencePreviewUrl(src);
+  const resolvedSrc = getWorkingReferenceUrl(src);
   const failed = Boolean(resolvedSrc && failedSrc === resolvedSrc);
 
   return resolvedSrc && !failed ? (
@@ -853,7 +861,7 @@ function ImagePreview({
       alt=""
       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
       onError={() => {
-        console.log('FAILED PREVIEW URL:', resolvedSrc);
+        console.error('FAILED PREVIEW URL:', resolvedSrc);
         setFailedSrc(resolvedSrc);
       }}
     />
@@ -2718,64 +2726,69 @@ export default function ProfilePage() {
                 ['leftAngle', 'Left angle'],
                 ['rightAngle', 'Right angle'],
                 ['fullBody', 'Full body'],
-              ] as const).map(([field, label]) => (
-                <label className="reference-upload" key={field}>
-                  <span>{label}</span>
-                  <div
-                    style={{
-                      position: 'relative',
-                      width: '100%',
-                      aspectRatio: '1',
-                      borderRadius: '16px',
-                      overflow: 'hidden',
-                      background: 'rgba(255,255,255,0.08)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      margin: '8px 0',
-                    }}
-                  >
-                    <ImagePreview
-                      src={selfForm[field]}
-                      fallback={field === 'fullBody' ? 'Optional' : 'Required'}
-                      errorMessage="Reference photo could not be loaded. Re-upload this photo."
-                    />
-                    {selfForm[field] ? (
-                      <button
-                        type="button"
-                        aria-label={`Remove ${label.toLowerCase()} reference`}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          void handleRemoveSelfImage(field);
-                        }}
-                        style={{
-                          position: 'absolute',
-                          top: '8px',
-                          right: '8px',
-                          width: '30px',
-                          height: '30px',
-                          borderRadius: '50%',
-                          border: '1px solid rgba(255,255,255,0.18)',
-                          background: 'rgba(5,4,11,0.78)',
-                          color: '#fff',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        X
-                      </button>
-                    ) : null}
-                  </div>
-                  <strong>
-                    {label}: {selfForm[field] ? 'Uploaded / Ready' : field === 'fullBody' ? 'Optional' : 'Required'}
-                  </strong>
-                  <span className="muted">
-                    {selfForm[referencePhotoNameFields[field]] ||
-                      (selfForm[field] ? 'Saved reference photo' : 'No file selected')}
-                  </span>
-                  <input type="file" accept="image/*" onChange={(event) => void handleSelfImageUpload(event, field)} />
-                </label>
-              ))}
+              ] as const).map(([field, label]) => {
+                const previewSource = selfReferencePreviewSource(selfForm, field);
+                const hasReference = Boolean(previewSource);
+
+                return (
+                  <label className="reference-upload" key={field}>
+                    <span>{label}</span>
+                    <div
+                      style={{
+                        position: 'relative',
+                        width: '100%',
+                        aspectRatio: '1',
+                        borderRadius: '16px',
+                        overflow: 'hidden',
+                        background: 'rgba(255,255,255,0.08)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        margin: '8px 0',
+                      }}
+                    >
+                      <ImagePreview
+                        src={previewSource}
+                        fallback={hasReference ? 'Preview unavailable' : field === 'fullBody' ? 'Optional' : 'Required'}
+                        errorMessage="Reference photo could not be loaded. Re-upload this photo."
+                      />
+                      {hasReference ? (
+                        <button
+                          type="button"
+                          aria-label={`Remove ${label.toLowerCase()} reference`}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            void handleRemoveSelfImage(field);
+                          }}
+                          style={{
+                            position: 'absolute',
+                            top: '8px',
+                            right: '8px',
+                            width: '30px',
+                            height: '30px',
+                            borderRadius: '50%',
+                            border: '1px solid rgba(255,255,255,0.18)',
+                            background: 'rgba(5,4,11,0.78)',
+                            color: '#fff',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          X
+                        </button>
+                      ) : null}
+                    </div>
+                    <strong>
+                      {label}: {hasReference ? 'Uploaded / Ready' : field === 'fullBody' ? 'Optional' : 'Required'}
+                    </strong>
+                    <span className="muted">
+                      {selfForm[referencePhotoNameFields[field]] ||
+                        (hasReference ? 'Saved reference photo' : 'No file selected')}
+                    </span>
+                    <input type="file" accept="image/*" onChange={(event) => void handleSelfImageUpload(event, field)} />
+                  </label>
+                );
+              })}
             </div>
 
             <div style={{ display: 'grid', gap: '12px' }}>
@@ -2931,7 +2944,9 @@ export default function ProfilePage() {
             <div style={{ display: 'grid', gap: '10px', padding: '16px', borderRadius: '18px', background: 'rgba(255,255,255,0.04)' }}>
               <span className="eyebrow">Build My Lumora Character</span>
               <strong>
-                {selfForm.frontFace && selfForm.leftAngle && selfForm.rightAngle
+                {hasSelfReferenceSource(selfForm, 'frontFace') &&
+                hasSelfReferenceSource(selfForm, 'leftAngle') &&
+                hasSelfReferenceSource(selfForm, 'rightAngle')
                   ? 'Identity ready'
                   : 'Needs references'}
               </strong>
@@ -2970,7 +2985,11 @@ export default function ProfilePage() {
               }}
             >
               <ImagePreview
-                src={creatorSelfCharacter.referenceImageUrls.frontFaceUrl || creatorSelfCharacter.referenceImageUrls.frontFace}
+                src={
+                  creatorSelfCharacter.referenceImageUrls.frontFaceUrl ||
+                  creatorSelfCharacter.referenceImageUrls.frontFacePath ||
+                  creatorSelfCharacter.referenceImageUrls.frontFace
+                }
                 fallback="Self"
               />
             </div>

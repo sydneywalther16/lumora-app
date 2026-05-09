@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import {
   type GenerationMode,
   type LumoraIdentityFeedback,
@@ -12,7 +12,7 @@ import {
 import { saveStudioProject, type StudioProject } from '../lib/projectStorage';
 import { loadLumoraProfile } from '../lib/profileStorage';
 import { loadSupabaseProfile, saveSupabaseDraft, saveSupabaseProject } from '../lib/supabaseAppData';
-import { resolveReferencePreviewUrl } from '../lib/selfCharacterReference';
+import { getWorkingReferenceUrl } from '../lib/selfCharacterReference';
 import { useSession } from '../hooks/useSession';
 import { useAppStore } from '../store/useAppStore';
 
@@ -150,14 +150,14 @@ function cleanReferenceUrl(value?: string | null): string | null {
 }
 
 function renderableReferenceImageUrl(value?: string | null): string | null {
-  return resolveReferencePreviewUrl(value);
+  return getWorkingReferenceUrl(value);
 }
 
 function pickReferenceImage(input: {
   referenceImageUrl?: string | null;
   referenceImageUrls?: Partial<ReferenceImageUrls> | null;
 }): { url: string | null; label: string | null } {
-  const explicitUrl = cleanReferenceUrl(input.referenceImageUrl);
+  const explicitUrl = getWorkingReferenceUrl(input.referenceImageUrl);
   if (explicitUrl) return { url: explicitUrl, label: 'Selected reference' };
 
   const urls = input.referenceImageUrls;
@@ -165,19 +165,24 @@ function pickReferenceImage(input: {
 
   const orderedSlots: Array<keyof ReferenceImageUrls> = [
     'frontFaceUrl',
+    'frontFacePath',
     'frontFace',
     'fullBodyUrl',
+    'fullBodyPath',
     'fullBody',
     'leftAngleUrl',
+    'leftAnglePath',
     'leftAngle',
     'rightAngleUrl',
+    'rightAnglePath',
     'rightAngle',
     'expressiveUrl',
+    'expressivePath',
     'expressive',
   ];
 
   for (const slot of orderedSlots) {
-    const url = cleanReferenceUrl(urls[slot]);
+    const url = getWorkingReferenceUrl(urls[slot]);
     if (url) {
       return {
         url,
@@ -191,22 +196,65 @@ function pickReferenceImage(input: {
 
 function referenceImagePayload(urls?: Partial<ReferenceImageUrls> | null) {
   if (!urls) return undefined;
-  const optionalUrl = (value?: string | null) => cleanReferenceUrl(value) ?? undefined;
+  const optionalUrl = (value?: string | null) => getWorkingReferenceUrl(value) ?? undefined;
 
   return {
-    front: optionalUrl(urls.frontFaceUrl ?? urls.frontFace),
-    frontFace: optionalUrl(urls.frontFaceUrl ?? urls.frontFace),
-    frontFaceUrl: optionalUrl(urls.frontFaceUrl ?? urls.frontFace),
-    fullBody: optionalUrl(urls.fullBodyUrl ?? urls.fullBody),
-    fullBodyUrl: optionalUrl(urls.fullBodyUrl ?? urls.fullBody),
-    left: optionalUrl(urls.leftAngleUrl ?? urls.leftAngle),
-    leftAngle: optionalUrl(urls.leftAngleUrl ?? urls.leftAngle),
-    leftAngleUrl: optionalUrl(urls.leftAngleUrl ?? urls.leftAngle),
-    right: optionalUrl(urls.rightAngleUrl ?? urls.rightAngle),
-    rightAngle: optionalUrl(urls.rightAngleUrl ?? urls.rightAngle),
-    rightAngleUrl: optionalUrl(urls.rightAngleUrl ?? urls.rightAngle),
-    expressive: optionalUrl(urls.expressiveUrl ?? urls.expressive),
+    front: optionalUrl(urls.frontFaceUrl ?? urls.frontFacePath ?? urls.frontFace),
+    frontFace: optionalUrl(urls.frontFaceUrl ?? urls.frontFacePath ?? urls.frontFace),
+    frontFaceUrl: optionalUrl(urls.frontFaceUrl ?? urls.frontFacePath ?? urls.frontFace),
+    fullBody: optionalUrl(urls.fullBodyUrl ?? urls.fullBodyPath ?? urls.fullBody),
+    fullBodyUrl: optionalUrl(urls.fullBodyUrl ?? urls.fullBodyPath ?? urls.fullBody),
+    left: optionalUrl(urls.leftAngleUrl ?? urls.leftAnglePath ?? urls.leftAngle),
+    leftAngle: optionalUrl(urls.leftAngleUrl ?? urls.leftAnglePath ?? urls.leftAngle),
+    leftAngleUrl: optionalUrl(urls.leftAngleUrl ?? urls.leftAnglePath ?? urls.leftAngle),
+    right: optionalUrl(urls.rightAngleUrl ?? urls.rightAnglePath ?? urls.rightAngle),
+    rightAngle: optionalUrl(urls.rightAngleUrl ?? urls.rightAnglePath ?? urls.rightAngle),
+    rightAngleUrl: optionalUrl(urls.rightAngleUrl ?? urls.rightAnglePath ?? urls.rightAngle),
+    expressive: optionalUrl(urls.expressiveUrl ?? urls.expressivePath ?? urls.expressive),
   };
+}
+
+function ReferencePreviewImage({
+  src,
+  alt,
+  className,
+  style,
+}: {
+  src?: string | null;
+  alt: string;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const previewUrl = getWorkingReferenceUrl(src);
+  const failed = Boolean(previewUrl && failedUrl === previewUrl);
+
+  if (!previewUrl || failed) {
+    return (
+      <div className={className} style={{
+        ...style,
+        display: 'grid',
+        placeItems: 'center',
+        background: 'rgba(255,255,255,0.08)',
+      }}>
+        <span className="muted" style={{ textAlign: 'center', padding: '8px' }}>Preview unavailable</span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={previewUrl}
+      alt={alt}
+      className={className}
+      style={style}
+      onError={(event) => {
+        console.error('FAILED PREVIEW URL:', previewUrl);
+        event.currentTarget.style.display = 'none';
+        setFailedUrl(previewUrl);
+      }}
+    />
+  );
 }
 
 function formatWarnings(value: unknown): string[] {
@@ -303,8 +351,8 @@ export default function CreateVideo({
   const primaryReferenceImage = pickReferenceImage({ referenceImageUrl, referenceImageUrls });
   const hasSelfCharacter = forceSelfMode || isDefaultSelfCharacter;
   const selectedSelfReferenceImageUrl = hasSelfCharacter
-    ? resolveReferencePreviewUrl(referenceImageUrl) || resolveReferencePreviewUrl(primaryReferenceImage.url)
-    : resolveReferencePreviewUrl(primaryReferenceImage.url) || resolveReferencePreviewUrl(characterAvatar);
+    ? getWorkingReferenceUrl(referenceImageUrl) || getWorkingReferenceUrl(primaryReferenceImage.url)
+    : getWorkingReferenceUrl(primaryReferenceImage.url) || getWorkingReferenceUrl(characterAvatar);
   const selfReferenceMode = hasSelfCharacter;
   const selectedGenerationMode: GenerationMode = selfReferenceMode
     ? 'self-reference-video'
@@ -324,10 +372,10 @@ export default function CreateVideo({
         ? 'Identity ready'
         : 'Needs references';
   const identityReferenceThumbs = [
-    resolveReferencePreviewUrl(identityProfile?.frontFaceUrl),
-    resolveReferencePreviewUrl(identityProfile?.leftAngleUrl),
-    resolveReferencePreviewUrl(identityProfile?.rightAngleUrl),
-    resolveReferencePreviewUrl(identityProfile?.fullBodyUrl),
+    getWorkingReferenceUrl(identityProfile?.frontFaceUrl),
+    getWorkingReferenceUrl(identityProfile?.leftAngleUrl),
+    getWorkingReferenceUrl(identityProfile?.rightAngleUrl),
+    getWorkingReferenceUrl(identityProfile?.fullBodyUrl),
   ].filter((url): url is string => Boolean(url));
   const canGenerate = true;
   const generateBusy = canGenerate ? busy || generationLoading || referenceLoading : true;
@@ -347,7 +395,7 @@ export default function CreateVideo({
     const currentPrompt = activePrompt;
     const selectedAspectRatio = aspectRatio;
     const selectedEngine = engine;
-    const selectedReferenceImageUrl = resolveReferencePreviewUrl(referenceImageUrl) || selectedSelfReferenceImageUrl;
+    const selectedReferenceImageUrl = getWorkingReferenceUrl(referenceImageUrl) || selectedSelfReferenceImageUrl;
     const selectedGenerationMode = selfReferenceMode
       ? 'self-reference-video'
       : selectedReferenceImageUrl
@@ -775,11 +823,10 @@ export default function CreateVideo({
             ) : null}
           </div>
           {referenceThumbnailUrl ? (
-            <img
+            <ReferencePreviewImage
               src={referenceThumbnailUrl}
-              alt=""
+              alt="Selected reference"
               className="reference-mode-thumb"
-              onError={() => console.log('FAILED PREVIEW URL:', referenceThumbnailUrl)}
             />
           ) : selfReferenceMode ? (
             <div className="reference-mode-thumb reference-mode-placeholder" aria-hidden="true">
@@ -812,10 +859,9 @@ export default function CreateVideo({
               {identityReferenceThumbs.length ? (
                 identityReferenceThumbs.map((url) => (
                   <div key={url} className="reference-upload" style={{ padding: '8px', minHeight: 'unset' }}>
-                    <img
+                    <ReferencePreviewImage
                       src={url}
-                      alt=""
-                      onError={() => console.log('FAILED PREVIEW URL:', url)}
+                      alt="Lumora Identity Character reference"
                       style={{
                         width: '100%',
                         aspectRatio: '1',
@@ -918,7 +964,7 @@ export default function CreateVideo({
           ) : null}
           {generatedReferenceThumbnailUrl ? (
             <div className="reference-result-row">
-              <img src={generatedReferenceThumbnailUrl} alt="" />
+              <ReferencePreviewImage src={generatedReferenceThumbnailUrl} alt="Reference image used for likeness" />
               <span className="muted">Reference image used for likeness</span>
             </div>
           ) : null}

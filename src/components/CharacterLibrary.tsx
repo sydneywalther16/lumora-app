@@ -3,6 +3,7 @@ import { type CharacterProfile } from '../lib/api';
 import { getStoredCharacters, isCreatorSelfCharacter } from '../lib/characterStorage';
 import { useSession } from '../hooks/useSession';
 import { loadSupabaseCharacters } from '../lib/supabaseAppData';
+import { getWorkingReferenceUrl } from '../lib/selfCharacterReference';
 
 type CharacterLibraryProps = {
   selectedCharacterId?: string | null;
@@ -12,6 +13,34 @@ type CharacterLibraryProps = {
 
 function characterInitial(name: string) {
   return name.trim().charAt(0).toUpperCase() || 'C';
+}
+
+function CharacterAvatarPreview({ character }: { character: CharacterProfile }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const previewUrl = getWorkingReferenceUrl(
+    character.referenceImageUrls.frontFaceUrl ||
+      character.referenceImageUrls.frontFacePath ||
+      character.referenceImageUrls.frontFace,
+  );
+  const failed = Boolean(previewUrl && failedUrl === previewUrl);
+
+  if (failed) {
+    return <span style={{ fontSize: '0.62rem', lineHeight: 1.1 }}>Preview unavailable</span>;
+  }
+
+  if (!previewUrl) return <>{characterInitial(character.name)}</>;
+
+  return (
+    <img
+      src={previewUrl}
+      alt=""
+      onError={(event) => {
+        console.error('FAILED PREVIEW URL:', previewUrl);
+        event.currentTarget.style.display = 'none';
+        setFailedUrl(previewUrl);
+      }}
+    />
+  );
 }
 
 export default function CharacterLibrary({
@@ -83,11 +112,7 @@ export default function CharacterLibrary({
               onClick={() => onSelect?.(character)}
             >
               <span className="character-avatar">
-                {character.referenceImageUrls.frontFaceUrl || character.referenceImageUrls.frontFace ? (
-                  <img src={character.referenceImageUrls.frontFaceUrl || character.referenceImageUrls.frontFace} alt="" />
-                ) : (
-                  characterInitial(character.name)
-                )}
+                <CharacterAvatarPreview character={character} />
               </span>
               <span className="character-copy">
                 <strong>{character.name}</strong>

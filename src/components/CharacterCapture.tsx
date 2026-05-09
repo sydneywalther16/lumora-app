@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { type PrivacySetting, type ReferenceImageUrls } from '../lib/api';
 import { saveLocalCharacter } from '../lib/characterStorage';
 import {
@@ -32,6 +32,56 @@ function compactPreferences(preferences: Record<string, string>) {
     Object.entries(preferences)
       .map(([key, value]) => [key, value.trim()])
       .filter(([, value]) => value),
+  );
+}
+
+function LocalReferencePreview({
+  file,
+  fallback,
+  label,
+}: {
+  file: File | null;
+  fallback: string;
+  label: string;
+}) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl(null);
+      setFailedUrl(null);
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    setPreviewUrl(objectUrl);
+    setFailedUrl(null);
+
+    return () => {
+      URL.revokeObjectURL(objectUrl);
+    };
+  }, [file]);
+
+  if (!previewUrl || failedUrl === previewUrl) {
+    return (
+      <span style={{ color: '#d3cdf3', fontSize: '0.95rem', padding: '8px', textAlign: 'center' }}>
+        {failedUrl ? 'Preview unavailable' : fallback}
+      </span>
+    );
+  }
+
+  return (
+    <img
+      src={previewUrl}
+      alt={label}
+      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+      onError={(event) => {
+        console.error('FAILED PREVIEW URL:', previewUrl);
+        event.currentTarget.style.display = 'none';
+        setFailedUrl(previewUrl);
+      }}
+    />
   );
 }
 
@@ -242,24 +292,76 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
       <div className="reference-grid">
         <label className="reference-upload">
           <span>Front face</span>
+          <div style={{
+            width: '100%',
+            aspectRatio: '1',
+            borderRadius: '16px',
+            overflow: 'hidden',
+            background: 'rgba(255,255,255,0.08)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '8px 0',
+          }}>
+            <LocalReferencePreview file={frontFace} fallback="Required" label="Front reference" />
+          </div>
           <strong>{frontFace ? 'Uploaded / Ready' : 'Required'}</strong>
           <span className="muted">{frontFace?.name ?? 'No file selected'}</span>
           <input type="file" accept="image/*" onChange={(event) => setFrontFace(event.target.files?.[0] ?? null)} />
         </label>
         <label className="reference-upload">
           <span>Left angle</span>
+          <div style={{
+            width: '100%',
+            aspectRatio: '1',
+            borderRadius: '16px',
+            overflow: 'hidden',
+            background: 'rgba(255,255,255,0.08)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '8px 0',
+          }}>
+            <LocalReferencePreview file={leftAngle} fallback="Required" label="Left angle reference" />
+          </div>
           <strong>{leftAngle ? 'Uploaded / Ready' : 'Required'}</strong>
           <span className="muted">{leftAngle?.name ?? 'No file selected'}</span>
           <input type="file" accept="image/*" onChange={(event) => setLeftAngle(event.target.files?.[0] ?? null)} />
         </label>
         <label className="reference-upload">
           <span>Right angle</span>
+          <div style={{
+            width: '100%',
+            aspectRatio: '1',
+            borderRadius: '16px',
+            overflow: 'hidden',
+            background: 'rgba(255,255,255,0.08)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '8px 0',
+          }}>
+            <LocalReferencePreview file={rightAngle} fallback="Required" label="Right angle reference" />
+          </div>
           <strong>{rightAngle ? 'Uploaded / Ready' : 'Required'}</strong>
           <span className="muted">{rightAngle?.name ?? 'No file selected'}</span>
           <input type="file" accept="image/*" onChange={(event) => setRightAngle(event.target.files?.[0] ?? null)} />
         </label>
         <label className="reference-upload">
           <span>Full body</span>
+          <div style={{
+            width: '100%',
+            aspectRatio: '1',
+            borderRadius: '16px',
+            overflow: 'hidden',
+            background: 'rgba(255,255,255,0.08)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '8px 0',
+          }}>
+            <LocalReferencePreview file={fullBody} fallback="Optional" label="Full body reference" />
+          </div>
           <strong>{fullBody ? 'Uploaded / Ready' : 'Optional'}</strong>
           <span className="muted">{fullBody?.name ?? 'No file selected'}</span>
           <input type="file" accept="image/*" onChange={(event) => setFullBody(event.target.files?.[0] ?? null)} />

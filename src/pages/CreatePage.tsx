@@ -18,7 +18,7 @@ import {
 } from '../lib/supabaseAppData';
 import {
   getSelfCharacterReferenceImage,
-  resolveReferencePreviewUrl,
+  getWorkingReferenceUrl,
   type SelfCharacterReferenceImage,
 } from '../lib/selfCharacterReference';
 import {
@@ -132,20 +132,28 @@ export default function CreatePage() {
   }, [activeSelfCharacter, profile]);
 
   const savedSelfReferenceUrls = activeSelfCharacter?.referenceImageUrls ?? null;
-  const savedFrontFaceUrl = resolveReferencePreviewUrl(savedSelfReferenceUrls?.frontFaceUrl)
-    ?? resolveReferencePreviewUrl(savedSelfReferenceUrls?.frontFace);
+  const savedFrontFaceUrl = getWorkingReferenceUrl(savedSelfReferenceUrls?.frontFaceUrl)
+    ?? getWorkingReferenceUrl(savedSelfReferenceUrls?.frontFacePath)
+    ?? getWorkingReferenceUrl(savedSelfReferenceUrls?.frontFace);
   const referenceImageUrl = hasSelfCharacter
     ? resolvedReference?.primary ?? savedFrontFaceUrl
-    : resolveReferencePreviewUrl(selectedCharacter?.referenceImageUrls?.frontFaceUrl)
-      ?? resolveReferencePreviewUrl(selectedCharacter?.referenceImageUrls?.frontFace);
+    : getWorkingReferenceUrl(selectedCharacter?.referenceImageUrls?.frontFaceUrl)
+      ?? getWorkingReferenceUrl(selectedCharacter?.referenceImageUrls?.frontFacePath)
+      ?? getWorkingReferenceUrl(selectedCharacter?.referenceImageUrls?.frontFace);
   const referenceImageUrls = hasSelfCharacter
     ? resolvedReference?.referenceImageUrls ?? activeSelfCharacter?.referenceImageUrls ?? null
     : selectedCharacter?.referenceImageUrls ?? null;
   const additionalReferenceImageUrls = hasSelfCharacter
     ? resolvedReference?.additional ?? [
-        resolveReferencePreviewUrl(savedSelfReferenceUrls?.leftAngleUrl) ?? resolveReferencePreviewUrl(savedSelfReferenceUrls?.leftAngle),
-        resolveReferencePreviewUrl(savedSelfReferenceUrls?.rightAngleUrl) ?? resolveReferencePreviewUrl(savedSelfReferenceUrls?.rightAngle),
-        resolveReferencePreviewUrl(savedSelfReferenceUrls?.fullBodyUrl) ?? resolveReferencePreviewUrl(savedSelfReferenceUrls?.fullBody),
+        getWorkingReferenceUrl(savedSelfReferenceUrls?.leftAngleUrl) ??
+          getWorkingReferenceUrl(savedSelfReferenceUrls?.leftAnglePath) ??
+          getWorkingReferenceUrl(savedSelfReferenceUrls?.leftAngle),
+        getWorkingReferenceUrl(savedSelfReferenceUrls?.rightAngleUrl) ??
+          getWorkingReferenceUrl(savedSelfReferenceUrls?.rightAnglePath) ??
+          getWorkingReferenceUrl(savedSelfReferenceUrls?.rightAngle),
+        getWorkingReferenceUrl(savedSelfReferenceUrls?.fullBodyUrl) ??
+          getWorkingReferenceUrl(savedSelfReferenceUrls?.fullBodyPath) ??
+          getWorkingReferenceUrl(savedSelfReferenceUrls?.fullBody),
       ].filter((url): url is string => Boolean(url))
     : [];
   const identityProfile = hasSelfCharacter
