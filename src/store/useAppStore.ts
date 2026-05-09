@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { posts, trends } from '../data/mockData';
+import { posts, projects, trends } from '../data/mockData';
 
 type AppState = {
   activePrompt: string;
@@ -7,6 +7,7 @@ type AppState = {
   selectedTrend: string | null;
   draftTitle: string;
   posts: typeof posts;
+  projects: typeof projects;
   trends: typeof trends;
   setActivePrompt: (prompt: string) => void;
   setSelectedStyle: (style: string) => void;
@@ -21,6 +22,7 @@ export const useAppStore = create<AppState>((set) => ({
   selectedTrend: 't1',
   draftTitle: 'Untitled concept',
   posts,
+  projects,
   trends,
   setActivePrompt: (prompt) => set({ activePrompt: prompt }),
   setSelectedStyle: (style) => set({ selectedStyle: style }),
