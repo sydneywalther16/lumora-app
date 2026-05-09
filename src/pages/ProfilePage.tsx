@@ -40,6 +40,7 @@ import {
   identityProfileToStylePreferences,
 } from '../lib/identityCharacter';
 import { resolveRenderableReferenceUrl } from '../lib/selfCharacterReference';
+import SelfReferencePreview from '../components/SelfReferencePreview';
 
 type Draft = { id: string; title: string; prompt: string; createdAt: string };
 type ProfileDebugInfo = {
@@ -130,6 +131,19 @@ function selfReferencePreviewSource(form: SelfCharacterForm, field: ReferencePho
 
 function hasSelfReferenceSource(form: SelfCharacterForm, field: ReferencePhotoField): boolean {
   return Boolean(selfReferencePreviewSource(form, field));
+}
+
+function selfReferencePreviewReference(form: SelfCharacterForm, field: ReferencePhotoField) {
+  const rawUrl = form[field] || undefined;
+  const path = form[referencePhotoPathFields[field]] || (
+    rawUrl && !rawUrl.startsWith('http') ? rawUrl : undefined
+  );
+
+  return {
+    url: rawUrl?.startsWith('http') ? rawUrl : undefined,
+    path,
+    fileName: form[referencePhotoNameFields[field]] || undefined,
+  };
 }
 
 const emptyCreatorSelfFeatures: CreatorSelfFeatures = {
@@ -2763,13 +2777,13 @@ export default function ProfilePage() {
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        margin: '8px 0',
-                      }}
-                    >
-                      <ImagePreview
-                        src={previewSource}
-                        fallback={field === 'fullBody' ? 'Optional' : 'Required'}
-                        errorMessage="Reference photo could not be loaded. Re-upload this photo."
+                      margin: '8px 0',
+                    }}
+                  >
+                      <SelfReferencePreview
+                        label={label}
+                        reference={selfReferencePreviewReference(selfForm, field)}
+                        required={field !== 'fullBody'}
                       />
                       {hasReference ? (
                         <button
@@ -3004,13 +3018,15 @@ export default function ProfilePage() {
                 flex: '0 0 auto',
               }}
             >
-              <ImagePreview
-                src={
-                  creatorSelfCharacter.referenceImageUrls.frontFaceUrl ||
-                  creatorSelfCharacter.referenceImageUrls.frontFacePath ||
-                  creatorSelfCharacter.referenceImageUrls.frontFace
-                }
-                fallback="Self"
+              <SelfReferencePreview
+                label="Self character front reference"
+                reference={{
+                  url: creatorSelfCharacter.referenceImageUrls.frontFaceUrl ||
+                    creatorSelfCharacter.referenceImageUrls.frontFace ||
+                    undefined,
+                  path: creatorSelfCharacter.referenceImageUrls.frontFacePath || undefined,
+                }}
+                required
               />
             </div>
             <div style={{ minWidth: 0, flex: 1 }}>

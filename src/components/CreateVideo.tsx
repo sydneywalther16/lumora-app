@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react';
+import { useState } from 'react';
 import {
   type GenerationMode,
   type LumoraIdentityFeedback,
@@ -15,6 +15,7 @@ import { loadSupabaseProfile, saveSupabaseDraft, saveSupabaseProject } from '../
 import { resolveRenderableReferenceUrl } from '../lib/selfCharacterReference';
 import { useSession } from '../hooks/useSession';
 import { useAppStore } from '../store/useAppStore';
+import SelfReferencePreview from './SelfReferencePreview';
 
 type CreateVideoProps = {
   refreshKey?: number;
@@ -214,56 +215,6 @@ function referenceImagePayload(urls?: Partial<ReferenceImageUrls> | null) {
   };
 }
 
-function ReferencePreviewImage({
-  src,
-  alt,
-  className,
-  style,
-}: {
-  src?: string | null;
-  alt: string;
-  className?: string;
-  style?: CSSProperties;
-}) {
-  const resolvedUrl = resolveRenderableReferenceUrl(src);
-
-  return (
-    <div
-      className={className}
-      style={{
-        ...style,
-        position: 'relative',
-        overflow: 'hidden',
-        display: 'grid',
-        placeItems: 'center',
-        background: 'rgba(255,255,255,0.08)',
-      }}
-    >
-      {resolvedUrl ? (
-        <img
-          src={resolvedUrl}
-          alt={alt}
-          style={{
-            position: 'absolute',
-            inset: 0,
-            zIndex: 1,
-            width: '100%',
-            height: '100%',
-            objectFit: 'cover',
-          }}
-          onLoad={() => console.log('LOADED PREVIEW:', resolvedUrl)}
-          onError={() => {
-            console.error('FAILED PREVIEW:', resolvedUrl);
-            console.error('FAILED PREVIEW URL:', resolvedUrl);
-          }}
-        />
-      ) : (
-        <span className="muted" style={{ textAlign: 'center', padding: '8px' }}>Preview unavailable</span>
-      )}
-    </div>
-  );
-}
-
 function formatWarnings(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.flatMap((item) => (typeof item === 'string' && item.trim() ? [item.trim()] : []));
@@ -370,7 +321,6 @@ export default function CreateVideo({
   const isTextFallbackMode = !hasSelfCharacter && !referenceLoading && selectedGenerationMode === 'text-to-video-fallback';
   const referenceThumbnailUrl = renderableReferenceImageUrl(primaryReferenceImage.url);
   const generatedReferenceThumbnailUrl = renderableReferenceImageUrl(generatedReferenceImageUrl);
-  const identityReady = identityProfile?.status === 'ready';
   const identityStatusLabel = !identityProfile
     ? 'Needs references'
     : identityProfile.status === 'building'
@@ -378,32 +328,40 @@ export default function CreateVideo({
       : identityProfile.status === 'ready'
         ? 'Identity ready'
         : 'Needs references';
-  const identityReferenceThumbs = [
-    resolveRenderableReferenceUrl(
-      identityProfile?.frontFaceUrl ??
-        referenceImageUrls?.frontFaceUrl ??
-        referenceImageUrls?.frontFacePath ??
-        referenceImageUrls?.frontFace,
-    ),
-    resolveRenderableReferenceUrl(
-      identityProfile?.leftAngleUrl ??
-        referenceImageUrls?.leftAngleUrl ??
-        referenceImageUrls?.leftAnglePath ??
-        referenceImageUrls?.leftAngle,
-    ),
-    resolveRenderableReferenceUrl(
-      identityProfile?.rightAngleUrl ??
-        referenceImageUrls?.rightAngleUrl ??
-        referenceImageUrls?.rightAnglePath ??
-        referenceImageUrls?.rightAngle,
-    ),
-    resolveRenderableReferenceUrl(
-      identityProfile?.fullBodyUrl ??
-        referenceImageUrls?.fullBodyUrl ??
-        referenceImageUrls?.fullBodyPath ??
-        referenceImageUrls?.fullBody,
-    ),
-  ].filter((url): url is string => Boolean(url));
+  const identityReferenceCards = [
+    {
+      label: 'Front photo',
+      required: true,
+      reference: {
+        url: identityProfile?.frontFaceUrl ?? referenceImageUrls?.frontFaceUrl ?? referenceImageUrls?.frontFace ?? undefined,
+        path: referenceImageUrls?.frontFacePath ?? undefined,
+      },
+    },
+    {
+      label: 'Left angle',
+      required: true,
+      reference: {
+        url: identityProfile?.leftAngleUrl ?? referenceImageUrls?.leftAngleUrl ?? referenceImageUrls?.leftAngle ?? undefined,
+        path: referenceImageUrls?.leftAnglePath ?? undefined,
+      },
+    },
+    {
+      label: 'Right angle',
+      required: true,
+      reference: {
+        url: identityProfile?.rightAngleUrl ?? referenceImageUrls?.rightAngleUrl ?? referenceImageUrls?.rightAngle ?? undefined,
+        path: referenceImageUrls?.rightAnglePath ?? undefined,
+      },
+    },
+    {
+      label: 'Full body',
+      required: false,
+      reference: {
+        url: identityProfile?.fullBodyUrl ?? referenceImageUrls?.fullBodyUrl ?? referenceImageUrls?.fullBody ?? undefined,
+        path: referenceImageUrls?.fullBodyPath ?? undefined,
+      },
+    },
+  ];
   const canGenerate = true;
   const generateBusy = canGenerate ? busy || generationLoading || referenceLoading : true;
   const saveBusy = busy || generationLoading;
@@ -849,17 +807,13 @@ export default function CreateVideo({
               </button>
             ) : null}
           </div>
-          {referenceThumbnailUrl ? (
-            <ReferencePreviewImage
-              src={referenceThumbnailUrl}
-              alt="Selected reference"
-              className="reference-mode-thumb"
+          <div className="reference-mode-thumb">
+            <SelfReferencePreview
+              label="Selected reference"
+              reference={{ url: referenceThumbnailUrl ?? undefined }}
+              required={selfReferenceMode}
             />
-          ) : selfReferenceMode ? (
-            <div className="reference-mode-thumb reference-mode-placeholder" aria-hidden="true">
-              Identity
-            </div>
-          ) : null}
+          </div>
           {primaryReferenceImage.label || selfReferenceMode ? (
             <span className="tiny-pill reference-mode-pill">
               {referenceLabel || primaryReferenceImage.label || 'Saved self character'}
@@ -883,28 +837,16 @@ export default function CreateVideo({
           <div className="field-block">
             <span>Lumora Identity Character</span>
             <div className="reference-grid" style={{ gap: '8px' }}>
-              {identityReferenceThumbs.length ? (
-                identityReferenceThumbs.map((url) => (
-                  <div key={url} className="reference-upload" style={{ padding: '8px', minHeight: 'unset' }}>
-                    <ReferencePreviewImage
-                      src={url}
-                      alt="Lumora Identity Character reference"
-                      style={{
-                        width: '100%',
-                        aspectRatio: '1',
-                        objectFit: 'cover',
-                        borderRadius: '14px',
-                        display: 'block',
-                      }}
+              {identityReferenceCards.map((item) => (
+                  <div key={item.label} className="reference-upload" style={{ padding: '8px', minHeight: 'unset' }}>
+                    <span>{item.label}</span>
+                    <SelfReferencePreview
+                      label={item.label}
+                      reference={item.reference}
+                      required={item.required}
                     />
                   </div>
-                ))
-              ) : (
-                <div className="reference-upload" style={{ padding: '14px' }}>
-                  <strong>{identityReady ? 'Identity ready' : 'Needs references'}</strong>
-                  <span className="muted">Add front, left, and right references to improve consistency.</span>
-                </div>
-              )}
+                ))}
             </div>
           </div>
         ) : null}
@@ -991,7 +933,10 @@ export default function CreateVideo({
           ) : null}
           {generatedReferenceThumbnailUrl ? (
             <div className="reference-result-row">
-              <ReferencePreviewImage src={generatedReferenceThumbnailUrl} alt="Reference image used for likeness" />
+              <SelfReferencePreview
+                label="Reference image used for likeness"
+                reference={{ url: generatedReferenceThumbnailUrl }}
+              />
               <span className="muted">Reference image used for likeness</span>
             </div>
           ) : null}

@@ -3,7 +3,7 @@ import { type CharacterProfile } from '../lib/api';
 import { getStoredCharacters, isCreatorSelfCharacter } from '../lib/characterStorage';
 import { useSession } from '../hooks/useSession';
 import { loadSupabaseCharacters } from '../lib/supabaseAppData';
-import { resolveRenderableReferenceUrl } from '../lib/selfCharacterReference';
+import SelfReferencePreview from './SelfReferencePreview';
 
 type CharacterLibraryProps = {
   selectedCharacterId?: string | null;
@@ -13,47 +13,6 @@ type CharacterLibraryProps = {
 
 function characterInitial(name: string) {
   return name.trim().charAt(0).toUpperCase() || 'C';
-}
-
-function CharacterAvatarPreview({ character }: { character: CharacterProfile }) {
-  const resolvedUrl = resolveRenderableReferenceUrl(
-    character.referenceImageUrls.frontFaceUrl ||
-      character.referenceImageUrls.frontFacePath ||
-      character.referenceImageUrls.frontFace,
-  );
-
-  return (
-    <div
-      style={{
-        position: 'relative',
-        width: '100%',
-        height: '100%',
-        overflow: 'hidden',
-      }}
-    >
-      {resolvedUrl ? (
-        <img
-          src={resolvedUrl}
-          alt=""
-          style={{
-            position: 'absolute',
-            inset: 0,
-            zIndex: 1,
-            width: '100%',
-            height: '100%',
-            objectFit: 'cover',
-          }}
-          onLoad={() => console.log('LOADED PREVIEW:', resolvedUrl)}
-          onError={() => {
-            console.error('FAILED PREVIEW:', resolvedUrl);
-            console.error('FAILED PREVIEW URL:', resolvedUrl);
-          }}
-        />
-      ) : (
-        characterInitial(character.name)
-      )}
-    </div>
-  );
 }
 
 export default function CharacterLibrary({
@@ -125,7 +84,19 @@ export default function CharacterLibrary({
               onClick={() => onSelect?.(character)}
             >
               <span className="character-avatar">
-                <CharacterAvatarPreview character={character} />
+                {character.referenceImageUrls.frontFaceUrl ||
+                character.referenceImageUrls.frontFacePath ||
+                character.referenceImageUrls.frontFace ? (
+                  <SelfReferencePreview
+                    label={`${character.name} front reference`}
+                    reference={{
+                      url: character.referenceImageUrls.frontFaceUrl || character.referenceImageUrls.frontFace || undefined,
+                      path: character.referenceImageUrls.frontFacePath || undefined,
+                    }}
+                  />
+                ) : (
+                  characterInitial(character.name)
+                )}
               </span>
               <span className="character-copy">
                 <strong>{character.name}</strong>

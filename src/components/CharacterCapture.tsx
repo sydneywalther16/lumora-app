@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { type PrivacySetting, type ReferenceImageUrls } from '../lib/api';
 import { saveLocalCharacter } from '../lib/characterStorage';
 import {
@@ -7,6 +7,7 @@ import {
   uploadLumoraMedia,
 } from '../lib/supabaseAppData';
 import { useSession } from '../hooks/useSession';
+import SelfReferencePreview from './SelfReferencePreview';
 
 type CharacterCaptureProps = {
   onCreated?: () => void;
@@ -32,73 +33,6 @@ function compactPreferences(preferences: Record<string, string>) {
     Object.entries(preferences)
       .map(([key, value]) => [key, value.trim()])
       .filter(([, value]) => value),
-  );
-}
-
-function LocalReferencePreview({
-  file,
-  fallback,
-  label,
-}: {
-  file: File | null;
-  fallback: string;
-  label: string;
-}) {
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!file) {
-      setPreviewUrl(null);
-      return;
-    }
-
-    const objectUrl = URL.createObjectURL(file);
-    setPreviewUrl(objectUrl);
-
-    return () => {
-      URL.revokeObjectURL(objectUrl);
-    };
-  }, [file]);
-
-  const resolvedUrl = previewUrl;
-  console.log('REFERENCE OBJECT:', file);
-  console.log('RESOLVED URL:', resolvedUrl);
-
-  return (
-    <div
-      style={{
-        position: 'relative',
-        width: '100%',
-        height: '100%',
-        overflow: 'hidden',
-        display: 'grid',
-        placeItems: 'center',
-      }}
-    >
-      {resolvedUrl ? (
-        <img
-          src={resolvedUrl}
-          alt={label}
-          style={{
-            position: 'absolute',
-            inset: 0,
-            zIndex: 1,
-            width: '100%',
-            height: '100%',
-            objectFit: 'cover',
-          }}
-          onLoad={() => console.log('LOADED PREVIEW:', resolvedUrl)}
-          onError={() => {
-            console.error('FAILED PREVIEW:', resolvedUrl);
-            console.error('FAILED PREVIEW URL:', resolvedUrl);
-          }}
-        />
-      ) : (
-        <span style={{ color: '#d3cdf3', fontSize: '0.95rem', padding: '8px', textAlign: 'center' }}>
-          {fallback}
-        </span>
-      )}
-    </div>
   );
 }
 
@@ -309,76 +243,28 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
       <div className="reference-grid">
         <label className="reference-upload">
           <span>Front face</span>
-          <div style={{
-            width: '100%',
-            aspectRatio: '1',
-            borderRadius: '16px',
-            overflow: 'hidden',
-            background: 'rgba(255,255,255,0.08)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            margin: '8px 0',
-          }}>
-            <LocalReferencePreview file={frontFace} fallback="Required" label="Front reference" />
-          </div>
+          <SelfReferencePreview label="Front reference" reference={{ fileName: frontFace?.name }} required />
           <strong>{frontFace ? 'Uploaded / Ready' : 'Required'}</strong>
           <span className="muted">{frontFace?.name ?? 'No file selected'}</span>
           <input type="file" accept="image/*" onChange={(event) => setFrontFace(event.target.files?.[0] ?? null)} />
         </label>
         <label className="reference-upload">
           <span>Left angle</span>
-          <div style={{
-            width: '100%',
-            aspectRatio: '1',
-            borderRadius: '16px',
-            overflow: 'hidden',
-            background: 'rgba(255,255,255,0.08)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            margin: '8px 0',
-          }}>
-            <LocalReferencePreview file={leftAngle} fallback="Required" label="Left angle reference" />
-          </div>
+          <SelfReferencePreview label="Left angle reference" reference={{ fileName: leftAngle?.name }} required />
           <strong>{leftAngle ? 'Uploaded / Ready' : 'Required'}</strong>
           <span className="muted">{leftAngle?.name ?? 'No file selected'}</span>
           <input type="file" accept="image/*" onChange={(event) => setLeftAngle(event.target.files?.[0] ?? null)} />
         </label>
         <label className="reference-upload">
           <span>Right angle</span>
-          <div style={{
-            width: '100%',
-            aspectRatio: '1',
-            borderRadius: '16px',
-            overflow: 'hidden',
-            background: 'rgba(255,255,255,0.08)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            margin: '8px 0',
-          }}>
-            <LocalReferencePreview file={rightAngle} fallback="Required" label="Right angle reference" />
-          </div>
+          <SelfReferencePreview label="Right angle reference" reference={{ fileName: rightAngle?.name }} required />
           <strong>{rightAngle ? 'Uploaded / Ready' : 'Required'}</strong>
           <span className="muted">{rightAngle?.name ?? 'No file selected'}</span>
           <input type="file" accept="image/*" onChange={(event) => setRightAngle(event.target.files?.[0] ?? null)} />
         </label>
         <label className="reference-upload">
           <span>Full body</span>
-          <div style={{
-            width: '100%',
-            aspectRatio: '1',
-            borderRadius: '16px',
-            overflow: 'hidden',
-            background: 'rgba(255,255,255,0.08)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            margin: '8px 0',
-          }}>
-            <LocalReferencePreview file={fullBody} fallback="Optional" label="Full body reference" />
-          </div>
+          <SelfReferencePreview label="Full body reference" reference={{ fileName: fullBody?.name }} />
           <strong>{fullBody ? 'Uploaded / Ready' : 'Optional'}</strong>
           <span className="muted">{fullBody?.name ?? 'No file selected'}</span>
           <input type="file" accept="image/*" onChange={(event) => setFullBody(event.target.files?.[0] ?? null)} />
