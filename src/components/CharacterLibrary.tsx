@@ -3,7 +3,7 @@ import { type CharacterProfile } from '../lib/api';
 import { getStoredCharacters, isCreatorSelfCharacter } from '../lib/characterStorage';
 import { useSession } from '../hooks/useSession';
 import { loadSupabaseCharacters } from '../lib/supabaseAppData';
-import SelfReferencePreview from './SelfReferencePreview';
+import SelfReferencePreview, { normalizeReference } from './SelfReferencePreview';
 
 type CharacterLibraryProps = {
   selectedCharacterId?: string | null;
@@ -89,10 +89,16 @@ export default function CharacterLibrary({
                 character.referenceImageUrls.frontFace ? (
                   <SelfReferencePreview
                     label={`${character.name} front reference`}
-                    reference={{
-                      url: character.referenceImageUrls.frontFaceUrl || character.referenceImageUrls.frontFace || undefined,
-                      path: character.referenceImageUrls.frontFacePath || undefined,
-                    }}
+                    reference={normalizeReference(
+                      {
+                        ...character.referenceImageUrls,
+                        frontFaceUrl:
+                          character.referenceImageUrls.frontFaceUrl ||
+                          character.referenceImageUrls.frontFace,
+                      },
+                      'frontFaceUrl',
+                      'frontFacePath',
+                    )}
                   />
                 ) : (
                   characterInitial(character.name)

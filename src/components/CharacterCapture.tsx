@@ -7,7 +7,7 @@ import {
   uploadLumoraMedia,
 } from '../lib/supabaseAppData';
 import { useSession } from '../hooks/useSession';
-import SelfReferencePreview from './SelfReferencePreview';
+import SelfReferencePreview, { normalizeReference } from './SelfReferencePreview';
 
 type CharacterCaptureProps = {
   onCreated?: () => void;
@@ -54,6 +54,26 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
   const [voiceSample, setVoiceSample] = useState<File | null>(null);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const normalizedFrontReference = normalizeReference(
+    frontFace ? { name: frontFace.name } : null,
+    'frontFaceUrl',
+    'frontFacePath',
+  );
+  const normalizedLeftReference = normalizeReference(
+    leftAngle ? { name: leftAngle.name } : null,
+    'leftAngleUrl',
+    'leftAnglePath',
+  );
+  const normalizedRightReference = normalizeReference(
+    rightAngle ? { name: rightAngle.name } : null,
+    'rightAngleUrl',
+    'rightAnglePath',
+  );
+  const normalizedFullBodyReference = normalizeReference(
+    fullBody ? { name: fullBody.name } : null,
+    'fullBodyUrl',
+    'fullBodyPath',
+  );
 
   async function handleSubmit() {
     if (!name.trim()) {
@@ -243,28 +263,28 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
       <div className="reference-grid">
         <label className="reference-upload">
           <span>Front face</span>
-          <SelfReferencePreview label="Front reference" reference={{ fileName: frontFace?.name }} required />
+          <SelfReferencePreview label="Front reference" reference={normalizedFrontReference} required />
           <strong>{frontFace ? 'Uploaded / Ready' : 'Required'}</strong>
           <span className="muted">{frontFace?.name ?? 'No file selected'}</span>
           <input type="file" accept="image/*" onChange={(event) => setFrontFace(event.target.files?.[0] ?? null)} />
         </label>
         <label className="reference-upload">
           <span>Left angle</span>
-          <SelfReferencePreview label="Left angle reference" reference={{ fileName: leftAngle?.name }} required />
+          <SelfReferencePreview label="Left angle reference" reference={normalizedLeftReference} required />
           <strong>{leftAngle ? 'Uploaded / Ready' : 'Required'}</strong>
           <span className="muted">{leftAngle?.name ?? 'No file selected'}</span>
           <input type="file" accept="image/*" onChange={(event) => setLeftAngle(event.target.files?.[0] ?? null)} />
         </label>
         <label className="reference-upload">
           <span>Right angle</span>
-          <SelfReferencePreview label="Right angle reference" reference={{ fileName: rightAngle?.name }} required />
+          <SelfReferencePreview label="Right angle reference" reference={normalizedRightReference} required />
           <strong>{rightAngle ? 'Uploaded / Ready' : 'Required'}</strong>
           <span className="muted">{rightAngle?.name ?? 'No file selected'}</span>
           <input type="file" accept="image/*" onChange={(event) => setRightAngle(event.target.files?.[0] ?? null)} />
         </label>
         <label className="reference-upload">
           <span>Full body</span>
-          <SelfReferencePreview label="Full body reference" reference={{ fileName: fullBody?.name }} />
+          <SelfReferencePreview label="Full body reference" reference={normalizedFullBodyReference} />
           <strong>{fullBody ? 'Uploaded / Ready' : 'Optional'}</strong>
           <span className="muted">{fullBody?.name ?? 'No file selected'}</span>
           <input type="file" accept="image/*" onChange={(event) => setFullBody(event.target.files?.[0] ?? null)} />

@@ -1,14 +1,37 @@
+export type SelfReferencePreviewReference = {
+  url?: string | null;
+  path?: string | null;
+  fileName?: string | null;
+  name?: string | null;
+  [key: string]: unknown;
+};
+
 type Props = {
   label: string;
-  reference?: {
-    url?: string;
-    path?: string;
-    fileName?: string;
-  };
+  reference?: SelfReferencePreviewReference | null;
   required?: boolean;
 };
 
-function cleanReferencePath(path?: string) {
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+export function normalizeReference(
+  reference: SelfReferencePreviewReference | null | undefined,
+  fallbackUrlKey: string,
+  fallbackPathKey: string,
+) {
+  const normalized = {
+    url: readString(reference?.url) || readString(reference?.[fallbackUrlKey]),
+    path: readString(reference?.path) || readString(reference?.[fallbackPathKey]),
+    fileName: readString(reference?.fileName) || readString(reference?.name) || '',
+  };
+
+  console.log('NORMALIZED REFERENCE:', normalized);
+  return normalized;
+}
+
+function cleanReferencePath(path?: string | null) {
   return path
     ?.trim()
     .replace(/^\/+/, '')

@@ -40,7 +40,7 @@ import {
   identityProfileToStylePreferences,
 } from '../lib/identityCharacter';
 import { resolveRenderableReferenceUrl } from '../lib/selfCharacterReference';
-import SelfReferencePreview from '../components/SelfReferencePreview';
+import SelfReferencePreview, { normalizeReference } from '../components/SelfReferencePreview';
 
 type Draft = { id: string; title: string; prompt: string; createdAt: string };
 type ProfileDebugInfo = {
@@ -134,16 +134,15 @@ function hasSelfReferenceSource(form: SelfCharacterForm, field: ReferencePhotoFi
 }
 
 function selfReferencePreviewReference(form: SelfCharacterForm, field: ReferencePhotoField) {
-  const rawUrl = form[field] || undefined;
-  const path = form[referencePhotoPathFields[field]] || (
-    rawUrl && !rawUrl.startsWith('http') ? rawUrl : undefined
+  return normalizeReference(
+    {
+      url: form[field],
+      path: form[referencePhotoPathFields[field]],
+      fileName: form[referencePhotoNameFields[field]],
+    },
+    `${field}Url`,
+    `${field}Path`,
   );
-
-  return {
-    url: rawUrl?.startsWith('http') ? rawUrl : undefined,
-    path,
-    fileName: form[referencePhotoNameFields[field]] || undefined,
-  };
 }
 
 const emptyCreatorSelfFeatures: CreatorSelfFeatures = {
@@ -3020,12 +3019,11 @@ export default function ProfilePage() {
             >
               <SelfReferencePreview
                 label="Self character front reference"
-                reference={{
-                  url: creatorSelfCharacter.referenceImageUrls.frontFaceUrl ||
-                    creatorSelfCharacter.referenceImageUrls.frontFace ||
-                    undefined,
-                  path: creatorSelfCharacter.referenceImageUrls.frontFacePath || undefined,
-                }}
+                reference={normalizeReference(
+                  creatorSelfCharacter.referenceImageUrls,
+                  'frontFaceUrl',
+                  'frontFacePath',
+                )}
                 required
               />
             </div>

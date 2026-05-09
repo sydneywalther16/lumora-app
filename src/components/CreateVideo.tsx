@@ -15,7 +15,7 @@ import { loadSupabaseProfile, saveSupabaseDraft, saveSupabaseProject } from '../
 import { resolveRenderableReferenceUrl } from '../lib/selfCharacterReference';
 import { useSession } from '../hooks/useSession';
 import { useAppStore } from '../store/useAppStore';
-import SelfReferencePreview from './SelfReferencePreview';
+import SelfReferencePreview, { normalizeReference } from './SelfReferencePreview';
 
 type CreateVideoProps = {
   refreshKey?: number;
@@ -332,36 +332,62 @@ export default function CreateVideo({
     {
       label: 'Front photo',
       required: true,
-      reference: {
-        url: identityProfile?.frontFaceUrl ?? referenceImageUrls?.frontFaceUrl ?? referenceImageUrls?.frontFace ?? undefined,
-        path: referenceImageUrls?.frontFacePath ?? undefined,
-      },
+      reference: normalizeReference(
+        {
+          ...referenceImageUrls,
+          frontFaceUrl: identityProfile?.frontFaceUrl ?? referenceImageUrls?.frontFaceUrl ?? referenceImageUrls?.frontFace,
+        },
+        'frontFaceUrl',
+        'frontFacePath',
+      ),
     },
     {
       label: 'Left angle',
       required: true,
-      reference: {
-        url: identityProfile?.leftAngleUrl ?? referenceImageUrls?.leftAngleUrl ?? referenceImageUrls?.leftAngle ?? undefined,
-        path: referenceImageUrls?.leftAnglePath ?? undefined,
-      },
+      reference: normalizeReference(
+        {
+          ...referenceImageUrls,
+          leftAngleUrl: identityProfile?.leftAngleUrl ?? referenceImageUrls?.leftAngleUrl ?? referenceImageUrls?.leftAngle,
+        },
+        'leftAngleUrl',
+        'leftAnglePath',
+      ),
     },
     {
       label: 'Right angle',
       required: true,
-      reference: {
-        url: identityProfile?.rightAngleUrl ?? referenceImageUrls?.rightAngleUrl ?? referenceImageUrls?.rightAngle ?? undefined,
-        path: referenceImageUrls?.rightAnglePath ?? undefined,
-      },
+      reference: normalizeReference(
+        {
+          ...referenceImageUrls,
+          rightAngleUrl: identityProfile?.rightAngleUrl ?? referenceImageUrls?.rightAngleUrl ?? referenceImageUrls?.rightAngle,
+        },
+        'rightAngleUrl',
+        'rightAnglePath',
+      ),
     },
     {
       label: 'Full body',
       required: false,
-      reference: {
-        url: identityProfile?.fullBodyUrl ?? referenceImageUrls?.fullBodyUrl ?? referenceImageUrls?.fullBody ?? undefined,
-        path: referenceImageUrls?.fullBodyPath ?? undefined,
-      },
+      reference: normalizeReference(
+        {
+          ...referenceImageUrls,
+          fullBodyUrl: identityProfile?.fullBodyUrl ?? referenceImageUrls?.fullBodyUrl ?? referenceImageUrls?.fullBody,
+        },
+        'fullBodyUrl',
+        'fullBodyPath',
+      ),
     },
   ];
+  const normalizedSelectedReference = normalizeReference(
+    { url: referenceThumbnailUrl },
+    'url',
+    'path',
+  );
+  const normalizedGeneratedReference = normalizeReference(
+    { url: generatedReferenceThumbnailUrl },
+    'url',
+    'path',
+  );
   const canGenerate = true;
   const generateBusy = canGenerate ? busy || generationLoading || referenceLoading : true;
   const saveBusy = busy || generationLoading;
@@ -810,7 +836,7 @@ export default function CreateVideo({
           <div className="reference-mode-thumb">
             <SelfReferencePreview
               label="Selected reference"
-              reference={{ url: referenceThumbnailUrl ?? undefined }}
+              reference={normalizedSelectedReference}
               required={selfReferenceMode}
             />
           </div>
@@ -935,7 +961,7 @@ export default function CreateVideo({
             <div className="reference-result-row">
               <SelfReferencePreview
                 label="Reference image used for likeness"
-                reference={{ url: generatedReferenceThumbnailUrl }}
+                reference={normalizedGeneratedReference}
               />
               <span className="muted">Reference image used for likeness</span>
             </div>
