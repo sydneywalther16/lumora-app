@@ -16,7 +16,11 @@ import {
   loadSupabaseProfile,
   saveSupabaseIdentityFeedback,
 } from '../lib/supabaseAppData';
-import { getSelfCharacterReferenceImage, type SelfCharacterReferenceImage } from '../lib/selfCharacterReference';
+import {
+  getSelfCharacterReferenceImage,
+  resolveReferencePreviewUrl,
+  type SelfCharacterReferenceImage,
+} from '../lib/selfCharacterReference';
 import {
   buildLumoraIdentityProfile,
   identityProfileToStylePreferences,
@@ -128,18 +132,20 @@ export default function CreatePage() {
   }, [activeSelfCharacter, profile]);
 
   const savedSelfReferenceUrls = activeSelfCharacter?.referenceImageUrls ?? null;
-  const savedFrontFaceUrl = savedSelfReferenceUrls?.frontFaceUrl ?? savedSelfReferenceUrls?.frontFace ?? null;
+  const savedFrontFaceUrl = resolveReferencePreviewUrl(savedSelfReferenceUrls?.frontFaceUrl)
+    ?? resolveReferencePreviewUrl(savedSelfReferenceUrls?.frontFace);
   const referenceImageUrl = hasSelfCharacter
     ? resolvedReference?.primary ?? savedFrontFaceUrl
-    : selectedCharacter?.referenceImageUrls?.frontFaceUrl ?? selectedCharacter?.referenceImageUrls?.frontFace ?? null;
+    : resolveReferencePreviewUrl(selectedCharacter?.referenceImageUrls?.frontFaceUrl)
+      ?? resolveReferencePreviewUrl(selectedCharacter?.referenceImageUrls?.frontFace);
   const referenceImageUrls = hasSelfCharacter
     ? resolvedReference?.referenceImageUrls ?? activeSelfCharacter?.referenceImageUrls ?? null
     : selectedCharacter?.referenceImageUrls ?? null;
   const additionalReferenceImageUrls = hasSelfCharacter
     ? resolvedReference?.additional ?? [
-        savedSelfReferenceUrls?.leftAngleUrl ?? savedSelfReferenceUrls?.leftAngle,
-        savedSelfReferenceUrls?.rightAngleUrl ?? savedSelfReferenceUrls?.rightAngle,
-        savedSelfReferenceUrls?.fullBodyUrl ?? savedSelfReferenceUrls?.fullBody,
+        resolveReferencePreviewUrl(savedSelfReferenceUrls?.leftAngleUrl) ?? resolveReferencePreviewUrl(savedSelfReferenceUrls?.leftAngle),
+        resolveReferencePreviewUrl(savedSelfReferenceUrls?.rightAngleUrl) ?? resolveReferencePreviewUrl(savedSelfReferenceUrls?.rightAngle),
+        resolveReferencePreviewUrl(savedSelfReferenceUrls?.fullBodyUrl) ?? resolveReferencePreviewUrl(savedSelfReferenceUrls?.fullBody),
       ].filter((url): url is string => Boolean(url))
     : [];
   const identityProfile = hasSelfCharacter

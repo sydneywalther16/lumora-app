@@ -313,6 +313,31 @@ export function toPublicSupabaseUrl(value: string): string | null {
   return toPublicSupabaseUrlCandidates(value)[0] ?? null;
 }
 
+export function resolveReferencePreviewUrl(reference: unknown): string | null {
+  const record = readObject(reference);
+  const value = typeof reference === 'string'
+    ? reference
+    : stringValue(
+        record.frontFaceUrl ??
+          record.leftAngleUrl ??
+          record.rightAngleUrl ??
+          record.fullBodyUrl ??
+          record.url ??
+          record.publicUrl ??
+          record.objectPath ??
+          record.path ??
+          record.fileName,
+      );
+  const resolvedUrl = value ? (cleanHttpUrl(value) ?? toPublicSupabaseUrl(value)) : null;
+
+  console.log('REFERENCE PREVIEW URL:', {
+    inputPreview: previewValue(value),
+    resolvedUrl,
+  });
+
+  return resolvedUrl;
+}
+
 async function validatePublicImageUrl(url: string): Promise<PublicImageValidation> {
   const controller = new AbortController();
   const timeout = globalThis.setTimeout(() => controller.abort(), 10_000);

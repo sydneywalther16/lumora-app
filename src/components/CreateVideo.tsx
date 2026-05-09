@@ -12,6 +12,7 @@ import {
 import { saveStudioProject, type StudioProject } from '../lib/projectStorage';
 import { loadLumoraProfile } from '../lib/profileStorage';
 import { loadSupabaseProfile, saveSupabaseDraft, saveSupabaseProject } from '../lib/supabaseAppData';
+import { resolveReferencePreviewUrl } from '../lib/selfCharacterReference';
 import { useSession } from '../hooks/useSession';
 import { useAppStore } from '../store/useAppStore';
 
@@ -149,9 +150,7 @@ function cleanReferenceUrl(value?: string | null): string | null {
 }
 
 function renderableReferenceImageUrl(value?: string | null): string | null {
-  const cleaned = cleanReferenceUrl(value);
-  if (!cleaned) return null;
-  return cleaned;
+  return resolveReferencePreviewUrl(value);
 }
 
 function pickReferenceImage(input: {
@@ -304,8 +303,8 @@ export default function CreateVideo({
   const primaryReferenceImage = pickReferenceImage({ referenceImageUrl, referenceImageUrls });
   const hasSelfCharacter = forceSelfMode || isDefaultSelfCharacter;
   const selectedSelfReferenceImageUrl = hasSelfCharacter
-    ? referenceImageUrl || primaryReferenceImage.url
-    : primaryReferenceImage.url || cleanReferenceUrl(characterAvatar);
+    ? resolveReferencePreviewUrl(referenceImageUrl) || resolveReferencePreviewUrl(primaryReferenceImage.url)
+    : resolveReferencePreviewUrl(primaryReferenceImage.url) || resolveReferencePreviewUrl(characterAvatar);
   const selfReferenceMode = hasSelfCharacter;
   const selectedGenerationMode: GenerationMode = selfReferenceMode
     ? 'self-reference-video'
@@ -325,11 +324,11 @@ export default function CreateVideo({
         ? 'Identity ready'
         : 'Needs references';
   const identityReferenceThumbs = [
-    identityProfile?.frontFaceUrl,
-    identityProfile?.leftAngleUrl,
-    identityProfile?.rightAngleUrl,
-    identityProfile?.fullBodyUrl,
-  ].filter((url): url is string => Boolean(renderableReferenceImageUrl(url)));
+    resolveReferencePreviewUrl(identityProfile?.frontFaceUrl),
+    resolveReferencePreviewUrl(identityProfile?.leftAngleUrl),
+    resolveReferencePreviewUrl(identityProfile?.rightAngleUrl),
+    resolveReferencePreviewUrl(identityProfile?.fullBodyUrl),
+  ].filter((url): url is string => Boolean(url));
   const canGenerate = true;
   const generateBusy = canGenerate ? busy || generationLoading || referenceLoading : true;
   const saveBusy = busy || generationLoading;
@@ -348,7 +347,7 @@ export default function CreateVideo({
     const currentPrompt = activePrompt;
     const selectedAspectRatio = aspectRatio;
     const selectedEngine = engine;
-    const selectedReferenceImageUrl = referenceImageUrl || selectedSelfReferenceImageUrl;
+    const selectedReferenceImageUrl = resolveReferencePreviewUrl(referenceImageUrl) || selectedSelfReferenceImageUrl;
     const selectedGenerationMode = selfReferenceMode
       ? 'self-reference-video'
       : selectedReferenceImageUrl
@@ -780,6 +779,7 @@ export default function CreateVideo({
               src={referenceThumbnailUrl}
               alt=""
               className="reference-mode-thumb"
+              onError={() => console.log('FAILED PREVIEW URL:', referenceThumbnailUrl)}
             />
           ) : selfReferenceMode ? (
             <div className="reference-mode-thumb reference-mode-placeholder" aria-hidden="true">
@@ -815,6 +815,7 @@ export default function CreateVideo({
                     <img
                       src={url}
                       alt=""
+                      onError={() => console.log('FAILED PREVIEW URL:', url)}
                       style={{
                         width: '100%',
                         aspectRatio: '1',

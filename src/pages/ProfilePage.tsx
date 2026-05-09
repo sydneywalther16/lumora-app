@@ -39,6 +39,7 @@ import {
   buildLumoraIdentityProfile,
   identityProfileToStylePreferences,
 } from '../lib/identityCharacter';
+import { resolveReferencePreviewUrl } from '../lib/selfCharacterReference';
 
 type Draft = { id: string; title: string; prompt: string; createdAt: string };
 type ProfileDebugInfo = {
@@ -843,18 +844,22 @@ function ImagePreview({
   errorMessage?: string;
 }) {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
-  const failed = Boolean(src && failedSrc === src);
+  const resolvedSrc = resolveReferencePreviewUrl(src);
+  const failed = Boolean(resolvedSrc && failedSrc === resolvedSrc);
 
-  return src && !failed ? (
+  return resolvedSrc && !failed ? (
     <img
-      src={src}
+      src={resolvedSrc}
       alt=""
       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-      onError={() => setFailedSrc(src)}
+      onError={() => {
+        console.log('FAILED PREVIEW URL:', resolvedSrc);
+        setFailedSrc(resolvedSrc);
+      }}
     />
   ) : (
     <span style={{ color: '#d3cdf3', fontSize: '1rem', padding: '8px', textAlign: 'center' }}>
-      {failed ? errorMessage ?? fallback : fallback}
+      {failed ? 'Preview unavailable' : fallback}
     </span>
   );
 }
