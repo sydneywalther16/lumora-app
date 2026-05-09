@@ -8,8 +8,22 @@ import StudioPage from './pages/StudioPage';
 import InboxPage from './pages/InboxPage';
 import ProfilePage from './pages/ProfilePage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
+import { useSession } from './hooks/useSession';
 
 export default function App() {
+  const { authReady, configured } = useSession();
+
+  if (configured && !authReady) {
+    return (
+      <div className="page" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
+        <section className="headline-card" style={{ width: 'min(420px, 100%)', textAlign: 'center' }}>
+          <span className="eyebrow">lumora</span>
+          <h1 style={{ marginTop: '8px' }}>Restoring Lumora session...</h1>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <Routes>
       <Route element={<AppShell />}>

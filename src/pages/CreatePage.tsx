@@ -34,8 +34,9 @@ function manualHttpsReferenceUrl(...values: Array<string | null | undefined>): s
 }
 
 export default function CreatePage() {
-  const { user, session, loading: sessionLoading, configured: supabaseConfigured } = useSession();
+  const { authReady, user, session, loading: sessionLoading, configured: supabaseConfigured } = useSession();
   const authUser = session?.user ?? user;
+  const authUserId = authUser?.id ?? null;
 
   const [characterRefreshKey, setCharacterRefreshKey] = useState(0);
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterProfile | null>(null);
@@ -52,23 +53,33 @@ export default function CreatePage() {
   });
 
   useEffect(() => {
+    setSelectedCharacter(null);
+    setDefaultSelfCharacter(null);
+    setResolvedReference(null);
+    setIsHydrated(false);
+  }, [authUserId]);
+
+  useEffect(() => {
     let active = true;
 
     async function loadData() {
       setCreatorDataLoading(true);
       setIsHydrated(false);
+      setDefaultSelfCharacter(null);
+      setResolvedReference(null);
 
-      if (supabaseConfigured && sessionLoading && !authUser) {
+      if (supabaseConfigured && (!authReady || sessionLoading)) {
         return;
       }
 
-      if (authUser) {
+      if (authUserId) {
         try {
-          const remoteProfile = await loadSupabaseProfile(authUser.id);
-          const remoteCharacters = await loadSupabaseCharacters(authUser.id);
+          const remoteProfile = await loadSupabaseProfile(authUserId);
+          const remoteCharacters = await loadSupabaseCharacters(authUserId);
           const selfChar = remoteCharacters.find(isCreatorSelfCharacter) ?? null;
           console.log('HYDRATED SELF CHARACTER:', selfChar);
           console.log('PROFILE SOURCE:', 'supabase');
+          console.log('SELF CHARACTER SOURCE:', 'supabase');
 
           if (!active) return;
 
@@ -78,7 +89,8 @@ export default function CreatePage() {
           console.error("Failed to load creator data:", err);
           if (active) {
             setDefaultSelfCharacter(null);
-            console.log('PROFILE SOURCE:', 'default');
+            console.log('PROFILE SOURCE:', 'supabase');
+            console.log('SELF CHARACTER SOURCE:', 'supabase');
           }
         } finally {
           if (active) {
@@ -91,6 +103,7 @@ export default function CreatePage() {
         const localSelf = getCreatorSelfCharacter();
         console.log('HYDRATED SELF CHARACTER:', localSelf);
         console.log('PROFILE SOURCE:', 'local');
+        console.log('SELF CHARACTER SOURCE:', localSelf ? 'local' : 'default');
 
         if (!active) return;
 
@@ -106,7 +119,7 @@ export default function CreatePage() {
     return () => {
       active = false;
     };
-  }, [authUser, characterRefreshKey, sessionLoading, supabaseConfigured]);
+  }, [authReady, authUserId, characterRefreshKey, sessionLoading, supabaseConfigured]);
 
   const activeSelfCharacter =
     !selectedCharacter && defaultSelfCharacter
@@ -188,7 +201,7 @@ export default function CreatePage() {
     : [];
   const identityProfile = hasSelfCharacter
     ? buildLumoraIdentityProfile({
-        userId: authUser?.id ?? 'local',
+        userId: authUserId ?? 'local',
         selfCharacter: activeSelfCharacter,
         profile,
         referenceImageUrls,
@@ -208,12 +221,12 @@ export default function CreatePage() {
 
     const nextIdentityProfile = mergeIdentityFeedback(identityProfile, feedback);
 
-    if (authUser) {
+    if (authUserId) {
       await saveSupabaseIdentityFeedback({
-        userId: authUser.id,
+        userId: authUserId,
         identityProfile: nextIdentityProfile,
       });
-      const remoteCharacters = await loadSupabaseCharacters(authUser.id);
+      const remoteCharacters = await loadSupabaseCharacters(authUserId);
       setDefaultSelfCharacter(remoteCharacters.find(isCreatorSelfCharacter) ?? defaultSelfCharacter);
       return;
     }
@@ -233,7 +246,7 @@ export default function CreatePage() {
   if (pageLoading) {
     return (
       <div className="page">
-        <h2>Loading...</h2>
+        <h2>Hydrating Lumora identity...</h2>
       </div>
     );
   }

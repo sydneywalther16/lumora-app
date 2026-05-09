@@ -1567,6 +1567,7 @@ function DraftCard({ draft }: { draft: Draft }) {
 
 export default function ProfilePage() {
   const {
+    authReady,
     user,
     session,
     loading: sessionLoading,
@@ -1637,7 +1638,7 @@ export default function ProfilePage() {
 
   useEffect(() => {
     void refreshProfileData();
-  }, [authUserId, sessionLoading, supabaseConfigured]);
+  }, [authReady, authUserId, sessionLoading, supabaseConfigured]);
 
   useEffect(() => {
     if (!editingSelfCharacter) return;
@@ -1646,12 +1647,16 @@ export default function ProfilePage() {
 
   async function refreshProfileData() {
     setIsHydrated(false);
+    setCharacters([]);
+    setPosts([]);
+    setCastIn([]);
+    setDrafts([]);
 
-    if (supabaseConfigured && sessionLoading) {
+    if (supabaseConfigured && (!authReady || sessionLoading)) {
       setDebugInfo((current) => ({
         ...current,
         authUserId,
-        source: 'default',
+        source: authUserId ? 'supabase' : 'default',
       }));
       return;
     }
@@ -1663,6 +1668,7 @@ export default function ProfilePage() {
         const loadedCreatorSelf = findCreatorSelfCharacter(loadedCharacters);
         console.log('HYDRATED SELF CHARACTER:', loadedCreatorSelf);
         console.log('PROFILE SOURCE:', 'supabase');
+        console.log('SELF CHARACTER SOURCE:', 'supabase');
         const [
           loadedPosts,
           loadedProjects,
@@ -1722,7 +1728,7 @@ export default function ProfilePage() {
         setDebugInfo((current) => ({
           ...current,
           authUserId,
-          source: 'default',
+          source: 'supabase',
         }));
         setCharacters([]);
         setIsHydrated(true);
@@ -1738,6 +1744,7 @@ export default function ProfilePage() {
     const loadedCreatorSelf = findCreatorSelfCharacter(loadedCharacters);
     console.log('HYDRATED SELF CHARACTER:', loadedCreatorSelf);
     console.log('PROFILE SOURCE:', typeof window !== 'undefined' && localStorage.getItem('lumora_profile') ? 'local' : 'default');
+    console.log('SELF CHARACTER SOURCE:', loadedCreatorSelf ? 'local' : 'default');
     setProfile(loadedProfile);
     setProfileDraft(loadedProfile);
     setCharacters(loadedCharacters);
@@ -2687,6 +2694,17 @@ export default function ProfilePage() {
       hasSelfReferenceSource(selfForm, 'rightAngle'));
   const debugSource = authUserId ? 'supabase' : debugInfo.source;
 
+  if (!authReady || sessionLoading || !isHydrated) {
+    return (
+      <div className="page" style={{ minHeight: '70vh', display: 'grid', placeItems: 'center' }}>
+        <section className="headline-card" style={{ width: 'min(420px, 100%)', textAlign: 'center' }}>
+          <span className="eyebrow">identity</span>
+          <h1 style={{ marginTop: '8px' }}>Hydrating Lumora identity...</h1>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="page" style={{ paddingBottom: '40px' }}>
       <section className="list-card" style={{ borderRadius: '30px', padding: '22px', background: 'rgba(20,16,24,0.95)' }}>
@@ -2760,14 +2778,16 @@ export default function ProfilePage() {
         </div>
       </section>
 
-      <div id="profile-auth-section">
-        <AuthCard
-          configured={supabaseConfigured}
-          loading={sessionLoading && !signedIn}
-          user={authUser}
-          session={session}
-        />
-      </div>
+      {!signedIn ? (
+        <div id="profile-auth-section">
+          <AuthCard
+            configured={supabaseConfigured}
+            loading={sessionLoading && !signedIn}
+            user={authUser}
+            session={session}
+          />
+        </div>
+      ) : null}
 
       {signedIn && (syncLocalProfileAvailable || syncLocalSelfAvailable) ? (
         <section className="headline-card compact" style={{ borderRadius: '24px', padding: '14px' }}>
