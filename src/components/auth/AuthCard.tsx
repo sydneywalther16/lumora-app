@@ -15,7 +15,11 @@ export default function AuthCard(props: Props = {}) {
   const loading = props.loading ?? false;
   const user = props.session?.user ?? props.user ?? null;
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
+  const [passwordMessage, setPasswordMessage] = useState('');
+  const [showPasswordAuth, setShowPasswordAuth] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   async function signIn() {
     if (!supabase) return;
@@ -40,6 +44,54 @@ export default function AuthCard(props: Props = {}) {
       options: { emailRedirectTo: callbackUrl },
     });
     setMessage(error ? error.message : 'Check your email for a sign-in link.');
+  }
+
+  async function signInWithPassword() {
+    if (!supabase) return;
+    if (!email.trim() || !password) {
+      setPasswordMessage('Enter an email and password to sign in.');
+      return;
+    }
+
+    setBusy(true);
+    setPasswordMessage('');
+
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      setPasswordMessage(error ? error.message : 'Signed in with password.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function signUpWithPassword() {
+    if (!supabase) return;
+    if (!email.trim() || !password) {
+      setPasswordMessage('Enter an email and password to create a test account.');
+      return;
+    }
+
+    setBusy(true);
+    setPasswordMessage('');
+
+    try {
+      const { error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+      });
+
+      setPasswordMessage(
+        error
+          ? error.message
+          : 'Account created. If confirmation is enabled, check your email before signing in.',
+      );
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function signOut() {
@@ -83,6 +135,54 @@ export default function AuthCard(props: Props = {}) {
           <button type="button" className="primary-btn" onClick={signIn}>Send sign-in link</button>
         </div>
         {message ? <p className="muted">{message}</p> : null}
+
+        <div style={{ display: 'grid', gap: '12px', marginTop: '16px' }}>
+          <button
+            type="button"
+            className="text-btn"
+            onClick={() => {
+              setShowPasswordAuth((current) => !current);
+              setPasswordMessage('');
+            }}
+            style={{ width: 'fit-content' }}
+          >
+            {showPasswordAuth ? 'Hide password sign-in' : 'Use password instead'}
+          </button>
+
+          {showPasswordAuth ? (
+            <div style={{ display: 'grid', gap: '12px' }}>
+              <label className="field-block">
+                <span>Password</span>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="Password"
+                  autoComplete="current-password"
+                />
+              </label>
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="primary-btn"
+                  onClick={() => void signInWithPassword()}
+                  disabled={busy}
+                >
+                  {busy ? 'Working...' : 'Sign in with password'}
+                </button>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => void signUpWithPassword()}
+                  disabled={busy}
+                >
+                  Create test account
+                </button>
+              </div>
+              {passwordMessage ? <p className="muted">{passwordMessage}</p> : null}
+            </div>
+          ) : null}
+        </div>
       </section>
     );
   }
