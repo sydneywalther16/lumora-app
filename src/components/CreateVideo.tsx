@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   type GenerationMode,
   type LumoraIdentityFeedback,
@@ -13,6 +13,12 @@ import { saveStudioProject, type StudioProject } from '../lib/projectStorage';
 import { loadLumoraProfile } from '../lib/profileStorage';
 import { loadSupabaseProfile, saveSupabaseDraft, saveSupabaseProject } from '../lib/supabaseAppData';
 import { resolveRenderableReferenceUrl } from '../lib/selfCharacterReference';
+import {
+  SEEDANCE_ENGINE_ID,
+  getSeedanceReferenceSet,
+  hasSeedanceMinimumReferences,
+  seedanceReferenceArray,
+} from '../lib/providers/seedance';
 import { useSession } from '../hooks/useSession';
 import { useAppStore } from '../store/useAppStore';
 import SelfReferencePreview, { normalizeReference } from './SelfReferencePreview';
@@ -39,9 +45,10 @@ type CreateVideoProps = {
 const stylePresets = ['Editorial Drama', 'Virtual Sitcom', 'Luxury POV', 'Cinematic Sunset'];
 const durations = [4, 8, 12, 16];
 const aspectRatios: VideoAspectRatio[] = ['9:16', '16:9', '1:1'];
-const engines: VideoEngine[] = ['replicate', 'sora-2', 'sora-2-pro'];
+const engines: VideoEngine[] = ['seedance-2.0', 'replicate'];
 const engineLabels: Record<VideoEngine, string> = {
-  replicate: 'Kling image-to-video',
+  'seedance-2.0': 'Seedance 2.0 Identity',
+  replicate: 'Kling image-to-video fallback',
   'sora-2': 'Sora 2',
   'sora-2-pro': 'Sora 2 Pro',
   veo: 'Veo',
@@ -295,6 +302,7 @@ export default function CreateVideo({
   const [duration, setDuration] = useState(8);
   const [aspectRatio, setAspectRatio] = useState<VideoAspectRatio>('9:16');
   const [engine, setEngine] = useState<VideoEngine>('replicate');
+  const [engineTouched, setEngineTouched] = useState(false);
   const [status, setStatus] = useState('');
   const [generationLoading, setGenerationLoading] = useState(false);
   const [generationError, setGenerationError] = useState('');
@@ -312,6 +320,9 @@ export default function CreateVideo({
   const [busy, setBusy] = useState(false);
   const [generationResult, setGenerationResult] = useState<GenerationResponse | null>(null);
   const primaryReferenceImage = pickReferenceImage({ referenceImageUrl, referenceImageUrls });
+  const seedanceReferences = getSeedanceReferenceSet(referenceImageUrls);
+  const seedanceReady = hasSeedanceMinimumReferences(seedanceReferences);
+  const seedanceReferenceImages = seedanceReferenceArray(seedanceReferences);
   const hasSelfCharacter = forceSelfMode || isDefaultSelfCharacter;
   const selectedSelfReferenceImageUrl = hasSelfCharacter
     ? resolveRenderableReferenceUrl(referenceImageUrl) || resolveRenderableReferenceUrl(primaryReferenceImage.url)
@@ -401,10 +412,23 @@ export default function CreateVideo({
   const generateBusy = canGenerate ? busy || generationLoading || referenceLoading : true;
   const saveBusy = busy || generationLoading;
   const isSoraEngine = engine === 'sora-2' || engine === 'sora-2-pro';
+  const isSeedanceEngine = engine === SEEDANCE_ENGINE_ID;
   const engineRoutingMessage =
-    isSoraEngine
+    isSeedanceEngine
+      ? seedanceReady
+        ? 'Seedance 2.0 runs through Replicate and uses front, left, and right identity references.'
+        : 'Seedance 2.0 Identity needs front, left, and right references. Use Kling fallback for single-image animation.'
+      : isSoraEngine
       ? 'Lumora Identity Character currently routes through Replicate image-to-video. Sora remains optional elsewhere.'
       : 'Kling runs through Replicate and uses your self-character reference image first.';
+
+  useEffect(() => {
+    if (seedanceReady && !engineTouched) {
+      setEngine(SEEDANCE_ENGINE_ID);
+    } else if (engine === SEEDANCE_ENGINE_ID) {
+      setEngine('replicate');
+    }
+  }, [engine, engineTouched, seedanceReady]);
 
   async function handleGenerate() {
     if (configured && sessionLoading && !authUser) {
@@ -415,10 +439,14 @@ export default function CreateVideo({
     const currentPrompt = activePrompt;
     const selectedAspectRatio = aspectRatio;
     const selectedEngine = engine;
+    const selectedSeedanceReferences = seedanceReferenceImages;
     const selectedReferenceImageUrl = resolveRenderableReferenceUrl(referenceImageUrl) || selectedSelfReferenceImageUrl;
+    const referenceImageForRequest = selectedEngine === SEEDANCE_ENGINE_ID
+      ? selectedSeedanceReferences[0] ?? selectedReferenceImageUrl
+      : selectedReferenceImageUrl;
     const selectedGenerationMode = selfReferenceMode
       ? 'self-reference-video'
-      : selectedReferenceImageUrl
+      : referenceImageForRequest
         ? 'image-to-video'
         : 'text-to-video-fallback';
     const selectedCharacterDescription =
@@ -431,9 +459,9 @@ export default function CreateVideo({
 
     console.log('FORCED SELF MODE:', {
       hasSelfCharacter,
-      referenceImageUrl: selectedReferenceImageUrl,
+      referenceImageUrl: referenceImageForRequest,
     });
-    console.log('FINAL IMAGE SENT:', selectedReferenceImageUrl);
+    console.log('FINAL IMAGE SENT:', referenceImageForRequest);
 
     setGenerationLoading(true);
     setGenerationError('');
@@ -449,7 +477,9 @@ export default function CreateVideo({
     setStatus('');
 
     try {
-      let keyframeUrl: string | null = cleanReferenceUrl(identityProfile?.keyframeUrl ?? null);
+      let keyframeUrl: string | null = selectedEngine === SEEDANCE_ENGINE_ID
+        ? null
+        : cleanReferenceUrl(identityProfile?.keyframeUrl ?? null);
       let keyframeFinalPrompt = '';
       let keyframeWarnings: string[] = [];
       let keyframeModel = '';
@@ -457,7 +487,7 @@ export default function CreateVideo({
         ? keyframeUrl ? 'identity-keyframe-to-video' : 'reference-photo-animation-fallback'
         : selectedGenerationMode;
 
-      if (selfReferenceMode && !keyframeUrl && selectedReferenceImageUrl && identityProfile) {
+      if (selectedEngine !== SEEDANCE_ENGINE_ID && selfReferenceMode && !keyframeUrl && selectedReferenceImageUrl && identityProfile) {
         const keyframeRes = await fetch('/api/lumora/generate-identity-keyframe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -513,10 +543,12 @@ export default function CreateVideo({
           identityPrompt: identityProfile?.identityPrompt,
           consistencyPrompt: identityProfile?.generationConsistencyPrompt,
           keyframeUrl,
-          referenceImageUrl: selectedReferenceImageUrl,
+          referenceImageUrl: referenceImageForRequest,
           additionalReferenceImageUrls,
           canonicalReferenceSet: identityProfile?.canonicalReferenceSet,
-          referenceImages: additionalReferenceImageUrls,
+          referenceImages: selectedEngine === SEEDANCE_ENGINE_ID
+            ? selectedSeedanceReferences
+            : additionalReferenceImageUrls,
           referenceImageUrls: referencePayload,
           aspectRatio: selectedAspectRatio,
           duration,
@@ -549,7 +581,7 @@ export default function CreateVideo({
       const nextGenerationMode = data.generationMode || videoGenerationMode;
       const nextDisplayEngine =
         data.displayEngine || (nextGenerationMode === 'text-to-video-fallback' ? 'text fallback' : 'kling');
-      const nextReferenceImageUrl = cleanReferenceUrl(normalizeVideoUrl(data.referenceImageUrl) || selectedReferenceImageUrl);
+      const nextReferenceImageUrl = cleanReferenceUrl(normalizeVideoUrl(data.referenceImageUrl) || referenceImageForRequest);
       const nextKeyframeUrl = cleanReferenceUrl(normalizeVideoUrl(data.keyframeUrl) || keyframeUrl);
       const nextWarnings = [
         ...keyframeWarnings,
@@ -595,6 +627,8 @@ export default function CreateVideo({
           ? 'Text-only fallback render created. Likeness is not guaranteed.'
           : nextGenerationMode === 'identity-keyframe-to-video'
             ? 'Lumora Identity Character keyframe render created.'
+          : selectedEngine === SEEDANCE_ENGINE_ID
+            ? 'Seedance identity render created from multiple references.'
           : 'Kling self-reference video render created.',
         createdAt: now,
       };
@@ -676,7 +710,7 @@ export default function CreateVideo({
             duration,
             aspectRatio,
             engine,
-            displayEngine: engine === 'replicate' ? 'kling' : engine,
+            displayEngine: engine === SEEDANCE_ENGINE_ID ? 'seedance' : engine === 'replicate' ? 'kling' : engine,
             characterId,
             characterName,
             characterAvatar,
@@ -792,7 +826,13 @@ export default function CreateVideo({
 
         <label className="field-block">
           <span>Engine</span>
-          <select value={engine} onChange={(event) => setEngine(event.target.value as VideoEngine)}>
+          <select
+            value={engine}
+            onChange={(event) => {
+              setEngineTouched(true);
+              setEngine(event.target.value as VideoEngine);
+            }}
+          >
             {engines.map((option) => (
               <option key={option} value={option}>
                 {engineLabels[option] ?? option}

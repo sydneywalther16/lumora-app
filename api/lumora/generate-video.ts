@@ -48,6 +48,15 @@ type ReplicateRunResult = {
   durationSent: number | null;
 };
 
+type GenerationModeUsed =
+  | 'seedance-identity'
+  | 'identity-keyframe-to-video'
+  | 'reference-photo-animation-fallback';
+
+const SEEDANCE_MODEL = 'bytedance/seedance-2.0' as ReplicateModelIdentifier;
+const SEEDANCE_IDENTITY_PROMPT =
+  'Use the provided reference images only as identity references. Do not animate or copy any single source image. Generate a new photorealistic person matching the same identity in the requested scene.';
+
 function safeJsonValue(value: unknown, seen = new WeakSet<object>()): unknown {
   if (value == null) return value;
 
@@ -242,9 +251,51 @@ function additionalReferenceImageUrls(body: GenerateVideoBody, primaryReference:
   });
 }
 
+function uniqueHttpUrls(values: string[]): string[] {
+  const seen = new Set<string>();
+
+  return values.flatMap((url) => {
+    if (!url || seen.has(url)) return [];
+    seen.add(url);
+    return [url];
+  });
+}
+
+function seedanceReferenceImages(body: GenerateVideoBody): string[] {
+  const urls = referenceUrlMap(body.referenceImageUrls);
+  const explicitReferences = Array.isArray(body.referenceImages)
+    ? body.referenceImages.map(publicImageUrl)
+    : [];
+  const canonicalReferences = Array.isArray(body.canonicalReferenceSet)
+    ? body.canonicalReferenceSet.map(publicImageUrl)
+    : [];
+
+  return uniqueHttpUrls([
+    urls.frontFace,
+    urls.leftAngle,
+    urls.rightAngle,
+    urls.fullBody,
+    ...explicitReferences,
+    ...canonicalReferences,
+  ]);
+}
+
 function normalizeAspectRatio(value: unknown): string {
   const aspectRatio = textValue(value);
   return ['9:16', '16:9', '1:1'].includes(aspectRatio) ? aspectRatio : '9:16';
+}
+
+function normalizeDuration(value: unknown): number {
+  const duration = typeof value === 'number'
+    ? value
+    : Number.parseInt(textValue(value), 10);
+
+  return Number.isFinite(duration) && duration > 0 ? Math.round(duration) : 8;
+}
+
+function isSeedanceEngine(body: GenerateVideoBody): boolean {
+  const engine = textValue(body.engine).toLowerCase();
+  return engine === 'seedance-2.0' || engine === 'seedance';
 }
 
 function buildFinalPrompt(input: {
@@ -252,13 +303,16 @@ function buildFinalPrompt(input: {
   characterDescription: string;
   identityPrompt: string;
   consistencyPrompt: string;
+  engine: string;
   style: string;
   camera: string;
   mood: string;
   aspectRatio: string;
 }) {
   return [
-    input.consistencyPrompt || 'Create a new photorealistic character render based on the provided identity references. Do not simply animate or copy the source photo. Use the references only to preserve identity: face shape, hair color, hairstyle, skin tone, eye area, proportions, makeup style, and overall likeness. Place this same person into the requested new scene.',
+    input.consistencyPrompt || (input.engine === 'seedance-2.0'
+      ? SEEDANCE_IDENTITY_PROMPT
+      : 'Create a new photorealistic character render based on the provided identity references. Do not simply animate or copy the source photo. Use the references only to preserve identity: face shape, hair color, hairstyle, skin tone, eye area, proportions, makeup style, and overall likeness. Place this same person into the requested new scene.'),
     input.identityPrompt ? `Identity prompt: ${input.identityPrompt}` : '',
     `${input.characterDescription} ${input.prompt}`.trim(),
     input.style ? `Style: ${input.style}` : '',
@@ -386,8 +440,9 @@ async function runReplicate(input: {
   model: ReplicateModelIdentifier;
   requestInput: Record<string, unknown>;
   durationSent: number | null;
-  generationModeUsed: 'identity-keyframe-to-video' | 'reference-photo-animation-fallback';
+  generationModeUsed: GenerationModeUsed;
   referenceImageUrl: string;
+  fallbackToStartImageOnly?: boolean;
 }) {
   console.log('LUMORA PROVIDER', {
     provider: 'replicate',
@@ -396,12 +451,15 @@ async function runReplicate(input: {
     inputKeys: Object.keys(input.requestInput),
   });
 
-  if (input.generationModeUsed) {
+  if (input.generationModeUsed === 'seedance-identity') {
+    console.log('SEEDANCE INPUT', input.requestInput);
+  } else if (input.generationModeUsed) {
     console.log('SENDING IMAGE TO KLING:', input.referenceImageUrl);
   }
 
   const attempts: unknown[] = [];
   const shouldTryStartImageOnly =
+    input.fallbackToStartImageOnly === true &&
     Array.isArray(input.requestInput.reference_images) &&
     input.requestInput.reference_images.length > 0;
   const requestInputs = shouldTryStartImageOnly
@@ -416,6 +474,9 @@ async function runReplicate(input: {
   for (const [index, requestInput] of requestInputs.entries()) {
     try {
       const output = await input.replicate.run(input.model, { input: requestInput });
+      if (input.generationModeUsed === 'seedance-identity') {
+        console.log('SEEDANCE RESPONSE', safeJsonValue(output));
+      }
       const videoUrl = await outputUrl(output);
       if (!videoUrl) {
         throw new Error(`No video URL returned. Raw output: ${JSON.stringify(safeJsonValue(output))}`);
@@ -490,15 +551,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return sendJson(res, 500, { error: 'Missing REPLICATE_API_TOKEN' });
     }
 
-    const referenceImageUrl = firstReferenceImageUrl(body);
+    const engine = textValue(body.engine).toLowerCase() || 'replicate';
+    const useSeedance = isSeedanceEngine(body);
+    const seedanceReferences = seedanceReferenceImages(body);
+    const referenceImageUrl = useSeedance
+      ? seedanceReferences[0] ?? ''
+      : firstReferenceImageUrl(body);
     const keyframeUrl = publicImageUrl(body.keyframeUrl);
     const additionalReferences = additionalReferenceImageUrls(body, referenceImageUrl);
     const aspectRatio = normalizeAspectRatio(body.aspectRatio);
+    const durationSent = normalizeDuration(body.duration);
     const finalPrompt = buildFinalPrompt({
       prompt,
       characterDescription: textValue(body.characterDescription),
       identityPrompt: textValue(body.identityPrompt),
       consistencyPrompt: textValue(body.consistencyPrompt) || textValue(body.generationConsistencyPrompt),
+      engine,
       style: textValue(body.style),
       camera: textValue(body.camera),
       mood: textValue(body.mood),
@@ -511,7 +579,96 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       referenceImageUrl,
       keyframeUrl,
       additionalReferences,
+      seedanceReferences,
+      engine,
     });
+
+    if (useSeedance) {
+      if (seedanceReferences.length < 3) {
+        return sendJson(res, 400, {
+          error: 'Seedance 2.0 Identity requires front, left, and right reference images.',
+          received: seedanceReferences,
+          engine,
+          model: SEEDANCE_MODEL,
+        });
+      }
+
+      for (const seedanceReference of seedanceReferences) {
+        if (!isValidHttpUrl(seedanceReference)) {
+          return sendJson(res, 400, {
+            error: 'Invalid Seedance reference image URL',
+            received: seedanceReference,
+            engine,
+            model: SEEDANCE_MODEL,
+          });
+        }
+
+        const validation = await validateReferenceImageUrl(seedanceReference);
+        if (!validation.ok) {
+          return sendJson(res, 400, {
+            error: 'Seedance reference image not accessible',
+            referenceImageUrl: seedanceReference,
+            status: validation.status,
+            contentType: validation.contentType,
+            engine,
+            model: SEEDANCE_MODEL,
+          });
+        }
+      }
+
+      const requestInput = {
+        prompt: promptForModel,
+        reference_images: seedanceReferences,
+        duration: durationSent,
+        aspect_ratio: aspectRatio,
+      };
+
+      console.log('GENERATION ENGINE USED', {
+        engine: 'seedance-2.0',
+        provider: 'replicate',
+        model: SEEDANCE_MODEL,
+      });
+      console.log('SEEDANCE INPUT', requestInput);
+
+      const { default: Replicate } = await import('replicate');
+      const replicate = new Replicate({ auth: token }) as ReplicateClient;
+
+      const result = await runReplicate({
+        replicate,
+        model: SEEDANCE_MODEL,
+        requestInput,
+        durationSent,
+        generationModeUsed: 'seedance-identity',
+        referenceImageUrl,
+        fallbackToStartImageOnly: false,
+      });
+
+      console.log('FINAL VIDEO URL:', result.videoUrl);
+
+      return sendJson(res, 200, {
+        success: true,
+        videoUrl: result.videoUrl,
+        provider: 'replicate',
+        model: result.model,
+        displayEngine: 'seedance',
+        generationMode: 'seedance-identity',
+        generationModeUsed: 'seedance-identity',
+        hasReferenceImage: true,
+        modelUsed: result.model,
+        durationSent: result.durationSent,
+        identityId: textValue(body.identityId) || null,
+        keyframeUrl: null,
+        referenceImageUrl,
+        referenceImages: seedanceReferences,
+        additionalReferenceImageUrls: seedanceReferences.slice(1),
+        finalPrompt: promptForModel,
+        warnings: [],
+        rawOutput: {
+          provider: safeJsonValue(result.rawOutput),
+          attempts: result.attempts,
+        },
+      });
+    }
 
     if (!isValidHttpUrl(referenceImageUrl)) {
       return sendJson(res, 400, {
@@ -567,6 +724,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       generationModeUsed,
       identityId: textValue(body.identityId),
     });
+    console.log('GENERATION ENGINE USED', {
+      engine: 'kling',
+      provider: 'replicate',
+      model,
+    });
     console.log('FINAL INPUT SENT TO KLING', requestInput);
 
     const { default: Replicate } = await import('replicate');
@@ -579,6 +741,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       durationSent: null,
       generationModeUsed,
       referenceImageUrl,
+      fallbackToStartImageOnly: true,
     });
 
     console.log('FINAL VIDEO URL:', result.videoUrl);
