@@ -50,6 +50,7 @@ const engineLabels: Record<VideoEngine, string> = {
   openai: 'OpenAI',
 };
 const referenceImageLabels: Partial<Record<keyof ReferenceImageUrls, string>> = {
+  manualReferenceImageUrl: 'Manual reference override',
   frontFace: 'Front face',
   fullBody: 'Full body',
   leftAngle: 'Left angle',
@@ -166,6 +167,7 @@ function pickReferenceImage(input: {
   if (!urls) return { url: null, label: null };
 
   const orderedSlots: Array<keyof ReferenceImageUrls> = [
+    'manualReferenceImageUrl',
     'frontFaceUrl',
     'frontFacePath',
     'frontFace',
@@ -201,6 +203,7 @@ function referenceImagePayload(urls?: Partial<ReferenceImageUrls> | null) {
   const optionalUrl = (value?: string | null) => resolveRenderableReferenceUrl(value) ?? undefined;
 
   return {
+    manualReferenceImageUrl: optionalUrl(urls.manualReferenceImageUrl),
     front: optionalUrl(urls.frontFaceUrl ?? urls.frontFacePath ?? urls.frontFace),
     frontFace: optionalUrl(urls.frontFaceUrl ?? urls.frontFacePath ?? urls.frontFace),
     frontFaceUrl: optionalUrl(urls.frontFaceUrl ?? urls.frontFacePath ?? urls.frontFace),
@@ -426,7 +429,7 @@ export default function CreateVideo({
       hasSelfCharacter,
       referenceImageUrl: selectedReferenceImageUrl,
     });
-    console.log('FINAL IMAGE SENT:', referenceImageUrl);
+    console.log('FINAL IMAGE SENT:', selectedReferenceImageUrl);
 
     setGenerationLoading(true);
     setGenerationError('');

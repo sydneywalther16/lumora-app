@@ -21,7 +21,7 @@ export function isCreatorSelfCharacter(character: CharacterProfile | null | unde
   return Boolean(character && (character.id === CREATOR_SELF_CHARACTER_ID || character.isCreatorSelf === true));
 }
 
-export function cleanupCreatorSelfMetadata(profile: { displayName: string; defaultSelfCharacterId?: string | null; defaultSelfCharacterAvatar?: string | null; avatar?: string; selfReferenceImageUrls?: any; selfReferencePhotoNames?: any }): void {
+export function cleanupCreatorSelfMetadata(profile: { displayName: string; defaultSelfCharacterId?: string | null; defaultSelfCharacterAvatar?: string | null; avatar?: string; manualReferenceImageUrl?: string | null; selfReferenceImageUrls?: any; selfReferencePhotoNames?: any }): void {
   if (typeof window === 'undefined') return;
 
   try {
@@ -49,6 +49,11 @@ export function cleanupCreatorSelfMetadata(profile: { displayName: string; defau
         referenceImageUrls: {
           ...fallbackReferenceImages,
           ...previousSelfCharacter.referenceImageUrls,
+          manualReferenceImageUrl:
+            cleanMediaUrl(profile.manualReferenceImageUrl) ||
+            cleanMediaUrl(profile.selfReferenceImageUrls?.manualReferenceImageUrl) ||
+            previousSelfCharacter.referenceImageUrls?.manualReferenceImageUrl ||
+            null,
           frontFace:
             cleanMediaUrl(profile.defaultSelfCharacterAvatar) ||
             cleanMediaUrl(profile.avatar) ||
@@ -144,6 +149,7 @@ export function saveCreatorSelfCharacter(payload: {
     
     // Clean media URLs - remove base64 data before storing
     const cleanedReferenceImageUrls: ReferenceImageUrls = {
+      manualReferenceImageUrl: cleanMediaUrl(payload.referenceImageUrls.manualReferenceImageUrl),
       frontFace: cleanMediaUrl(payload.referenceImageUrls.frontFace) || '',
       frontFaceUrl: cleanMediaUrl(payload.referenceImageUrls.frontFaceUrl ?? payload.referenceImageUrls.frontFace),
       frontFacePath: cleanMediaUrl(payload.referenceImageUrls.frontFacePath),
@@ -295,6 +301,7 @@ export function saveLocalCharacter(payload: {
     visibility: payload.visibility,
     stylePreferences: payload.stylePreferences,
     referenceImageUrls: {
+      manualReferenceImageUrl: cleanMediaUrl(payload.referenceImageUrls.manualReferenceImageUrl),
       frontFace: cleanMediaUrl(payload.referenceImageUrls.frontFace) || '',
       frontFaceUrl: cleanMediaUrl(payload.referenceImageUrls.frontFaceUrl ?? payload.referenceImageUrls.frontFace),
       frontFacePath: cleanMediaUrl(payload.referenceImageUrls.frontFacePath),

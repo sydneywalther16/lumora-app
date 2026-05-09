@@ -2,6 +2,7 @@ import type { CreatorSelfStylePreferences, LumoraPost } from './api';
 import type { StudioProject } from './projectStorage';
 
 type SelfReferenceImageUrls = {
+  manualReferenceImageUrl?: string | null;
   frontFace?: string | null;
   frontFaceUrl?: string | null;
   frontFacePath?: string | null;
@@ -35,6 +36,7 @@ export type LumoraProfile = {
   defaultSelfCharacterId?: string | null;
   defaultSelfCharacterName?: string | null;
   defaultSelfCharacterAvatar?: string | null;
+  manualReferenceImageUrl?: string | null;
   selfReferenceImageUrls?: SelfReferenceImageUrls | null;
   selfReferencePhotoNames?: SelfReferencePhotoNames | null;
   selfCaptureVideoName?: string | null;
@@ -100,6 +102,7 @@ function readReferenceMetadata(value: unknown): SelfReferenceImageUrls | null {
   if (!record) return null;
 
   return {
+    manualReferenceImageUrl: typeof record.manualReferenceImageUrl === 'string' ? record.manualReferenceImageUrl : null,
     frontFace: typeof record.frontFace === 'string' ? record.frontFace : null,
     frontFaceUrl: typeof record.frontFaceUrl === 'string' ? record.frontFaceUrl : null,
     frontFacePath: typeof record.frontFacePath === 'string' ? record.frontFacePath : null,
@@ -164,6 +167,10 @@ export function loadLumoraProfile(): LumoraProfile {
           : null,
       defaultSelfCharacterAvatar:
         typeof parsed.defaultSelfCharacterAvatar === 'string' ? parsed.defaultSelfCharacterAvatar : null,
+      manualReferenceImageUrl:
+        typeof parsed.manualReferenceImageUrl === 'string' && parsed.manualReferenceImageUrl.trim()
+          ? parsed.manualReferenceImageUrl
+          : readReferenceMetadata(parsed.selfReferenceImageUrls)?.manualReferenceImageUrl ?? null,
       selfReferenceImageUrls: readReferenceMetadata(parsed.selfReferenceImageUrls),
       selfReferencePhotoNames: readReferenceMetadata(parsed.selfReferencePhotoNames),
       selfCaptureVideoName:

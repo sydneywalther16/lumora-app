@@ -28,6 +28,11 @@ import {
 } from '../lib/identityCharacter';
 import type { LumoraIdentityFeedback } from '../lib/api';
 
+function manualHttpsReferenceUrl(...values: Array<string | null | undefined>): string | null {
+  const value = values.find((item) => typeof item === 'string' && item.trim().startsWith('https://'));
+  return value?.trim() ?? null;
+}
+
 export default function CreatePage() {
   const { user, session, loading: sessionLoading, configured: supabaseConfigured } = useSession();
   const authUser = session?.user ?? user;
@@ -147,16 +152,26 @@ export default function CreatePage() {
   }, [activeSelfCharacter, isHydrated, profile]);
 
   const savedSelfReferenceUrls = activeSelfCharacter?.referenceImageUrls ?? null;
+  const manualReferenceImageUrl = hasSelfCharacter
+    ? manualHttpsReferenceUrl(
+        savedSelfReferenceUrls?.manualReferenceImageUrl,
+        profile.manualReferenceImageUrl,
+        profile.selfReferenceImageUrls?.manualReferenceImageUrl,
+      )
+    : null;
   const savedFrontFaceUrl = resolveRenderableReferenceUrl(savedSelfReferenceUrls?.frontFaceUrl)
     ?? resolveRenderableReferenceUrl(savedSelfReferenceUrls?.frontFacePath)
     ?? resolveRenderableReferenceUrl(savedSelfReferenceUrls?.frontFace);
   const referenceImageUrl = hasSelfCharacter
-    ? resolvedReference?.primary ?? savedFrontFaceUrl
+    ? manualReferenceImageUrl ?? savedFrontFaceUrl ?? resolvedReference?.primary ?? null
     : resolveRenderableReferenceUrl(selectedCharacter?.referenceImageUrls?.frontFaceUrl)
       ?? resolveRenderableReferenceUrl(selectedCharacter?.referenceImageUrls?.frontFacePath)
       ?? resolveRenderableReferenceUrl(selectedCharacter?.referenceImageUrls?.frontFace);
   const referenceImageUrls = hasSelfCharacter
-    ? resolvedReference?.referenceImageUrls ?? activeSelfCharacter?.referenceImageUrls ?? null
+    ? {
+        ...(resolvedReference?.referenceImageUrls ?? activeSelfCharacter?.referenceImageUrls ?? {}),
+        manualReferenceImageUrl,
+      }
     : selectedCharacter?.referenceImageUrls ?? null;
   const additionalReferenceImageUrls = hasSelfCharacter
     ? resolvedReference?.additional ?? [
@@ -245,7 +260,7 @@ export default function CreatePage() {
         referenceImageUrls={referenceImageUrls}
         additionalReferenceImageUrls={additionalReferenceImageUrls}
         referenceLoading={referenceLoading}
-        referenceLabel={identityProfile ? 'Lumora Identity Character' : null}
+        referenceLabel={manualReferenceImageUrl ? 'Temporary manual reference override' : identityProfile ? 'Lumora Identity Character' : null}
         forceSelfMode={hasSelfCharacter}
         isHydrated={isHydrated}
         identityProfile={identityProfile}

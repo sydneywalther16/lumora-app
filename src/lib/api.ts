@@ -101,6 +101,7 @@ export type MediaUploadInput = {
 };
 
 export type ReferenceImageUrls = {
+  manualReferenceImageUrl?: string | null;
   frontFace: string;
   frontFaceUrl?: string | null;
   frontFacePath?: string | null;

@@ -54,6 +54,7 @@ export type SelfCharacterReferenceImage = {
 };
 
 const knownImageKeys = new Set([
+  'manualReferenceImageUrl',
   'frontFace',
   'frontFaceUrl',
   'frontFacePath',
@@ -525,6 +526,7 @@ function pushKnownReferenceCandidates(
   prefix: string,
   userId?: string | null,
 ) {
+  pushCandidate(candidates, 'frontFace', `${prefix}.manualReferenceImageUrl`, source.manualReferenceImageUrl, userId);
   pushCandidate(candidates, 'frontFace', `${prefix}.frontFace`, source.frontFace, userId);
   pushCandidate(candidates, 'frontFace', `${prefix}.frontFaceUrl`, source.frontFaceUrl, userId);
   pushCandidate(candidates, 'frontFace', `${prefix}.frontFacePath`, source.frontFacePath, userId);
@@ -644,6 +646,7 @@ function buildReferenceCandidates(
 
 function candidatePriority(candidate: ReferenceCandidate) {
   const label = candidate.label.toLowerCase();
+  if (label.endsWith('.manualreferenceimageurl')) return -1;
   if (label.endsWith('.frontfaceurl')) return 0;
   if (label.endsWith('.avatarurl')) return 1;
   if (label.endsWith('.imageurl')) return 2;

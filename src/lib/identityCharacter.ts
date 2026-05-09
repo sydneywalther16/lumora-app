@@ -144,6 +144,7 @@ export function buildLumoraIdentityProfile(input: IdentityBuildInput): LumoraIde
   const existing = getIdentityProfileFromCharacter(input.selfCharacter);
   const frontFaceUrl = cleanHttpUrl(
     input.primaryReferenceImageUrl ||
+      referenceImageUrls.manualReferenceImageUrl ||
       referenceImageUrls.frontFaceUrl ||
       referenceImageUrls.frontFace,
   );

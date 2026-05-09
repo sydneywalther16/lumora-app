@@ -74,6 +74,7 @@ type SelfCharacterForm = {
   fullBody: string;
   fullBodyPath: string;
   fullBodyName: string;
+  manualReferenceImageUrl: string;
   selfieVideoName: string;
   selfieVideoUrl: string | null;
   selfieVideoPath: string;
@@ -131,6 +132,10 @@ function selfReferencePreviewSource(form: SelfCharacterForm, field: ReferencePho
 
 function hasSelfReferenceSource(form: SelfCharacterForm, field: ReferencePhotoField): boolean {
   return Boolean(selfReferencePreviewSource(form, field));
+}
+
+function isManualReferenceUrlReady(value?: string | null): boolean {
+  return Boolean(value?.trim().startsWith('https://'));
 }
 
 function selfReferencePreviewReference(form: SelfCharacterForm, field: ReferencePhotoField) {
@@ -333,8 +338,14 @@ async function prepareLocalProfileForAccountSync(
     defaultSelfCharacterAvatar: isTransientMediaUrl(nextProfile.defaultSelfCharacterAvatar)
       ? null
       : nextProfile.defaultSelfCharacterAvatar ?? null,
+    manualReferenceImageUrl: isTransientMediaUrl(nextProfile.manualReferenceImageUrl)
+      ? null
+      : nextProfile.manualReferenceImageUrl || nextProfile.selfReferenceImageUrls?.manualReferenceImageUrl || null,
     selfReferenceImageUrls: nextProfile.selfReferenceImageUrls
       ? {
+          manualReferenceImageUrl: isTransientMediaUrl(nextProfile.selfReferenceImageUrls.manualReferenceImageUrl)
+            ? null
+            : nextProfile.selfReferenceImageUrls.manualReferenceImageUrl || nextProfile.manualReferenceImageUrl || null,
           frontFace: isTransientMediaUrl(nextProfile.selfReferenceImageUrls.frontFace)
             ? null
             : nextProfile.selfReferenceImageUrls.frontFace ?? null,
@@ -474,6 +485,7 @@ function parseSelfCharacterEditorDraft(value: unknown): SelfCharacterEditorDraft
     fullBody: readString(record.fullBody),
     fullBodyPath: readString(record.fullBodyPath),
     fullBodyName: readString(record.fullBodyName),
+    manualReferenceImageUrl: readString(record.manualReferenceImageUrl),
     selfieVideoName: readString(record.selfieVideoName),
     selfieVideoUrl: firstNullableString(readString(record.selfieVideoUrl)),
     selfieVideoPath: readString(record.selfieVideoPath),
@@ -526,6 +538,7 @@ function createSelfCharacterEditorDraft(form: SelfCharacterForm): SelfCharacterE
     fullBody: form.fullBody,
     fullBodyPath: form.fullBodyPath,
     fullBodyName: form.fullBodyName,
+    manualReferenceImageUrl: form.manualReferenceImageUrl,
     selfieVideoName: form.selfieVideoName,
     selfieVideoUrl: form.selfieVideoUrl,
     selfieVideoPath: form.selfieVideoPath,
@@ -569,6 +582,7 @@ function cleanMediaFromDraft(draft: SelfCharacterEditorDraft): SelfCharacterEdit
     leftAngle: cleanMediaUrl(draft.leftAngle) || '',
     rightAngle: cleanMediaUrl(draft.rightAngle) || '',
     fullBody: cleanMediaUrl(draft.fullBody) || '',
+    manualReferenceImageUrl: cleanMediaUrl(draft.manualReferenceImageUrl) || '',
     selfieVideoUrl: cleanMediaUrl(draft.selfieVideoUrl),
     selfieVideoPath: cleanMediaUrl(draft.selfieVideoPath) || '',
     selfieVideo2Url: cleanMediaUrl(draft.selfieVideo2Url),
@@ -624,6 +638,11 @@ function buildCreatorSelfCharacterSource(character: CharacterProfile | null): Se
     fullBody: firstString(character.referenceImageUrls.fullBodyUrl, character.referenceImageUrls.fullBody, editorDraft?.fullBody),
     fullBodyPath: firstString(character.referenceImageUrls.fullBodyPath, editorDraft?.fullBodyPath),
     fullBodyName: firstString(readString(referencePhotoNames.fullBody), editorDraft?.fullBodyName, character.referenceImageUrls.fullBody ? 'Saved full body photo' : ''),
+    manualReferenceImageUrl: firstString(
+      character.referenceImageUrls.manualReferenceImageUrl,
+      readString(stylePreferences.manualReferenceImageUrl),
+      editorDraft?.manualReferenceImageUrl,
+    ),
     selfieVideoName: firstString(editorDraft?.selfieVideoName, character.sourceCaptureVideoUrl ? 'Saved selfie video' : ''),
     selfieVideoUrl: firstNullableString(character.sourceCaptureVideoUrl, editorDraft?.selfieVideoUrl),
     selfieVideoPath: firstString(character.sourceCaptureVideoPath, readString(stylePreferences.selfieVideoPath), editorDraft?.selfieVideoPath),
@@ -684,6 +703,11 @@ function buildProfileSelfCharacterSource(profile: LumoraProfile): SelfCharacterF
     fullBody: firstString(readString(referenceImageUrls.fullBodyUrl), readString(referenceImageUrls.fullBody), editorDraft?.fullBody),
     fullBodyPath: firstString(readString(referenceImageUrls.fullBodyPath), editorDraft?.fullBodyPath),
     fullBodyName: firstString(readString(referencePhotoNames.fullBody), editorDraft?.fullBodyName),
+    manualReferenceImageUrl: firstString(
+      profile.manualReferenceImageUrl,
+      readString(referenceImageUrls.manualReferenceImageUrl),
+      editorDraft?.manualReferenceImageUrl,
+    ),
     selfieVideoName: firstString(profile.selfCaptureVideoName, editorDraft?.selfieVideoName),
     selfieVideoUrl: firstNullableString(profile.selfCaptureVideoUrl, editorDraft?.selfieVideoUrl),
     selfieVideoPath: firstString(editorDraft?.selfieVideoPath),
@@ -733,6 +757,7 @@ function mergeSelfCharacterFormSources(...sources: SelfCharacterFormSource[]): S
     fullBody: findStringField('fullBody'),
     fullBodyPath: findStringField('fullBodyPath'),
     fullBodyName: findStringField('fullBodyName'),
+    manualReferenceImageUrl: findStringField('manualReferenceImageUrl'),
     selfieVideoName: findStringField('selfieVideoName'),
     selfieVideoUrl: findNullableStringField('selfieVideoUrl'),
     selfieVideoPath: findStringField('selfieVideoPath'),
@@ -791,6 +816,7 @@ function buildBlankSelfCharacterForm(): SelfCharacterForm {
     fullBody: '',
     fullBodyPath: '',
     fullBodyName: '',
+    manualReferenceImageUrl: '',
     selfieVideoName: '',
     selfieVideoUrl: null,
     selfieVideoPath: '',
@@ -1907,6 +1933,7 @@ export default function ProfilePage() {
     const finalEditorDraft = saveSelfCharacterEditorDraft(nextForm) ?? createSelfCharacterEditorDraft(nextForm);
     const displayName = profile.displayName.trim() || 'Creator';
     const referenceImageUrls = {
+      manualReferenceImageUrl: nextForm.manualReferenceImageUrl || null,
       frontFace: nextForm.frontFace,
       frontFaceUrl: nextForm.frontFace,
       frontFacePath: nextForm.frontFacePath || null,
@@ -1928,6 +1955,7 @@ export default function ProfilePage() {
       selfCaptureConsent: nextForm.selfCaptureConsent,
       selfCaptureCompleted: nextForm.selfCaptureCompleted,
       selfVoiceSampleConsent: Boolean(nextForm.voiceSampleConsent),
+      manualReferenceImageUrl: nextForm.manualReferenceImageUrl || null,
       selfieVideoPath: nextForm.selfieVideoPath || null,
       selfieVideo2Name: nextForm.selfieVideo2Name || null,
       selfieVideo2Url: nextForm.selfieVideo2Url,
@@ -2010,6 +2038,7 @@ export default function ProfilePage() {
     });
     const remoteCharacters = await loadSupabaseCharacters(authUserId);
 
+    saveLumoraProfile(saved.profile);
     setProfile(saved.profile);
     setProfileDraft(saved.profile);
     setCharacters(remoteCharacters.length ? remoteCharacters : [saved.character]);
@@ -2187,8 +2216,8 @@ export default function ProfilePage() {
   }
 
   async function handleSaveSelfCharacter() {
-    if (!selfForm.frontFace || !selfForm.leftAngle || !selfForm.rightAngle) {
-      setSelfCharacterStatus('Add front, left, and right photos to save your self character.');
+    if (!isManualReferenceUrlReady(selfForm.manualReferenceImageUrl) && (!selfForm.frontFace || !selfForm.leftAngle || !selfForm.rightAngle)) {
+      setSelfCharacterStatus('Add front, left, and right photos or a manual HTTPS reference URL to save your self character.');
       return;
     }
 
@@ -2197,6 +2226,7 @@ export default function ProfilePage() {
     const finalEditorDraft = saveSelfCharacterEditorDraft(selfForm) ?? createSelfCharacterEditorDraft(selfForm);
     const displayName = profile.displayName.trim() || 'Creator';
     const referenceImageUrls = {
+      manualReferenceImageUrl: selfForm.manualReferenceImageUrl || null,
       frontFace: selfForm.frontFace,
       frontFaceUrl: selfForm.frontFace,
       frontFacePath: selfForm.frontFacePath || null,
@@ -2218,6 +2248,7 @@ export default function ProfilePage() {
       selfCaptureConsent: selfForm.selfCaptureConsent,
       selfCaptureCompleted: selfForm.selfCaptureCompleted,
       selfVoiceSampleConsent: Boolean(selfForm.voiceSampleConsent),
+      manualReferenceImageUrl: selfForm.manualReferenceImageUrl || null,
       selfieVideoPath: selfForm.selfieVideoPath || null,
       selfieVideo2Name: selfForm.selfieVideo2Name || null,
       selfieVideo2Url: selfForm.selfieVideo2Url,
@@ -2285,6 +2316,7 @@ export default function ProfilePage() {
         });
         const remoteCharacters = await loadSupabaseCharacters(authUserId);
 
+        saveLumoraProfile(saved.profile);
         setProfile(saved.profile);
         setProfileDraft(saved.profile);
         setCharacters(remoteCharacters.length ? remoteCharacters : [saved.character]);
@@ -2332,8 +2364,10 @@ export default function ProfilePage() {
         ...profile,
         defaultSelfCharacterId: CREATOR_SELF_CHARACTER_ID,
         defaultSelfCharacterName: displayName,
-        defaultSelfCharacterAvatar: profile.avatar || selfForm.frontFace,
+        defaultSelfCharacterAvatar: profile.avatar || selfForm.manualReferenceImageUrl || selfForm.frontFace,
+        manualReferenceImageUrl: selfForm.manualReferenceImageUrl || null,
         selfReferenceImageUrls: {
+          manualReferenceImageUrl: selfForm.manualReferenceImageUrl || null,
           frontFace: selfForm.frontFace || null,
           frontFaceUrl: selfForm.frontFace || null,
           frontFacePath: selfForm.frontFacePath || null,
@@ -2436,6 +2470,7 @@ export default function ProfilePage() {
             profile: savedProfile,
             name: localCreatorSelf.name || savedProfile.displayName,
             referenceImageUrls: {
+              manualReferenceImageUrl: localSelfForm.manualReferenceImageUrl || null,
               frontFace: localSelfForm.frontFace,
               frontFaceUrl: localSelfForm.frontFace,
               frontFacePath: localSelfForm.frontFacePath || null,
@@ -2532,6 +2567,12 @@ export default function ProfilePage() {
   }
 
   const showSelfCaptureControls = !selfForm.selfCaptureCompleted || showSelfCaptureRedo;
+  const manualReferenceReady = isManualReferenceUrlReady(selfForm.manualReferenceImageUrl);
+  const selfCharacterReferencesReady =
+    manualReferenceReady ||
+    (hasSelfReferenceSource(selfForm, 'frontFace') &&
+      hasSelfReferenceSource(selfForm, 'leftAngle') &&
+      hasSelfReferenceSource(selfForm, 'rightAngle'));
   const debugSource = authUserId ? 'supabase' : debugInfo.source;
 
   return (
@@ -2834,6 +2875,46 @@ export default function ProfilePage() {
               })}
             </div>
 
+            <div style={{ display: 'grid', gap: '12px', padding: '16px', borderRadius: '18px', background: 'rgba(255,255,255,0.04)' }}>
+              <div>
+                <span className="eyebrow">Temporary manual reference override</span>
+                <p className="muted" style={{ margin: '8px 0 0' }}>
+                  Paste a known working public HTTPS image URL while Supabase reference hydration is being stabilized.
+                </p>
+              </div>
+              <label className="field-group">
+                <span className="eyebrow">Manual working reference URL</span>
+                <input
+                  type="url"
+                  value={selfForm.manualReferenceImageUrl}
+                  placeholder="https://..."
+                  onChange={(event) =>
+                    setSelfForm((current) => ({
+                      ...current,
+                      manualReferenceImageUrl: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              {manualReferenceReady ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', gap: '12px', alignItems: 'center' }}>
+                  <SelfReferencePreview
+                    label="Manual working reference URL"
+                    reference={normalizeReference(
+                      { url: selfForm.manualReferenceImageUrl },
+                      'url',
+                      'path',
+                    )}
+                  />
+                  <span className="muted">Manual HTTPS reference ready. Create will use this before saved photos.</span>
+                </div>
+              ) : selfForm.manualReferenceImageUrl.trim() ? (
+                <p className="muted" style={{ margin: 0 }}>
+                  Manual override must start with https:// to be used for generation.
+                </p>
+              ) : null}
+            </div>
+
             <div style={{ display: 'grid', gap: '12px' }}>
               <strong>Self capture</strong>
               {showSelfCaptureControls ? (
@@ -2986,13 +3067,7 @@ export default function ProfilePage() {
             </p>
             <div style={{ display: 'grid', gap: '10px', padding: '16px', borderRadius: '18px', background: 'rgba(255,255,255,0.04)' }}>
               <span className="eyebrow">Build My Lumora Character</span>
-              <strong>
-                {hasSelfReferenceSource(selfForm, 'frontFace') &&
-                hasSelfReferenceSource(selfForm, 'leftAngle') &&
-                hasSelfReferenceSource(selfForm, 'rightAngle')
-                  ? 'Identity ready'
-                  : 'Needs references'}
-              </strong>
+              <strong>{selfCharacterReferencesReady ? 'Identity ready' : 'Needs references'}</strong>
               <p className="muted" style={{ margin: 0 }}>
                 Build a reusable photorealistic character from your reference photos and videos.
               </p>

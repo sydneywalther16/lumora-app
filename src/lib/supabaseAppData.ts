@@ -401,6 +401,14 @@ export async function saveSupabaseProfile(userId: string, profile: LumoraProfile
       : `creator-${userId.slice(0, 8)}`;
   const displayName = profile.displayName.trim() || 'Creator';
   const profileAvatarUrl = storageUrl(profile.avatar, 'Profile avatar');
+  const manualReferenceImageUrl = storageUrl(
+    profile.manualReferenceImageUrl || profile.selfReferenceImageUrls?.manualReferenceImageUrl,
+    'Manual reference image URL',
+  );
+  const selfReferenceImageUrls = cleanJsonRecord({
+    ...(profile.selfReferenceImageUrls ?? {}),
+    manualReferenceImageUrl,
+  });
   const payload = {
     id: userId,
     user_id: userId,
@@ -412,7 +420,7 @@ export async function saveSupabaseProfile(userId: string, profile: LumoraProfile
     default_self_character_id: profile.defaultSelfCharacterId ?? null,
     default_self_character_name: profile.defaultSelfCharacterName ?? null,
     default_self_character_avatar: storageUrl(profile.defaultSelfCharacterAvatar, 'Default self character avatar'),
-    self_reference_image_urls: cleanJsonRecord(profile.selfReferenceImageUrls),
+    self_reference_image_urls: selfReferenceImageUrls,
     self_reference_photo_names: cleanJsonRecord(profile.selfReferencePhotoNames),
     self_capture_video_name: profile.selfCaptureVideoName ?? null,
     self_capture_video_url: storageUrl(profile.selfCaptureVideoUrl, 'Self capture video'),
@@ -479,6 +487,7 @@ export async function saveSupabaseProfile(userId: string, profile: LumoraProfile
 
 function mapProfileRow(row: DbRow): LumoraProfile {
   const userId = nullableString(row.user_id) || stringValue(row.id) || null;
+  const selfReferenceImageUrls = jsonRecord(row.self_reference_image_urls);
 
   return {
     id: nullableString(row.id),
@@ -490,7 +499,8 @@ function mapProfileRow(row: DbRow): LumoraProfile {
     defaultSelfCharacterId: nullableString(row.default_self_character_id),
     defaultSelfCharacterName: nullableString(row.default_self_character_name),
     defaultSelfCharacterAvatar: nullableString(row.default_self_character_avatar),
-    selfReferenceImageUrls: jsonRecord(row.self_reference_image_urls),
+    manualReferenceImageUrl: nullableString(selfReferenceImageUrls.manualReferenceImageUrl),
+    selfReferenceImageUrls,
     selfReferencePhotoNames: jsonRecord(row.self_reference_photo_names),
     selfCaptureVideoName: nullableString(row.self_capture_video_name),
     selfCaptureVideoUrl: nullableString(row.self_capture_video_url),
@@ -526,6 +536,7 @@ function mapStylePreferences(value: unknown): CreatorSelfStylePreferences {
 
 function mapReferenceImages(value: unknown): ReferenceImageUrls {
   const record = stringRecord(value);
+  const manualReferenceImageUrl = record.manualReferenceImageUrl ?? null;
   const frontFaceUrl = record.frontFaceUrl ?? record.frontFace ?? '';
   const leftAngleUrl = record.leftAngleUrl ?? record.leftAngle ?? '';
   const rightAngleUrl = record.rightAngleUrl ?? record.rightAngle ?? '';
@@ -533,6 +544,7 @@ function mapReferenceImages(value: unknown): ReferenceImageUrls {
   const expressiveUrl = record.expressiveUrl ?? record.expressive ?? null;
 
   return {
+    manualReferenceImageUrl,
     frontFace: frontFaceUrl,
     frontFaceUrl,
     frontFacePath: record.frontFacePath ?? null,
@@ -593,6 +605,7 @@ function mapIdentityProfile(value: unknown): LumoraIdentityProfile | null {
 }
 
 function cleanReferenceImageUrls(value: ReferenceImageUrls): ReferenceImageUrls {
+  const manualReferenceImageUrl = storageUrl(value.manualReferenceImageUrl, 'Manual reference image URL');
   const frontFace = storageUrl(value.frontFaceUrl ?? value.frontFace, 'Front reference photo') ?? '';
   const leftAngle = storageUrl(value.leftAngleUrl ?? value.leftAngle, 'Left reference photo') ?? '';
   const rightAngle = storageUrl(value.rightAngleUrl ?? value.rightAngle, 'Right reference photo') ?? '';
@@ -600,6 +613,7 @@ function cleanReferenceImageUrls(value: ReferenceImageUrls): ReferenceImageUrls 
   const expressive = storageUrl(value.expressiveUrl ?? value.expressive, 'Expressive reference photo');
 
   return {
+    manualReferenceImageUrl,
     frontFace,
     frontFaceUrl: frontFace,
     frontFacePath: storageUrl(value.frontFacePath, 'Front reference photo path'),
@@ -874,9 +888,11 @@ export async function saveSupabaseCreatorSelfCharacter(input: {
     defaultSelfCharacterId: CREATOR_SELF_CHARACTER_ID,
     defaultSelfCharacterName: input.name,
     defaultSelfCharacterAvatar:
+      stringValue(referenceImageUrls.manualReferenceImageUrl) ||
       stringValue(referenceImageUrls.frontFaceUrl) ||
       stringValue(referenceImageUrls.frontFace) ||
       storageUrl(input.profile.avatar, 'Profile avatar'),
+    manualReferenceImageUrl: stringValue(referenceImageUrls.manualReferenceImageUrl) || null,
     selfReferenceImageUrls: referenceImageUrls,
     selfReferencePhotoNames: referencePhotoNames,
     selfCaptureVideoName: input.sourceCaptureVideoName ?? null,
