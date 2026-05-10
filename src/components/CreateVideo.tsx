@@ -22,6 +22,7 @@ import {
 import { useSession } from '../hooks/useSession';
 import { useAppStore } from '../store/useAppStore';
 import SelfReferencePreview, { normalizeReference } from './SelfReferencePreview';
+import { STYLE_PRESETS, selectedStylePrompt } from '../lib/stylePresets';
 
 type CreateVideoProps = {
   refreshKey?: number;
@@ -42,7 +43,6 @@ type CreateVideoProps = {
   onResaveReferencePhoto?: () => void;
 };
 
-const stylePresets = ['Editorial Drama', 'Virtual Sitcom', 'Luxury POV', 'Cinematic Sunset'];
 const durations = [4, 8, 12, 16];
 const aspectRatios: VideoAspectRatio[] = ['9:16', '16:9', '1:1'];
 const engines: VideoEngine[] = ['seedance-2.0', 'replicate'];
@@ -334,10 +334,10 @@ export default function CreateVideo({
   const authUser = session?.user ?? user;
   const {
     activePrompt,
-    selectedStyle,
+    selectedStyles,
     draftTitle,
     setActivePrompt,
-    setSelectedStyle,
+    toggleSelectedStyle,
     setDraftTitle,
   } = useAppStore();
 
@@ -569,6 +569,7 @@ export default function CreateVideo({
     setStatus('');
 
     try {
+      const generationStylePrompt = selectedStylePrompt(selectedStyles, currentPrompt);
       const savedIdentityKeyframeUrl = cleanReferenceUrl(identityProfile?.keyframeUrl ?? null);
       const identityFrontFaceUrl = cleanReferenceUrl(identityProfile?.frontFaceUrl ?? null);
       let keyframeUrl: string | null =
@@ -601,7 +602,7 @@ export default function CreateVideo({
             preferences: identityProfile.userPreferences,
             dislikes: identityProfile.dislikedTraits,
             likenessNotes: identityProfile.likenessNotes,
-            style: selectedStyle,
+            style: generationStylePrompt,
           }),
         });
         const keyframeText = await keyframeRes.text();
@@ -651,7 +652,7 @@ export default function CreateVideo({
           referenceImageUrls: referencePayload,
           aspectRatio: selectedAspectRatio,
           duration,
-          style: selectedStyle,
+          style: generationStylePrompt,
           audio: true,
           provider: 'replicate',
           engine: selectedEngine,
@@ -856,7 +857,7 @@ export default function CreateVideo({
           title: draftTitle,
           prompt: activePrompt,
           payload: {
-            selectedStyle,
+            selectedStyles,
             duration,
             aspectRatio,
             engine,
@@ -927,14 +928,15 @@ export default function CreateVideo({
         </label>
 
         <div className="field-block">
-          <span>Style preset</span>
+          <span>Style presets</span>
           <div className="chip-row wrap">
-            {stylePresets.map((style) => (
+            {STYLE_PRESETS.map((style) => (
               <button
                 key={style}
                 type="button"
-                className={`chip ${selectedStyle === style ? 'active' : ''}`}
-                onClick={() => setSelectedStyle(style)}
+                aria-pressed={selectedStyles.includes(style)}
+                className={`chip ${selectedStyles.includes(style) ? 'active' : ''}`}
+                onClick={() => toggleSelectedStyle(style)}
               >
                 {style}
               </button>

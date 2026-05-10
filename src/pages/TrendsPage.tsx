@@ -6,10 +6,10 @@ export default function TrendsPage() {
     <div className="page">
       <section className="headline-card">
         <div>
-          <span className="eyebrow">trend radar</span>
+          <span className="eyebrow">for you</span>
           <h2>What is hitting right now</h2>
         </div>
-        <p>Tap any trend to push its prompt into the Create screen instantly.</p>
+        <p>Tap any idea to push its prompt into the Create screen instantly.</p>
       </section>
       <TrendList />
       <BottomSheet title="Signal readout">

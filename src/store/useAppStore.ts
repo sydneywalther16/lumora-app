@@ -1,16 +1,18 @@
 import { create } from 'zustand';
 import { posts, projects, trends } from '../data/mockData';
+import { toggleStylePreset } from '../lib/stylePresets';
 
 type AppState = {
   activePrompt: string;
-  selectedStyle: string;
+  selectedStyles: string[];
   selectedTrend: string | null;
   draftTitle: string;
   posts: typeof posts;
   projects: typeof projects;
   trends: typeof trends;
   setActivePrompt: (prompt: string) => void;
-  setSelectedStyle: (style: string) => void;
+  setSelectedStyles: (styles: string[]) => void;
+  toggleSelectedStyle: (style: string) => void;
   setSelectedTrend: (trendId: string | null) => void;
   setDraftTitle: (title: string) => void;
 };
@@ -18,14 +20,15 @@ type AppState = {
 export const useAppStore = create<AppState>((set) => ({
   activePrompt:
     'Build a glossy AI influencer reveal with paparazzi flash frames, ultra-smooth motion, and a final hook that feels instantly repostable.',
-  selectedStyle: 'Editorial Drama',
+  selectedStyles: [],
   selectedTrend: 't1',
   draftTitle: 'Untitled concept',
   posts,
   projects,
   trends,
   setActivePrompt: (prompt) => set({ activePrompt: prompt }),
-  setSelectedStyle: (style) => set({ selectedStyle: style }),
+  setSelectedStyles: (styles) => set({ selectedStyles: styles }),
+  toggleSelectedStyle: (style) => set((state) => ({ selectedStyles: toggleStylePreset(state.selectedStyles, style) })),
   setSelectedTrend: (trendId) => set({ selectedTrend: trendId }),
   setDraftTitle: (title) => set({ draftTitle: title }),
 }));

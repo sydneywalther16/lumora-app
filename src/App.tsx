@@ -29,7 +29,8 @@ export default function App() {
       <Route element={<AppShell />}>
         <Route path="/" element={<Navigate to="/home" replace />} />
         <Route path="/home" element={<HomePage />} />
-        <Route path="/trends" element={<TrendsPage />} />
+        <Route path="/for-you" element={<TrendsPage />} />
+        <Route path="/trends" element={<Navigate to="/for-you" replace />} />
         <Route path="/create" element={<CreatePage />} />
         <Route path="/capture" element={<CharacterCapturePage />} />
         <Route path="/studio" element={<StudioPage />} />

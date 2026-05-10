@@ -25,7 +25,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export type GenerationPayload = {
   title?: string;
   prompt: string;
-  stylePreset?: string;
+  stylePreset?: string | string[];
   outputType?: 'image' | 'video';
   characterId?: string | null;
   characterName?: string | null;

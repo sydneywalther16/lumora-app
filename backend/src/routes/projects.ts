@@ -6,7 +6,7 @@ import { createProjectForUser, listProjectsForUser } from '../services/projectSe
 const createProjectSchema = z.object({
   title: z.string().min(1),
   prompt: z.string().min(1),
-  stylePreset: z.string().min(1),
+  stylePreset: z.string().trim().optional().nullable(),
 });
 
 export const projectsRouter = Router();
@@ -23,7 +23,7 @@ projectsRouter.post('/', async (req: AuthedRequest, res) => {
     userId: req.userId!,
     title: payload.title,
     prompt: payload.prompt,
-    stylePreset: payload.stylePreset,
+    stylePreset: payload.stylePreset || null,
   });
   res.status(201).json({ project });
 });

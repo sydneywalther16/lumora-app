@@ -17,13 +17,13 @@ export async function createProjectForUser(input: {
   userId: string;
   title: string;
   prompt: string;
-  stylePreset: string;
+  stylePreset?: string | null;
 }) {
   const result = await query(
     `insert into projects (user_id, title, prompt, style_preset, status)
      values ($1, $2, $3, $4, 'draft')
      returning id, title, status, updated_at as "updatedAt", style_preset as "stylePreset"`,
-    [input.userId, input.title, input.prompt, input.stylePreset],
+    [input.userId, input.title, input.prompt, input.stylePreset ?? ''],
   );
 
   return result.rows[0];

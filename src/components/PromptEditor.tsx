@@ -1,16 +1,15 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAppStore } from '../store/useAppStore';
-
-const stylePresets = ['Editorial Drama', 'Virtual Sitcom', 'Luxury POV', 'Cinematic Sunset'];
+import { STYLE_PRESETS, selectedStylePrompt } from '../lib/stylePresets';
 
 export default function PromptEditor() {
   const {
     activePrompt,
-    selectedStyle,
+    selectedStyles,
     draftTitle,
     setActivePrompt,
-    setSelectedStyle,
+    toggleSelectedStyle,
     setDraftTitle,
   } = useAppStore();
 
@@ -39,10 +38,11 @@ export default function PromptEditor() {
     setBusy(true);
     setStatus('Submitting generation job...');
     try {
+      const stylePreset = selectedStylePrompt(selectedStyles, activePrompt);
       const result = await api.createGeneration({
         title: draftTitle,
         prompt: activePrompt,
-        stylePreset: selectedStyle,
+        ...(stylePreset ? { stylePreset } : {}),
         outputType: 'video',
       });
       setStatus(`Queued: ${result.jobId}`);
@@ -70,14 +70,15 @@ export default function PromptEditor() {
       </label>
 
       <div className="field-block">
-        <span>Style preset</span>
+        <span>Style presets</span>
         <div className="chip-row wrap">
-          {stylePresets.map((style) => (
+          {STYLE_PRESETS.map((style) => (
             <button
               key={style}
               type="button"
-              className={`chip ${selectedStyle === style ? 'active' : ''}`}
-              onClick={() => setSelectedStyle(style)}
+              aria-pressed={selectedStyles.includes(style)}
+              className={`chip ${selectedStyles.includes(style) ? 'active' : ''}`}
+              onClick={() => toggleSelectedStyle(style)}
             >
               {style}
             </button>

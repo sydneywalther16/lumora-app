@@ -4,7 +4,8 @@ import BottomNav from './BottomNav';
 
 const routeTitles: Record<string, string> = {
   '/home': 'Lumora',
-  '/trends': 'Trend Radar',
+  '/for-you': 'For You',
+  '/trends': 'For You',
   '/create': 'Create',
   '/capture': 'Capture',
   '/studio': 'Studio',

@@ -31,7 +31,7 @@ export async function submitGenerationJob(input: {
   projectId: string;
   title: string;
   prompt: string;
-  stylePreset: string;
+  stylePreset?: string | null;
   outputType: 'image' | 'video';
   character?: CharacterVideoContext | null;
   characterId?: string | null;

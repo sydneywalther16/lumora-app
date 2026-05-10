@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 
 const items = [
   ['Home', '/home'],
-  ['Trends', '/trends'],
+  ['For You', '/for-you'],
   ['Create', '/create'],
   ['Studio', '/studio'],
   ['Inbox', '/inbox'],
