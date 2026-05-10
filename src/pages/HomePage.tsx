@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import BottomSheet from '../components/BottomSheet';
 import SwipeFeed from '../components/SwipeFeed';
 import TopChips from '../components/TopChips';
@@ -360,19 +359,6 @@ export default function HomePage() {
           <strong>{localPosts.length ? '+52%' : '+38%'}</strong>
         </div>
       </div>
-
-      <section className="headline-card">
-        <div className="row-between">
-          <div>
-            <span className="eyebrow">characters</span>
-            <h2>Capture your next character</h2>
-          </div>
-          <Link className="primary-btn" to="/capture">
-            Capture a character
-          </Link>
-        </div>
-        <p>Upload reference images and optional media, then keep your character profiles private by default.</p>
-      </section>
 
       {feedMessage ? <p className="muted">{feedMessage}</p> : null}
 
