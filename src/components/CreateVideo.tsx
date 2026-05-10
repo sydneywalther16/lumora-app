@@ -46,6 +46,7 @@ const stylePresets = ['Editorial Drama', 'Virtual Sitcom', 'Luxury POV', 'Cinema
 const durations = [4, 8, 12, 16];
 const aspectRatios: VideoAspectRatio[] = ['9:16', '16:9', '1:1'];
 const engines: VideoEngine[] = ['seedance-2.0', 'replicate'];
+const SINGLE_PROVIDER_MODE = true;
 const engineLabels: Record<VideoEngine, string> = {
   'seedance-2.0': 'Seedance 2.0 Identity',
   replicate: 'Kling image-to-video',
@@ -250,6 +251,8 @@ function formatUnknownDetail(value: unknown): string {
 const providerSafetyFilterMessage =
   'Provider safety filter blocked this render. Try a safer, fully clothed editorial prompt.';
 const providerQueueBusyMessage = 'Provider queue is busy. Retrying generation...';
+const replicateThrottledMessage =
+  'Replicate is temporarily throttling this account. Wait a minute and try again.';
 
 function isProviderSafetyFilterError(value: string): boolean {
   const lower = value.toLowerCase();
@@ -271,6 +274,10 @@ function isProviderQueueBusyError(value: string): boolean {
     lower.includes('throttl') ||
     lower.includes('429')
   );
+}
+
+function isReplicateThrottledError(value: string): boolean {
+  return value.toLowerCase().includes('replicate is temporarily throttling this account');
 }
 
 function parseGenerateResponse(text: string): {
@@ -541,7 +548,9 @@ export default function CreateVideo({
     try {
       let keyframeUrl: string | null = selectedEngine === SEEDANCE_ENGINE_ID
         ? null
-        : cleanReferenceUrl(identityProfile?.keyframeUrl ?? null);
+        : SINGLE_PROVIDER_MODE
+          ? null
+          : cleanReferenceUrl(identityProfile?.keyframeUrl ?? null);
       let keyframeFinalPrompt = '';
       let keyframeWarnings: string[] = [];
       let keyframeModel = '';
@@ -549,7 +558,7 @@ export default function CreateVideo({
         ? keyframeUrl ? 'identity-keyframe-to-video' : 'reference-photo-animation-fallback'
         : selectedGenerationMode;
 
-      if (selectedEngine !== SEEDANCE_ENGINE_ID && selfReferenceMode && !keyframeUrl && selectedReferenceImageUrl && identityProfile) {
+      if (!SINGLE_PROVIDER_MODE && selectedEngine !== SEEDANCE_ENGINE_ID && selfReferenceMode && !keyframeUrl && selectedReferenceImageUrl && identityProfile) {
         const keyframeRes = await fetch('/api/lumora/generate-identity-keyframe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -631,6 +640,9 @@ export default function CreateVideo({
         const apiMessage = data.error || parseError || 'Generation failed.';
         if (isProviderSafetyFilterError([apiMessage, data.suggestion || '', detail].join(' '))) {
           throw new Error(providerSafetyFilterMessage);
+        }
+        if (isReplicateThrottledError([apiMessage, data.suggestion || '', detail].join(' '))) {
+          throw new Error(replicateThrottledMessage);
         }
         if (isProviderQueueBusyError([apiMessage, detail].join(' '))) {
           throw new Error(providerQueueBusyMessage);
@@ -764,6 +776,8 @@ export default function CreateVideo({
       const message = error instanceof Error ? error.message : 'Unable to create draft render';
       const displayMessage = isProviderSafetyFilterError(message)
         ? providerSafetyFilterMessage
+        : isReplicateThrottledError(message)
+          ? replicateThrottledMessage
         : isProviderQueueBusyError(message)
           ? providerQueueBusyMessage
         : message;

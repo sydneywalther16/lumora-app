@@ -66,6 +66,10 @@ const SENSITIVE_FILTER_ERROR = 'Generation blocked by provider safety filter';
 const SENSITIVE_FILTER_SUGGESTION =
   'Try a safer prompt: fully clothed, cinematic, editorial, non-suggestive.';
 const PROVIDER_QUEUE_BUSY_MESSAGE = 'Provider queue is busy. Retrying generation...';
+const SINGLE_PROVIDER_MODE = true;
+const REPLICATE_THROTTLED_ERROR = 'Replicate is temporarily throttling this account';
+const REPLICATE_THROTTLED_SUGGESTION =
+  'Wait a minute and try again. No fallback providers were attempted.';
 const KLING_FALLBACK_DELAY_MS = 5_000;
 const KLING_SECONDARY_FALLBACK_DELAY_MS = 8_000;
 const DEFAULT_REPLICATE_RETRY_AFTER_MS = 6_000;
@@ -271,9 +275,14 @@ function referenceUrlMap(value: unknown): Record<string, string> {
   );
 }
 
-function firstReferenceImageUrl(body: GenerateVideoBody): string {
-  const keyframe = publicImageUrl(body.keyframeUrl);
-  if (keyframe) return keyframe;
+function firstReferenceImageUrl(
+  body: GenerateVideoBody,
+  options: { includeKeyframe?: boolean } = {},
+): string {
+  if (options.includeKeyframe !== false) {
+    const keyframe = publicImageUrl(body.keyframeUrl);
+    if (keyframe) return keyframe;
+  }
 
   const explicit = publicImageUrl(body.referenceImageUrl);
   if (explicit) return explicit;
@@ -947,13 +956,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     try {
     const engine = textValue(body.engine).toLowerCase() || 'replicate';
-    const useSeedance = isSeedanceEngine(body);
+    const useSeedance = SINGLE_PROVIDER_MODE ? false : isSeedanceEngine(body);
     const seedanceReferences = seedanceReferenceImages(body);
     const referenceImageUrl = useSeedance
       ? seedanceReferences[0] ?? ''
-      : firstReferenceImageUrl(body);
+      : firstReferenceImageUrl(body, { includeKeyframe: !SINGLE_PROVIDER_MODE });
     const keyframeUrl = publicImageUrl(body.keyframeUrl);
-    const additionalReferences = additionalReferenceImageUrls(body, referenceImageUrl);
+    const additionalReferences = SINGLE_PROVIDER_MODE
+      ? []
+      : additionalReferenceImageUrls(body, referenceImageUrl);
     const aspectRatio = normalizeAspectRatio(body.aspectRatio);
     const durationSent = normalizeDuration(body.duration);
     const finalPrompt = buildFinalPrompt({
@@ -961,7 +972,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       characterDescription: textValue(body.characterDescription),
       identityPrompt: textValue(body.identityPrompt),
       consistencyPrompt: textValue(body.consistencyPrompt) || textValue(body.generationConsistencyPrompt),
-      engine,
+      engine: SINGLE_PROVIDER_MODE ? 'replicate' : engine,
       style: textValue(body.style),
       camera: textValue(body.camera),
       mood: textValue(body.mood),
@@ -977,6 +988,104 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       seedanceReferences,
       engine,
     });
+
+    if (SINGLE_PROVIDER_MODE) {
+      console.log('SINGLE PROVIDER MODE ACTIVE', {
+        requestedEngine: engine,
+        skippedSeedance: true,
+        skippedFallbackProviders: true,
+      });
+
+      if (!isValidHttpUrl(referenceImageUrl)) {
+        return sendJson(res, 400, {
+          error: 'Invalid reference image URL',
+          received: referenceImageUrl,
+        });
+      }
+
+      const referenceValidation = await validateReferenceImageUrl(referenceImageUrl);
+      if (!referenceValidation.ok) {
+        return sendJson(res, 400, {
+          error: 'Reference image not accessible',
+          referenceImageUrl,
+          status: referenceValidation.status,
+          contentType: referenceValidation.contentType,
+        });
+      }
+
+      const model = (process.env.REPLICATE_IMAGE_TO_VIDEO_MODEL || KLING_IMAGE_TO_VIDEO_MODEL) as ReplicateModelIdentifier;
+      const requestInput = {
+        prompt: promptForModel,
+        start_image: referenceImageUrl,
+      };
+      const generationModeUsed: GenerationModeUsed = 'reference-photo-animation-fallback';
+
+      console.log('MODEL ATTEMPTED', {
+        provider: 'replicate',
+        model,
+      });
+      console.log('FINAL INPUT SENT TO SINGLE PROVIDER', requestInput);
+
+      const { default: Replicate } = await import('replicate');
+      const replicate = new Replicate({ auth: token }) as ReplicateClient;
+
+      try {
+        const result = await runReplicate({
+          replicate,
+          model,
+          requestInput,
+          durationSent: null,
+          generationModeUsed,
+          referenceImageUrl,
+          fallbackToStartImageOnly: false,
+        });
+
+        console.log('FINAL VIDEO URL:', result.videoUrl);
+
+        return sendJson(res, 200, {
+          success: true,
+          videoUrl: result.videoUrl,
+          provider: 'replicate',
+          model: result.model,
+          displayEngine: 'single provider kling',
+          generationMode: generationModeUsed,
+          generationModeUsed,
+          hasReferenceImage: true,
+          modelUsed: result.model,
+          durationSent: result.durationSent,
+          identityId: textValue(body.identityId) || null,
+          keyframeUrl: null,
+          referenceImageUrl,
+          additionalReferenceImageUrls: [],
+          finalPrompt: promptForModel,
+          warnings: [],
+          rawOutput: {
+            provider: safeJsonValue(result.rawOutput),
+            attempts: result.attempts,
+          },
+        });
+      } catch (singleProviderError) {
+        console.warn('NO FALLBACK ATTEMPTED', {
+          model,
+          singleProviderMode: true,
+          rateLimited: isRateLimitError(singleProviderError),
+        });
+
+        if (isRateLimitError(singleProviderError)) {
+          const errorRecord = objectRecord(singleProviderError);
+          const retryAfterMs =
+            numericValue(errorRecord.retryAfterMs) ??
+            retryAfterMilliseconds(singleProviderError);
+          return sendJson(res, 429, {
+            error: REPLICATE_THROTTLED_ERROR,
+            retryAfter: retryAfterMs !== null ? retryAfterMs / 1_000 : null,
+            suggestion: REPLICATE_THROTTLED_SUGGESTION,
+          });
+        }
+
+        throw singleProviderError;
+      }
+    }
 
     if (useSeedance) {
       if (seedanceReferences.length < 3) {
