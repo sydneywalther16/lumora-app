@@ -249,6 +249,7 @@ function formatUnknownDetail(value: unknown): string {
 
 const providerSafetyFilterMessage =
   'Provider safety filter blocked this render. Try a safer, fully clothed editorial prompt.';
+const providerQueueBusyMessage = 'Provider queue is busy. Retrying generation...';
 
 function isProviderSafetyFilterError(value: string): boolean {
   const lower = value.toLowerCase();
@@ -257,6 +258,18 @@ function isProviderSafetyFilterError(value: string): boolean {
     lower.includes('generation blocked by provider safety filter') ||
     lower.includes('flagged as sensitive') ||
     lower.includes('e005')
+  );
+}
+
+function isProviderQueueBusyError(value: string): boolean {
+  const lower = value.toLowerCase();
+  return (
+    lower.includes('provider queue is busy') ||
+    lower.includes('too many requests') ||
+    lower.includes('rate limit') ||
+    lower.includes('rate_limit') ||
+    lower.includes('throttl') ||
+    lower.includes('429')
   );
 }
 
@@ -619,6 +632,9 @@ export default function CreateVideo({
         if (isProviderSafetyFilterError([apiMessage, data.suggestion || '', detail].join(' '))) {
           throw new Error(providerSafetyFilterMessage);
         }
+        if (isProviderQueueBusyError([apiMessage, detail].join(' '))) {
+          throw new Error(providerQueueBusyMessage);
+        }
 
         throw new Error(
           [apiMessage, detail]
@@ -748,6 +764,8 @@ export default function CreateVideo({
       const message = error instanceof Error ? error.message : 'Unable to create draft render';
       const displayMessage = isProviderSafetyFilterError(message)
         ? providerSafetyFilterMessage
+        : isProviderQueueBusyError(message)
+          ? providerQueueBusyMessage
         : message;
       setGenerationError(
         isSoraEngine && !isProviderSafetyFilterError(displayMessage)

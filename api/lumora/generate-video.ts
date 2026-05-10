@@ -65,8 +65,9 @@ const SAFE_PROMPT_REPLACEMENT = 'stylish, cinematic, confident, editorial, fashi
 const SENSITIVE_FILTER_ERROR = 'Generation blocked by provider safety filter';
 const SENSITIVE_FILTER_SUGGESTION =
   'Try a safer prompt: fully clothed, cinematic, editorial, non-suggestive.';
-const KLING_FALLBACK_DELAY_MS = 4_000;
-const KLING_SECONDARY_FALLBACK_DELAY_MS = 6_000;
+const PROVIDER_QUEUE_BUSY_MESSAGE = 'Provider queue is busy. Retrying generation...';
+const KLING_FALLBACK_DELAY_MS = 5_000;
+const KLING_SECONDARY_FALLBACK_DELAY_MS = 8_000;
 const DEFAULT_REPLICATE_RETRY_AFTER_MS = 6_000;
 const sensitivePromptTerms = [
   'sexy',
@@ -80,8 +81,14 @@ const sensitivePromptTerms = [
   'adult',
 ] as const;
 
-const activeGenerationUsers = new Set<string>();
-let replicatePredictionQueue: Promise<unknown> = Promise.resolve();
+type LumoraGenerationGlobals = typeof globalThis & {
+  __lumoraActiveGenerationUsers?: Set<string>;
+  __lumoraReplicatePredictionQueue?: Promise<unknown>;
+};
+
+const lumoraGenerationGlobals = globalThis as LumoraGenerationGlobals;
+const activeGenerationUsers =
+  lumoraGenerationGlobals.__lumoraActiveGenerationUsers ??= new Set<string>();
 
 function safeJsonValue(value: unknown, seen = new WeakSet<object>()): unknown {
   if (value == null) return value;
@@ -185,9 +192,7 @@ function textValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
-}
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -541,6 +546,13 @@ function retryAfterMilliseconds(error: unknown): number | null {
     if (parsed !== null) return parsed;
   }
 
+  const serializedError = JSON.stringify(safeJsonValue(error) ?? '');
+  const serializedRetryAfter = serializedError.match(/retry[_ -]?after["'\s:=]+(\d+(?:\.\d+)?)/i);
+  if (serializedRetryAfter?.[1]) {
+    const parsed = retryAfterMillisecondsFromValue(serializedRetryAfter[1]);
+    if (parsed !== null) return parsed;
+  }
+
   return (
     headerRetryAfterMilliseconds(record.headers) ??
     headerRetryAfterMilliseconds(response.headers) ??
@@ -647,8 +659,9 @@ async function validateReferenceImageUrl(referenceImageUrl: string): Promise<{
 }
 
 async function enqueueReplicatePrediction<T>(operation: () => Promise<T>): Promise<T> {
-  const queuedOperation = replicatePredictionQueue.then(operation, operation);
-  replicatePredictionQueue = queuedOperation.then(
+  const queue = lumoraGenerationGlobals.__lumoraReplicatePredictionQueue ?? Promise.resolve();
+  const queuedOperation = queue.then(operation, operation);
+  lumoraGenerationGlobals.__lumoraReplicatePredictionQueue = queuedOperation.then(
     () => undefined,
     () => undefined,
   );
@@ -721,6 +734,13 @@ async function runReplicate(input: {
       const rateLimited = isRateLimitError(error);
       const retryAfterMs = retryAfterMilliseconds(error);
       console.error('REPLICATE ERROR:', error);
+      if (rateLimited) {
+        console.warn('THROTTLED:', {
+          model: input.model,
+          status: errorStatusCode(error) ?? 429,
+          retryAfterSeconds: retryAfterMs !== null ? retryAfterMs / 1_000 : null,
+        });
+      }
       attempts.push({
         model: input.model,
         inputKeys: Object.keys(requestInput),
@@ -780,12 +800,14 @@ async function runReplicateWithRateLimitRetry(input: {
     }
 
     const retryAfterMs = retryAfterMilliseconds(error) ?? DEFAULT_REPLICATE_RETRY_AFTER_MS;
-    console.log('RETRY_AFTER:', {
+    console.log('WAITING:', {
+      reason: 'replicate-429',
       model: input.model,
+      milliseconds: retryAfterMs,
       seconds: retryAfterMs / 1_000,
     });
     await sleep(retryAfterMs);
-    console.warn('RETRYING SAME MODEL:', {
+    console.warn('RETRYING MODEL:', {
       model: input.model,
       mode: input.generationModeUsed,
     });
@@ -802,6 +824,8 @@ async function runKlingImageToVideo(input: {
   primaryModel?: ReplicateModelIdentifier;
   durationSent: number | null;
   generationModeUsed: GenerationModeUsed;
+  fallbackFromModel?: ReplicateModelIdentifier;
+  providerFallback?: boolean;
   safetyFallback?: boolean;
 }) {
   const models = uniqueModels([
@@ -815,17 +839,26 @@ async function runKlingImageToVideo(input: {
   }> = [];
 
   for (const [modelIndex, model] of models.entries()) {
-    if (input.safetyFallback && modelIndex === 0) {
-      console.log('WAITING BEFORE FALLBACK:', {
-        from: SEEDANCE_MODEL,
+    const isFirstProviderFallback = (input.providerFallback === true || input.safetyFallback === true) && modelIndex === 0;
+    if (isFirstProviderFallback) {
+      console.warn('SWITCHING PROVIDER:', {
+        from: input.fallbackFromModel ?? SEEDANCE_MODEL,
         to: model,
+      });
+      console.log('WAITING:', {
+        reason: 'kling-v2.1-fallback',
+        milliseconds: KLING_FALLBACK_DELAY_MS,
         seconds: KLING_FALLBACK_DELAY_MS / 1_000,
       });
       await sleep(KLING_FALLBACK_DELAY_MS);
     } else if (modelIndex > 0) {
-      console.log('WAITING BEFORE FALLBACK:', {
+      console.warn('SWITCHING PROVIDER:', {
         from: models[modelIndex - 1],
         to: model,
+      });
+      console.log('WAITING:', {
+        reason: 'kling-v2.5-fallback',
+        milliseconds: KLING_SECONDARY_FALLBACK_DELAY_MS,
         seconds: KLING_SECONDARY_FALLBACK_DELAY_MS / 1_000,
       });
       await sleep(KLING_SECONDARY_FALLBACK_DELAY_MS);
@@ -856,7 +889,7 @@ async function runKlingImageToVideo(input: {
       console.warn('Kling image-to-video attempt failed', {
         model,
         safetyFiltered: isSensitiveFilterError(error),
-        safetyFallback: input.safetyFallback ?? false,
+        providerFallback: input.providerFallback ?? input.safetyFallback ?? false,
       });
     }
   }
@@ -908,7 +941,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const generationUserKey = activeGenerationUserKey(body);
     if (!acquireActiveGeneration(generationUserKey)) {
       return sendJson(res, 409, {
-        error: 'Generation already in progress. Please wait for the current render to finish.',
+        error: PROVIDER_QUEUE_BUSY_MESSAGE,
       });
     }
 
@@ -1032,13 +1065,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           },
         });
       } catch (seedanceError) {
-        if (!isSensitiveFilterError(seedanceError)) {
+        const seedanceSafetyFiltered = isSensitiveFilterError(seedanceError);
+        const seedanceRateLimited = isRateLimitError(seedanceError);
+        if (!seedanceSafetyFiltered && !seedanceRateLimited) {
           throw seedanceError;
         }
 
-        console.warn('Seedance safety filter blocked generation; retrying Kling image-to-video fallback.', {
+        console.warn('Seedance generation switched to Kling image-to-video fallback.', {
           model: SEEDANCE_MODEL,
           referenceImageUrl,
+          safetyFiltered: seedanceSafetyFiltered,
+          rateLimited: seedanceRateLimited,
         });
 
         const fallbackResult = await runKlingImageToVideo({
@@ -1049,7 +1086,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           primaryModel: KLING_IMAGE_TO_VIDEO_MODEL,
           durationSent: null,
           generationModeUsed: 'reference-photo-animation-fallback',
-          safetyFallback: true,
+          fallbackFromModel: SEEDANCE_MODEL,
+          providerFallback: true,
         });
 
         console.log('FINAL VIDEO URL:', fallbackResult.videoUrl);
@@ -1072,7 +1110,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           additionalReferenceImageUrls: [],
           finalPrompt: promptForModel,
           warnings: [
-            'Provider safety filter blocked Seedance, so Lumora used Kling image-to-video with the same saved reference.',
+            seedanceRateLimited
+              ? PROVIDER_QUEUE_BUSY_MESSAGE
+              : 'Provider safety filter blocked Seedance, so Lumora used Kling image-to-video with the same saved reference.',
           ],
           rawOutput: {
             fallbackFrom: {
@@ -1196,6 +1236,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return sendJson(res, 422, {
         error: SENSITIVE_FILTER_ERROR,
         suggestion: SENSITIVE_FILTER_SUGGESTION,
+      });
+    }
+
+    if (errorRecord.rateLimited === true || isRateLimitError(error)) {
+      return sendJson(res, 429, {
+        error: PROVIDER_QUEUE_BUSY_MESSAGE,
+        details: safeJsonValue(errorRecord.details ?? error),
+        provider: textValue(errorRecord.provider) || 'replicate',
+        model: textValue(errorRecord.model) || null,
       });
     }
 
