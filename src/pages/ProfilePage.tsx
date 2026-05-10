@@ -1518,7 +1518,7 @@ function ProfileMenuSidebar({
   );
 }
 
-function ProjectCard({ project }: { project: StudioProject }) {
+function ProjectCard({ project, onOpen }: { project: StudioProject; onOpen: () => void }) {
   const characterLabel = project.isDefaultSelfCharacter
     ? 'Created as self'
     : project.characterName
@@ -1526,7 +1526,20 @@ function ProjectCard({ project }: { project: StudioProject }) {
       : 'No character selected';
 
   return (
-    <article className="list-card" style={{ borderRadius: '28px', background: 'rgba(20,16,24,0.9)', padding: '18px' }}>
+    <article
+      className="list-card"
+      role="button"
+      tabIndex={0}
+      aria-label={`Open completed project ${project.title || project.prompt || project.id}`}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      style={{ borderRadius: '28px', background: 'rgba(20,16,24,0.9)', padding: '18px', cursor: 'pointer' }}
+    >
       <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <h3>{project.prompt || 'Cast Video'}</h3>
@@ -1544,6 +1557,7 @@ function ProjectCard({ project }: { project: StudioProject }) {
         muted
         loop
         playsInline
+        onClick={(event) => event.stopPropagation()}
         style={{ width: '100%', borderRadius: '20px', objectFit: 'cover', background: '#000', marginTop: '14px' }}
         onError={(event) => {
           event.currentTarget.style.display = 'none';
@@ -1553,9 +1567,22 @@ function ProjectCard({ project }: { project: StudioProject }) {
   );
 }
 
-function DraftCard({ draft }: { draft: Draft }) {
+function DraftCard({ draft, onOpen }: { draft: Draft; onOpen: () => void }) {
   return (
-    <article className="list-card" style={{ borderRadius: '28px', background: 'rgba(20,16,24,0.9)', padding: '18px' }}>
+    <article
+      className="list-card"
+      role="button"
+      tabIndex={0}
+      aria-label={`Open draft ${draft.title || draft.id}`}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      style={{ borderRadius: '28px', background: 'rgba(20,16,24,0.9)', padding: '18px', cursor: 'pointer' }}
+    >
       <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <h3>{draft.title || 'Draft concept'}</h3>
@@ -2699,6 +2726,17 @@ export default function ProfilePage() {
     }
   }
 
+  function openCompletedProject(project: StudioProject) {
+    localStorage.setItem('lumora_open_studio_project_id', project.id);
+    window.location.href = '/studio';
+  }
+
+  function openDraftInCreate(draft: Draft) {
+    localStorage.setItem('remixPrompt', draft.prompt || '');
+    localStorage.setItem('remixTitle', draft.title || 'Draft concept');
+    window.location.href = '/create';
+  }
+
   const showSelfCaptureControls = !selfForm.selfCaptureCompleted || showSelfCaptureRedo;
   const manualReferenceReady = isManualReferenceUrlReady(selfForm.manualReferenceImageUrl);
   const selfCharacterReferencesReady =
@@ -3313,7 +3351,7 @@ export default function ProfilePage() {
         {castIn.length ? (
           <div className="list-stack">
             {castIn.map((project) => (
-              <ProjectCard key={project.id} project={project} />
+              <ProjectCard key={project.id} project={project} onOpen={() => openCompletedProject(project)} />
             ))}
           </div>
         ) : (
@@ -3331,7 +3369,7 @@ export default function ProfilePage() {
         {drafts.length ? (
           <div className="list-stack">
             {drafts.map((draft) => (
-              <DraftCard key={draft.id} draft={draft} />
+              <DraftCard key={draft.id} draft={draft} onOpen={() => openDraftInCreate(draft)} />
             ))}
           </div>
         ) : (

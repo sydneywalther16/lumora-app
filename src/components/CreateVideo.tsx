@@ -46,7 +46,7 @@ const stylePresets = ['Editorial Drama', 'Virtual Sitcom', 'Luxury POV', 'Cinema
 const durations = [4, 8, 12, 16];
 const aspectRatios: VideoAspectRatio[] = ['9:16', '16:9', '1:1'];
 const engines: VideoEngine[] = ['seedance-2.0', 'replicate'];
-const SINGLE_PROVIDER_MODE = true;
+const ENABLE_IDENTITY_KEYFRAME_FLOW = true;
 const engineLabels: Record<VideoEngine, string> = {
   'seedance-2.0': 'Seedance 2.0 Identity',
   replicate: 'Kling image-to-video',
@@ -75,6 +75,7 @@ type GenerateVideoApiResponse = {
   rawOutput?: unknown;
   referenceImageNote?: string;
   referenceImageUrl?: unknown;
+  additionalReferenceImageUrls?: unknown;
   keyframeUrl?: unknown;
   generationMode?: GenerationMode;
   displayEngine?: string;
@@ -235,6 +236,13 @@ function formatWarnings(value: unknown): string[] {
 
   if (typeof value === 'string' && value.trim()) return [value.trim()];
   return [];
+}
+
+function formatUrlList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === 'string' ? cleanReferenceUrl(item) : null))
+    .filter((item): item is string => Boolean(item));
 }
 
 function formatUnknownDetail(value: unknown): string {
@@ -470,6 +478,21 @@ export default function CreateVideo({
     }
   }, [engine, engineTouched, seedanceReady]);
 
+  useEffect(() => {
+    const savedPrompt = localStorage.getItem('remixPrompt');
+    const savedTitle = localStorage.getItem('remixTitle');
+
+    if (savedPrompt) {
+      setActivePrompt(savedPrompt);
+      localStorage.removeItem('remixPrompt');
+    }
+
+    if (savedTitle) {
+      setDraftTitle(savedTitle);
+      localStorage.removeItem('remixTitle');
+    }
+  }, [setActivePrompt, setDraftTitle]);
+
   async function handleGenerate() {
     if (generationInFlightRef.current) return;
 
@@ -546,11 +569,12 @@ export default function CreateVideo({
     setStatus('');
 
     try {
-      let keyframeUrl: string | null = selectedEngine === SEEDANCE_ENGINE_ID
-        ? null
-        : SINGLE_PROVIDER_MODE
-          ? null
-          : cleanReferenceUrl(identityProfile?.keyframeUrl ?? null);
+      const savedIdentityKeyframeUrl = cleanReferenceUrl(identityProfile?.keyframeUrl ?? null);
+      const identityFrontFaceUrl = cleanReferenceUrl(identityProfile?.frontFaceUrl ?? null);
+      let keyframeUrl: string | null =
+        savedIdentityKeyframeUrl && savedIdentityKeyframeUrl !== identityFrontFaceUrl
+          ? savedIdentityKeyframeUrl
+          : null;
       let keyframeFinalPrompt = '';
       let keyframeWarnings: string[] = [];
       let keyframeModel = '';
@@ -558,7 +582,7 @@ export default function CreateVideo({
         ? keyframeUrl ? 'identity-keyframe-to-video' : 'reference-photo-animation-fallback'
         : selectedGenerationMode;
 
-      if (!SINGLE_PROVIDER_MODE && selectedEngine !== SEEDANCE_ENGINE_ID && selfReferenceMode && !keyframeUrl && selectedReferenceImageUrl && identityProfile) {
+      if (ENABLE_IDENTITY_KEYFRAME_FLOW && selfReferenceMode && !keyframeUrl && selectedReferenceImageUrl && identityProfile) {
         const keyframeRes = await fetch('/api/lumora/generate-identity-keyframe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -568,6 +592,7 @@ export default function CreateVideo({
             frontFaceUrl: identityProfile.frontFaceUrl || selectedReferenceImageUrl,
             leftAngleUrl: identityProfile.leftAngleUrl,
             rightAngleUrl: identityProfile.rightAngleUrl,
+            fullBodyUrl: identityProfile.fullBodyUrl,
             videoReferenceUrls: identityProfile.videoReferenceUrls,
             appearanceSummary: identityProfile.appearanceSummary,
             identityPrompt: identityProfile.identityPrompt,
@@ -595,9 +620,11 @@ export default function CreateVideo({
             videoGenerationMode = 'identity-keyframe-to-video';
           }
         } else {
-          const keyframeMessage = keyframeData.error || keyframeParseError || 'Identity keyframe provider not configured yet.';
+          const keyframeMessage = keyframeData.error || keyframeParseError || 'Keyframe identity renderer not configured yet.';
           keyframeWarnings = [
-            `${keyframeMessage} Using saved reference photo animation.`,
+            keyframeMessage.includes('Keyframe identity renderer not configured yet')
+              ? 'Keyframe identity renderer not configured yet. Using front-photo animation fallback.'
+              : `${keyframeMessage} Using front-photo animation fallback.`,
           ];
           videoGenerationMode = 'reference-photo-animation-fallback';
         }
@@ -659,13 +686,22 @@ export default function CreateVideo({
         throw new Error(parseError);
       }
 
+      console.log('GENERATION RESPONSE:', data);
+
       const nextVideoUrl = normalizeVideoUrl(data.videoUrl ?? data.video);
       const generationProvider = data.provider === 'openai' ? 'openai' : 'replicate';
       const nextGenerationMode = data.generationMode || videoGenerationMode;
-      const nextDisplayEngine =
-        data.displayEngine || (nextGenerationMode === 'text-to-video-fallback' ? 'text fallback' : 'kling');
       const nextReferenceImageUrl = cleanReferenceUrl(normalizeVideoUrl(data.referenceImageUrl) || referenceImageForRequest);
       const nextKeyframeUrl = cleanReferenceUrl(normalizeVideoUrl(data.keyframeUrl) || keyframeUrl);
+      const nextDisplayEngine = nextKeyframeUrl
+        ? data.displayEngine || 'Lumora identity keyframe'
+        : nextGenerationMode === 'reference-photo-animation-fallback'
+          ? 'Reference photo animation fallback'
+          : data.displayEngine || (nextGenerationMode === 'text-to-video-fallback' ? 'text fallback' : 'kling');
+      const nextAdditionalReferenceImageUrls = formatUrlList(data.additionalReferenceImageUrls).length
+        ? formatUrlList(data.additionalReferenceImageUrls)
+        : additionalReferenceImageUrls;
+      const nextThumbnailUrl = nextKeyframeUrl || nextReferenceImageUrl || nextVideoUrl;
       const nextWarnings = [
         ...keyframeWarnings,
         ...formatWarnings(data.warnings),
@@ -709,10 +745,10 @@ export default function CreateVideo({
         referenceImageUrl: nextReferenceImageUrl,
         message: nextGenerationMode === 'text-to-video-fallback'
           ? 'Text-only fallback render created. Likeness is not guaranteed.'
-          : nextGenerationMode === 'identity-keyframe-to-video'
-            ? 'Lumora Identity Character keyframe render created.'
-          : selectedEngine === SEEDANCE_ENGINE_ID
-            ? 'Seedance identity render created from multiple references.'
+          : nextKeyframeUrl
+            ? 'Lumora identity keyframe created from multiple references.'
+          : nextGenerationMode === 'reference-photo-animation-fallback'
+            ? 'Front reference animation fallback.'
           : 'Kling self-reference video render created.',
         createdAt: now,
       };
@@ -726,6 +762,7 @@ export default function CreateVideo({
           prompt: result.prompt,
           finalPrompt: nextFinalPrompt,
           videoUrl: result.outputUrl,
+          thumbnailUrl: nextThumbnailUrl,
           status: result.status,
           provider: generationProvider,
           engine: selectedEngine,
@@ -740,6 +777,7 @@ export default function CreateVideo({
           keyframeUrl: nextKeyframeUrl,
           referenceImageUrl: nextReferenceImageUrl,
           referenceImageUrls: referencePayload,
+          additionalReferenceImageUrls: nextAdditionalReferenceImageUrls,
           characterId,
           characterName,
           characterAvatar,
@@ -751,12 +789,19 @@ export default function CreateVideo({
           updatedAt: now,
         };
 
+        console.log('SAVING COMPLETED STUDIO PROJECT:', studioProject);
+
         if (authUser) {
           try {
-            await saveSupabaseProject(authUser.id, studioProject);
+            const savedProject = await saveSupabaseProject(authUser.id, studioProject);
+            console.log('SAVED COMPLETED STUDIO PROJECT:', savedProject);
           } catch (saveError) {
             console.error('Unable to save project to Supabase; saving local backup.', saveError);
             saveStudioProject(studioProject);
+            console.log('SAVED COMPLETED STUDIO PROJECT:', {
+              ...studioProject,
+              storage: 'local-fallback',
+            });
             studioSaveStatus = 'Video generated. Account save failed, so a local Studio backup was saved.';
             setGenerationWarnings((current) => [
               ...current,
@@ -767,6 +812,10 @@ export default function CreateVideo({
           }
         } else {
           saveStudioProject(studioProject);
+          console.log('SAVED COMPLETED STUDIO PROJECT:', {
+            ...studioProject,
+            storage: 'local',
+          });
         }
       }
 
@@ -1115,8 +1164,10 @@ export default function CreateVideo({
           {generatedKeyframeUrl ? (
             <div className="reference-result-row">
               <img src={generatedKeyframeUrl} alt="" />
-              <span className="muted">Identity keyframe generated for this scene</span>
+              <span className="muted">Lumora identity keyframe created from multiple references.</span>
             </div>
+          ) : generatedMode === 'reference-photo-animation-fallback' ? (
+            <p className="muted">Front reference animation fallback.</p>
           ) : null}
           {generatedReferenceThumbnailUrl ? (
             <div className="reference-result-row">

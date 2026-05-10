@@ -7,6 +7,7 @@ export type StudioProject = {
   prompt: string;
   finalPrompt?: string | null;
   videoUrl: string;
+  thumbnailUrl?: string | null;
   status: string;
   provider: VideoEngine;
   engine?: VideoEngine | null;
@@ -21,6 +22,7 @@ export type StudioProject = {
   keyframeUrl?: string | null;
   referenceImageUrl?: string | null;
   referenceImageUrls?: Partial<ReferenceImageUrls> | null;
+  additionalReferenceImageUrls?: string[] | null;
   likenessFeedback?: LumoraIdentityFeedback | null;
   characterId: string | null;
   characterName: string | null;
@@ -74,6 +76,7 @@ export function loadStudioProjects(): StudioProject[] {
         title: typeof project.title === 'string' ? project.title : null,
         caption: typeof project.caption === 'string' ? project.caption : null,
         finalPrompt: typeof project.finalPrompt === 'string' ? project.finalPrompt : null,
+        thumbnailUrl: typeof project.thumbnailUrl === 'string' ? project.thumbnailUrl : null,
         engine: typeof project.engine === 'string' ? project.engine as VideoEngine : null,
         displayEngine: typeof project.displayEngine === 'string' ? project.displayEngine : null,
         aspectRatio: typeof project.aspectRatio === 'string' ? project.aspectRatio : null,
@@ -91,6 +94,9 @@ export function loadStudioProjects(): StudioProject[] {
           project.referenceImageUrls && typeof project.referenceImageUrls === 'object'
             ? project.referenceImageUrls as Partial<ReferenceImageUrls>
             : null,
+        additionalReferenceImageUrls: Array.isArray(project.additionalReferenceImageUrls)
+          ? project.additionalReferenceImageUrls.filter((item): item is string => typeof item === 'string')
+          : null,
         likenessFeedback:
           project.likenessFeedback && typeof project.likenessFeedback === 'object'
             ? project.likenessFeedback as LumoraIdentityFeedback
@@ -118,8 +124,11 @@ export function saveStudioProject(project: StudioProject) {
     {
       ...project,
       videoUrl: cleanMediaUrl(project.videoUrl),
+      thumbnailUrl: cleanOptionalMediaUrl(project.thumbnailUrl),
       keyframeUrl: cleanOptionalMediaUrl(project.keyframeUrl),
       referenceImageUrl: cleanOptionalMediaUrl(project.referenceImageUrl),
+      additionalReferenceImageUrls:
+        project.additionalReferenceImageUrls?.map(cleanOptionalMediaUrl).filter((url): url is string => Boolean(url)) ?? null,
       characterAvatar: cleanOptionalMediaUrl(project.characterAvatar),
       creatorAvatar: cleanOptionalMediaUrl(project.creatorAvatar),
       updatedAt: project.updatedAt ?? new Date().toISOString(),

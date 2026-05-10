@@ -958,10 +958,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const engine = textValue(body.engine).toLowerCase() || 'replicate';
     const useSeedance = SINGLE_PROVIDER_MODE ? false : isSeedanceEngine(body);
     const seedanceReferences = seedanceReferenceImages(body);
-    const referenceImageUrl = useSeedance
+    const primaryReferenceImageUrl = useSeedance
       ? seedanceReferences[0] ?? ''
-      : firstReferenceImageUrl(body, { includeKeyframe: !SINGLE_PROVIDER_MODE });
+      : firstReferenceImageUrl(body, { includeKeyframe: false });
     const keyframeUrl = publicImageUrl(body.keyframeUrl);
+    const referenceImageUrl = SINGLE_PROVIDER_MODE
+      ? keyframeUrl || primaryReferenceImageUrl
+      : useSeedance
+        ? primaryReferenceImageUrl
+        : firstReferenceImageUrl(body);
     const additionalReferences = SINGLE_PROVIDER_MODE
       ? []
       : additionalReferenceImageUrls(body, referenceImageUrl);
@@ -1018,7 +1023,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         prompt: promptForModel,
         start_image: referenceImageUrl,
       };
-      const generationModeUsed: GenerationModeUsed = 'reference-photo-animation-fallback';
+      const generationModeUsed: GenerationModeUsed = keyframeUrl
+        ? 'identity-keyframe-to-video'
+        : 'reference-photo-animation-fallback';
 
       console.log('MODEL ATTEMPTED', {
         provider: 'replicate',
@@ -1047,15 +1054,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           videoUrl: result.videoUrl,
           provider: 'replicate',
           model: result.model,
-          displayEngine: 'single provider kling',
+          displayEngine: generationModeUsed === 'identity-keyframe-to-video'
+            ? 'Lumora identity keyframe'
+            : 'Reference photo animation fallback',
           generationMode: generationModeUsed,
           generationModeUsed,
           hasReferenceImage: true,
           modelUsed: result.model,
           durationSent: result.durationSent,
           identityId: textValue(body.identityId) || null,
-          keyframeUrl: null,
-          referenceImageUrl,
+          keyframeUrl: keyframeUrl || null,
+          referenceImageUrl: primaryReferenceImageUrl || referenceImageUrl,
           additionalReferenceImageUrls: [],
           finalPrompt: promptForModel,
           warnings: [],

@@ -1029,6 +1029,7 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
     caption: project.caption ?? project.prompt,
     prompt: project.prompt,
     final_prompt: project.finalPrompt ?? project.prompt,
+    thumbnail_url: storageUrl(project.thumbnailUrl ?? project.keyframeUrl ?? project.referenceImageUrl ?? project.videoUrl, 'Generated project thumbnail'),
     style_preset: project.engine ?? project.provider ?? 'replicate',
     status: project.status || 'completed',
     provider: project.provider,
@@ -1043,6 +1044,7 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
     cover_asset_url: storageUrl(project.videoUrl, 'Generated project video'),
     reference_image_url: storageUrl(project.referenceImageUrl, 'Project reference image'),
     reference_image_urls: cleanJsonRecord(project.referenceImageUrls),
+    additional_reference_image_urls: stripBase64Media(project.additionalReferenceImageUrls) ?? null,
     likeness_feedback: cleanJsonRecord(project.likenessFeedback),
     character_id: project.characterId,
     character_name: project.characterName,
@@ -1052,9 +1054,12 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
     creator_username: project.creatorUsername ?? null,
     creator_avatar: storageUrl(project.creatorAvatar, 'Project creator avatar'),
     aspect_ratio: project.aspectRatio ?? null,
+    created_at: project.createdAt,
     updated_at: project.updatedAt ?? new Date().toISOString(),
   };
   const removableProjectColumns = [
+    'thumbnail_url',
+    'additional_reference_image_urls',
     'reference_image_url',
     'reference_image_urls',
     'keyframe_url',
@@ -1100,6 +1105,7 @@ function mapProjectRow(row: DbRow): StudioProject {
     caption: nullableString(row.caption),
     prompt: stringValue(row.prompt),
     finalPrompt: nullableString(row.final_prompt),
+    thumbnailUrl: nullableString(row.thumbnail_url) || nullableString(row.cover_asset_url),
     videoUrl: stringValue(row.video_url) || stringValue(row.cover_asset_url),
     status: stringValue(row.status) || 'draft',
     provider: (row.provider ?? 'mock') as VideoEngine,
@@ -1112,6 +1118,9 @@ function mapProjectRow(row: DbRow): StudioProject {
     keyframeUrl: nullableString(row.keyframe_url),
     referenceImageUrl: nullableString(row.reference_image_url),
     referenceImageUrls: jsonRecord(row.reference_image_urls) as Partial<ReferenceImageUrls>,
+    additionalReferenceImageUrls: Array.isArray(row.additional_reference_image_urls)
+      ? row.additional_reference_image_urls.filter((item): item is string => typeof item === 'string')
+      : null,
     likenessFeedback: isObject(row.likeness_feedback)
       ? row.likeness_feedback as LumoraIdentityFeedback
       : null,

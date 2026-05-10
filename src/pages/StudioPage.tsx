@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import StudioList from '../components/StudioList';
-import { type GenerationJob } from '../lib/api';
+import { type GenerationJob, type LumoraPost, type VideoEngine } from '../lib/api';
 import { loadStudioProjects, type StudioProject } from '../lib/projectStorage';
 import { useSession } from '../hooks/useSession';
-import { loadSupabaseProjects } from '../lib/supabaseAppData';
+import { loadSupabaseProfilePosts, loadSupabaseProjects } from '../lib/supabaseAppData';
 
 export default function StudioPage() {
   const { user, session, loading, configured } = useSession();
@@ -21,17 +21,27 @@ export default function StudioPage() {
       }
 
       try {
+        const localProjects = loadStudioProjects();
         const projects = authUser
-          ? await loadSupabaseProjects(authUser.id)
-          : loadStudioProjects();
+          ? mergeProjects(
+              await loadSupabaseProjects(authUser.id),
+              mapPostsToProjects(await loadSupabaseProfilePosts(authUser.id)),
+              localProjects,
+            )
+          : localProjects;
         if (!active) return;
         const mappedJobs = mapProjectsToJobs(projects);
         setJobs(mappedJobs);
         setStatus(mappedJobs.length ? '' : 'No projects yet');
       } catch (error) {
         if (!active) return;
-        setJobs([]);
-        setStatus(error instanceof Error ? error.message : 'Unable to load studio projects.');
+        const fallbackJobs = mapProjectsToJobs(loadStudioProjects());
+        setJobs(fallbackJobs);
+        setStatus(
+          fallbackJobs.length
+            ? 'Showing local Studio backups while account projects are unavailable.'
+            : error instanceof Error ? error.message : 'Unable to load studio projects.',
+        );
       }
     }
 
@@ -41,6 +51,45 @@ export default function StudioPage() {
       active = false;
     };
   }, [authUser, configured, loading]);
+
+  function mergeProjects(...groups: StudioProject[][]): StudioProject[] {
+    const seen = new Set<string>();
+    return groups
+      .flat()
+      .filter((project) => {
+        if (!project.id || seen.has(project.id)) return false;
+        seen.add(project.id);
+        return true;
+      })
+      .sort((a, b) => new Date(b.updatedAt ?? b.createdAt).getTime() - new Date(a.updatedAt ?? a.createdAt).getTime());
+  }
+
+  function mapPostsToProjects(posts: LumoraPost[]): StudioProject[] {
+    return posts
+      .filter((post) => Boolean(post.videoUrl))
+      .map((post) => ({
+        id: post.sourceGenerationId || post.id,
+        title: post.title ?? 'Posted video',
+        caption: post.caption ?? post.prompt ?? '',
+        prompt: post.prompt ?? post.caption ?? '',
+        finalPrompt: post.prompt ?? null,
+        videoUrl: post.videoUrl ?? '',
+        thumbnailUrl: post.imageUrl ?? post.videoUrl ?? null,
+        status: post.status || 'completed',
+        provider: (post.provider || 'replicate') as VideoEngine,
+        engine: (post.provider || 'replicate') as VideoEngine,
+        displayEngine: post.provider ?? null,
+        characterId: post.characterId ?? null,
+        characterName: post.characterName ?? null,
+        characterAvatar: post.characterAvatar ?? null,
+        isDefaultSelfCharacter: post.isDefaultSelfCharacter ?? false,
+        creatorName: post.creatorName ?? post.displayName ?? null,
+        creatorUsername: post.creatorUsername ?? post.username ?? null,
+        creatorAvatar: post.creatorAvatar ?? post.avatar ?? null,
+        createdAt: post.createdAt,
+        updatedAt: post.createdAt,
+      }));
+  }
 
   function mapProjectsToJobs(projects: StudioProject[]): GenerationJob[] {
     return projects.map((project) => ({

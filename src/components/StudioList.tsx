@@ -122,6 +122,17 @@ export default function StudioList({ jobs }: Props) {
     setSelectedJob(job);
   }
 
+  useEffect(() => {
+    const projectId = localStorage.getItem('lumora_open_studio_project_id');
+    if (!projectId) return;
+
+    const project = jobs.find((job) => job.id === projectId || job.projectId === projectId);
+    if (!project) return;
+
+    localStorage.removeItem('lumora_open_studio_project_id');
+    openJob(project);
+  }, [jobs]);
+
   async function postToFeed(job: GenerationJob, captionText: string) {
     setPublishMessage(null);
     setPublishError(null);

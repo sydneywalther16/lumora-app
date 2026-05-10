@@ -20,6 +20,7 @@ type KeyframeBody = {
   frontFaceUrl?: unknown;
   leftAngleUrl?: unknown;
   rightAngleUrl?: unknown;
+  fullBodyUrl?: unknown;
   videoReferenceUrls?: unknown;
   appearanceSummary?: unknown;
   preferences?: unknown;
@@ -153,6 +154,7 @@ async function generateWithOpenAI(input: {
   frontFaceUrl: string;
   leftAngleUrl: string;
   rightAngleUrl: string;
+  fullBodyUrl: string;
   videoReferenceUrls: string[];
 }) {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -203,6 +205,7 @@ async function generateWithReplicate(input: {
   frontFaceUrl: string;
   leftAngleUrl: string;
   rightAngleUrl: string;
+  fullBodyUrl: string;
   videoReferenceUrls: string[];
 }) {
   const token = process.env.REPLICATE_API_TOKEN;
@@ -218,6 +221,7 @@ async function generateWithReplicate(input: {
       reference_images: [
         input.leftAngleUrl,
         input.rightAngleUrl,
+        input.fullBodyUrl,
         ...input.videoReferenceUrls,
       ].filter(Boolean),
     },
@@ -253,6 +257,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const frontFaceUrl = cleanHttpUrl(body.frontFaceUrl);
     const leftAngleUrl = cleanHttpUrl(body.leftAngleUrl);
     const rightAngleUrl = cleanHttpUrl(body.rightAngleUrl);
+    const fullBodyUrl = cleanHttpUrl(body.fullBodyUrl);
     const videoReferenceUrls = stringList(body.videoReferenceUrls).map(cleanHttpUrl).filter(Boolean);
 
     if (!prompt) return sendJson(res, 400, { error: 'Missing prompt' });
@@ -268,6 +273,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       frontFaceUrl,
       hasLeft: Boolean(leftAngleUrl),
       hasRight: Boolean(rightAngleUrl),
+      hasFullBody: Boolean(fullBodyUrl),
       videoReferenceCount: videoReferenceUrls.length,
     });
 
@@ -276,6 +282,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       frontFaceUrl,
       leftAngleUrl,
       rightAngleUrl,
+      fullBodyUrl,
       videoReferenceUrls,
     });
     const result = openAiResult ?? await generateWithReplicate({
@@ -283,12 +290,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       frontFaceUrl,
       leftAngleUrl,
       rightAngleUrl,
+      fullBodyUrl,
       videoReferenceUrls,
     });
 
     if (!result) {
       return sendJson(res, 501, {
-        error: 'Identity keyframe provider not configured yet.',
+        error: 'Keyframe identity renderer not configured yet.',
         warnings: ['Set OPENAI_IMAGE_MODEL with OPENAI_API_KEY, or REPLICATE_IDENTITY_KEYFRAME_MODEL with REPLICATE_API_TOKEN.'],
         finalPrompt,
       });
