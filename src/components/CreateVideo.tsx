@@ -79,6 +79,7 @@ type GenerateVideoApiResponse = {
   displayEngine?: string;
   warnings?: unknown;
   error?: string;
+  suggestion?: string;
   details?: unknown;
 };
 
@@ -244,6 +245,19 @@ function formatUnknownDetail(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+const providerSafetyFilterMessage =
+  'Provider safety filter blocked this render. Try a safer, fully clothed editorial prompt.';
+
+function isProviderSafetyFilterError(value: string): boolean {
+  const lower = value.toLowerCase();
+  return (
+    lower.includes('provider safety filter') ||
+    lower.includes('generation blocked by provider safety filter') ||
+    lower.includes('flagged as sensitive') ||
+    lower.includes('e005')
+  );
 }
 
 function parseGenerateResponse(text: string): {
@@ -586,8 +600,13 @@ export default function CreateVideo({
 
       if (!res.ok) {
         const detail = formatUnknownDetail(data.details);
+        const apiMessage = data.error || parseError || 'Generation failed.';
+        if (isProviderSafetyFilterError([apiMessage, data.suggestion || '', detail].join(' '))) {
+          throw new Error(providerSafetyFilterMessage);
+        }
+
         throw new Error(
-          [data.error || parseError || 'Generation failed.', detail]
+          [apiMessage, detail]
             .filter(Boolean)
             .join(' Details: '),
         );
@@ -712,10 +731,13 @@ export default function CreateVideo({
     } catch (error) {
       console.error('Generation failed', error);
       const message = error instanceof Error ? error.message : 'Unable to create draft render';
+      const displayMessage = isProviderSafetyFilterError(message)
+        ? providerSafetyFilterMessage
+        : message;
       setGenerationError(
-        isSoraEngine
-          ? `${message} Self-character likeness is currently routed through Replicate.`
-          : message,
+        isSoraEngine && !isProviderSafetyFilterError(displayMessage)
+          ? `${displayMessage} Self-character likeness is currently routed through Replicate.`
+          : displayMessage,
       );
     } finally {
       setGenerationLoading(false);

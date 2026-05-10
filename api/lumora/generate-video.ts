@@ -54,8 +54,27 @@ type GenerationModeUsed =
   | 'reference-photo-animation-fallback';
 
 const SEEDANCE_MODEL = 'bytedance/seedance-2.0' as ReplicateModelIdentifier;
+const KLING_IMAGE_TO_VIDEO_MODEL = 'kwaivgi/kling-v2.1' as ReplicateModelIdentifier;
+const KLING_IMAGE_TO_VIDEO_FALLBACK_MODEL = 'kwaivgi/kling-v2.5-turbo-pro' as ReplicateModelIdentifier;
 const SEEDANCE_IDENTITY_PROMPT =
   'Use the provided reference images only as identity references. Do not animate or copy any single source image. Generate a new photorealistic person matching the same identity in the requested scene.';
+const SAFE_IDENTITY_PROMPT_PREFIX =
+  'Create a safe, fully clothed, photorealistic cinematic video of the identity reference person. Preserve likeness. No nudity, no sexual content, no minors, no suggestive posing.';
+const SAFE_PROMPT_REPLACEMENT = 'stylish, cinematic, confident, editorial, fashion-inspired';
+const SENSITIVE_FILTER_ERROR = 'Generation blocked by provider safety filter';
+const SENSITIVE_FILTER_SUGGESTION =
+  'Try a safer prompt: fully clothed, cinematic, editorial, non-suggestive.';
+const sensitivePromptTerms = [
+  'sexy',
+  'nude',
+  'nudity',
+  'lingerie',
+  'onlyfans',
+  'seducing',
+  'seductive',
+  'provocative',
+  'adult',
+] as const;
 
 function safeJsonValue(value: unknown, seen = new WeakSet<object>()): unknown {
   if (value == null) return value;
@@ -157,6 +176,26 @@ function errorStack(error: unknown): string | null {
 
 function textValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function sanitizePromptText(value: string): string {
+  let sanitized = value;
+
+  for (const term of sensitivePromptTerms) {
+    sanitized = sanitized.replace(
+      new RegExp(`\\b${escapeRegExp(term)}\\b`, 'gi'),
+      SAFE_PROMPT_REPLACEMENT,
+    );
+  }
+
+  return sanitized
+    .replace(/\s*,\s*,+/g, ', ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function objectRecord(value: unknown): Record<string, unknown> {
@@ -309,15 +348,18 @@ function buildFinalPrompt(input: {
   mood: string;
   aspectRatio: string;
 }) {
-  return [
-    input.consistencyPrompt || (input.engine === 'seedance-2.0'
+  const consistencyPrompt = input.consistencyPrompt || (input.engine === 'seedance-2.0'
       ? SEEDANCE_IDENTITY_PROMPT
-      : 'Create a new photorealistic character render based on the provided identity references. Do not simply animate or copy the source photo. Use the references only to preserve identity: face shape, hair color, hairstyle, skin tone, eye area, proportions, makeup style, and overall likeness. Place this same person into the requested new scene.'),
-    input.identityPrompt ? `Identity prompt: ${input.identityPrompt}` : '',
-    `${input.characterDescription} ${input.prompt}`.trim(),
-    input.style ? `Style: ${input.style}` : '',
-    input.camera ? `Camera: ${input.camera}` : '',
-    input.mood ? `Mood: ${input.mood}` : '',
+      : 'Create a new photorealistic character render based on the provided identity references. Do not simply animate or copy the source photo. Use the references only to preserve identity: face shape, hair color, hairstyle, skin tone, eye area, proportions, makeup style, and overall likeness. Place this same person into the requested new scene.');
+
+  return [
+    SAFE_IDENTITY_PROMPT_PREFIX,
+    sanitizePromptText(consistencyPrompt),
+    input.identityPrompt ? `Identity prompt: ${sanitizePromptText(input.identityPrompt)}` : '',
+    sanitizePromptText(`${input.characterDescription} ${input.prompt}`.trim()),
+    input.style ? `Style: ${sanitizePromptText(input.style)}` : '',
+    input.camera ? `Camera: ${sanitizePromptText(input.camera)}` : '',
+    input.mood ? `Mood: ${sanitizePromptText(input.mood)}` : '',
     input.aspectRatio === '9:16' ? 'vertical video' : `${input.aspectRatio} video`,
     'Cinematic lighting, realistic motion, high detail.',
   ]
@@ -382,6 +424,23 @@ function modelErrorMessage(error: unknown): string {
 function isBillingOrCreditError(error: unknown): boolean {
   const lower = JSON.stringify(safeJsonValue(error) ?? '').toLowerCase();
   return lower.includes('credit') || lower.includes('billing') || lower.includes('payment');
+}
+
+function isSensitiveFilterError(error: unknown): boolean {
+  const lower = [
+    errorMessage(error),
+    JSON.stringify(safeJsonValue(error) ?? ''),
+  ].join(' ').toLowerCase();
+
+  return (
+    lower.includes('flagged as sensitive') ||
+    lower.includes('e005') ||
+    lower.includes('sensitive')
+  );
+}
+
+function uniqueModels(models: ReplicateModelIdentifier[]): ReplicateModelIdentifier[] {
+  return Array.from(new Set(models));
 }
 
 function isValidHttpUrl(url: string) {
@@ -523,6 +582,73 @@ async function runReplicate(input: {
   throw new Error('Replicate generation failed without a completed attempt.');
 }
 
+async function runKlingImageToVideo(input: {
+  replicate: ReplicateClient;
+  prompt: string;
+  referenceImageUrl: string;
+  additionalReferences: string[];
+  primaryModel?: ReplicateModelIdentifier;
+  durationSent: number | null;
+  generationModeUsed: GenerationModeUsed;
+  safetyFallback?: boolean;
+}) {
+  const models = uniqueModels([
+    input.primaryModel ?? KLING_IMAGE_TO_VIDEO_MODEL,
+    KLING_IMAGE_TO_VIDEO_FALLBACK_MODEL,
+  ]);
+  const failures: Array<{
+    model: ReplicateModelIdentifier;
+    safetyFiltered: boolean;
+    details: unknown;
+  }> = [];
+
+  for (const model of models) {
+    const requestInput = {
+      prompt: input.prompt,
+      start_image: input.referenceImageUrl,
+      ...(input.additionalReferences.length ? { reference_images: input.additionalReferences } : {}),
+    };
+
+    try {
+      return await runReplicate({
+        replicate: input.replicate,
+        model,
+        requestInput,
+        durationSent: input.durationSent,
+        generationModeUsed: input.generationModeUsed,
+        referenceImageUrl: input.referenceImageUrl,
+        fallbackToStartImageOnly: true,
+      });
+    } catch (error) {
+      failures.push({
+        model,
+        safetyFiltered: isSensitiveFilterError(error),
+        details: safeJsonValue(error),
+      });
+      console.warn('Kling image-to-video attempt failed', {
+        model,
+        safetyFiltered: isSensitiveFilterError(error),
+        safetyFallback: input.safetyFallback ?? false,
+      });
+    }
+  }
+
+  if (failures.length > 0 && failures.every((failure) => failure.safetyFiltered)) {
+    throw Object.assign(new Error(SENSITIVE_FILTER_ERROR), {
+      provider: 'replicate',
+      model: failures[failures.length - 1]?.model ?? KLING_IMAGE_TO_VIDEO_FALLBACK_MODEL,
+      safetyFiltered: true,
+      details: { attempts: failures },
+    });
+  }
+
+  throw Object.assign(new Error('Kling image-to-video generation failed.'), {
+    provider: 'replicate',
+    model: failures[failures.length - 1]?.model ?? KLING_IMAGE_TO_VIDEO_FALLBACK_MODEL,
+    details: { attempts: failures },
+  });
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   console.log('LUMORA GENERATE START');
 
@@ -633,41 +759,96 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { default: Replicate } = await import('replicate');
       const replicate = new Replicate({ auth: token }) as ReplicateClient;
 
-      const result = await runReplicate({
-        replicate,
-        model: SEEDANCE_MODEL,
-        requestInput,
-        durationSent,
-        generationModeUsed: 'seedance-identity',
-        referenceImageUrl,
-        fallbackToStartImageOnly: false,
-      });
+      try {
+        const result = await runReplicate({
+          replicate,
+          model: SEEDANCE_MODEL,
+          requestInput,
+          durationSent,
+          generationModeUsed: 'seedance-identity',
+          referenceImageUrl,
+          fallbackToStartImageOnly: false,
+        });
 
-      console.log('FINAL VIDEO URL:', result.videoUrl);
+        console.log('FINAL VIDEO URL:', result.videoUrl);
 
-      return sendJson(res, 200, {
-        success: true,
-        videoUrl: result.videoUrl,
-        provider: 'replicate',
-        model: result.model,
-        displayEngine: 'seedance',
-        generationMode: 'seedance-identity',
-        generationModeUsed: 'seedance-identity',
-        hasReferenceImage: true,
-        modelUsed: result.model,
-        durationSent: result.durationSent,
-        identityId: textValue(body.identityId) || null,
-        keyframeUrl: null,
-        referenceImageUrl,
-        referenceImages: seedanceReferences,
-        additionalReferenceImageUrls: seedanceReferences.slice(1),
-        finalPrompt: promptForModel,
-        warnings: [],
-        rawOutput: {
-          provider: safeJsonValue(result.rawOutput),
-          attempts: result.attempts,
-        },
-      });
+        return sendJson(res, 200, {
+          success: true,
+          videoUrl: result.videoUrl,
+          provider: 'replicate',
+          model: result.model,
+          displayEngine: 'seedance',
+          generationMode: 'seedance-identity',
+          generationModeUsed: 'seedance-identity',
+          hasReferenceImage: true,
+          modelUsed: result.model,
+          durationSent: result.durationSent,
+          identityId: textValue(body.identityId) || null,
+          keyframeUrl: null,
+          referenceImageUrl,
+          referenceImages: seedanceReferences,
+          additionalReferenceImageUrls: seedanceReferences.slice(1),
+          finalPrompt: promptForModel,
+          warnings: [],
+          rawOutput: {
+            provider: safeJsonValue(result.rawOutput),
+            attempts: result.attempts,
+          },
+        });
+      } catch (seedanceError) {
+        if (!isSensitiveFilterError(seedanceError)) {
+          throw seedanceError;
+        }
+
+        console.warn('Seedance safety filter blocked generation; retrying Kling image-to-video fallback.', {
+          model: SEEDANCE_MODEL,
+          referenceImageUrl,
+        });
+
+        const fallbackResult = await runKlingImageToVideo({
+          replicate,
+          prompt: promptForModel,
+          referenceImageUrl,
+          additionalReferences: [],
+          primaryModel: KLING_IMAGE_TO_VIDEO_MODEL,
+          durationSent: null,
+          generationModeUsed: 'reference-photo-animation-fallback',
+          safetyFallback: true,
+        });
+
+        console.log('FINAL VIDEO URL:', fallbackResult.videoUrl);
+
+        return sendJson(res, 200, {
+          success: true,
+          videoUrl: fallbackResult.videoUrl,
+          provider: 'replicate',
+          model: fallbackResult.model,
+          displayEngine: 'kling safety fallback',
+          generationMode: 'reference-photo-animation-fallback',
+          generationModeUsed: 'reference-photo-animation-fallback',
+          hasReferenceImage: true,
+          modelUsed: fallbackResult.model,
+          durationSent: fallbackResult.durationSent,
+          identityId: textValue(body.identityId) || null,
+          keyframeUrl: null,
+          referenceImageUrl,
+          referenceImages: [referenceImageUrl],
+          additionalReferenceImageUrls: [],
+          finalPrompt: promptForModel,
+          warnings: [
+            'Provider safety filter blocked Seedance, so Lumora used Kling image-to-video with the same saved reference.',
+          ],
+          rawOutput: {
+            fallbackFrom: {
+              provider: 'replicate',
+              model: SEEDANCE_MODEL,
+              error: safeJsonValue(seedanceError),
+            },
+            provider: safeJsonValue(fallbackResult.rawOutput),
+            attempts: fallbackResult.attempts,
+          },
+        });
+      }
     }
 
     if (!isValidHttpUrl(referenceImageUrl)) {
@@ -708,7 +889,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const model = (process.env.REPLICATE_IMAGE_TO_VIDEO_MODEL || 'kwaivgi/kling-v2.1') as ReplicateModelIdentifier;
+    const model = (process.env.REPLICATE_IMAGE_TO_VIDEO_MODEL || KLING_IMAGE_TO_VIDEO_MODEL) as ReplicateModelIdentifier;
     const requestInput = {
       prompt: promptForModel,
       start_image: referenceImageUrl,
@@ -734,14 +915,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { default: Replicate } = await import('replicate');
     const replicate = new Replicate({ auth: token }) as ReplicateClient;
 
-    const result = await runReplicate({
+    const result = await runKlingImageToVideo({
       replicate,
-      model,
-      requestInput,
+      prompt: promptForModel,
+      referenceImageUrl,
+      additionalReferences,
+      primaryModel: model,
       durationSent: null,
       generationModeUsed,
-      referenceImageUrl,
-      fallbackToStartImageOnly: true,
     });
 
     console.log('FINAL VIDEO URL:', result.videoUrl);
@@ -771,6 +952,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (error) {
     console.error('LUMORA GENERATE ERROR:', error);
     const errorRecord = objectRecord(error);
+
+    if (errorRecord.safetyFiltered === true || isSensitiveFilterError(error)) {
+      return sendJson(res, 422, {
+        error: SENSITIVE_FILTER_ERROR,
+        suggestion: SENSITIVE_FILTER_SUGGESTION,
+      });
+    }
 
     return sendJson(res, 500, {
       error: errorMessage(error),
