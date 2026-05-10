@@ -58,13 +58,23 @@ const patchCharacterSchema = z.object({
 export const charactersRouter = Router();
 charactersRouter.use(requireAuth);
 
+function stringRouteParam(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] ?? '' : value ?? '';
+}
+
 charactersRouter.get('/', async (req: AuthedRequest, res) => {
   const characters = await listCharacterProfilesForUser(req.userId!);
   res.json({ characters });
 });
 
 charactersRouter.get('/:id', async (req: AuthedRequest, res) => {
-  const character = await getCharacterProfileForUser(req.userId!, req.params.id);
+  const characterId = stringRouteParam(req.params.id);
+  if (!characterId) {
+    res.status(400).json({ error: 'Character id is required.' });
+    return;
+  }
+
+  const character = await getCharacterProfileForUser(req.userId!, characterId);
   if (!character) {
     res.status(404).json({ error: 'Character profile not found.' });
     return;
@@ -149,6 +159,12 @@ charactersRouter.post('/', async (req: AuthedRequest, res) => {
 charactersRouter.patch('/:id', async (req: AuthedRequest, res) => {
   const payload = patchCharacterSchema.parse(req.body);
   const consentConfirmed = payload.consentConfirmed ?? payload.consent_confirmed;
+  const characterId = stringRouteParam(req.params.id);
+
+  if (!characterId) {
+    res.status(400).json({ error: 'Character id is required.' });
+    return;
+  }
 
   if (consentConfirmed === false) {
     res.status(400).json({
@@ -157,7 +173,7 @@ charactersRouter.patch('/:id', async (req: AuthedRequest, res) => {
     return;
   }
 
-  const current = await getCharacterProfileForUser(req.userId!, req.params.id);
+  const current = await getCharacterProfileForUser(req.userId!, characterId);
   if (!current) {
     res.status(404).json({ error: 'Character profile not found.' });
     return;
@@ -219,7 +235,7 @@ charactersRouter.patch('/:id', async (req: AuthedRequest, res) => {
 
   const character = await updateCharacterProfileForUser({
     ownerUserId: req.userId!,
-    characterId: req.params.id,
+    characterId,
     name: payload.name,
     status: payload.status,
     visibility: payload.visibility,

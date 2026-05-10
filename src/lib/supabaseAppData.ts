@@ -262,8 +262,13 @@ export async function uploadCharacterReferencePhoto(input: {
     await new Promise((resolve) => globalThis.setTimeout(resolve, 800));
     try {
       await validateUploadedReferencePhoto(url);
-    } catch {
-      throw firstError;
+    } catch (secondError) {
+      console.warn('Reference photo public validation failed after upload; saving durable storage URL anyway.', {
+        objectPath,
+        url,
+        firstError,
+        secondError,
+      });
     }
   }
 
@@ -930,9 +935,9 @@ export async function saveSupabaseCreatorSelfCharacter(input: {
     defaultSelfCharacterId: CREATOR_SELF_CHARACTER_ID,
     defaultSelfCharacterName: input.name,
     defaultSelfCharacterAvatar:
-      stringValue(referenceImageUrls.manualReferenceImageUrl) ||
       stringValue(referenceImageUrls.frontFaceUrl) ||
       stringValue(referenceImageUrls.frontFace) ||
+      stringValue(referenceImageUrls.manualReferenceImageUrl) ||
       storageUrl(input.profile.avatar, 'Profile avatar'),
     manualReferenceImageUrl: stringValue(referenceImageUrls.manualReferenceImageUrl) || null,
     selfReferenceImageUrls: referenceImageUrls,

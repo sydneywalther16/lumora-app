@@ -48,7 +48,7 @@ const aspectRatios: VideoAspectRatio[] = ['9:16', '16:9', '1:1'];
 const engines: VideoEngine[] = ['seedance-2.0', 'replicate'];
 const engineLabels: Record<VideoEngine, string> = {
   'seedance-2.0': 'Seedance 2.0 Identity',
-  replicate: 'Kling image-to-video fallback',
+  replicate: 'Kling image-to-video',
   'sora-2': 'Sora 2',
   'sora-2-pro': 'Sora 2 Pro',
   veo: 'Veo',
@@ -327,14 +327,15 @@ export default function CreateVideo({
   const selectedSelfReferenceImageUrl = hasSelfCharacter
     ? resolveRenderableReferenceUrl(referenceImageUrl) || resolveRenderableReferenceUrl(primaryReferenceImage.url)
     : resolveRenderableReferenceUrl(primaryReferenceImage.url) || resolveRenderableReferenceUrl(characterAvatar);
+  const hasGenerationReference = Boolean(selectedSelfReferenceImageUrl);
   const selfReferenceMode = hasSelfCharacter;
   const selectedGenerationMode: GenerationMode = selfReferenceMode
     ? 'self-reference-video'
-    : primaryReferenceImage.url
+    : hasGenerationReference
       ? 'image-to-video'
       : 'text-to-video-fallback';
   const referencePayload = referenceImagePayload(referenceImageUrls);
-  const isTextFallbackMode = !hasSelfCharacter && !referenceLoading && selectedGenerationMode === 'text-to-video-fallback';
+  const isTextFallbackMode = !referenceLoading && !hasGenerationReference;
   const referenceThumbnailUrl = renderableReferenceImageUrl(primaryReferenceImage.url);
   const generatedReferenceThumbnailUrl = renderableReferenceImageUrl(generatedReferenceImageUrl);
   const identityStatusLabel = !identityProfile
@@ -408,11 +409,15 @@ export default function CreateVideo({
     'url',
     'path',
   );
-  const canGenerate = true;
-  const generateBusy = canGenerate ? busy || generationLoading || referenceLoading : true;
-  const saveBusy = busy || generationLoading;
   const isSoraEngine = engine === 'sora-2' || engine === 'sora-2-pro';
   const isSeedanceEngine = engine === SEEDANCE_ENGINE_ID;
+  const canGenerate =
+    isHydrated &&
+    !referenceLoading &&
+    hasGenerationReference &&
+    (!isSeedanceEngine || seedanceReady);
+  const generateBusy = !canGenerate || busy || generationLoading || referenceLoading;
+  const saveBusy = busy || generationLoading;
   const engineRoutingMessage =
     isSeedanceEngine
       ? seedanceReady
@@ -423,9 +428,9 @@ export default function CreateVideo({
       : 'Kling runs through Replicate and uses your self-character reference image first.';
 
   useEffect(() => {
-    if (seedanceReady && !engineTouched) {
+    if (seedanceReady && !engineTouched && engine !== SEEDANCE_ENGINE_ID) {
       setEngine(SEEDANCE_ENGINE_ID);
-    } else if (engine === SEEDANCE_ENGINE_ID) {
+    } else if (!seedanceReady && engine === SEEDANCE_ENGINE_ID) {
       setEngine('replicate');
     }
   }, [engine, engineTouched, seedanceReady]);
@@ -436,11 +441,27 @@ export default function CreateVideo({
       return;
     }
 
+    if (!isHydrated || referenceLoading) {
+      setStatus('Checking saved reference photos. Try again in a moment.');
+      return;
+    }
+
     const currentPrompt = activePrompt;
     const selectedAspectRatio = aspectRatio;
     const selectedEngine = engine;
     const selectedSeedanceReferences = seedanceReferenceImages;
     const selectedReferenceImageUrl = resolveRenderableReferenceUrl(referenceImageUrl) || selectedSelfReferenceImageUrl;
+
+    if (selectedEngine === SEEDANCE_ENGINE_ID && selectedSeedanceReferences.length < 3) {
+      setGenerationError('Seedance identity generation needs saved front, left, and right reference photos.');
+      return;
+    }
+
+    if (selectedEngine !== SEEDANCE_ENGINE_ID && !selectedReferenceImageUrl) {
+      setGenerationError('Add or re-save a public reference photo before generating.');
+      return;
+    }
+
     const referenceImageForRequest = selectedEngine === SEEDANCE_ENGINE_ID
       ? selectedSeedanceReferences[0] ?? selectedReferenceImageUrl
       : selectedReferenceImageUrl;
@@ -526,7 +547,7 @@ export default function CreateVideo({
         } else {
           const keyframeMessage = keyframeData.error || keyframeParseError || 'Identity keyframe provider not configured yet.';
           keyframeWarnings = [
-            `${keyframeMessage} Using reference photo animation fallback.`,
+            `${keyframeMessage} Using saved reference photo animation.`,
           ];
           videoGenerationMode = 'reference-photo-animation-fallback';
         }
@@ -596,6 +617,7 @@ export default function CreateVideo({
       }
 
       const nextFinalPrompt = data.finalPrompt || keyframeFinalPrompt || currentPrompt;
+      let studioSaveStatus = 'Video generated and saved to Studio.';
       setGeneratedVideoUrl(nextVideoUrl);
       setFinalGeneratedPrompt(nextFinalPrompt);
       setGeneratedModel(data.model || keyframeModel || '');
@@ -668,15 +690,25 @@ export default function CreateVideo({
         };
 
         if (authUser) {
-          await saveSupabaseProject(authUser.id, studioProject);
-        }
-
-        if (!authUser) {
+          try {
+            await saveSupabaseProject(authUser.id, studioProject);
+          } catch (saveError) {
+            console.error('Unable to save project to Supabase; saving local backup.', saveError);
+            saveStudioProject(studioProject);
+            studioSaveStatus = 'Video generated. Account save failed, so a local Studio backup was saved.';
+            setGenerationWarnings((current) => [
+              ...current,
+              saveError instanceof Error
+                ? `Account save failed: ${saveError.message}. A local Studio backup was saved.`
+                : 'Account save failed. A local Studio backup was saved.',
+            ]);
+          }
+        } else {
           saveStudioProject(studioProject);
         }
       }
 
-      setStatus('Video generated and saved to Studio.');
+      setStatus(studioSaveStatus);
     } catch (error) {
       console.error('Generation failed', error);
       const message = error instanceof Error ? error.message : 'Unable to create draft render';
@@ -849,8 +881,8 @@ export default function CreateVideo({
                   ? 'Lumora Identity Character'
                 : referenceLoading
                   ? 'Checking self reference'
-                  : isTextFallbackMode
-                    ? 'Text-only fallback'
+                : isTextFallbackMode
+                    ? 'Reference required'
                     : 'Image-to-video'}
             </span>
             <strong>
@@ -859,7 +891,7 @@ export default function CreateVideo({
                 : referenceLoading
                   ? 'Looking for saved self-character photos'
                 : isTextFallbackMode
-                  ? 'Likeness not guaranteed'
+                  ? 'Save a reference image first'
                   : 'Using a reference image'}
             </strong>
             <span className="muted">
@@ -870,7 +902,7 @@ export default function CreateVideo({
                   ? 'Build a reusable photorealistic character from your reference photos and videos.'
                   : 'Lumora Identity Character references will be sent when available.'
                 : isTextFallbackMode
-                  ? 'Text-only fallback uses Luma and supports 5s or 9s renders.'
+                  ? 'Create needs a public saved reference image for the current generation path.'
                   : 'Kling will condition the video on the selected image.'}
             </span>
             {selfReferenceMode ? (
@@ -938,15 +970,15 @@ export default function CreateVideo({
         ) : null}
 
         <div className="button-row">
-          <button type="button" className="primary-btn" onClick={handleGenerate} disabled={false} aria-busy={generateBusy}>
+          <button type="button" className="primary-btn" onClick={handleGenerate} disabled={generateBusy} aria-busy={generateBusy}>
             {generationLoading
               ? 'Rendering...'
-              : selfReferenceMode
-                ? 'Generate new scene with my Lumora character'
-                : referenceLoading
+              : referenceLoading
                   ? 'Checking self character...'
-                : isTextFallbackMode
-                  ? 'Generate text-only fallback'
+                : !canGenerate
+                  ? 'Add reference before generating'
+                  : selfReferenceMode
+                    ? 'Generate new scene with my Lumora character'
                   : 'Generate video'}
           </button>
           <button type="button" className="ghost-btn" onClick={() => void handleSaveDraft()} disabled={saveBusy}>

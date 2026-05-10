@@ -1,7 +1,6 @@
 const requiredFrontend = [
   'VITE_SUPABASE_URL',
-  'VITE_SUPABASE_ANON_KEY',
-  'VITE_API_URL'
+  'VITE_SUPABASE_ANON_KEY'
 ];
 
 const requiredBackend = [
@@ -20,6 +19,10 @@ for (const key of requiredFrontend.concat(requiredBackend)) {
 if (missing.length) {
   console.error('Missing env vars for deploy:\n' + missing.map(k => `- ${k}`).join('\n'));
   process.exit(1);
+}
+
+if (!process.env.VITE_API_BASE_URL && !process.env.VITE_API_URL) {
+  console.warn('VITE_API_BASE_URL/VITE_API_URL not set; frontend API calls will use same-origin /api routes.');
 }
 
 console.log('Deploy env check passed.');

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { createVideoGeneration, type VideoEngine, type VideoProviderResult } from '../video';
+import { createVideoGeneration } from '../video';
 
 const generationSchema = z.object({
   prompt: z.string().min(1),
@@ -42,7 +42,7 @@ generationsRouter.post('/', async (req, res) => {
       characterId: payload.characterId ?? null,
       characterName: payload.characterName ?? null,
       prompt: payload.prompt,
-      outputUrl: providerResult.resultAssetUrl ?? '',
+      outputUrl: '',
       message: providerResult.message,
       createdAt: new Date().toISOString(),
     });

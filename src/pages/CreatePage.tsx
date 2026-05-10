@@ -176,7 +176,7 @@ export default function CreatePage() {
     ?? resolveRenderableReferenceUrl(savedSelfReferenceUrls?.frontFacePath)
     ?? resolveRenderableReferenceUrl(savedSelfReferenceUrls?.frontFace);
   const referenceImageUrl = hasSelfCharacter
-    ? manualReferenceImageUrl ?? savedFrontFaceUrl ?? resolvedReference?.primary ?? null
+    ? savedFrontFaceUrl ?? resolvedReference?.primary ?? manualReferenceImageUrl ?? null
     : resolveRenderableReferenceUrl(selectedCharacter?.referenceImageUrls?.frontFaceUrl)
       ?? resolveRenderableReferenceUrl(selectedCharacter?.referenceImageUrls?.frontFacePath)
       ?? resolveRenderableReferenceUrl(selectedCharacter?.referenceImageUrls?.frontFace);
@@ -273,7 +273,7 @@ export default function CreatePage() {
         referenceImageUrls={referenceImageUrls}
         additionalReferenceImageUrls={additionalReferenceImageUrls}
         referenceLoading={referenceLoading}
-        referenceLabel={manualReferenceImageUrl ? 'Temporary manual reference override' : identityProfile ? 'Lumora Identity Character' : null}
+        referenceLabel={manualReferenceImageUrl && referenceImageUrl === manualReferenceImageUrl ? 'Backup reference URL' : identityProfile ? 'Lumora Identity Character' : null}
         forceSelfMode={hasSelfCharacter}
         isHydrated={isHydrated}
         identityProfile={identityProfile}

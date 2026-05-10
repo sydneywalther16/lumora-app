@@ -1,3 +1,5 @@
+import { resolveRenderableReferenceUrl } from '../lib/selfCharacterReference';
+
 export type SelfReferencePreviewReference = {
   url?: string | null;
   path?: string | null;
@@ -27,28 +29,13 @@ export function normalizeReference(
     fileName: readString(reference?.fileName) || readString(reference?.name) || '',
   };
 
-  console.log('NORMALIZED REFERENCE:', normalized);
   return normalized;
 }
 
-function cleanReferencePath(path?: string | null) {
-  return path
-    ?.trim()
-    .replace(/^\/+/, '')
-    .replace(/^character-reference-images\/+/, '');
-}
-
 export default function SelfReferencePreview({ label, reference, required }: Props) {
-  const cleanPath = cleanReferencePath(reference?.path);
   const resolvedUrl =
-    reference?.url?.startsWith('http')
-      ? reference.url
-      : cleanPath
-        ? `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/character-reference-images/${cleanPath}`
-        : null;
-
-  console.log('REFERENCE OBJECT:', reference);
-  console.log('RESOLVED URL:', resolvedUrl);
+    resolveRenderableReferenceUrl(reference?.url) ??
+    resolveRenderableReferenceUrl(reference?.path);
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 aspect-square">

@@ -362,22 +362,41 @@ export async function refreshBootstrapSession(source: SessionSource = 'refresh')
   });
 
   const nextSource: SessionSource = redirectParamsPresent ? 'url-redirect' : source;
-  const nextSnapshot = await readSession(supabase, nextSource, redirectParamsPresent);
-  initialHydrated = true;
-  emitSessionState(nextSnapshot);
+  try {
+    const nextSnapshot = await readSession(supabase, nextSource, redirectParamsPresent);
+    initialHydrated = true;
+    emitSessionState(nextSnapshot);
 
-  if (redirectParamsPresent && nextSnapshot.authSession) {
-    cleanAuthUrl();
+    if (redirectParamsPresent && nextSnapshot.authSession) {
+      cleanAuthUrl();
+    }
+
+    return nextSnapshot.authSession;
+  } catch (error) {
+    console.error('Unable to bootstrap Supabase session:', error);
+    initialHydrated = true;
+    emitSessionState({
+      authReady: true,
+      authUser: null,
+      authSession: null,
+      configured: true,
+      source: nextSource,
+    });
+    return null;
   }
-
-  return nextSnapshot.authSession;
 }
 
 export function bootstrapSession(): Promise<Session | null> {
   ensureAuthSubscription();
 
+  if (initialHydrated) {
+    return Promise.resolve(currentSnapshot.authSession);
+  }
+
   if (!bootstrapPromise) {
-    bootstrapPromise = refreshBootstrapSession('initial');
+    bootstrapPromise = refreshBootstrapSession('initial').finally(() => {
+      bootstrapPromise = null;
+    });
   }
 
   return bootstrapPromise;

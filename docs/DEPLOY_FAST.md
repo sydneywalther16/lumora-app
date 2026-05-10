@@ -21,7 +21,7 @@ Copy these values from Supabase:
 Set these on Vercel:
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
-- `VITE_API_URL`
+- `VITE_API_BASE_URL` or `VITE_API_URL` only if the frontend should call a separate API host. Leave both unset to use same-origin Vercel `/api` routes.
 
 Framework preset: **Vite**
 Output directory: `dist`

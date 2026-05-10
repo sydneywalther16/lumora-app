@@ -54,7 +54,7 @@ export async function submitGenerationJob(input: {
     });
   }
 
-  const provider = input.outputType === 'video' ? env.OPENAI_VIDEO_MODEL : env.OPENAI_IMAGE_MODEL;
+  const provider = env.OPENAI_IMAGE_MODEL;
   const providerJobId = randomUUID();
   const demoMode = !openai;
 

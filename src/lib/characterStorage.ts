@@ -55,9 +55,9 @@ export function cleanupCreatorSelfMetadata(profile: { displayName: string; defau
             previousSelfCharacter.referenceImageUrls?.manualReferenceImageUrl ||
             null,
           frontFace:
+            previousSelfCharacter.referenceImageUrls?.frontFace ||
             cleanMediaUrl(profile.defaultSelfCharacterAvatar) ||
             cleanMediaUrl(profile.avatar) ||
-            previousSelfCharacter.referenceImageUrls?.frontFace ||
             '',
         },
         isSelf: true,

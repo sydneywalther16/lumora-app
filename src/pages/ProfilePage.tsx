@@ -134,6 +134,13 @@ function hasSelfReferenceSource(form: SelfCharacterForm, field: ReferencePhotoFi
   return Boolean(selfReferencePreviewSource(form, field));
 }
 
+function resolvedSelfReferenceSource(form: SelfCharacterForm, field: ReferencePhotoField): string | null {
+  return (
+    resolveRenderableReferenceUrl(form[field]) ??
+    resolveRenderableReferenceUrl(form[referencePhotoPathFields[field]])
+  );
+}
+
 function isManualReferenceUrlReady(value?: string | null): boolean {
   return Boolean(value?.trim().startsWith('https://'));
 }
@@ -1775,8 +1782,9 @@ export default function ProfilePage() {
         profile,
         referenceImageUrls: creatorSelfCharacter.referenceImageUrls,
         primaryReferenceImageUrl:
-          creatorSelfCharacter.referenceImageUrls.manualReferenceImageUrl ||
-          creatorSelfCharacter.referenceImageUrls.frontFaceUrl || creatorSelfCharacter.referenceImageUrls.frontFace,
+          creatorSelfCharacter.referenceImageUrls.frontFaceUrl ||
+          creatorSelfCharacter.referenceImageUrls.frontFace ||
+          creatorSelfCharacter.referenceImageUrls.manualReferenceImageUrl,
       })
     : null;
   const identityConfidence = Math.round(creatorIdentityProfile?.identityStrength ?? 0);
@@ -2030,7 +2038,7 @@ export default function ProfilePage() {
       selfCharacter: identityDraftCharacter,
       profile,
       referenceImageUrls,
-      primaryReferenceImageUrl: nextForm.manualReferenceImageUrl || nextForm.frontFace,
+      primaryReferenceImageUrl: nextForm.frontFace || nextForm.manualReferenceImageUrl,
       additionalReferenceImageUrls: [nextForm.leftAngle, nextForm.rightAngle, nextForm.fullBody].filter(Boolean),
     });
     const identityProfile = identityProfileOverride
@@ -2273,9 +2281,15 @@ export default function ProfilePage() {
   }
 
   async function handleBuildIdentityCharacter() {
-    const primaryReference = selfForm.manualReferenceImageUrl || selfForm.frontFace;
-    if (!primaryReference || !primaryReference.startsWith('https://')) {
-      setIdentityBuildStatus('Add a public HTTPS front photo or manual working reference URL before building identity.');
+    const primaryReference =
+      resolvedSelfReferenceSource(selfForm, 'frontFace') ||
+      (isManualReferenceUrlReady(selfForm.manualReferenceImageUrl) ? selfForm.manualReferenceImageUrl.trim() : null);
+    const leftAngleUrl = resolvedSelfReferenceSource(selfForm, 'leftAngle');
+    const rightAngleUrl = resolvedSelfReferenceSource(selfForm, 'rightAngle');
+    const fullBodyUrl = resolvedSelfReferenceSource(selfForm, 'fullBody');
+
+    if (!primaryReference) {
+      setIdentityBuildStatus('Add or re-save a public front photo before building identity.');
       return;
     }
 
@@ -2290,9 +2304,9 @@ export default function ProfilePage() {
           identityId: creatorIdentityProfile?.identityId,
           userId: authUserId || 'local',
           frontFaceUrl: primaryReference,
-          leftAngleUrl: selfForm.leftAngle || null,
-          rightAngleUrl: selfForm.rightAngle || null,
-          fullBodyUrl: selfForm.fullBody || null,
+          leftAngleUrl,
+          rightAngleUrl,
+          fullBodyUrl,
           selfieVideoUrl: selfForm.selfieVideoUrl,
           selfieVideo2Url: selfForm.selfieVideo2Url,
           appearanceSummary: buildSelfFormAppearanceSummary(selfForm),
@@ -2335,8 +2349,8 @@ export default function ProfilePage() {
   }
 
   async function handleSaveSelfCharacter() {
-    if (!isManualReferenceUrlReady(selfForm.manualReferenceImageUrl) && (!selfForm.frontFace || !selfForm.leftAngle || !selfForm.rightAngle)) {
-      setSelfCharacterStatus('Add front, left, and right photos or a manual HTTPS reference URL to save your self character.');
+    if (!hasSelfReferenceSource(selfForm, 'frontFace') || !hasSelfReferenceSource(selfForm, 'leftAngle') || !hasSelfReferenceSource(selfForm, 'rightAngle')) {
+      setSelfCharacterStatus('Add front, left, and right photos to save your self character.');
       return;
     }
 
@@ -2396,7 +2410,7 @@ export default function ProfilePage() {
       selfCharacter: identityDraftCharacter,
       profile,
       referenceImageUrls,
-      primaryReferenceImageUrl: selfForm.manualReferenceImageUrl || selfForm.frontFace,
+      primaryReferenceImageUrl: selfForm.frontFace || selfForm.manualReferenceImageUrl,
       additionalReferenceImageUrls: [selfForm.leftAngle, selfForm.rightAngle].filter(Boolean),
     });
     const stylePreferences = identityProfileToStylePreferences(baseStylePreferences, identityProfile);
@@ -2483,7 +2497,7 @@ export default function ProfilePage() {
         ...profile,
         defaultSelfCharacterId: CREATOR_SELF_CHARACTER_ID,
         defaultSelfCharacterName: displayName,
-        defaultSelfCharacterAvatar: profile.avatar || selfForm.manualReferenceImageUrl || selfForm.frontFace,
+        defaultSelfCharacterAvatar: selfForm.frontFace || selfForm.manualReferenceImageUrl || profile.avatar,
         manualReferenceImageUrl: selfForm.manualReferenceImageUrl || null,
         selfReferenceImageUrls: {
           manualReferenceImageUrl: selfForm.manualReferenceImageUrl || null,
@@ -3009,13 +3023,13 @@ export default function ProfilePage() {
 
             <div style={{ display: 'grid', gap: '12px', padding: '16px', borderRadius: '18px', background: 'rgba(255,255,255,0.04)' }}>
               <div>
-                <span className="eyebrow">Temporary manual reference override</span>
+                <span className="eyebrow">Backup reference URL</span>
                 <p className="muted" style={{ margin: '8px 0 0' }}>
-                  Paste a known working public HTTPS image URL while Supabase reference hydration is being stabilized.
+                  Optional public HTTPS image URL used only when the saved front photo is not available.
                 </p>
               </div>
               <label className="field-group">
-                <span className="eyebrow">Manual working reference URL</span>
+                <span className="eyebrow">Backup public reference URL</span>
                 <input
                   type="url"
                   value={selfForm.manualReferenceImageUrl}
@@ -3031,18 +3045,18 @@ export default function ProfilePage() {
               {manualReferenceReady ? (
                 <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr', gap: '12px', alignItems: 'center' }}>
                   <SelfReferencePreview
-                    label="Manual working reference URL"
+                    label="Backup public reference URL"
                     reference={normalizeReference(
                       { url: selfForm.manualReferenceImageUrl },
                       'url',
                       'path',
                     )}
                   />
-                  <span className="muted">Manual HTTPS reference ready. Create will use this before saved photos.</span>
+                  <span className="muted">Backup HTTPS reference ready. Saved photos remain preferred.</span>
                 </div>
               ) : selfForm.manualReferenceImageUrl.trim() ? (
                 <p className="muted" style={{ margin: 0 }}>
-                  Manual override must start with https:// to be used for generation.
+                  Backup reference must start with https:// to be used for generation.
                 </p>
               ) : null}
             </div>

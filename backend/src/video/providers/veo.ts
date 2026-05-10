@@ -2,8 +2,6 @@ import { randomUUID } from 'node:crypto';
 import { env } from '../../lib/env';
 import type { VideoGenerationRequest, VideoProvider, VideoProviderResult } from './types';
 
-declare module '@google/generative-ai';
-
 const VIDEO_MODEL = 'veo-3.1-generate-preview';
 const MOCK_OUTPUT_URL = '/demo-video.mp4';
 
@@ -42,7 +40,7 @@ export class VeoVideoProvider implements VideoProvider {
     }
 
     try {
-      const sdk = await import('@google/generative-ai');
+      const sdk = await import('@google/generative-ai') as any;
       const VideoGenerationModel = sdk.VideoGenerationModel ?? sdk.VideoModel ?? sdk.VideoGeneration;
       const OperationsClient = sdk.OperationsClient ?? sdk.operations?.OperationsClient;
 

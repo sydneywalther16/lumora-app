@@ -12,7 +12,7 @@ export const supabase = hasSupabaseConfig
       {
         auth: {
           autoRefreshToken: true,
-          detectSessionInUrl: true,
+          detectSessionInUrl: false,
           flowType: 'pkce',
           persistSession: true,
         },
