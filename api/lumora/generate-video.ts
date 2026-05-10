@@ -14,6 +14,7 @@ type ReplicateModelIdentifier = `${string}/${string}` | `${string}/${string}:${s
 
 type GenerateVideoBody = {
   prompt?: unknown;
+  userId?: unknown;
   identityId?: unknown;
   identityPrompt?: unknown;
   consistencyPrompt?: unknown;
@@ -64,6 +65,9 @@ const SAFE_PROMPT_REPLACEMENT = 'stylish, cinematic, confident, editorial, fashi
 const SENSITIVE_FILTER_ERROR = 'Generation blocked by provider safety filter';
 const SENSITIVE_FILTER_SUGGESTION =
   'Try a safer prompt: fully clothed, cinematic, editorial, non-suggestive.';
+const KLING_FALLBACK_DELAY_MS = 4_000;
+const KLING_SECONDARY_FALLBACK_DELAY_MS = 6_000;
+const DEFAULT_REPLICATE_RETRY_AFTER_MS = 6_000;
 const sensitivePromptTerms = [
   'sexy',
   'nude',
@@ -75,6 +79,9 @@ const sensitivePromptTerms = [
   'provocative',
   'adult',
 ] as const;
+
+const activeGenerationUsers = new Set<string>();
+let replicatePredictionQueue: Promise<unknown> = Promise.resolve();
 
 function safeJsonValue(value: unknown, seen = new WeakSet<object>()): unknown {
   if (value == null) return value;
@@ -178,6 +185,10 @@ function textValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -202,6 +213,24 @@ function objectRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function activeGenerationUserKey(body: GenerateVideoBody): string {
+  return (
+    textValue(body.userId) ||
+    textValue(body.identityId) ||
+    'local'
+  ).toLowerCase();
+}
+
+function acquireActiveGeneration(userKey: string): boolean {
+  if (activeGenerationUsers.has(userKey)) return false;
+  activeGenerationUsers.add(userKey);
+  return true;
+}
+
+function releaseActiveGeneration(userKey: string) {
+  activeGenerationUsers.delete(userKey);
 }
 
 function publicImageUrl(value: unknown): string {
@@ -439,6 +468,129 @@ function isSensitiveFilterError(error: unknown): boolean {
   );
 }
 
+function numericValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function retryAfterMillisecondsFromValue(value: unknown): number | null {
+  const seconds = numericValue(value);
+  if (seconds !== null && seconds >= 0) return Math.ceil(seconds * 1_000);
+
+  if (typeof value === 'string' && value.trim()) {
+    const retryDate = Date.parse(value);
+    if (Number.isFinite(retryDate)) {
+      return Math.max(0, retryDate - Date.now());
+    }
+  }
+
+  return null;
+}
+
+function headerRetryAfterMilliseconds(headers: unknown): number | null {
+  if (!headers) return null;
+
+  const getter = (headers as { get?: unknown }).get;
+  if (typeof getter === 'function') {
+    const retryAfter = getter.call(headers, 'retry-after') ?? getter.call(headers, 'Retry-After');
+    const parsed = retryAfterMillisecondsFromValue(retryAfter);
+    if (parsed !== null) return parsed;
+  }
+
+  const headerRecord = objectRecord(headers);
+  return retryAfterMillisecondsFromValue(
+    headerRecord['retry-after'] ??
+      headerRecord['Retry-After'] ??
+      headerRecord.retry_after ??
+      headerRecord.retryAfter,
+  );
+}
+
+function retryAfterMilliseconds(error: unknown): number | null {
+  const record = objectRecord(error);
+  const response = objectRecord(record.response);
+  const details = objectRecord(record.details);
+  const detailError = objectRecord(details.error);
+  const detailResponse = objectRecord(detailError.response);
+
+  const directCandidates = [
+    record.retry_after,
+    record.retryAfter,
+    record.retryAfterSeconds,
+    record['retry-after'],
+    response.retry_after,
+    response.retryAfter,
+    response.retryAfterSeconds,
+    response['retry-after'],
+    detailError.retry_after,
+    detailError.retryAfter,
+    detailError.retryAfterSeconds,
+    detailError['retry-after'],
+    detailResponse.retry_after,
+    detailResponse.retryAfter,
+    detailResponse.retryAfterSeconds,
+    detailResponse['retry-after'],
+  ];
+
+  for (const candidate of directCandidates) {
+    const parsed = retryAfterMillisecondsFromValue(candidate);
+    if (parsed !== null) return parsed;
+  }
+
+  return (
+    headerRetryAfterMilliseconds(record.headers) ??
+    headerRetryAfterMilliseconds(response.headers) ??
+    headerRetryAfterMilliseconds(detailError.headers) ??
+    headerRetryAfterMilliseconds(detailResponse.headers)
+  );
+}
+
+function errorStatusCode(error: unknown): number | null {
+  const record = objectRecord(error);
+  const response = objectRecord(record.response);
+  const details = objectRecord(record.details);
+  const detailError = objectRecord(details.error);
+  const detailResponse = objectRecord(detailError.response);
+
+  for (const candidate of [
+    record.status,
+    record.statusCode,
+    record.code,
+    response.status,
+    response.statusCode,
+    detailError.status,
+    detailError.statusCode,
+    detailError.code,
+    detailResponse.status,
+    detailResponse.statusCode,
+  ]) {
+    const numeric = numericValue(candidate);
+    if (numeric !== null) return numeric;
+  }
+
+  return null;
+}
+
+function isRateLimitError(error: unknown): boolean {
+  const lower = [
+    errorMessage(error),
+    JSON.stringify(safeJsonValue(error) ?? ''),
+  ].join(' ').toLowerCase();
+
+  return (
+    errorStatusCode(error) === 429 ||
+    lower.includes('429') ||
+    lower.includes('too many requests') ||
+    lower.includes('rate limit') ||
+    lower.includes('rate_limit') ||
+    lower.includes('throttl')
+  );
+}
+
 function uniqueModels(models: ReplicateModelIdentifier[]): ReplicateModelIdentifier[] {
   return Array.from(new Set(models));
 }
@@ -494,6 +646,15 @@ async function validateReferenceImageUrl(referenceImageUrl: string): Promise<{
   }
 }
 
+async function enqueueReplicatePrediction<T>(operation: () => Promise<T>): Promise<T> {
+  const queuedOperation = replicatePredictionQueue.then(operation, operation);
+  replicatePredictionQueue = queuedOperation.then(
+    () => undefined,
+    () => undefined,
+  );
+  return queuedOperation;
+}
+
 async function runReplicate(input: {
   replicate: ReplicateClient;
   model: ReplicateModelIdentifier;
@@ -532,7 +693,9 @@ async function runReplicate(input: {
 
   for (const [index, requestInput] of requestInputs.entries()) {
     try {
-      const output = await input.replicate.run(input.model, { input: requestInput });
+      const output = await enqueueReplicatePrediction(() =>
+        input.replicate.run(input.model, { input: requestInput }),
+      );
       if (input.generationModeUsed === 'seedance-identity') {
         console.log('SEEDANCE RESPONSE', safeJsonValue(output));
       }
@@ -555,13 +718,31 @@ async function runReplicate(input: {
         durationSent: input.durationSent,
       } satisfies ReplicateRunResult;
     } catch (error) {
+      const rateLimited = isRateLimitError(error);
+      const retryAfterMs = retryAfterMilliseconds(error);
       console.error('REPLICATE ERROR:', error);
       attempts.push({
         model: input.model,
         inputKeys: Object.keys(requestInput),
         success: false,
+        rateLimited,
+        retryAfterSeconds: retryAfterMs !== null ? retryAfterMs / 1_000 : null,
         details: safeJsonValue(error),
       });
+
+      if (rateLimited) {
+        throw Object.assign(new Error(modelErrorMessage(error)), {
+          provider: 'replicate',
+          model: input.model,
+          rateLimited: true,
+          retryAfterMs,
+          retryAfterSeconds: retryAfterMs !== null ? retryAfterMs / 1_000 : null,
+          details: {
+            error: safeJsonValue(error),
+            attempts,
+          },
+        });
+      }
 
       if (index < requestInputs.length - 1) {
         console.warn('Kling rejected reference_images; retrying with start_image only.');
@@ -580,6 +761,37 @@ async function runReplicate(input: {
   }
 
   throw new Error('Replicate generation failed without a completed attempt.');
+}
+
+async function runReplicateWithRateLimitRetry(input: {
+  replicate: ReplicateClient;
+  model: ReplicateModelIdentifier;
+  requestInput: Record<string, unknown>;
+  durationSent: number | null;
+  generationModeUsed: GenerationModeUsed;
+  referenceImageUrl: string;
+  fallbackToStartImageOnly?: boolean;
+}) {
+  try {
+    return await runReplicate(input);
+  } catch (error) {
+    if (!isRateLimitError(error)) {
+      throw error;
+    }
+
+    const retryAfterMs = retryAfterMilliseconds(error) ?? DEFAULT_REPLICATE_RETRY_AFTER_MS;
+    console.log('RETRY_AFTER:', {
+      model: input.model,
+      seconds: retryAfterMs / 1_000,
+    });
+    await sleep(retryAfterMs);
+    console.warn('RETRYING SAME MODEL:', {
+      model: input.model,
+      mode: input.generationModeUsed,
+    });
+
+    return await runReplicate(input);
+  }
 }
 
 async function runKlingImageToVideo(input: {
@@ -602,7 +814,23 @@ async function runKlingImageToVideo(input: {
     details: unknown;
   }> = [];
 
-  for (const model of models) {
+  for (const [modelIndex, model] of models.entries()) {
+    if (input.safetyFallback && modelIndex === 0) {
+      console.log('WAITING BEFORE FALLBACK:', {
+        from: SEEDANCE_MODEL,
+        to: model,
+        seconds: KLING_FALLBACK_DELAY_MS / 1_000,
+      });
+      await sleep(KLING_FALLBACK_DELAY_MS);
+    } else if (modelIndex > 0) {
+      console.log('WAITING BEFORE FALLBACK:', {
+        from: models[modelIndex - 1],
+        to: model,
+        seconds: KLING_SECONDARY_FALLBACK_DELAY_MS / 1_000,
+      });
+      await sleep(KLING_SECONDARY_FALLBACK_DELAY_MS);
+    }
+
     const requestInput = {
       prompt: input.prompt,
       start_image: input.referenceImageUrl,
@@ -610,7 +838,7 @@ async function runKlingImageToVideo(input: {
     };
 
     try {
-      return await runReplicate({
+      return await runReplicateWithRateLimitRetry({
         replicate: input.replicate,
         model,
         requestInput,
@@ -677,6 +905,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return sendJson(res, 500, { error: 'Missing REPLICATE_API_TOKEN' });
     }
 
+    const generationUserKey = activeGenerationUserKey(body);
+    if (!acquireActiveGeneration(generationUserKey)) {
+      return sendJson(res, 409, {
+        error: 'Generation already in progress. Please wait for the current render to finish.',
+      });
+    }
+
+    try {
     const engine = textValue(body.engine).toLowerCase() || 'replicate';
     const useSeedance = isSeedanceEngine(body);
     const seedanceReferences = seedanceReferenceImages(body);
@@ -760,7 +996,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const replicate = new Replicate({ auth: token }) as ReplicateClient;
 
       try {
-        const result = await runReplicate({
+        const result = await runReplicateWithRateLimitRetry({
           replicate,
           model: SEEDANCE_MODEL,
           requestInput,
@@ -949,6 +1185,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         attempts: result.attempts,
       },
     });
+    } finally {
+      releaseActiveGeneration(generationUserKey);
+    }
   } catch (error) {
     console.error('LUMORA GENERATE ERROR:', error);
     const errorRecord = objectRecord(error);

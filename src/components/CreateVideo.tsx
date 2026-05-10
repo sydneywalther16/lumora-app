@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   type GenerationMode,
   type LumoraIdentityFeedback,
@@ -333,6 +333,7 @@ export default function CreateVideo({
   const [feedbackStatus, setFeedbackStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [generationResult, setGenerationResult] = useState<GenerationResponse | null>(null);
+  const generationInFlightRef = useRef(false);
   const primaryReferenceImage = pickReferenceImage({ referenceImageUrl, referenceImageUrls });
   const seedanceReferences = getSeedanceReferenceSet(referenceImageUrls);
   const seedanceReady = hasSeedanceMinimumReferences(seedanceReferences);
@@ -450,13 +451,25 @@ export default function CreateVideo({
   }, [engine, engineTouched, seedanceReady]);
 
   async function handleGenerate() {
+    if (generationInFlightRef.current) return;
+
+    const releaseGenerateLock = () => {
+      generationInFlightRef.current = false;
+      setGenerationLoading(false);
+    };
+
+    generationInFlightRef.current = true;
+    setGenerationLoading(true);
+
     if (configured && sessionLoading && !authUser) {
       setStatus('Checking your account session. Try again in a moment.');
+      releaseGenerateLock();
       return;
     }
 
     if (!isHydrated || referenceLoading) {
       setStatus('Checking saved reference photos. Try again in a moment.');
+      releaseGenerateLock();
       return;
     }
 
@@ -468,11 +481,13 @@ export default function CreateVideo({
 
     if (selectedEngine === SEEDANCE_ENGINE_ID && selectedSeedanceReferences.length < 3) {
       setGenerationError('Seedance identity generation needs saved front, left, and right reference photos.');
+      releaseGenerateLock();
       return;
     }
 
     if (selectedEngine !== SEEDANCE_ENGINE_ID && !selectedReferenceImageUrl) {
       setGenerationError('Add or re-save a public reference photo before generating.');
+      releaseGenerateLock();
       return;
     }
 
@@ -498,7 +513,6 @@ export default function CreateVideo({
     });
     console.log('FINAL IMAGE SENT:', referenceImageForRequest);
 
-    setGenerationLoading(true);
     setGenerationError('');
     setGeneratedVideoUrl(null);
     setFinalGeneratedPrompt('');
@@ -573,6 +587,7 @@ export default function CreateVideo({
         body: JSON.stringify({
           prompt: currentPrompt,
           characterId,
+          userId: authUser?.id ?? identityProfile?.userId ?? null,
           identityId: identityProfile?.identityId,
           characterDescription: selectedCharacterDescription,
           identityPrompt: identityProfile?.identityPrompt,
@@ -740,7 +755,7 @@ export default function CreateVideo({
           : displayMessage,
       );
     } finally {
-      setGenerationLoading(false);
+      releaseGenerateLock();
     }
   }
 
