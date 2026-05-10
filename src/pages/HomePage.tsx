@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import ActionRail from '../components/ActionRail';
 import BottomSheet from '../components/BottomSheet';
 import SwipeFeed from '../components/SwipeFeed';
 import TopChips from '../components/TopChips';
@@ -136,8 +135,6 @@ type HomeFeedCardProps = {
 
 function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
   const [videoFailed, setVideoFailed] = useState(false);
-  const [liked, setLiked] = useState(false);
-  const [saved, setSaved] = useState(false);
   const stats = getPostStats(post.id);
 
   const videoUrl = post.videoUrl || post.imageUrl;
@@ -149,68 +146,6 @@ function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
   const featuring = !post.isDefaultSelfCharacter && post.characterName ? `Featuring ${post.characterName}` : undefined;
   const defaultSelfLabel = post.isDefaultSelfCharacter ? 'Created as self' : undefined;
   const hasVideo = Boolean(post.videoUrl);
-  const likeCount = stats.likes + (liked ? 1 : 0);
-
-  function handleRemix() {
-    if (typeof window === 'undefined') return;
-    localStorage.setItem('remixPrompt', post.prompt || post.caption || post.title || '');
-    localStorage.setItem('remixTitle', `Remix of ${post.title || post.caption || 'Lumora post'}`);
-    window.location.href = '/create';
-  }
-
-  async function handleShare() {
-    const shareUrl = post.videoUrl || post.imageUrl || window.location.href;
-
-    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
-      try {
-        await navigator.share({
-          title,
-          text: bodyText,
-          url: shareUrl,
-        });
-        return;
-      } catch {
-        // Fall back to copying below when native sharing is cancelled or unavailable.
-      }
-    }
-
-    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(shareUrl);
-    }
-  }
-
-  const actionButtons = [
-    {
-      label: liked ? 'Liked' : 'Like',
-      meta: likeCount.toLocaleString(),
-      onClick: () => setLiked((current) => !current),
-      active: liked,
-    },
-    {
-      label: 'Comment',
-      meta: stats.comments.toLocaleString(),
-      onClick: () => undefined,
-      active: false,
-    },
-    {
-      label: 'Remix',
-      meta: 'Create',
-      onClick: handleRemix,
-      active: false,
-    },
-    {
-      label: saved ? 'Saved' : 'Save',
-      meta: saved ? 'Kept' : 'Keep',
-      onClick: () => setSaved((current) => !current),
-      active: saved,
-    },
-    {
-      label: 'Share',
-      meta: 'Send',
-      onClick: () => void handleShare(),
-      active: false,
-    },
-  ];
 
   return (
     <article
@@ -295,7 +230,7 @@ function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
         style={{
           position: 'absolute',
           left: '14px',
-          right: '76px',
+          right: '14px',
           bottom: '16px',
           display: 'grid',
           gap: '10px',
@@ -349,40 +284,6 @@ function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
             {formatPostedDate(post.createdAt)}
           </span>
         </div>
-      </div>
-
-      <div
-        style={{
-          position: 'absolute',
-          right: '12px',
-          bottom: '18px',
-          display: 'grid',
-          gap: '10px',
-          width: '54px',
-        }}
-      >
-        {actionButtons.map((action) => (
-          <button
-            key={action.label}
-            type="button"
-            onClick={action.onClick}
-            title={action.label}
-            style={{
-              display: 'grid',
-              gap: '4px',
-              justifyItems: 'center',
-              padding: '8px 4px',
-              borderRadius: '18px',
-              background: action.active ? 'rgba(255,105,212,0.28)' : 'rgba(10,8,22,0.58)',
-              color: '#fff',
-              border: '1px solid rgba(255,255,255,0.14)',
-              backdropFilter: 'blur(12px)',
-            }}
-          >
-            <strong style={{ fontSize: '0.72rem', lineHeight: 1 }}>{action.label}</strong>
-            <span style={{ color: '#d8d2ef', fontSize: '0.68rem', lineHeight: 1 }}>{action.meta}</span>
-          </button>
-        ))}
       </div>
     </article>
   );
@@ -459,8 +360,6 @@ export default function HomePage() {
           <strong>{localPosts.length ? '+52%' : '+38%'}</strong>
         </div>
       </div>
-
-      <ActionRail />
 
       <section className="headline-card">
         <div className="row-between">

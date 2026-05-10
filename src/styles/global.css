@@ -296,22 +296,9 @@ button {
   font-size: 0.88rem;
 }
 
-.action-rail {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-}
-
-.action-rail button,
 .primary-btn,
 .ghost-btn {
   padding: 12px 14px;
-}
-
-.action-rail button {
-  border-radius: 18px;
-  background: rgba(255,255,255,0.06);
-  color: #f4f1ff;
 }
 
 .bottom-sheet {
