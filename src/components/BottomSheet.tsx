@@ -16,7 +16,6 @@ export default function BottomSheet({ title, children }: Props) {
       <div className="sheet-handle" />
       <div className="sheet-title-row">
         <h2>{title}</h2>
-        <button type="button">Open</button>
       </div>
       {children}
     </motion.section>

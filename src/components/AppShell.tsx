@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import StatusBar from './StatusBar';
 import BottomNav from './BottomNav';
@@ -16,6 +17,11 @@ const routeTitles: Record<string, string> = {
 
 export default function AppShell() {
   const location = useLocation();
+
+  useEffect(() => {
+    console.info('NAV OK');
+  }, []);
+
   return (
     <div className="app-bg">
       <div className="phone-frame">

@@ -1,7 +1,9 @@
+import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../store/useAppStore';
 
 export default function TrendList() {
-  const { trends, selectedTrend, setSelectedTrend, setActivePrompt } = useAppStore();
+  const navigate = useNavigate();
+  const { trends, selectedTrend, setSelectedTrend, setActivePrompt, setDraftTitle } = useAppStore();
 
   return (
     <section className="list-stack">
@@ -13,6 +15,8 @@ export default function TrendList() {
           onClick={() => {
             setSelectedTrend(trend.id);
             setActivePrompt(trend.prompt);
+            setDraftTitle(trend.title);
+            navigate('/create');
           }}
         >
           <div className="row-between">
@@ -22,7 +26,7 @@ export default function TrendList() {
           <p>{trend.prompt}</p>
           <div className="row-between muted-line">
             <span>{trend.uses}</span>
-            <span>Tap to load prompt</span>
+            <span>Tap to create</span>
           </div>
         </button>
       ))}

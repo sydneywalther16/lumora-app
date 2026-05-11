@@ -53,6 +53,20 @@ export default function PromptEditor() {
     }
   }
 
+  function handleSaveDraft() {
+    const draft = {
+      id: `draft-${Date.now()}`,
+      title: draftTitle || 'Untitled concept',
+      prompt: activePrompt,
+      createdAt: new Date().toISOString(),
+    };
+    const raw = localStorage.getItem('lumora_drafts');
+    const parsed = raw ? JSON.parse(raw) : [];
+    const existing = Array.isArray(parsed) ? parsed : [];
+    localStorage.setItem('lumora_drafts', JSON.stringify([draft, ...existing]));
+    setStatus('Draft saved locally.');
+  }
+
   return (
     <section className="editor-card">
       <label className="field-block">
@@ -90,7 +104,7 @@ export default function PromptEditor() {
         <button type="button" className="primary-btn" onClick={handleGenerate} disabled={busy}>
           {busy ? 'Submitting...' : 'Generate concept'}
         </button>
-        <button type="button" className="ghost-btn">
+        <button type="button" className="ghost-btn" onClick={handleSaveDraft}>
           Save draft
         </button>
       </div>

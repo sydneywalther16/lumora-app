@@ -9,7 +9,7 @@ import {
   saveStoredCharacters,
 } from '../lib/characterStorage';
 import { loadLumoraProfile, type LumoraProfile } from '../lib/profileStorage';
-import { type CharacterProfile } from '../lib/api';
+import { type CharacterProfile, type GenerationMode, type ReferenceImageUrls } from '../lib/api';
 import { useSession } from '../hooks/useSession';
 import {
   loadSupabaseCharacters,
@@ -33,6 +33,33 @@ function manualHttpsReferenceUrl(...values: Array<string | null | undefined>): s
   return value?.trim() ?? null;
 }
 
+type RemixProjectPayload = {
+  projectId?: string | null;
+  prompt?: string;
+  title?: string;
+  characterId?: string | null;
+  characterName?: string | null;
+  characterAvatar?: string | null;
+  isDefaultSelfCharacter?: boolean;
+  referenceImageUrl?: string | null;
+  referenceImageUrls?: Partial<ReferenceImageUrls> | null;
+  additionalReferenceImageUrls?: string[];
+  generationMode?: GenerationMode | null;
+};
+
+function readStoredRemixProject(): RemixProjectPayload | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const raw = localStorage.getItem('lumora_remix_project');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as RemixProjectPayload;
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function CreatePage() {
   const { authReady, user, session, loading: sessionLoading, configured: supabaseConfigured } = useSession();
   const authUser = session?.user ?? user;
@@ -45,12 +72,22 @@ export default function CreatePage() {
   const [isHydrated, setIsHydrated] = useState(false);
   const [resolvedReference, setResolvedReference] = useState<SelfCharacterReferenceImage | null>(null);
   const [referenceLoading, setReferenceLoading] = useState(false);
+  const [remixProject, setRemixProject] = useState<RemixProjectPayload | null>(null);
 
   const [profile, setProfile] = useState<LumoraProfile>({
     displayName: 'Creator',
     username: 'lumora.creator',
     bio: '',
   });
+
+  useEffect(() => {
+    console.info('CREATE OK');
+    const storedRemixProject = readStoredRemixProject();
+    if (storedRemixProject) {
+      setRemixProject(storedRemixProject);
+      localStorage.removeItem('lumora_remix_project');
+    }
+  }, []);
 
   useEffect(() => {
     setSelectedCharacter(null);
@@ -199,14 +236,27 @@ export default function CreatePage() {
           resolveRenderableReferenceUrl(savedSelfReferenceUrls?.fullBody),
       ].filter((url): url is string => Boolean(url))
     : [];
+  const remixReferenceImageUrl = resolveRenderableReferenceUrl(remixProject?.referenceImageUrl);
+  const remixAdditionalReferenceImageUrls = remixProject?.additionalReferenceImageUrls?.filter(Boolean) ?? [];
+  const effectiveReferenceImageUrl = remixReferenceImageUrl ?? referenceImageUrl;
+  const effectiveReferenceImageUrls = remixProject?.referenceImageUrls ?? referenceImageUrls;
+  const effectiveAdditionalReferenceImageUrls = remixAdditionalReferenceImageUrls.length
+    ? remixAdditionalReferenceImageUrls
+    : additionalReferenceImageUrls;
+  const effectiveIsDefaultSelfCharacter = remixProject
+    ? Boolean(remixProject.isDefaultSelfCharacter)
+    : hasSelfCharacter;
+  const effectiveCharacterId = remixProject?.characterId ?? activeSelfCharacter?.id ?? null;
+  const effectiveCharacterName = remixProject?.characterName ?? activeSelfCharacter?.name ?? profile.displayName;
+  const effectiveCharacterAvatar = remixProject?.characterAvatar ?? effectiveReferenceImageUrl;
   const identityProfile = hasSelfCharacter
     ? buildLumoraIdentityProfile({
         userId: authUserId ?? 'local',
         selfCharacter: activeSelfCharacter,
         profile,
-        referenceImageUrls,
-        primaryReferenceImageUrl: referenceImageUrl,
-        additionalReferenceImageUrls,
+        referenceImageUrls: effectiveReferenceImageUrls,
+        primaryReferenceImageUrl: effectiveReferenceImageUrl,
+        additionalReferenceImageUrls: effectiveAdditionalReferenceImageUrls,
       })
     : null;
 
@@ -264,19 +314,19 @@ export default function CreatePage() {
 
       <CreateVideo
         refreshKey={characterRefreshKey}
-        characterId={activeSelfCharacter?.id ?? null}
-        characterName={activeSelfCharacter?.name ?? profile.displayName}
-        characterAvatar={referenceImageUrl}
-        isDefaultSelfCharacter={hasSelfCharacter}
-        characterDescription={identityProfile?.appearanceSummary ?? ""}
-        referenceImageUrl={referenceImageUrl}
-        referenceImageUrls={referenceImageUrls}
-        additionalReferenceImageUrls={additionalReferenceImageUrls}
+        characterId={effectiveCharacterId}
+        characterName={effectiveCharacterName}
+        characterAvatar={effectiveCharacterAvatar}
+        isDefaultSelfCharacter={effectiveIsDefaultSelfCharacter}
+        characterDescription={identityProfile?.appearanceSummary ?? remixProject?.characterName ?? ""}
+        referenceImageUrl={effectiveReferenceImageUrl}
+        referenceImageUrls={effectiveReferenceImageUrls}
+        additionalReferenceImageUrls={effectiveAdditionalReferenceImageUrls}
         referenceLoading={referenceLoading}
-        referenceLabel={manualReferenceImageUrl && referenceImageUrl === manualReferenceImageUrl ? 'Backup reference URL' : identityProfile ? 'Lumora Identity Character' : null}
-        forceSelfMode={hasSelfCharacter}
+        referenceLabel={remixProject ? 'Remixed project reference' : manualReferenceImageUrl && effectiveReferenceImageUrl === manualReferenceImageUrl ? 'Backup reference URL' : identityProfile ? 'Lumora Identity Character' : null}
+        forceSelfMode={effectiveIsDefaultSelfCharacter}
         isHydrated={isHydrated}
-        identityProfile={identityProfile}
+        identityProfile={effectiveIsDefaultSelfCharacter ? identityProfile : null}
         onLikenessFeedback={(feedback) => void handleLikenessFeedback(feedback)}
         onResaveReferencePhoto={() => {
           window.location.hash = 'character-capture';

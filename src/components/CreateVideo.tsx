@@ -891,6 +891,13 @@ export default function CreateVideo({
     );
   }
 
+  function handleRemixResult() {
+    const remixPrompt = finalGeneratedPrompt || generationResult?.prompt || activePrompt;
+    setActivePrompt(remixPrompt);
+    setDraftTitle(`Remix of ${draftTitle || 'Lumora result'}`);
+    setStatus('Result prompt loaded for remix.');
+  }
+
   async function handleSubmitLikenessFeedback() {
     if (!onLikenessFeedback || (!selectedFeedbackChoices.length && !feedbackNote.trim())) return;
 
@@ -1115,7 +1122,7 @@ export default function CreateVideo({
           </div>
         ) : null}
         {status ? <p className="muted">{status}</p> : null}
-        {generatedVideoUrl ? (
+        {generatedVideoUrl && !generationResult ? (
           <div style={{ display: 'grid', gap: '12px', marginTop: '14px' }}>
             <video
               src={generatedVideoUrl}
@@ -1134,6 +1141,14 @@ export default function CreateVideo({
               style={{ flex: 'unset', width: '100%' }}
             >
               View in Studio
+            </button>
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={handleRemixResult}
+              style={{ flex: 'unset', width: '100%' }}
+            >
+              Remix result
             </button>
           </div>
         ) : null}
@@ -1190,6 +1205,14 @@ export default function CreateVideo({
               style={{ width: '100%', borderRadius: 12 }}
             />
           ) : null}
+          <div className="button-row">
+            <button type="button" className="ghost-btn" onClick={() => { window.location.href = '/studio'; }}>
+              Open in Studio
+            </button>
+            <button type="button" className="ghost-btn" onClick={handleRemixResult}>
+              Remix result
+            </button>
+          </div>
           {selfReferenceMode && onLikenessFeedback ? (
             <div style={{ display: 'grid', gap: '10px', marginTop: '12px' }}>
               <strong>Improve likeness</strong>
@@ -1217,8 +1240,13 @@ export default function CreateVideo({
                   placeholder="Add a likeness note"
                 />
               </label>
-              <button type="button" className="ghost-btn" onClick={() => void handleSubmitLikenessFeedback()}>
-                Save likeness feedback
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={() => void handleSubmitLikenessFeedback()}
+                disabled={!selectedFeedbackChoices.length && !feedbackNote.trim()}
+              >
+                {selectedFeedbackChoices.length || feedbackNote.trim() ? 'Save likeness feedback' : 'Add feedback first'}
               </button>
               {feedbackStatus ? <p className="muted">{feedbackStatus}</p> : null}
             </div>

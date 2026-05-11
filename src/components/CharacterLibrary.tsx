@@ -81,6 +81,8 @@ export default function CharacterLibrary({
               key={character.id}
               type="button"
               className={`character-tile ${selected ? 'selected' : ''}`}
+              disabled={!onSelect}
+              title={onSelect ? `Select ${character.name}` : 'Open Create to select this character'}
               onClick={() => onSelect?.(character)}
             >
               <span className="character-avatar">

@@ -77,6 +77,10 @@ export type GenerationJob = {
   aspectRatio: string | null;
   privacy: string;
   resultAssetUrl: string | null;
+  referenceImageUrl?: string | null;
+  referenceImageUrls?: Partial<ReferenceImageUrls> | null;
+  additionalReferenceImageUrls?: string[] | null;
+  generationMode?: GenerationMode | null;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;

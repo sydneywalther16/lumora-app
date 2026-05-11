@@ -1,14 +1,28 @@
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import type { Post } from '../data/mockData';
+import { useAppStore } from '../store/useAppStore';
 
 type Props = {
   post: Post;
 };
 
 export default function FeedCard({ post }: Props) {
+  const navigate = useNavigate();
+  const { setActivePrompt, setDraftTitle } = useAppStore();
+
+  function openInCreate() {
+    setActivePrompt(post.prompt);
+    setDraftTitle(`Inspired by ${post.caption}`);
+    navigate('/create');
+  }
+
   return (
-    <motion.article
+    <motion.button
+      type="button"
       className="feed-card"
+      aria-label={`Open ${post.caption} in Create`}
+      onClick={openInCreate}
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       whileTap={{ scale: 0.985 }}
@@ -31,11 +45,11 @@ export default function FeedCard({ post }: Props) {
         </div>
         <p className="prompt-copy">{post.prompt}</p>
         <div className="stats-row">
-          <span>♥ {post.stats.likes}</span>
-          <span>↺ {post.stats.remix}</span>
-          <span>★ {post.stats.saves}</span>
+          <span>Likes {post.stats.likes}</span>
+          <span>Remixes {post.stats.remix}</span>
+          <span>Saves {post.stats.saves}</span>
         </div>
       </div>
-    </motion.article>
+    </motion.button>
   );
 }

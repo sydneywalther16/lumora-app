@@ -12,6 +12,10 @@ export default function StudioPage() {
   const [status, setStatus] = useState('Loading studio...');
 
   useEffect(() => {
+    console.info('STUDIO OK');
+  }, []);
+
+  useEffect(() => {
     let active = true;
 
     async function loadJobs() {
@@ -119,6 +123,10 @@ export default function StudioPage() {
       aspectRatio: project.aspectRatio ?? null,
       privacy: 'private',
       resultAssetUrl: project.videoUrl,
+      referenceImageUrl: project.referenceImageUrl ?? null,
+      referenceImageUrls: project.referenceImageUrls ?? null,
+      additionalReferenceImageUrls: project.additionalReferenceImageUrls ?? null,
+      generationMode: project.generationMode ?? null,
       errorMessage: null,
       createdAt: project.createdAt,
       updatedAt: project.updatedAt ?? project.createdAt,

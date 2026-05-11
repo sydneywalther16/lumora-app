@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { loadLumoraProfile } from '../lib/profileStorage';
 import { CREATOR_SELF_CHARACTER_ID, getStoredCharacters } from '../lib/characterStorage';
 import { savePostedItem } from '../lib/postStorage';
@@ -254,6 +255,28 @@ export default function StudioList({ jobs }: Props) {
     alert(job.resultAssetUrl);
   }
 
+  function remixJob(job: GenerationJob) {
+    localStorage.setItem('remixPrompt', job.prompt || job.title || '');
+    localStorage.setItem('remixTitle', `Remix of ${job.title || 'Untitled concept'}`);
+    localStorage.setItem(
+      'lumora_remix_project',
+      JSON.stringify({
+        projectId: job.projectId || job.id,
+        prompt: job.prompt || '',
+        title: job.title || 'Untitled concept',
+        characterId: job.characterId,
+        characterName: job.characterName ?? null,
+        characterAvatar: job.characterAvatar ?? null,
+        isDefaultSelfCharacter: Boolean(job.isDefaultSelfCharacter),
+        referenceImageUrl: job.referenceImageUrl ?? job.characterAvatar ?? null,
+        referenceImageUrls: job.referenceImageUrls ?? null,
+        additionalReferenceImageUrls: job.additionalReferenceImageUrls ?? [],
+        generationMode: job.generationMode ?? null,
+      }),
+    );
+    window.location.href = '/create';
+  }
+
   if (!jobs.length) {
     return (
       <section className="list-stack">
@@ -263,6 +286,9 @@ export default function StudioList({ jobs }: Props) {
             <span className="tiny-pill status-drafting">Ready</span>
           </div>
           <p>Your generated concepts will appear here once you queue one from Create.</p>
+          <Link className="primary-btn" to="/create" style={{ display: 'inline-flex', width: 'fit-content', flex: 'unset' }}>
+            Create a video
+          </Link>
         </article>
       </section>
     );
@@ -279,11 +305,22 @@ export default function StudioList({ jobs }: Props) {
             <article
               className="list-card"
               key={job.id}
+              role="button"
+              tabIndex={0}
+              aria-label={`Open project ${job.title}`}
+              onClick={() => openJob(job)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  openJob(job);
+                }
+              }}
               style={{
                 width: '100%',
                 borderRadius: '28px',
                 boxShadow: 'var(--modal-shadow)',
                 overflow: 'hidden',
+                cursor: 'pointer',
               }}
             >
               <button
@@ -400,20 +437,23 @@ export default function StudioList({ jobs }: Props) {
                 <div style={{ display: 'flex', gap: '10px' }}>
                   {job.resultAssetUrl ? (
                     <>
-                      <button type="button" className="text-btn" onClick={() => openJob(job)}>
+                      <button
+                        type="button"
+                        className="text-btn"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openJob(job);
+                        }}
+                      >
                         Open
                       </button>
 
                       <button
                         type="button"
                         className="text-btn"
-                        onClick={() => {
-                          localStorage.setItem('remixPrompt', job.prompt || job.title || '');
-                          localStorage.setItem(
-                            'remixTitle',
-                            `Remix of ${job.title || 'Untitled concept'}`
-                          );
-                          window.location.href = '/create';
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          remixJob(job);
                         }}
                       >
                         Remix
@@ -525,29 +565,24 @@ export default function StudioList({ jobs }: Props) {
                 onClick={() => {
                   void postToFeed(selectedJob, captionDraft);
                 }}
-                disabled={isPosted(selectedJob.id)}
+                disabled={isPosted(selectedJob.id) || !selectedJob.resultAssetUrl}
               >
-                {isPosted(selectedJob.id) ? 'Posted' : 'Post'}
+                {isPosted(selectedJob.id) ? 'Posted' : selectedJob.resultAssetUrl ? 'Post' : 'Video still processing'}
               </button>
 
-              <button
-                type="button"
-                className="ghost-btn"
-                onClick={() => {
-                  localStorage.setItem('remixPrompt', selectedJob.prompt || selectedJob.title || '');
-                  localStorage.setItem(
-                    'remixTitle',
-                    `Remix of ${selectedJob.title || 'Untitled concept'}`
-                  );
-                  window.location.href = '/create';
-                }}
-              >
+              <button type="button" className="ghost-btn" onClick={() => remixJob(selectedJob)}>
                 Remix This
               </button>
 
-              <a href={selectedJob.resultAssetUrl || '#'} download className="ghost-btn">
-                Download
-              </a>
+              {selectedJob.resultAssetUrl ? (
+                <a href={selectedJob.resultAssetUrl} download className="ghost-btn">
+                  Download
+                </a>
+              ) : (
+                <button type="button" className="ghost-btn" disabled>
+                  Download when ready
+                </button>
+              )}
 
               <button
                 type="button"
@@ -555,8 +590,9 @@ export default function StudioList({ jobs }: Props) {
                 onClick={() => {
                   void shareAsset(selectedJob);
                 }}
+                disabled={!selectedJob.resultAssetUrl}
               >
-                Share
+                {selectedJob.resultAssetUrl ? 'Share' : 'Share when ready'}
               </button>
             </div>
 

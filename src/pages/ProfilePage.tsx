@@ -1662,6 +1662,7 @@ export default function ProfilePage() {
   const [syncLocalSelfAvailable, setSyncLocalSelfAvailable] = useState(false);
   const [syncingLocal, setSyncingLocal] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [showDebugInfo, setShowDebugInfo] = useState(false);
   const [debugInfo, setDebugInfo] = useState<ProfileDebugInfo>({
     authUserId: null,
     loadedProfileId: null,
@@ -1671,6 +1672,10 @@ export default function ProfilePage() {
     source: 'default',
   });
   const selfCharacterEditorRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    console.info('PROFILE OK');
+  }, []);
 
   useEffect(() => {
     console.log('PROFILE AUTH USER ID', { authUserId });
@@ -2899,24 +2904,43 @@ export default function ProfilePage() {
       ) : null}
 
       <section className="headline-card compact" style={{ borderRadius: '24px', padding: '14px' }}>
-        <span className="eyebrow">profile debug</span>
-        <div className="stats-row" style={{ marginTop: '10px', flexWrap: 'wrap' }}>
-          <span>authUserId: {authUserId || 'none'}</span>
-          <span>loadedProfileId: {debugInfo.loadedProfileId || 'none'}</span>
-          <span>profileAvatarUrl: {debugInfo.profileAvatarUrlExists ? 'yes' : 'no'}</span>
-          <span>selfCharacterLoaded: {debugInfo.selfCharacterLoaded ? 'yes' : 'no'}</span>
-          <span>selfCharacterUserId: {debugInfo.selfCharacterUserId || 'none'}</span>
-          <span>sessionSource: {sessionSource}</span>
-          <span>source: {debugSource}</span>
+        <div className="row-between" style={{ gap: '12px' }}>
+          <div>
+            <span className="eyebrow">diagnostics</span>
+            <p className="muted" style={{ margin: '6px 0 0' }}>
+              Session tools are hidden unless you need them.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="ghost-btn"
+            style={{ flex: 'unset', padding: '8px 12px' }}
+            onClick={() => setShowDebugInfo((current) => !current)}
+          >
+            {showDebugInfo ? 'Hide debug' : 'Show debug'}
+          </button>
         </div>
-        <button
-          type="button"
-          className="ghost-btn"
-          style={{ marginTop: '12px', padding: '8px 12px' }}
-          onClick={() => void refreshSession()}
-        >
-          Refresh session
-        </button>
+        {showDebugInfo ? (
+          <>
+            <div className="stats-row" style={{ marginTop: '10px', flexWrap: 'wrap' }}>
+              <span>authUserId: {authUserId || 'none'}</span>
+              <span>loadedProfileId: {debugInfo.loadedProfileId || 'none'}</span>
+              <span>profileAvatarUrl: {debugInfo.profileAvatarUrlExists ? 'yes' : 'no'}</span>
+              <span>selfCharacterLoaded: {debugInfo.selfCharacterLoaded ? 'yes' : 'no'}</span>
+              <span>selfCharacterUserId: {debugInfo.selfCharacterUserId || 'none'}</span>
+              <span>sessionSource: {sessionSource}</span>
+              <span>source: {debugSource}</span>
+            </div>
+            <button
+              type="button"
+              className="ghost-btn"
+              style={{ marginTop: '12px', padding: '8px 12px', flex: 'unset' }}
+              onClick={() => void refreshSession()}
+            >
+              Refresh session
+            </button>
+          </>
+        ) : null}
       </section>
 
       {editingProfile ? (
@@ -2992,9 +3016,6 @@ export default function ProfilePage() {
               <h2 style={{ marginTop: '8px' }}>{selfCharacterFormTitle}</h2>
             </div>
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              <button type="button" className="text-btn" onClick={() => setEditingSelfCharacter(false)}>
-                Cancel
-              </button>
               <button type="button" className="text-btn" onClick={() => setEditingSelfCharacter(false)}>
                 Close
               </button>
