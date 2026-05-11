@@ -8,6 +8,8 @@
     #090814;
   --body-background: #090814;
   --text-primary: #f5f2ff;
+  --text-secondary: #bdb6dc;
+  --text-muted: #b4add6;
   --muted-text: #bdb6dc;
   --soft-text: #d3cdf3;
   --eyebrow-text: #b4add6;
@@ -72,11 +74,13 @@
     radial-gradient(circle at top right, rgba(205,220,255,.55), transparent 35%),
     linear-gradient(135deg, #fffafc, #f7f3ff 45%, #eef7ff);
   --body-background: #fffafc;
-  --text-primary: #2a2032;
-  --muted-text: #766a82;
-  --soft-text: #5f536b;
-  --eyebrow-text: #8f739c;
-  --icon-text: #776486;
+  --text-primary: #2a2233;
+  --text-secondary: #5f5870;
+  --text-muted: #7c7690;
+  --muted-text: var(--text-secondary);
+  --soft-text: var(--text-secondary);
+  --eyebrow-text: var(--text-muted);
+  --icon-text: #514a60;
   --app-shell-background:
     radial-gradient(circle at 18% 12%, rgba(255, 210, 245, 0.62), transparent 32%),
     radial-gradient(circle at 86% 8%, rgba(205, 220, 255, 0.62), transparent 30%),
@@ -94,30 +98,35 @@
   --surface-shadow: inset 0 1px 0 rgba(255,255,255,0.75), 0 16px 48px rgba(113, 87, 150, 0.12);
   --panel-background: rgba(255,255,255,0.58);
   --panel-border: rgba(166, 128, 194, 0.18);
-  --control-background: rgba(255, 255, 255, 0.62);
-  --control-text: #34263d;
-  --control-border: rgba(166, 128, 194, 0.18);
-  --active-gradient: linear-gradient(135deg, #ff69d4, #8b7bff);
-  --active-text: #ffffff;
+  --control-background: rgba(255, 255, 255, 0.72);
+  --control-text: #2a2233;
+  --control-border: rgba(116, 145, 178, 0.24);
+  --active-gradient: linear-gradient(
+    135deg,
+    #7ee7d8 0%,
+    #7ccfff 45%,
+    #9ab8ff 100%
+  );
+  --active-text: #172b35;
   --card-media-background:
     linear-gradient(180deg, rgba(255,255,255,0.18), transparent),
     radial-gradient(circle at 25% 25%, rgba(255, 104, 212, 0.42), transparent 28%),
     radial-gradient(circle at 75% 70%, rgba(90, 130, 255, 0.36), transparent 30%),
     linear-gradient(135deg, #fdf4ff, #eaf5ff 68%);
   --media-chip-background: rgba(255, 255, 255, 0.52);
-  --media-chip-border: rgba(166, 128, 194, 0.2);
+  --media-chip-border: rgba(116, 145, 178, 0.24);
   --sheet-handle-background: rgba(143, 115, 156, 0.3);
   --input-background: rgba(255, 255, 255, 0.72);
   --input-border: rgba(166, 128, 194, 0.22);
-  --input-text: #2a2032;
-  --selected-outline: rgba(255, 105, 212, 0.54);
-  --selected-shadow: 0 0 0 4px rgba(255, 105, 212, 0.12);
-  --pill-background: rgba(255, 255, 255, 0.58);
-  --pill-text: #34263d;
-  --dot-background: #ff69d4;
-  --dot-shadow: 0 0 0 6px rgba(255, 105, 212, 0.18);
+  --input-text: #2a2233;
+  --selected-outline: rgba(76, 166, 189, 0.66);
+  --selected-shadow: 0 0 0 4px rgba(124, 207, 255, 0.18);
+  --pill-background: rgba(255, 255, 255, 0.72);
+  --pill-text: #2a2233;
+  --dot-background: #7ccfff;
+  --dot-shadow: 0 0 0 6px rgba(124, 207, 255, 0.22);
   --nav-background: linear-gradient(180deg, rgba(255, 250, 255, 0.2), rgba(255, 250, 255, 0.9) 40%);
-  --placeholder-text: rgba(75, 61, 86, 0.68);
+  --placeholder-text: rgba(42, 34, 51, 0.62);
   --warning-border: rgba(216, 92, 124, 0.28);
   --warning-background: rgba(255, 230, 238, 0.68);
   --warning-text: #8b2848;
