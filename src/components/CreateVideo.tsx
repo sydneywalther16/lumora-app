@@ -1106,7 +1106,7 @@ export default function CreateVideo({
           </button>
         </div>
         {generationLoading ? <p className="muted">Rendering your concept...</p> : null}
-        {generationError ? <p style={{ color: '#f07178' }}>{generationError}</p> : null}
+        {generationError ? <p style={{ color: 'var(--error-text)' }}>{generationError}</p> : null}
         {generationWarnings.length ? (
           <div className="generation-warning-list">
             {generationWarnings.map((warning) => (

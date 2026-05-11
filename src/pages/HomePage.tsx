@@ -156,8 +156,8 @@ function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
         padding: 0,
         borderRadius: '30px',
         minHeight: '560px',
-        background: '#05040b',
-        boxShadow: stats.likes > 700 ? '0 0 42px rgba(255,105,212,0.18)' : '0 20px 70px rgba(0,0,0,0.42)',
+        background: 'var(--media-background)',
+        boxShadow: stats.likes > 700 ? '0 0 42px rgba(255,105,212,0.18)' : 'var(--modal-shadow)',
       }}
     >
       {hasVideo && !videoFailed && post.videoUrl ? (
@@ -175,7 +175,7 @@ function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
             aspectRatio: '9 / 16',
             objectFit: 'cover',
             display: 'block',
-            background: '#000',
+            background: 'var(--media-background)',
           }}
         />
       ) : videoUrl && !videoFailed ? (
@@ -197,12 +197,11 @@ function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
             width: '100%',
             minHeight: '560px',
             aspectRatio: '9 / 16',
-            background:
-              'linear-gradient(180deg, rgba(7,6,18,0.2), rgba(7,6,18,0.92)), linear-gradient(135deg, #25163f 0%, #071224 100%)',
+            background: 'var(--card-media-background)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: '#d3cdf3',
+            color: 'var(--soft-text)',
             padding: '16px',
             textAlign: 'center',
           }}
@@ -379,7 +378,7 @@ export default function HomePage() {
           <article className="list-card">
             <div className="row-between">
               <h3>No {emptyCategoryLabel} posts yet</h3>
-              <span className="tiny-pill" style={{ background: '#2a1f3d' }}>
+              <span className="tiny-pill" style={{ background: 'var(--pill-background)' }}>
                 Local
               </span>
             </div>

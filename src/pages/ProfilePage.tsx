@@ -17,6 +17,7 @@ import {
 import type { CharacterProfile, CreatorSelfStylePreferences, LumoraIdentityProfile, LumoraPost } from '../lib/api';
 import type { StudioProject } from '../lib/projectStorage';
 import { useSession } from '../hooks/useSession';
+import { useLumoraTheme, type LumoraTheme } from '../hooks/useLumoraTheme';
 import { supabase } from '../lib/supabase';
 import {
   hasSupabaseProfile,
@@ -945,7 +946,7 @@ function ImagePreview({
           }}
         />
       ) : (
-        <span style={{ color: '#d3cdf3', fontSize: '1rem', padding: '8px', textAlign: 'center', zIndex: 0 }}>
+        <span style={{ color: 'var(--soft-text)', fontSize: '1rem', padding: '8px', textAlign: 'center', zIndex: 0 }}>
           {fallback}
         </span>
       )}
@@ -984,8 +985,8 @@ function ProfilePostTile({
         borderRadius: '18px',
         color: '#fff',
         textAlign: 'left',
-        background: 'linear-gradient(135deg, #160f25, #071224)',
-        border: '1px solid rgba(255,255,255,0.08)',
+        background: 'var(--card-media-background)',
+        border: '1px solid var(--surface-border)',
       }}
     >
       {post.videoUrl ? (
@@ -1015,10 +1016,10 @@ function ProfilePostTile({
             placeItems: 'center',
             padding: '12px',
             background:
-              'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)), linear-gradient(135deg, #25163f, #071224)',
+              'var(--card-media-background)',
           }}
         >
-          <span style={{ color: '#d3cdf3', fontWeight: 700 }}>Lumora</span>
+          <span style={{ color: 'var(--soft-text)', fontWeight: 700 }}>Lumora</span>
         </div>
       )}
       <div
@@ -1096,7 +1097,7 @@ function ProfilePostPreviewModal({
         alignItems: 'center',
         justifyContent: 'center',
         padding: '18px',
-        background: 'rgba(0,0,0,0.72)',
+        background: 'var(--modal-backdrop)',
       }}
     >
       <div
@@ -1106,9 +1107,9 @@ function ProfilePostPreviewModal({
           maxHeight: '92vh',
           overflow: 'auto',
           borderRadius: '24px',
-          background: '#141018',
-          boxShadow: '0 24px 80px rgba(0,0,0,0.45)',
-          color: 'white',
+          background: 'var(--modal-surface)',
+          boxShadow: 'var(--modal-shadow)',
+          color: 'var(--text-primary)',
         }}
       >
         <div className="row-between" style={{ padding: '16px', gap: '12px' }}>
@@ -1119,7 +1120,7 @@ function ProfilePostPreviewModal({
                 height: '44px',
                 borderRadius: '50%',
                 overflow: 'hidden',
-                background: 'rgba(255,255,255,0.08)',
+                background: 'var(--control-background)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -1156,7 +1157,7 @@ function ProfilePostPreviewModal({
               minHeight: '340px',
               display: 'grid',
               placeItems: 'center',
-              background: 'linear-gradient(135deg, #25163f, #071224)',
+              background: 'var(--card-media-background)',
             }}
           >
             <strong>Preview unavailable</strong>
@@ -1167,7 +1168,7 @@ function ProfilePostPreviewModal({
           <div className="row-between" style={{ gap: '10px', alignItems: 'flex-start' }}>
             <h3>{title}</h3>
             {characterLabel ? (
-              <span className="tiny-pill" style={{ background: '#3f2f5f' }}>
+              <span className="tiny-pill" style={{ background: 'var(--pill-background)' }}>
                 {characterLabel}
               </span>
             ) : null}
@@ -1226,8 +1227,8 @@ function MenuSectionCard({
         gap: '10px',
         padding: '14px',
         borderRadius: '20px',
-        background: 'rgba(255,255,255,0.055)',
-        border: '1px solid rgba(255,255,255,0.08)',
+        background: 'var(--panel-background)',
+        border: '1px solid var(--panel-border)',
       }}
     >
       {title ? <strong>{title}</strong> : null}
@@ -1238,7 +1239,7 @@ function MenuSectionCard({
 
 function ComingSoonPill() {
   return (
-    <span className="tiny-pill" style={{ width: 'fit-content', background: 'rgba(255,255,255,0.1)' }}>
+    <span className="tiny-pill" style={{ width: 'fit-content', background: 'var(--pill-background)' }}>
       Coming soon
     </span>
   );
@@ -1261,7 +1262,12 @@ function ProfileMenuDetail({
   onSignOut: () => void;
   onJumpToAuth: () => void;
 }) {
-  const mutedTextStyle = { margin: 0, color: '#d3cdf3', lineHeight: 1.45 };
+  const { theme, setTheme } = useLumoraTheme();
+  const mutedTextStyle = { margin: 0, color: 'var(--muted-text)', lineHeight: 1.45 };
+  const appearanceOptions: Array<{ value: LumoraTheme; label: string }> = [
+    { value: 'dark', label: 'Dark' },
+    { value: 'light', label: 'Light' },
+  ];
 
   return (
     <div style={{ display: 'grid', gap: '14px', alignContent: 'start' }}>
@@ -1316,6 +1322,22 @@ function ProfileMenuDetail({
 
       {item.id === 'settings' ? (
         <div style={{ display: 'grid', gap: '10px' }}>
+          <MenuSectionCard title="Appearance">
+            <p style={mutedTextStyle}>Choose Lumora's interface palette.</p>
+            <div className="chip-row wrap" role="group" aria-label="Appearance">
+              {appearanceOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={theme === option.value}
+                  className={`chip ${theme === option.value ? 'active' : ''}`}
+                  onClick={() => setTheme(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </MenuSectionCard>
           {[
             'Workspace preferences',
             'Creator profile',
@@ -1432,7 +1454,7 @@ function ProfileMenuSidebar({
         position: 'fixed',
         inset: 0,
         zIndex: 10000,
-        background: 'rgba(0,0,0,0.58)',
+        background: 'var(--modal-backdrop)',
         display: 'flex',
         justifyContent: 'flex-end',
       }}
@@ -1443,9 +1465,9 @@ function ProfileMenuSidebar({
           width: 'min(86vw, 320px)',
           height: '100%',
           padding: '18px',
-          background: 'linear-gradient(180deg, rgba(20,16,24,0.98), rgba(9,8,20,0.98))',
-          borderLeft: '1px solid rgba(255,255,255,0.1)',
-          boxShadow: '-24px 0 80px rgba(0,0,0,0.42)',
+          background: 'var(--modal-surface)',
+          borderLeft: '1px solid var(--surface-border)',
+          boxShadow: 'var(--modal-shadow)',
           display: 'grid',
           gridTemplateRows: 'auto 1fr',
           gap: '18px',
@@ -1538,7 +1560,7 @@ function ProjectCard({ project, onOpen }: { project: StudioProject; onOpen: () =
           onOpen();
         }
       }}
-      style={{ borderRadius: '28px', background: 'rgba(20,16,24,0.9)', padding: '18px', cursor: 'pointer' }}
+      style={{ borderRadius: '28px', background: 'var(--surface-strong)', padding: '18px', cursor: 'pointer' }}
     >
       <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div style={{ minWidth: 0, flex: 1 }}>
@@ -1547,7 +1569,7 @@ function ProjectCard({ project, onOpen }: { project: StudioProject; onOpen: () =
             {characterLabel} - {(project.displayEngine || project.provider).toUpperCase()}
           </p>
         </div>
-        <span className="tiny-pill" style={{ background: '#2a1f3d' }}>
+        <span className="tiny-pill" style={{ background: 'var(--pill-background)' }}>
           {project.status}
         </span>
       </div>
@@ -1581,7 +1603,7 @@ function DraftCard({ draft, onOpen }: { draft: Draft; onOpen: () => void }) {
           onOpen();
         }
       }}
-      style={{ borderRadius: '28px', background: 'rgba(20,16,24,0.9)', padding: '18px', cursor: 'pointer' }}
+      style={{ borderRadius: '28px', background: 'var(--surface-strong)', padding: '18px', cursor: 'pointer' }}
     >
       <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div style={{ minWidth: 0, flex: 1 }}>
@@ -2759,7 +2781,7 @@ export default function ProfilePage() {
 
   return (
     <div className="page" style={{ paddingBottom: '40px' }}>
-      <section className="list-card" style={{ borderRadius: '30px', padding: '22px', background: 'rgba(20,16,24,0.95)' }}>
+      <section className="list-card" style={{ borderRadius: '30px', padding: '22px', background: 'var(--surface-strong)' }}>
         <div style={{ display: 'grid', gap: '18px', justifyItems: 'center', textAlign: 'center' }}>
           <div className="row-between" style={{ width: '100%', alignItems: 'center' }}>
             <span className="eyebrow">creator profile</span>
@@ -2773,15 +2795,15 @@ export default function ProfilePage() {
                 borderRadius: '50%',
                 display: 'grid',
                 placeItems: 'center',
-                background: 'rgba(255,255,255,0.08)',
-                color: '#f7f4ff',
-                border: '1px solid rgba(255,255,255,0.1)',
+                background: 'var(--control-background)',
+                color: 'var(--control-text)',
+                border: '1px solid var(--control-border)',
               }}
             >
               <span style={{ display: 'grid', gap: '4px', width: '16px' }} aria-hidden="true">
-                <span style={{ display: 'block', height: '2px', borderRadius: '999px', background: '#f7f4ff' }} />
-                <span style={{ display: 'block', height: '2px', borderRadius: '999px', background: '#f7f4ff' }} />
-                <span style={{ display: 'block', height: '2px', borderRadius: '999px', background: '#f7f4ff' }} />
+                <span style={{ display: 'block', height: '2px', borderRadius: '999px', background: 'var(--control-text)' }} />
+                <span style={{ display: 'block', height: '2px', borderRadius: '999px', background: 'var(--control-text)' }} />
+                <span style={{ display: 'block', height: '2px', borderRadius: '999px', background: 'var(--control-text)' }} />
               </span>
             </button>
           </div>
@@ -2792,7 +2814,7 @@ export default function ProfilePage() {
               height: '108px',
               borderRadius: '34px',
               overflow: 'hidden',
-              background: 'rgba(255,255,255,0.08)',
+              background: 'var(--control-background)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -2826,7 +2848,7 @@ export default function ProfilePage() {
             </button>
           </div>
 
-          {saveMessage ? <p style={{ color: '#8bc34a', margin: 0 }}>{saveMessage}</p> : null}
+          {saveMessage ? <p style={{ color: 'var(--success-text)', margin: 0 }}>{saveMessage}</p> : null}
         </div>
       </section>
 
@@ -2917,7 +2939,7 @@ export default function ProfilePage() {
                   height: '78px',
                   borderRadius: '24px',
                   overflow: 'hidden',
-                  background: 'rgba(255,255,255,0.08)',
+                  background: 'var(--control-background)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -3007,7 +3029,7 @@ export default function ProfilePage() {
                         aspectRatio: '1',
                         borderRadius: '16px',
                         overflow: 'hidden',
-                        background: 'rgba(255,255,255,0.08)',
+                        background: 'var(--control-background)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -3059,7 +3081,7 @@ export default function ProfilePage() {
               })}
             </div>
 
-            <div style={{ display: 'grid', gap: '12px', padding: '16px', borderRadius: '18px', background: 'rgba(255,255,255,0.04)' }}>
+            <div style={{ display: 'grid', gap: '12px', padding: '16px', borderRadius: '18px', background: 'var(--panel-background)' }}>
               <div>
                 <span className="eyebrow">Backup reference URL</span>
                 <p className="muted" style={{ margin: '8px 0 0' }}>
@@ -3106,7 +3128,7 @@ export default function ProfilePage() {
                   <button type="button" className="ghost-btn" onClick={handleStartSelfCapture}>
                     Start self capture
                   </button>
-                  <div style={{ padding: '16px', borderRadius: '18px', background: 'rgba(255,255,255,0.04)' }}>
+                  <div style={{ padding: '16px', borderRadius: '18px', background: 'var(--panel-background)' }}>
                     <strong>Read the numbers shown on screen:</strong>
                     <div style={{ marginTop: '10px', fontSize: '1.35rem', letterSpacing: '0.25em' }}>
                       {selfForm.selfCaptureNumbers}
@@ -3156,7 +3178,7 @@ export default function ProfilePage() {
                   </label>
                 </>
               ) : (
-                <div style={{ display: 'grid', gap: '12px', padding: '16px', borderRadius: '18px', background: 'rgba(255,255,255,0.04)' }}>
+                <div style={{ display: 'grid', gap: '12px', padding: '16px', borderRadius: '18px', background: 'var(--panel-background)' }}>
                   <div>
                     <strong>Self capture complete</strong>
                     <p className="muted" style={{ marginTop: '8px' }}>
@@ -3184,7 +3206,7 @@ export default function ProfilePage() {
               >
                 Generate voice prompt
               </button>
-              <div style={{ padding: '16px', borderRadius: '18px', background: 'rgba(255,255,255,0.04)' }}>
+              <div style={{ padding: '16px', borderRadius: '18px', background: 'var(--panel-background)' }}>
                 <strong>Voice sample prompt</strong>
                 <p className="muted" style={{ margin: '8px 0 0' }}>
                   {formatSelfVoiceSamplePrompt(selfForm.voiceSampleNumbers)}
@@ -3249,7 +3271,7 @@ export default function ProfilePage() {
             <p className="muted" style={{ margin: 0 }}>
               Save changes to your self character photos, voice, features, and style.
             </p>
-            <div style={{ display: 'grid', gap: '10px', padding: '16px', borderRadius: '18px', background: 'rgba(255,255,255,0.04)' }}>
+            <div style={{ display: 'grid', gap: '10px', padding: '16px', borderRadius: '18px', background: 'var(--panel-background)' }}>
               <span className="eyebrow">Build My Lumora Character</span>
               <strong>
                 {buildingIdentity ? 'Building identity' : selfCharacterReferencesReady ? 'Identity ready' : 'Needs references'}
@@ -3282,7 +3304,7 @@ export default function ProfilePage() {
       ) : null}
 
       {creatorSelfCharacter ? (
-        <section className="list-card" style={{ marginTop: '18px', borderRadius: '28px', padding: '18px', background: 'rgba(20,16,24,0.9)' }}>
+        <section className="list-card" style={{ marginTop: '18px', borderRadius: '28px', padding: '18px', background: 'var(--surface-strong)' }}>
           <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
             <div
               style={{
@@ -3290,7 +3312,7 @@ export default function ProfilePage() {
                 height: '72px',
                 borderRadius: '22px',
                 overflow: 'hidden',
-                background: 'rgba(255,255,255,0.08)',
+                background: 'var(--control-background)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -3319,7 +3341,7 @@ export default function ProfilePage() {
                 Identity confidence: {identityConfidence}%
               </p>
             </div>
-            <span className="tiny-pill" style={{ background: '#2a1f3d' }}>
+            <span className="tiny-pill" style={{ background: 'var(--pill-background)' }}>
               {identityLifecycleLabel}
             </span>
           </div>

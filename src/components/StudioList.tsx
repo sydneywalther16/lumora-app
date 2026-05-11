@@ -282,7 +282,7 @@ export default function StudioList({ jobs }: Props) {
               style={{
                 width: '100%',
                 borderRadius: '28px',
-                boxShadow: '0 24px 80px rgba(0, 0, 0, 0.35)',
+                boxShadow: 'var(--modal-shadow)',
                 overflow: 'hidden',
               }}
             >
@@ -319,7 +319,7 @@ export default function StudioList({ jobs }: Props) {
                         objectFit: 'cover',
                         borderRadius: '16px',
                         display: 'block',
-                        backgroundColor: '#06040e',
+                        backgroundColor: 'var(--media-background)',
                       }}
                     >
                       <source src={job.resultAssetUrl} type="video/mp4" />
@@ -332,7 +332,7 @@ export default function StudioList({ jobs }: Props) {
                         height: '260px',
                         borderRadius: '16px',
                         overflow: 'hidden',
-                        background: 'rgba(255,255,255,0.04)',
+                        background: 'var(--panel-background)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -356,11 +356,11 @@ export default function StudioList({ jobs }: Props) {
                       height: '260px',
                       borderRadius: '16px',
                       overflow: 'hidden',
-                      background: 'linear-gradient(135deg, rgba(255,255,255,0.02), rgba(255,255,255,0.08))',
+                      background: 'var(--card-media-background)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      color: '#d3cdf3',
+                      color: 'var(--soft-text)',
                       fontSize: '1rem',
                       textAlign: 'center',
                       padding: '12px',
@@ -368,7 +368,7 @@ export default function StudioList({ jobs }: Props) {
                   >
                     <div>
                       <strong>Processing</strong>
-                      <p style={{ margin: '10px 0 0', color: '#bdb6dc' }}>
+                      <p style={{ margin: '10px 0 0', color: 'var(--muted-text)' }}>
                         Your video is rendering. Check back momentarily.
                       </p>
                     </div>
@@ -379,7 +379,7 @@ export default function StudioList({ jobs }: Props) {
               <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <h3>{job.title}</h3>
-                  <p style={{ margin: '6px 0 0', color: '#bdb6dc', overflowWrap: 'anywhere' }}>
+                  <p style={{ margin: '6px 0 0', color: 'var(--muted-text)', overflowWrap: 'anywhere' }}>
                     {job.prompt}
                   </p>
                 </div>
@@ -440,7 +440,7 @@ export default function StudioList({ jobs }: Props) {
             position: 'fixed',
             inset: 0,
             zIndex: 9999,
-            background: 'rgba(0, 0, 0, 0.72)',
+            background: 'var(--modal-backdrop)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -454,10 +454,10 @@ export default function StudioList({ jobs }: Props) {
               maxHeight: '92vh',
               overflow: 'auto',
               borderRadius: '24px',
-              background: '#141018',
-              boxShadow: '0 24px 80px rgba(0,0,0,0.45)',
+              background: 'var(--modal-surface)',
+              boxShadow: 'var(--modal-shadow)',
               padding: '18px',
-              color: 'white',
+              color: 'var(--text-primary)',
             }}
           >
             <div className="row-between" style={{ marginBottom: '14px' }}>
@@ -485,7 +485,7 @@ export default function StudioList({ jobs }: Props) {
                   objectFit: 'contain',
                   borderRadius: '18px',
                   display: 'block',
-                  background: '#000',
+                  background: 'var(--media-background)',
                 }}
               >
                 <source src={selectedJob.resultAssetUrl} type="video/mp4" />
@@ -561,10 +561,10 @@ export default function StudioList({ jobs }: Props) {
             </div>
 
             {publishMessage ? (
-              <p style={{ color: '#8bc34a', marginTop: '14px' }}>{publishMessage}</p>
+              <p style={{ color: 'var(--success-text)', marginTop: '14px' }}>{publishMessage}</p>
             ) : null}
             {publishError ? (
-              <p style={{ color: '#f07178', marginTop: '14px' }}>{publishError}</p>
+              <p style={{ color: 'var(--error-text)', marginTop: '14px' }}>{publishError}</p>
             ) : null}
           </div>
         </div>
