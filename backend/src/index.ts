@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { ZodError } from 'zod';
 import { env } from './lib/env';
+import { logEnvironmentDiagnostics } from './lib/envDiagnostics';
 import { healthRouter } from './routes/health';
 import { projectsRouter } from './routes/projects';
 import { generationsRouter } from './routes/generations';
@@ -36,7 +37,7 @@ app.use(
 );
 app.use('/api/billing/webhook', express.raw({ type: 'application/json' }));
 app.use((req, res, next) => {
-  if (req.originalUrl === '/api/billing/webhook') return next();
+  if (req.path === '/api/billing/webhook') return next();
   return express.json({ limit: '35mb' })(req, res, next);
 });
 
@@ -65,6 +66,7 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 
 const server = app.listen(env.API_PORT, () => {
   console.log(`Lumora API listening on http://localhost:${env.API_PORT}`);
+  logEnvironmentDiagnostics();
 });
 
 server.on('error', (error) => {

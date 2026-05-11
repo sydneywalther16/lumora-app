@@ -22,6 +22,7 @@ Set these on Vercel:
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
 - `VITE_API_BASE_URL` or `VITE_API_URL` only if the frontend should call a separate API host. Leave both unset to use same-origin Vercel `/api` routes.
+- `REPLICATE_API_TOKEN` if using same-origin Vercel `/api` generation routes.
 
 Framework preset: **Vite**
 Output directory: `dist`
@@ -38,6 +39,7 @@ Set these on Render for both the API service and worker service:
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
+- `REPLICATE_API_TOKEN`
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
 - `STRIPE_PRICE_ID`

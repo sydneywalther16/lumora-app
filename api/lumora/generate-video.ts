@@ -50,9 +50,9 @@ type ReplicateRunResult = {
 };
 
 type GenerationModeUsed =
-  | 'seedance-identity'
-  | 'identity-keyframe-to-video'
-  | 'reference-photo-animation-fallback';
+  | 'seedance-multimodal-reference'
+  | 'identity-image-to-video'
+  | 'reference-image-to-video';
 
 const SEEDANCE_MODEL = 'bytedance/seedance-2.0' as ReplicateModelIdentifier;
 const KLING_IMAGE_TO_VIDEO_MODEL = 'kwaivgi/kling-v2.1' as ReplicateModelIdentifier;
@@ -693,7 +693,7 @@ async function runReplicate(input: {
     inputKeys: Object.keys(input.requestInput),
   });
 
-  if (input.generationModeUsed === 'seedance-identity') {
+  if (input.generationModeUsed === 'seedance-multimodal-reference') {
     console.log('SEEDANCE INPUT', input.requestInput);
   } else if (input.generationModeUsed) {
     console.log('SENDING IMAGE TO KLING:', input.referenceImageUrl);
@@ -718,7 +718,7 @@ async function runReplicate(input: {
       const output = await enqueueReplicatePrediction(() =>
         input.replicate.run(input.model, { input: requestInput }),
       );
-      if (input.generationModeUsed === 'seedance-identity') {
+      if (input.generationModeUsed === 'seedance-multimodal-reference') {
         console.log('SEEDANCE RESPONSE', safeJsonValue(output));
       }
       const videoUrl = await outputUrl(output);
@@ -1024,8 +1024,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         start_image: referenceImageUrl,
       };
       const generationModeUsed: GenerationModeUsed = keyframeUrl
-        ? 'identity-keyframe-to-video'
-        : 'reference-photo-animation-fallback';
+        ? 'identity-image-to-video'
+        : 'reference-image-to-video';
 
       console.log('MODEL ATTEMPTED', {
         provider: 'replicate',
@@ -1054,9 +1054,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           videoUrl: result.videoUrl,
           provider: 'replicate',
           model: result.model,
-          displayEngine: generationModeUsed === 'identity-keyframe-to-video'
-            ? 'Lumora identity keyframe'
-            : 'Reference photo animation fallback',
+          displayEngine: generationModeUsed === 'identity-image-to-video'
+            ? 'Lumora identity reference'
+            : 'Reference image-to-video',
           generationMode: generationModeUsed,
           generationModeUsed,
           hasReferenceImage: true,
@@ -1152,7 +1152,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           model: SEEDANCE_MODEL,
           requestInput,
           durationSent,
-          generationModeUsed: 'seedance-identity',
+          generationModeUsed: 'seedance-multimodal-reference',
           referenceImageUrl,
           fallbackToStartImageOnly: false,
         });
@@ -1165,8 +1165,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           provider: 'replicate',
           model: result.model,
           displayEngine: 'seedance',
-          generationMode: 'seedance-identity',
-          generationModeUsed: 'seedance-identity',
+          generationMode: 'seedance-multimodal-reference',
+          generationModeUsed: 'seedance-multimodal-reference',
           hasReferenceImage: true,
           modelUsed: result.model,
           durationSent: result.durationSent,
@@ -1189,57 +1189,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           throw seedanceError;
         }
 
-        console.warn('Seedance generation switched to Kling image-to-video fallback.', {
+        console.warn('Seedance generation failed without image-to-video fallback.', {
           model: SEEDANCE_MODEL,
-          referenceImageUrl,
+          referenceImages: seedanceReferences,
           safetyFiltered: seedanceSafetyFiltered,
           rateLimited: seedanceRateLimited,
         });
 
-        const fallbackResult = await runKlingImageToVideo({
-          replicate,
-          prompt: promptForModel,
-          referenceImageUrl,
-          additionalReferences: [],
-          primaryModel: KLING_IMAGE_TO_VIDEO_MODEL,
-          durationSent: null,
-          generationModeUsed: 'reference-photo-animation-fallback',
-          fallbackFromModel: SEEDANCE_MODEL,
-          providerFallback: true,
-        });
-
-        console.log('FINAL VIDEO URL:', fallbackResult.videoUrl);
-
-        return sendJson(res, 200, {
-          success: true,
-          videoUrl: fallbackResult.videoUrl,
+        return sendJson(res, seedanceRateLimited ? 429 : 400, {
+          success: false,
+          videoUrl: '',
           provider: 'replicate',
-          model: fallbackResult.model,
-          displayEngine: 'kling safety fallback',
-          generationMode: 'reference-photo-animation-fallback',
-          generationModeUsed: 'reference-photo-animation-fallback',
-          hasReferenceImage: true,
-          modelUsed: fallbackResult.model,
-          durationSent: fallbackResult.durationSent,
+          model: SEEDANCE_MODEL,
+          displayEngine: 'seedance',
+          generationMode: 'seedance-multimodal-reference',
+          generationModeUsed: 'seedance-multimodal-reference',
+          hasReferenceImage: seedanceReferences.length > 0,
+          modelUsed: SEEDANCE_MODEL,
+          durationSent,
           identityId: textValue(body.identityId) || null,
           keyframeUrl: null,
-          referenceImageUrl,
-          referenceImages: [referenceImageUrl],
-          additionalReferenceImageUrls: [],
+          referenceImageUrl: null,
+          referenceImages: seedanceReferences,
+          additionalReferenceImageUrls: seedanceReferences,
           finalPrompt: promptForModel,
-          warnings: [
-            seedanceRateLimited
-              ? PROVIDER_QUEUE_BUSY_MESSAGE
-              : 'Provider safety filter blocked Seedance, so Lumora used Kling image-to-video with the same saved reference.',
-          ],
+          warnings: [seedanceRateLimited ? PROVIDER_QUEUE_BUSY_MESSAGE : SENSITIVE_FILTER_ERROR],
+          error: seedanceRateLimited ? PROVIDER_QUEUE_BUSY_MESSAGE : SENSITIVE_FILTER_ERROR,
+          suggestion: seedanceRateLimited ? undefined : SENSITIVE_FILTER_SUGGESTION,
           rawOutput: {
-            fallbackFrom: {
+            failedProvider: {
               provider: 'replicate',
               model: SEEDANCE_MODEL,
               error: safeJsonValue(seedanceError),
             },
-            provider: safeJsonValue(fallbackResult.rawOutput),
-            attempts: fallbackResult.attempts,
           },
         });
       }
@@ -1289,7 +1271,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       start_image: referenceImageUrl,
       ...(additionalReferences.length ? { reference_images: additionalReferences } : {}),
     };
-    const generationModeUsed = keyframeUrl ? 'identity-keyframe-to-video' : 'reference-photo-animation-fallback';
+    const generationModeUsed = keyframeUrl ? 'identity-image-to-video' : 'reference-image-to-video';
 
     console.log('GENERATION DEBUG', {
       referenceImageUrl,

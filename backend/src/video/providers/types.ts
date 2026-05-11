@@ -1,6 +1,6 @@
 import type { CharacterReferenceImageUrls, CharacterVisibility } from '../../services/characterService';
 
-export type VideoEngine = 'veo' | 'runway' | 'mock' | 'openai';
+export type VideoEngine = 'seedance-2.0' | 'seedance-quality' | 'veo' | 'runway' | 'mock' | 'openai';
 export type VideoAspectRatio = '9:16' | '16:9' | '1:1';
 export type VideoPrivacy = CharacterVisibility;
 
@@ -25,10 +25,18 @@ export type VideoGenerationRequest = {
 };
 
 export type VideoProviderQueuedResult = {
-  status: 'queued' | 'queued-demo';
+  status: 'queued' | 'processing' | 'queued-demo';
   provider: VideoEngine;
   providerJobId: string;
   message: string;
+};
+
+export type VideoProviderFailedResult = {
+  status: 'failed';
+  provider: VideoEngine;
+  providerJobId: string;
+  message: string;
+  errorMessage: string;
 };
 
 export type VideoProviderCompletedResult = {
@@ -43,7 +51,7 @@ export type VideoProviderCompletedResult = {
   rawResponse?: unknown;
 };
 
-export type VideoProviderResult = VideoProviderQueuedResult | VideoProviderCompletedResult;
+export type VideoProviderResult = VideoProviderQueuedResult | VideoProviderCompletedResult | VideoProviderFailedResult;
 
 export interface VideoProvider {
   engine: VideoEngine;

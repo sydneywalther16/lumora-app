@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  api,
   type GenerationMode,
   type LumoraIdentityFeedback,
   type LumoraIdentityFeedbackChoice,
   type LumoraIdentityProfile,
   type GenerationResponse,
   type ReferenceImageUrls,
+  type SeedanceReferenceImage,
   type VideoAspectRatio,
   type VideoEngine,
 } from '../lib/api';
@@ -14,10 +16,9 @@ import { loadLumoraProfile } from '../lib/profileStorage';
 import { loadSupabaseProfile, saveSupabaseDraft, saveSupabaseProject } from '../lib/supabaseAppData';
 import { resolveRenderableReferenceUrl } from '../lib/selfCharacterReference';
 import {
+  buildSeedanceReferenceImages,
   SEEDANCE_ENGINE_ID,
-  getSeedanceReferenceSet,
-  hasSeedanceMinimumReferences,
-  seedanceReferenceArray,
+  SEEDANCE_QUALITY_ENGINE_ID,
 } from '../lib/providers/seedance';
 import { useSession } from '../hooks/useSession';
 import { useAppStore } from '../store/useAppStore';
@@ -45,10 +46,52 @@ type CreateVideoProps = {
 
 const durations = [4, 8, 12, 16];
 const aspectRatios: VideoAspectRatio[] = ['9:16', '16:9', '1:1'];
-const engines: VideoEngine[] = ['seedance-2.0', 'replicate'];
-const ENABLE_IDENTITY_KEYFRAME_FLOW = true;
+const providerOptions: Array<{
+  engine: VideoEngine;
+  label: string;
+  speed: string;
+  quality: string;
+  description: string;
+}> = [
+  {
+    engine: SEEDANCE_ENGINE_ID,
+    label: 'Seedance Fast',
+    speed: '~1-3 min',
+    quality: 'High',
+    description: 'Fast Replicate multimodal reference generation.',
+  },
+  {
+    engine: SEEDANCE_QUALITY_ENGINE_ID,
+    label: 'Seedance Quality',
+    speed: '~3-6 min',
+    quality: 'Higher',
+    description: 'Slower Seedance pass for stronger identity and motion detail.',
+  },
+  {
+    engine: 'veo',
+    label: 'Veo Experimental',
+    speed: 'Variable',
+    quality: 'Experimental',
+    description: 'Placeholder-safe Veo path for future Google video support.',
+  },
+  {
+    engine: 'mock',
+    label: 'Demo Mode',
+    speed: 'Instant',
+    quality: 'Demo',
+    description: 'Always-available local preview without provider usage.',
+  },
+  {
+    engine: 'replicate',
+    label: 'Kling Reference',
+    speed: '~1-3 min',
+    quality: 'Reference',
+    description: 'Existing image-to-video route for self-character reference animation.',
+  },
+];
 const engineLabels: Record<VideoEngine, string> = {
-  'seedance-2.0': 'Seedance 2.0 Identity',
+  'seedance-2.0': 'Seedance Fast',
+  'seedance-quality': 'Seedance Quality',
   replicate: 'Kling image-to-video',
   'sora-2': 'Sora 2',
   'sora-2-pro': 'Sora 2 Pro',
@@ -69,6 +112,7 @@ const referenceImageLabels: Partial<Record<keyof ReferenceImageUrls, string>> = 
 type GenerateVideoApiResponse = {
   videoUrl?: unknown;
   video?: unknown;
+  outputUrl?: unknown;
   provider?: string;
   model?: string;
   finalPrompt?: string;
@@ -76,24 +120,25 @@ type GenerateVideoApiResponse = {
   referenceImageNote?: string;
   referenceImageUrl?: unknown;
   additionalReferenceImageUrls?: unknown;
-  keyframeUrl?: unknown;
   generationMode?: GenerationMode;
+  aspectRatio?: unknown;
+  durationSeconds?: unknown;
+  resolution?: unknown;
   displayEngine?: string;
+  referenceImages?: unknown;
+  referenceImageCount?: unknown;
+  multimodalReferenceMode?: unknown;
   warnings?: unknown;
   error?: string;
   suggestion?: string;
   details?: unknown;
 };
 
-type KeyframeApiResponse = {
-  keyframeUrl?: unknown;
-  finalPrompt?: string;
-  provider?: string;
-  model?: string;
-  warnings?: unknown;
-  error?: string;
-  details?: unknown;
-};
+type GenerationStatusState = 'idle' | 'queued' | 'processing' | 'completed' | 'failed';
+type ToastState = {
+  type: 'success' | 'error';
+  message: string;
+} | null;
 
 const likenessFeedbackOptions: Array<{ value: LumoraIdentityFeedbackChoice; label: string }> = [
   { value: 'looks_like_me', label: 'looks like me' },
@@ -245,6 +290,20 @@ function formatUrlList(value: unknown): string[] {
     .filter((item): item is string => Boolean(item));
 }
 
+function formatSeedanceReferenceUrls(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item) => {
+      if (typeof item === 'string') return cleanReferenceUrl(item);
+      if (item && typeof item === 'object') {
+        return cleanReferenceUrl((item as { url?: unknown }).url as string | null);
+      }
+      return null;
+    })
+    .filter((item): item is string => Boolean(item));
+}
+
 function formatUnknownDetail(value: unknown): string {
   if (!value) return '';
   if (typeof value === 'string') return value;
@@ -344,8 +403,9 @@ export default function CreateVideo({
   const [duration, setDuration] = useState(8);
   const [aspectRatio, setAspectRatio] = useState<VideoAspectRatio>('9:16');
   const [engine, setEngine] = useState<VideoEngine>('replicate');
-  const [engineTouched, setEngineTouched] = useState(false);
   const [status, setStatus] = useState('');
+  const [generationStatusState, setGenerationStatusState] = useState<GenerationStatusState>('idle');
+  const [toast, setToast] = useState<ToastState>(null);
   const [generationLoading, setGenerationLoading] = useState(false);
   const [generationError, setGenerationError] = useState('');
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
@@ -355,30 +415,48 @@ export default function CreateVideo({
   const [generatedReferenceImageUrl, setGeneratedReferenceImageUrl] = useState<string | null>(null);
   const [generatedMode, setGeneratedMode] = useState<GenerationMode | null>(null);
   const [generationWarnings, setGenerationWarnings] = useState<string[]>([]);
-  const [generatedKeyframeUrl, setGeneratedKeyframeUrl] = useState<string | null>(null);
   const [selectedFeedbackChoices, setSelectedFeedbackChoices] = useState<LumoraIdentityFeedbackChoice[]>([]);
   const [feedbackNote, setFeedbackNote] = useState('');
   const [feedbackStatus, setFeedbackStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [generationResult, setGenerationResult] = useState<GenerationResponse | null>(null);
   const generationInFlightRef = useRef(false);
+  const progressTimerRef = useRef<number | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
   const primaryReferenceImage = pickReferenceImage({ referenceImageUrl, referenceImageUrls });
-  const seedanceReferences = getSeedanceReferenceSet(referenceImageUrls);
-  const seedanceReady = hasSeedanceMinimumReferences(seedanceReferences);
-  const seedanceReferenceImages = seedanceReferenceArray(seedanceReferences);
   const hasSelfCharacter = forceSelfMode || isDefaultSelfCharacter;
   const selectedSelfReferenceImageUrl = hasSelfCharacter
     ? resolveRenderableReferenceUrl(referenceImageUrl) || resolveRenderableReferenceUrl(primaryReferenceImage.url)
     : resolveRenderableReferenceUrl(primaryReferenceImage.url) || resolveRenderableReferenceUrl(characterAvatar);
   const hasGenerationReference = Boolean(selectedSelfReferenceImageUrl);
   const selfReferenceMode = hasSelfCharacter;
-  const selectedGenerationMode: GenerationMode = selfReferenceMode
-    ? 'self-reference-video'
-    : hasGenerationReference
-      ? 'image-to-video'
-      : 'text-to-video-fallback';
+  const isSoraEngine = engine === 'sora-2' || engine === 'sora-2-pro';
+  const isSeedanceEngine = engine === SEEDANCE_ENGINE_ID || engine === SEEDANCE_QUALITY_ENGINE_ID;
+  const isBackendProviderEngine = isSeedanceEngine || engine === 'veo' || engine === 'mock';
+  const requiresReferenceImage = engine === 'replicate';
+  const selectedProviderOption = providerOptions.find((option) => option.engine === engine) ?? providerOptions[0];
+  const hasPrompt = activePrompt.trim().length > 0;
+  const seedanceReferenceImages = buildSeedanceReferenceImages({
+    referenceImageUrl,
+    referenceImageUrls,
+    additionalReferenceImageUrls,
+    identityProfile,
+    characterAvatar,
+  });
+  const seedanceReferenceCount = seedanceReferenceImages.length;
+  const seedanceMultimodalActive = isSeedanceEngine && seedanceReferenceCount > 1;
+  const seedanceSingleReferenceWarning = isSeedanceEngine && seedanceReferenceCount === 1;
+  const selectedGenerationMode: GenerationMode = isSeedanceEngine
+    ? (seedanceReferenceCount > 0 ? 'seedance-multimodal-reference' : 'seedance-text-to-video')
+    : engine !== 'replicate'
+      ? 'text-to-video-fallback'
+      : selfReferenceMode
+        ? 'self-reference-video'
+        : hasGenerationReference
+          ? 'image-to-video'
+          : 'text-to-video-fallback';
   const referencePayload = referenceImagePayload(referenceImageUrls);
-  const isTextFallbackMode = !referenceLoading && !hasGenerationReference;
+  const isTextFallbackMode = !isSeedanceEngine && !referenceLoading && !hasGenerationReference;
   const referenceThumbnailUrl = renderableReferenceImageUrl(primaryReferenceImage.url);
   const generatedReferenceThumbnailUrl = renderableReferenceImageUrl(generatedReferenceImageUrl);
   const identityStatusLabel = !identityProfile
@@ -387,7 +465,7 @@ export default function CreateVideo({
       ? 'Building identity'
       : (identityProfile.feedbackIterations ?? 0) > 0
         ? 'Identity learning'
-        : (identityProfile.keyframeUrl && identityProfile.keyframeUrl !== identityProfile.frontFaceUrl) || (identityProfile.identityStrength ?? 0) >= 70
+        : (identityProfile.identityStrength ?? 0) >= 70
           ? 'Identity stabilized'
           : identityProfile.status === 'ready'
             ? 'Identity ready'
@@ -452,31 +530,23 @@ export default function CreateVideo({
     'url',
     'path',
   );
-  const isSoraEngine = engine === 'sora-2' || engine === 'sora-2-pro';
-  const isSeedanceEngine = engine === SEEDANCE_ENGINE_ID;
   const canGenerate =
     isHydrated &&
     !referenceLoading &&
-    hasGenerationReference &&
-    (!isSeedanceEngine || seedanceReady);
+    hasPrompt &&
+    (!requiresReferenceImage || hasGenerationReference);
   const generateBusy = !canGenerate || busy || generationLoading || referenceLoading;
   const saveBusy = busy || generationLoading;
   const engineRoutingMessage =
     isSeedanceEngine
-      ? seedanceReady
-        ? 'Seedance 2.0 runs through Replicate and uses front, left, and right identity references.'
-        : 'Seedance 2.0 Identity needs front, left, and right references. Use Kling fallback for single-image animation.'
+      ? `${selectedProviderOption.label} sends ${seedanceReferenceCount} reference image${seedanceReferenceCount === 1 ? '' : 's'} to Seedance without forcing a first frame.`
+    : engine === 'veo'
+      ? 'Veo Experimental keeps the placeholder-safe architecture while provider credentials evolve.'
+    : engine === 'mock'
+      ? 'Demo Mode returns an instant preview and never spends provider credits.'
       : isSoraEngine
       ? 'Lumora Identity Character currently routes through Replicate image-to-video. Sora remains optional elsewhere.'
       : 'Kling runs through Replicate and uses your self-character reference image first.';
-
-  useEffect(() => {
-    if (seedanceReady && !engineTouched && engine !== SEEDANCE_ENGINE_ID) {
-      setEngine(SEEDANCE_ENGINE_ID);
-    } else if (!seedanceReady && engine === SEEDANCE_ENGINE_ID) {
-      setEngine('replicate');
-    }
-  }, [engine, engineTouched, seedanceReady]);
 
   useEffect(() => {
     const savedPrompt = localStorage.getItem('remixPrompt');
@@ -492,6 +562,41 @@ export default function CreateVideo({
       localStorage.removeItem('remixTitle');
     }
   }, [setActivePrompt, setDraftTitle]);
+
+  useEffect(() => {
+    return () => {
+      if (progressTimerRef.current) window.clearTimeout(progressTimerRef.current);
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
+  function showToast(nextToast: NonNullable<ToastState>) {
+    setToast(nextToast);
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, 5200);
+  }
+
+  function beginGenerationProgress() {
+    setGenerationStatusState('queued');
+    setStatus('Queued with provider...');
+    if (progressTimerRef.current) window.clearTimeout(progressTimerRef.current);
+    progressTimerRef.current = window.setTimeout(() => {
+      setGenerationStatusState('processing');
+      setStatus('Provider is processing your render...');
+      progressTimerRef.current = null;
+    }, 1400);
+  }
+
+  function finishGenerationProgress(state: Extract<GenerationStatusState, 'completed' | 'failed'>) {
+    if (progressTimerRef.current) {
+      window.clearTimeout(progressTimerRef.current);
+      progressTimerRef.current = null;
+    }
+    setGenerationStatusState(state);
+  }
 
   async function handleGenerate() {
     if (generationInFlightRef.current) return;
@@ -519,25 +624,35 @@ export default function CreateVideo({
     const currentPrompt = activePrompt;
     const selectedAspectRatio = aspectRatio;
     const selectedEngine = engine;
-    const selectedSeedanceReferences = seedanceReferenceImages;
     const selectedReferenceImageUrl = resolveRenderableReferenceUrl(referenceImageUrl) || selectedSelfReferenceImageUrl;
 
-    if (selectedEngine === SEEDANCE_ENGINE_ID && selectedSeedanceReferences.length < 3) {
-      setGenerationError('Seedance identity generation needs saved front, left, and right reference photos.');
+    if (!currentPrompt.trim()) {
+      setGenerationError('Add a prompt before generating.');
+      setGenerationStatusState('failed');
       releaseGenerateLock();
       return;
     }
 
-    if (selectedEngine !== SEEDANCE_ENGINE_ID && !selectedReferenceImageUrl) {
+    if (selectedEngine === 'replicate' && !selectedReferenceImageUrl) {
       setGenerationError('Add or re-save a public reference photo before generating.');
+      setGenerationStatusState('failed');
       releaseGenerateLock();
       return;
     }
 
-    const referenceImageForRequest = selectedEngine === SEEDANCE_ENGINE_ID
-      ? selectedSeedanceReferences[0] ?? selectedReferenceImageUrl
+    const selectedIsSeedanceEngine = selectedEngine === SEEDANCE_ENGINE_ID || selectedEngine === SEEDANCE_QUALITY_ENGINE_ID;
+    const selectedIsBackendProviderEngine = selectedIsSeedanceEngine || selectedEngine === 'veo' || selectedEngine === 'mock';
+    const selectedSeedanceReferences: SeedanceReferenceImage[] = selectedIsSeedanceEngine
+      ? seedanceReferenceImages
+      : [];
+    const referenceImageForRequest = selectedIsSeedanceEngine
+      ? null
       : selectedReferenceImageUrl;
-    const selectedGenerationMode = selfReferenceMode
+    const selectedGenerationMode: GenerationMode = selectedIsSeedanceEngine
+      ? (selectedSeedanceReferences.length > 0 ? 'seedance-multimodal-reference' : 'seedance-text-to-video')
+      : selectedEngine !== 'replicate'
+        ? 'text-to-video-fallback'
+      : selfReferenceMode
       ? 'self-reference-video'
       : referenceImageForRequest
         ? 'image-to-video'
@@ -555,6 +670,14 @@ export default function CreateVideo({
       referenceImageUrl: referenceImageForRequest,
     });
     console.log('FINAL IMAGE SENT:', referenceImageForRequest);
+    if (selectedIsSeedanceEngine) {
+      console.info('SEEDANCE MULTIMODAL REFERENCES SENT:', selectedSeedanceReferences.map((reference) => ({
+        token: reference.token,
+        label: reference.label,
+        role: reference.role,
+        url: reference.url,
+      })));
+    }
 
     setGenerationError('');
     setGeneratedVideoUrl(null);
@@ -564,167 +687,183 @@ export default function CreateVideo({
     setGeneratedReferenceImageUrl(null);
     setGeneratedMode(null);
     setGenerationWarnings([]);
-    setGeneratedKeyframeUrl(null);
     setGenerationResult(null);
     setStatus('');
+    beginGenerationProgress();
 
     try {
       const generationStylePrompt = selectedStylePrompt(selectedStyles, currentPrompt);
-      const savedIdentityKeyframeUrl = cleanReferenceUrl(identityProfile?.keyframeUrl ?? null);
-      const identityFrontFaceUrl = cleanReferenceUrl(identityProfile?.frontFaceUrl ?? null);
-      let keyframeUrl: string | null =
-        savedIdentityKeyframeUrl && savedIdentityKeyframeUrl !== identityFrontFaceUrl
-          ? savedIdentityKeyframeUrl
-          : null;
-      let keyframeFinalPrompt = '';
-      let keyframeWarnings: string[] = [];
-      let keyframeModel = '';
-      let videoGenerationMode: GenerationMode = selfReferenceMode
-        ? keyframeUrl ? 'identity-keyframe-to-video' : 'reference-photo-animation-fallback'
-        : selectedGenerationMode;
+      const videoGenerationMode: GenerationMode = selectedGenerationMode;
 
-      if (ENABLE_IDENTITY_KEYFRAME_FLOW && selfReferenceMode && !keyframeUrl && selectedReferenceImageUrl && identityProfile) {
-        const keyframeRes = await fetch('/api/lumora/generate-identity-keyframe', {
+      let data: GenerateVideoApiResponse;
+      if (selectedIsSeedanceEngine) {
+        const seedanceResult = await api.createSeedanceGeneration({
+          title: draftTitle,
+          prompt: currentPrompt,
+          stylePreset: selectedStyles,
+          userId: authUser?.id ?? identityProfile?.userId ?? null,
+          engine: selectedEngine,
+          quality: selectedEngine === SEEDANCE_QUALITY_ENGINE_ID ? 'quality' : 'fast',
+          characterId,
+          characterName,
+          characterAvatar,
+          isDefaultSelfCharacter,
+          referenceImages: selectedSeedanceReferences,
+          referenceImageUrls: referencePayload,
+          additionalReferenceImageUrls,
+        });
+
+        data = {
+          videoUrl: seedanceResult.videoUrl ?? seedanceResult.outputUrl,
+          outputUrl: seedanceResult.outputUrl,
+          provider: seedanceResult.provider ?? 'replicate',
+          model: seedanceResult.model ?? (selectedEngine === SEEDANCE_QUALITY_ENGINE_ID ? 'bytedance/seedance-2.0' : 'bytedance/seedance-2.0-fast'),
+          finalPrompt: seedanceResult.finalPrompt ?? seedanceResult.prompt,
+          generationMode: seedanceResult.generationMode ?? videoGenerationMode,
+          aspectRatio: seedanceResult.aspectRatio,
+          durationSeconds: seedanceResult.durationSeconds,
+          displayEngine: seedanceResult.displayEngine ?? (selectedEngine === SEEDANCE_QUALITY_ENGINE_ID ? 'Seedance Quality' : 'Seedance Fast'),
+          referenceImages: seedanceResult.referenceImages ?? selectedSeedanceReferences,
+          referenceImageCount: seedanceResult.referenceImageCount ?? selectedSeedanceReferences.length,
+          multimodalReferenceMode: seedanceResult.multimodalReferenceMode ?? selectedSeedanceReferences.length > 1,
+          warnings: seedanceResult.warnings ?? undefined,
+        };
+      } else if (selectedIsBackendProviderEngine) {
+        const providerResult = await api.createGeneration({
+          title: draftTitle,
+          prompt: currentPrompt,
+          stylePreset: selectedStyles,
+          userId: authUser?.id ?? identityProfile?.userId ?? null,
+          characterId,
+          characterName,
+          characterAvatar,
+          isDefaultSelfCharacter,
+          duration,
+          aspectRatio: selectedAspectRatio,
+          engine: selectedEngine,
+        });
+
+        if (providerResult.status === 'failed') {
+          throw new Error(providerResult.error || providerResult.message || 'Generation failed.');
+        }
+
+        data = {
+          videoUrl: providerResult.videoUrl ?? providerResult.outputUrl,
+          outputUrl: providerResult.outputUrl,
+          provider: providerResult.provider ?? selectedEngine,
+          model: providerResult.model ?? undefined,
+          finalPrompt: providerResult.prompt,
+          generationMode: providerResult.generationMode ?? videoGenerationMode,
+          aspectRatio: providerResult.aspectRatio,
+          durationSeconds: providerResult.durationSeconds,
+          displayEngine: providerResult.displayEngine ?? engineLabels[selectedEngine],
+          warnings: providerResult.warnings ?? undefined,
+        };
+      } else {
+        const res = await fetch('/api/lumora/generate-video', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             prompt: currentPrompt,
-            identityId: identityProfile.identityId,
-            frontFaceUrl: identityProfile.frontFaceUrl || selectedReferenceImageUrl,
-            leftAngleUrl: identityProfile.leftAngleUrl,
-            rightAngleUrl: identityProfile.rightAngleUrl,
-            fullBodyUrl: identityProfile.fullBodyUrl,
-            videoReferenceUrls: identityProfile.videoReferenceUrls,
-            appearanceSummary: identityProfile.appearanceSummary,
-            identityPrompt: identityProfile.identityPrompt,
-            consistencyPrompt: identityProfile.generationConsistencyPrompt,
-            canonicalReferenceSet: identityProfile.canonicalReferenceSet,
-            preferences: identityProfile.userPreferences,
-            dislikes: identityProfile.dislikedTraits,
-            likenessNotes: identityProfile.likenessNotes,
+            characterId,
+            userId: authUser?.id ?? identityProfile?.userId ?? null,
+            identityId: identityProfile?.identityId,
+            characterDescription: selectedCharacterDescription,
+            identityPrompt: identityProfile?.identityPrompt,
+            consistencyPrompt: identityProfile?.generationConsistencyPrompt,
+            referenceImageUrl: referenceImageForRequest,
+            additionalReferenceImageUrls,
+            canonicalReferenceSet: identityProfile?.canonicalReferenceSet,
+            referenceImages: additionalReferenceImageUrls,
+            referenceImageUrls: referencePayload,
+            aspectRatio: selectedAspectRatio,
+            duration,
             style: generationStylePrompt,
+            audio: true,
+            provider: 'replicate',
+            engine: selectedEngine,
+            generationMode: videoGenerationMode,
           }),
         });
-        const keyframeText = await keyframeRes.text();
-        const { data: keyframeData, parseError: keyframeParseError } = parseGenerateResponse(keyframeText) as {
-          data: KeyframeApiResponse;
-          parseError: string | null;
-        };
 
-        if (keyframeRes.ok && !keyframeParseError) {
-          keyframeUrl = normalizeVideoUrl(keyframeData.keyframeUrl);
-          keyframeFinalPrompt = keyframeData.finalPrompt || '';
-          keyframeWarnings = formatWarnings(keyframeData.warnings);
-          keyframeModel = keyframeData.model || '';
+        const responseText = await res.text();
+        const { data: parsedData, parseError } = parseGenerateResponse(responseText);
 
-          if (keyframeUrl) {
-            videoGenerationMode = 'identity-keyframe-to-video';
+        if (!res.ok) {
+          const detail = formatUnknownDetail(parsedData.details);
+          const apiMessage = parsedData.error || parseError || 'Generation failed.';
+          if (isProviderSafetyFilterError([apiMessage, parsedData.suggestion || '', detail].join(' '))) {
+            throw new Error(providerSafetyFilterMessage);
           }
-        } else {
-          const keyframeMessage = keyframeData.error || keyframeParseError || 'Keyframe identity renderer not configured yet.';
-          keyframeWarnings = [
-            keyframeMessage.includes('Keyframe identity renderer not configured yet')
-              ? 'Keyframe identity renderer not configured yet. Using front-photo animation fallback.'
-              : `${keyframeMessage} Using front-photo animation fallback.`,
-          ];
-          videoGenerationMode = 'reference-photo-animation-fallback';
-        }
-      }
+          if (isReplicateThrottledError([apiMessage, parsedData.suggestion || '', detail].join(' '))) {
+            throw new Error(replicateThrottledMessage);
+          }
+          if (isProviderQueueBusyError([apiMessage, detail].join(' '))) {
+            throw new Error(providerQueueBusyMessage);
+          }
 
-      const res = await fetch('/api/lumora/generate-video', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: currentPrompt,
-          characterId,
-          userId: authUser?.id ?? identityProfile?.userId ?? null,
-          identityId: identityProfile?.identityId,
-          characterDescription: selectedCharacterDescription,
-          identityPrompt: identityProfile?.identityPrompt,
-          consistencyPrompt: identityProfile?.generationConsistencyPrompt,
-          keyframeUrl,
-          referenceImageUrl: referenceImageForRequest,
-          additionalReferenceImageUrls,
-          canonicalReferenceSet: identityProfile?.canonicalReferenceSet,
-          referenceImages: selectedEngine === SEEDANCE_ENGINE_ID
-            ? selectedSeedanceReferences
-            : additionalReferenceImageUrls,
-          referenceImageUrls: referencePayload,
-          aspectRatio: selectedAspectRatio,
-          duration,
-          style: generationStylePrompt,
-          audio: true,
-          provider: 'replicate',
-          engine: selectedEngine,
-          generationMode: videoGenerationMode,
-        }),
-      });
-
-      const responseText = await res.text();
-      const { data, parseError } = parseGenerateResponse(responseText);
-
-      if (!res.ok) {
-        const detail = formatUnknownDetail(data.details);
-        const apiMessage = data.error || parseError || 'Generation failed.';
-        if (isProviderSafetyFilterError([apiMessage, data.suggestion || '', detail].join(' '))) {
-          throw new Error(providerSafetyFilterMessage);
-        }
-        if (isReplicateThrottledError([apiMessage, data.suggestion || '', detail].join(' '))) {
-          throw new Error(replicateThrottledMessage);
-        }
-        if (isProviderQueueBusyError([apiMessage, detail].join(' '))) {
-          throw new Error(providerQueueBusyMessage);
+          throw new Error(
+            [apiMessage, detail]
+              .filter(Boolean)
+              .join(' Details: '),
+          );
         }
 
-        throw new Error(
-          [apiMessage, detail]
-            .filter(Boolean)
-            .join(' Details: '),
-        );
-      }
+        if (parseError) {
+          throw new Error(parseError);
+        }
 
-      if (parseError) {
-        throw new Error(parseError);
+        data = parsedData;
       }
 
       console.log('GENERATION RESPONSE:', data);
 
-      const nextVideoUrl = normalizeVideoUrl(data.videoUrl ?? data.video);
-      const generationProvider = data.provider === 'openai' ? 'openai' : 'replicate';
+      const nextVideoUrl = normalizeVideoUrl(data.videoUrl ?? data.outputUrl ?? data.video);
+      const generationProvider = (typeof data.provider === 'string' && data.provider
+        ? data.provider
+        : selectedEngine) as VideoEngine;
       const nextGenerationMode = data.generationMode || videoGenerationMode;
+      const nextAspectRatio = typeof data.aspectRatio === 'string' ? data.aspectRatio : selectedAspectRatio;
       const nextReferenceImageUrl = cleanReferenceUrl(normalizeVideoUrl(data.referenceImageUrl) || referenceImageForRequest);
-      const nextKeyframeUrl = cleanReferenceUrl(normalizeVideoUrl(data.keyframeUrl) || keyframeUrl);
-      const nextDisplayEngine = nextKeyframeUrl
-        ? data.displayEngine || 'Lumora identity keyframe'
-        : nextGenerationMode === 'reference-photo-animation-fallback'
-          ? 'Reference photo animation fallback'
+      const nextDisplayEngine = nextGenerationMode === 'seedance-multimodal-reference'
+        ? data.displayEngine || 'Seedance multimodal reference'
+        : nextGenerationMode === 'seedance-text-to-video'
+          ? data.displayEngine || 'Seedance 2.0 Fast'
           : data.displayEngine || (nextGenerationMode === 'text-to-video-fallback' ? 'text fallback' : 'kling');
-      const nextAdditionalReferenceImageUrls = formatUrlList(data.additionalReferenceImageUrls).length
-        ? formatUrlList(data.additionalReferenceImageUrls)
-        : additionalReferenceImageUrls;
-      const nextThumbnailUrl = nextKeyframeUrl || nextReferenceImageUrl || nextVideoUrl;
-      const nextWarnings = [
-        ...keyframeWarnings,
+      const responseSeedanceReferenceUrls = formatSeedanceReferenceUrls(data.referenceImages);
+      const nextAdditionalReferenceImageUrls = selectedIsSeedanceEngine
+        ? (responseSeedanceReferenceUrls.length
+            ? responseSeedanceReferenceUrls
+            : selectedSeedanceReferences.map((reference) => reference.url))
+        : formatUrlList(data.additionalReferenceImageUrls).length
+          ? formatUrlList(data.additionalReferenceImageUrls)
+          : additionalReferenceImageUrls;
+      const nextThumbnailUrl = nextReferenceImageUrl || nextVideoUrl;
+      const nextWarnings = Array.from(new Set([
         ...formatWarnings(data.warnings),
         ...(data.referenceImageNote ? [data.referenceImageNote] : []),
-      ];
+        ...(selectedIsSeedanceEngine && selectedSeedanceReferences.length === 1
+          ? ['Only one image is uploaded. Add side, full-body, expression, or outfit references for stronger Seedance identity consistency.']
+          : []),
+      ]));
 
       if (!nextVideoUrl) {
         console.error('No video returned', data);
         setGenerationError('No usable video URL was returned from the generator.');
+        finishGenerationProgress('failed');
+        showToast({ type: 'error', message: 'Generation failed. No video URL was returned.' });
         return;
       }
 
-      const nextFinalPrompt = data.finalPrompt || keyframeFinalPrompt || currentPrompt;
+      const nextFinalPrompt = data.finalPrompt || currentPrompt;
       let studioSaveStatus = 'Video generated and saved to Studio.';
       setGeneratedVideoUrl(nextVideoUrl);
       setFinalGeneratedPrompt(nextFinalPrompt);
-      setGeneratedModel(data.model || keyframeModel || '');
+      setGeneratedModel(data.model || '');
       setGeneratedDisplayEngine(nextDisplayEngine);
       setGeneratedReferenceImageUrl(nextReferenceImageUrl);
       setGeneratedMode(nextGenerationMode);
       setGenerationWarnings(nextWarnings);
-      setGeneratedKeyframeUrl(nextKeyframeUrl);
 
       const profile = authUser ? await loadSupabaseProfile(authUser.id) : loadLumoraProfile();
       const now = new Date().toISOString();
@@ -741,15 +880,25 @@ export default function CreateVideo({
         prompt: currentPrompt,
         outputUrl: nextVideoUrl,
         generationMode: nextGenerationMode,
+        finalPrompt: nextFinalPrompt,
         model: data.model || null,
         displayEngine: nextDisplayEngine,
         referenceImageUrl: nextReferenceImageUrl,
-        message: nextGenerationMode === 'text-to-video-fallback'
+        referenceImages: selectedIsSeedanceEngine
+          ? selectedSeedanceReferences
+          : null,
+        referenceImageCount: selectedIsSeedanceEngine
+          ? selectedSeedanceReferences.length
+          : null,
+        multimodalReferenceMode: selectedIsSeedanceEngine
+          ? selectedSeedanceReferences.length > 1
+          : null,
+        message: nextGenerationMode === 'seedance-multimodal-reference'
+          ? 'Seedance multimodal reference render created.'
+          : nextGenerationMode === 'seedance-text-to-video'
+          ? 'Seedance 2.0 Fast video render created.'
+          : nextGenerationMode === 'text-to-video-fallback'
           ? 'Text-only fallback render created. Likeness is not guaranteed.'
-          : nextKeyframeUrl
-            ? 'Lumora identity keyframe created from multiple references.'
-          : nextGenerationMode === 'reference-photo-animation-fallback'
-            ? 'Front reference animation fallback.'
           : 'Kling self-reference video render created.',
         createdAt: now,
       };
@@ -767,7 +916,7 @@ export default function CreateVideo({
           status: result.status,
           provider: generationProvider,
           engine: selectedEngine,
-          aspectRatio: selectedAspectRatio,
+          aspectRatio: nextAspectRatio,
           model: data.model || null,
           displayEngine: nextDisplayEngine,
           generationMode: nextGenerationMode,
@@ -775,7 +924,7 @@ export default function CreateVideo({
           identityPrompt: identityProfile?.identityPrompt ?? null,
           consistencyPrompt: identityProfile?.generationConsistencyPrompt ?? null,
           canonicalReferenceSet: identityProfile?.canonicalReferenceSet ?? null,
-          keyframeUrl: nextKeyframeUrl,
+          keyframeUrl: null,
           referenceImageUrl: nextReferenceImageUrl,
           referenceImageUrls: referencePayload,
           additionalReferenceImageUrls: nextAdditionalReferenceImageUrls,
@@ -794,9 +943,27 @@ export default function CreateVideo({
 
         if (authUser) {
           try {
+            console.info('ACCOUNT PROJECT SAVE SESSION CONTEXT:', {
+              authUserId: authUser.id,
+              sessionUserId: session?.user?.id ?? null,
+              sessionMatchesAuthUser: session?.user?.id === authUser.id,
+              hasSession: Boolean(session),
+              supabaseConfigured: configured,
+            });
             const savedProject = await saveSupabaseProject(authUser.id, studioProject);
             console.log('SAVED COMPLETED STUDIO PROJECT:', savedProject);
           } catch (saveError) {
+            console.error('ACCOUNT PROJECT SAVE FAILED EXACT ERROR:', {
+              authUserId: authUser.id,
+              sessionUserId: session?.user?.id ?? null,
+              sessionMatchesAuthUser: session?.user?.id === authUser.id,
+              supabaseConfigured: configured,
+              projectId: studioProject.id,
+              projectStatus: studioProject.status,
+              provider: studioProject.provider,
+              engine: studioProject.engine,
+              saveError,
+            });
             console.error('Unable to save project to Supabase; saving local backup.', saveError);
             saveStudioProject(studioProject);
             console.log('SAVED COMPLETED STUDIO PROJECT:', {
@@ -820,7 +987,9 @@ export default function CreateVideo({
         }
       }
 
+      finishGenerationProgress('completed');
       setStatus(studioSaveStatus);
+      showToast({ type: 'success', message: 'Generation completed and saved to Studio.' });
     } catch (error) {
       console.error('Generation failed', error);
       const message = error instanceof Error ? error.message : 'Unable to create draft render';
@@ -836,6 +1005,8 @@ export default function CreateVideo({
           ? `${displayMessage} Self-character likeness is currently routed through Replicate.`
           : displayMessage,
       );
+      finishGenerationProgress('failed');
+      showToast({ type: 'error', message: 'Generation failed. You can retry when ready.' });
     } finally {
       releaseGenerateLock();
     }
@@ -861,7 +1032,13 @@ export default function CreateVideo({
             duration,
             aspectRatio,
             engine,
-            displayEngine: engine === SEEDANCE_ENGINE_ID ? 'seedance' : engine === 'replicate' ? 'kling' : engine,
+            displayEngine: engine === SEEDANCE_ENGINE_ID
+              ? 'Seedance Fast'
+              : engine === SEEDANCE_QUALITY_ENGINE_ID
+                ? 'Seedance Quality'
+                : engine === 'replicate'
+                  ? 'kling'
+                  : engineLabels[engine] ?? engine,
             characterId,
             characterName,
             characterAvatar,
@@ -869,6 +1046,7 @@ export default function CreateVideo({
             generationMode: selectedGenerationMode,
             referenceImageUrl: selectedSelfReferenceImageUrl,
             referenceImageUrls: referencePayload,
+            referenceImages: isSeedanceEngine ? seedanceReferenceImages : undefined,
           },
         });
         setStatus('Draft saved to your account.');
@@ -918,6 +1096,11 @@ export default function CreateVideo({
 
   return (
     <section className="create-video-stack">
+      {toast ? (
+        <div className={`toast-notice ${toast.type}`} role="status" aria-live="polite">
+          {toast.message}
+        </div>
+      ) : null}
       <section className="editor-card">
         <div>
           <span className="eyebrow">video</span>
@@ -983,28 +1166,38 @@ export default function CreateVideo({
           </div>
         </div>
 
-        <label className="field-block">
-          <span>Engine</span>
-          <select
-            value={engine}
-            onChange={(event) => {
-              setEngineTouched(true);
-              setEngine(event.target.value as VideoEngine);
-            }}
-          >
-            {engines.map((option) => (
-              <option key={option} value={option}>
-                {engineLabels[option] ?? option}
-              </option>
+        <div className="field-block">
+          <span>Provider</span>
+          <div className="provider-grid" role="radiogroup" aria-label="Generation provider">
+            {providerOptions.map((option) => (
+              <button
+                key={option.engine}
+                type="button"
+                role="radio"
+                aria-checked={engine === option.engine}
+                className={`provider-option ${engine === option.engine ? 'active' : ''}`}
+                onClick={() => setEngine(option.engine)}
+              >
+                <span>
+                  <strong>{option.label}</strong>
+                  <small>{option.description}</small>
+                </span>
+                <span className="provider-meta">
+                  <span>Speed {option.speed}</span>
+                  <span>Quality {option.quality}</span>
+                </span>
+              </button>
             ))}
-          </select>
+          </div>
           <small className="muted">{engineRoutingMessage}</small>
-        </label>
+        </div>
 
         <div className="reference-mode-card">
           <div className="reference-mode-copy">
             <span className="eyebrow">
-              {selfReferenceMode
+              {isSeedanceEngine
+                ? 'Seedance 2.0'
+                : engine === 'replicate' && selfReferenceMode
                   ? 'Lumora Identity Character'
                 : referenceLoading
                   ? 'Checking self reference'
@@ -1013,8 +1206,14 @@ export default function CreateVideo({
                     : 'Image-to-video'}
             </span>
             <strong>
-              {selfReferenceMode
-                ? 'Generate new scenes from your reusable identity'
+              {isSeedanceEngine
+                ? 'Generate a new Seedance scene from all reference images'
+                : engine === 'replicate' && selfReferenceMode
+                  ? 'Generate new scenes from your reusable identity'
+                : engine === 'veo'
+                  ? 'Generate through the Veo placeholder path'
+                : engine === 'mock'
+                  ? 'Preview instantly with demo output'
                 : referenceLoading
                   ? 'Looking for saved self-character photos'
                 : isTextFallbackMode
@@ -1024,6 +1223,12 @@ export default function CreateVideo({
             <span className="muted">
               {referenceLoading
                 ? 'Lumora is checking front, full-body, angle, avatar, and media URL fields.'
+                : isSeedanceEngine
+                ? 'Seedance receives every saved reference as identity guidance and does not force any image as the first frame.'
+                : engine === 'veo'
+                ? 'Veo Experimental currently fails over safely when production credentials are not available.'
+                : engine === 'mock'
+                ? 'Demo Mode returns a known video so you can test Studio save and playback.'
                 : selfReferenceMode
                 ? primaryReferenceImage.url
                   ? 'Build a reusable photorealistic character from your reference photos and videos.'
@@ -1032,7 +1237,24 @@ export default function CreateVideo({
                   ? 'Create needs a public saved reference image for the current generation path.'
                   : 'Kling will condition the video on the selected image.'}
             </span>
-            {selfReferenceMode ? (
+            {seedanceMultimodalActive ? (
+              <span className="tiny-pill multimodal-reference-badge">Multimodal Reference Mode</span>
+            ) : null}
+            {seedanceSingleReferenceWarning ? (
+              <span className="seedance-reference-warning">
+                Only one image uploaded. Add side, full-body, expression, or outfit references for stronger identity consistency.
+              </span>
+            ) : null}
+            {isSeedanceEngine && seedanceReferenceCount > 0 ? (
+              <div className="seedance-reference-list" aria-label="Seedance references">
+                {seedanceReferenceImages.map((reference) => (
+                  <span key={`${reference.token}-${reference.url}`}>
+                    {reference.token} {reference.label || 'Reference image'}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {selfReferenceMode && engine === 'replicate' ? (
               <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }}>
                 <span className="tiny-pill" style={{ width: 'fit-content' }}>{identityStatusLabel}</span>
                 <span className="muted">
@@ -1040,7 +1262,7 @@ export default function CreateVideo({
                 </span>
               </div>
             ) : null}
-            {selfReferenceMode && onResaveReferencePhoto ? (
+            {selfReferenceMode && engine === 'replicate' && onResaveReferencePhoto ? (
               <button
                 type="button"
                 className="ghost-btn reference-resave-btn"
@@ -1055,13 +1277,15 @@ export default function CreateVideo({
               <SelfReferencePreview
                 label="Selected reference"
                 reference={normalizedSelectedReference}
-                required={selfReferenceMode}
+                required={engine === 'replicate' && selfReferenceMode}
               />
             </div>
           ) : null}
-          {primaryReferenceImage.label || selfReferenceMode ? (
+          {primaryReferenceImage.label || selfReferenceMode || isSeedanceEngine ? (
             <span className="tiny-pill reference-mode-pill">
-              {referenceLabel || primaryReferenceImage.label || 'Saved self character'}
+              {isSeedanceEngine
+                ? `${seedanceReferenceCount} Seedance reference${seedanceReferenceCount === 1 ? '' : 's'}`
+                : referenceLabel || primaryReferenceImage.label || 'Saved self character'}
             </span>
           ) : null}
         </div>
@@ -1078,7 +1302,7 @@ export default function CreateVideo({
           </div>
         ) : null}
 
-        {selfReferenceMode && isHydrated ? (
+        {selfReferenceMode && engine === 'replicate' && isHydrated ? (
           <div className="field-block">
             <span>Lumora Identity Character</span>
             <div className="reference-grid" style={{ gap: '8px' }}>
@@ -1102,9 +1326,17 @@ export default function CreateVideo({
               ? 'Rendering...'
               : referenceLoading
                   ? 'Checking self character...'
+                : !hasPrompt
+                  ? 'Add prompt before generating'
                 : !canGenerate
                   ? 'Add reference before generating'
-                  : selfReferenceMode
+                : isSeedanceEngine
+                  ? `Generate with ${selectedProviderOption.label}`
+                : engine === 'mock'
+                  ? 'Generate demo preview'
+                : engine === 'veo'
+                  ? 'Generate with Veo Experimental'
+                  : engine === 'replicate' && selfReferenceMode
                     ? 'Generate new scene with my Lumora character'
                   : 'Generate video'}
           </button>
@@ -1112,8 +1344,24 @@ export default function CreateVideo({
             Save draft
           </button>
         </div>
+        {generationStatusState !== 'idle' ? (
+          <div className="generation-progress" aria-live="polite">
+            {(['queued', 'processing', 'completed', 'failed'] as const).map((phase) => (
+              <span key={phase} className={generationStatusState === phase ? 'active' : ''}>
+                {phase}
+              </span>
+            ))}
+          </div>
+        ) : null}
         {generationLoading ? <p className="muted">Rendering your concept...</p> : null}
-        {generationError ? <p style={{ color: 'var(--error-text)' }}>{generationError}</p> : null}
+        {generationError ? (
+          <div className="generation-error-card">
+            <p>{generationError}</p>
+            <button type="button" className="ghost-btn" onClick={handleGenerate} disabled={generateBusy}>
+              Retry generation
+            </button>
+          </div>
+        ) : null}
         {generationWarnings.length ? (
           <div className="generation-warning-list">
             {generationWarnings.map((warning) => (
@@ -1178,15 +1426,15 @@ export default function CreateVideo({
           {generatedMode ? (
             <p className="muted">Generation mode: {generatedMode}</p>
           ) : null}
-          {generatedKeyframeUrl ? (
+          {generatedMode === 'seedance-multimodal-reference' ? (
             <div className="reference-result-row">
-              <img src={generatedKeyframeUrl} alt="" />
-              <span className="muted">Lumora identity keyframe created from multiple references.</span>
+              <span className="tiny-pill multimodal-reference-badge">Multimodal Reference Mode</span>
+              <span className="muted">
+                Seedance used {generationResult.referenceImageCount ?? seedanceReferenceCount} identity references for a fresh cinematic scene.
+              </span>
             </div>
-          ) : generatedMode === 'reference-photo-animation-fallback' ? (
-            <p className="muted">Front reference animation fallback.</p>
           ) : null}
-          {generatedReferenceThumbnailUrl ? (
+          {generatedReferenceThumbnailUrl && generatedMode !== 'seedance-multimodal-reference' ? (
             <div className="reference-result-row">
               <SelfReferencePreview
                 label="Reference image used for likeness"

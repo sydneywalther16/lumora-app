@@ -1,4 +1,10 @@
 import { query } from './db';
+import { persistCompletedGeneration } from './generationPersistence';
+import {
+  generateSeedanceVideo,
+  type SeedanceQualityMode,
+  type SeedanceReferenceImage,
+} from './providers/seedanceProvider';
 
 export type GenerationRecord = {
   id: string;
@@ -17,6 +23,95 @@ export type GenerationRecord = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type SeedanceGenerationRecord = {
+  id: string;
+  jobId: string;
+  status: 'completed';
+  engine: 'seedance-2.0' | 'seedance-quality';
+  provider: 'replicate';
+  model: string;
+  providerJobId: string;
+  prompt: string;
+  outputUrl: string;
+  videoUrl: string;
+  durationSeconds: 5;
+  aspectRatio: '16:9';
+  resolution: '720p';
+  message: string;
+  createdAt: string;
+  projectId: string | null;
+  storagePath: string | null;
+  warnings: string[];
+  finalPrompt: string;
+  referenceImages: SeedanceReferenceImage[];
+  referenceImageCount: number;
+  multimodalReferenceMode: boolean;
+  rawOutput: unknown;
+};
+
+export async function createSeedanceGeneration(input: {
+  prompt: string;
+  quality?: SeedanceQualityMode;
+  userId?: string | null;
+  title?: string | null;
+  characterId?: string | null;
+  characterName?: string | null;
+  characterAvatar?: string | null;
+  isDefaultSelfCharacter?: boolean | null;
+  referenceImages?: SeedanceReferenceImage[];
+}): Promise<SeedanceGenerationRecord> {
+  const result = await generateSeedanceVideo(input.prompt, {
+    quality: input.quality,
+    referenceImages: input.referenceImages,
+  });
+  const createdAt = new Date().toISOString();
+  const persistence = await persistCompletedGeneration({
+    userId: input.userId ?? null,
+    id: result.id,
+    title: input.title ?? null,
+    prompt: input.prompt,
+    finalPrompt: result.finalPrompt,
+    provider: result.provider,
+    engine: input.quality === 'quality' ? 'seedance-quality' : 'seedance-2.0',
+    model: result.model,
+    displayEngine: input.quality === 'quality' ? 'Seedance Quality' : 'Seedance Fast',
+    videoUrl: result.videoUrl,
+    thumbnailUrl: result.videoUrl,
+    characterId: input.characterId ?? null,
+    characterName: input.characterName ?? null,
+    characterAvatar: input.characterAvatar ?? null,
+    isDefaultSelfCharacter: input.isDefaultSelfCharacter ?? null,
+    durationSeconds: result.settings.duration,
+    aspectRatio: result.settings.aspect_ratio,
+  });
+
+  return {
+    id: result.id,
+    jobId: result.id,
+    status: 'completed',
+    engine: input.quality === 'quality' ? 'seedance-quality' : 'seedance-2.0',
+    provider: result.provider,
+    model: result.model,
+    providerJobId: result.providerJobId,
+    prompt: result.finalPrompt,
+    outputUrl: persistence.videoUrl,
+    videoUrl: persistence.videoUrl,
+    durationSeconds: result.settings.duration,
+    aspectRatio: result.settings.aspect_ratio,
+    resolution: result.settings.resolution,
+    message: 'Seedance 2.0 video generated successfully.',
+    createdAt,
+    projectId: persistence.projectId,
+    storagePath: persistence.storagePath,
+    warnings: [...result.warnings, ...persistence.warnings],
+    finalPrompt: result.finalPrompt,
+    referenceImages: result.referenceImages,
+    referenceImageCount: result.referenceImageCount,
+    multimodalReferenceMode: result.multimodalReferenceMode,
+    rawOutput: result.rawOutput,
+  };
+}
 
 export async function createGenerationJob(input: {
   userId: string;

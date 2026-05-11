@@ -8,6 +8,7 @@ import StudioPage from './pages/StudioPage';
 import InboxPage from './pages/InboxPage';
 import ProfilePage from './pages/ProfilePage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
+import DiagnosticsPage from './pages/DiagnosticsPage';
 import { useSession } from './hooks/useSession';
 
 export default function App() {
@@ -36,6 +37,7 @@ export default function App() {
         <Route path="/studio" element={<StudioPage />} />
         <Route path="/inbox" element={<InboxPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/diagnostics" element={<DiagnosticsPage />} />
         <Route path="/auth/callback" element={<AuthCallbackPage />} />
       </Route>
     </Routes>

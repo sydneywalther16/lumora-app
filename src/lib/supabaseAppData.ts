@@ -89,6 +89,101 @@ function missingColumnName<T extends string>(error: unknown, columns: readonly T
   return columns.find((column) => isMissingColumnError(error, column)) ?? null;
 }
 
+function serializeSupabaseError(error: unknown): Record<string, unknown> {
+  if (!error) return {};
+
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    };
+  }
+
+  if (!isObject(error)) {
+    return { message: String(error) };
+  }
+
+  return Object.fromEntries(
+    Object.entries(error).map(([key, value]) => [
+      key,
+      isObject(value) || Array.isArray(value) ? JSON.stringify(value) : value,
+    ]),
+  );
+}
+
+function supabaseErrorSummary(error: unknown): string {
+  const serialized = serializeSupabaseError(error);
+  return [
+    serialized.code,
+    serialized.message,
+    serialized.details,
+    serialized.hint,
+  ]
+    .filter(Boolean)
+    .join(' | ') || 'Unknown Supabase error';
+}
+
+function rlsHintForProjectSave(error: unknown): string | null {
+  const summary = supabaseErrorSummary(error).toLowerCase();
+  if (summary.includes('row-level security') || summary.includes('violates row-level security')) {
+    return 'RLS rejected the project write. Verify the browser has a current Supabase session and projects_insert_own/projects_update_own policies use auth.uid() = user_id.';
+  }
+
+  if (summary.includes('jwt') || summary.includes('permission denied') || summary.includes('not authenticated')) {
+    return 'Auth/session propagation may be stale. Refresh the Supabase session before saving account projects.';
+  }
+
+  return null;
+}
+
+async function getProjectSaveAuthDiagnostics(userId: string) {
+  const client = getClient();
+  const diagnostics: Record<string, unknown> = {
+    requestedUserId: userId,
+    supabaseConfigured: Boolean(supabase),
+  };
+
+  try {
+    const { data, error } = await client.auth.getSession();
+    const session = data.session;
+    diagnostics.sessionUserId = session?.user?.id ?? null;
+    diagnostics.hasAccessToken = Boolean(session?.access_token);
+    diagnostics.sessionExpiresAt = session?.expires_at
+      ? new Date(session.expires_at * 1000).toISOString()
+      : null;
+    diagnostics.sessionMatchesRequestedUser = session?.user?.id === userId;
+    if (error) diagnostics.getSessionError = serializeSupabaseError(error);
+  } catch (error) {
+    diagnostics.getSessionException = serializeSupabaseError(error);
+  }
+
+  try {
+    const { data, error } = await client.auth.getUser();
+    diagnostics.authUserId = data.user?.id ?? null;
+    diagnostics.authUserMatchesRequestedUser = data.user?.id === userId;
+    if (error) diagnostics.getUserError = serializeSupabaseError(error);
+  } catch (error) {
+    diagnostics.getUserException = serializeSupabaseError(error);
+  }
+
+  return diagnostics;
+}
+
+async function probeProjectsTableForSave(userId: string) {
+  const client = getClient();
+  const { count, error } = await client
+    .from('projects')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId);
+
+  return {
+    ok: !error,
+    ownProjectCount: count ?? null,
+    error: error ? serializeSupabaseError(error) : null,
+  };
+}
+
 function jsonRecord(value: unknown): Record<string, unknown> {
   return isObject(value) ? value : {};
 }
@@ -1022,41 +1117,61 @@ export async function loadSupabaseProjects(userId: string): Promise<StudioProjec
 
 export async function saveSupabaseProject(userId: string, project: StudioProject): Promise<StudioProject> {
   const client = getClient();
-  const payload = {
-    id: project.id,
-    user_id: userId,
-    title: project.title || 'Untitled concept',
-    caption: project.caption ?? project.prompt,
-    prompt: project.prompt,
-    final_prompt: project.finalPrompt ?? project.prompt,
-    thumbnail_url: storageUrl(project.thumbnailUrl ?? project.keyframeUrl ?? project.referenceImageUrl ?? project.videoUrl, 'Generated project thumbnail'),
-    style_preset: project.engine ?? project.provider ?? 'replicate',
-    status: project.status || 'completed',
-    provider: project.provider,
-    engine: project.engine ?? project.provider,
-    display_engine: project.displayEngine ?? null,
-    model: project.model ?? null,
-    generation_mode: project.generationMode ?? null,
-    identity_id: project.identityId ?? null,
-    keyframe_url: storageUrl(project.keyframeUrl, 'Generated identity keyframe'),
-    output_type: 'video',
-    video_url: storageUrl(project.videoUrl, 'Generated project video'),
-    cover_asset_url: storageUrl(project.videoUrl, 'Generated project video'),
-    reference_image_url: storageUrl(project.referenceImageUrl, 'Project reference image'),
-    reference_image_urls: cleanJsonRecord(project.referenceImageUrls),
-    additional_reference_image_urls: stripBase64Media(project.additionalReferenceImageUrls) ?? null,
-    likeness_feedback: cleanJsonRecord(project.likenessFeedback),
-    character_id: project.characterId,
-    character_name: project.characterName,
-    character_avatar: storageUrl(project.characterAvatar, 'Project character avatar'),
-    is_default_self_character: Boolean(project.isDefaultSelfCharacter),
-    creator_name: project.creatorName ?? null,
-    creator_username: project.creatorUsername ?? null,
-    creator_avatar: storageUrl(project.creatorAvatar, 'Project creator avatar'),
-    aspect_ratio: project.aspectRatio ?? null,
-    created_at: project.createdAt,
-    updated_at: project.updatedAt ?? new Date().toISOString(),
-  };
+  const authDiagnostics = await getProjectSaveAuthDiagnostics(userId);
+  const projectsTableProbe = await probeProjectsTableForSave(userId).catch((error) => ({
+    ok: false,
+    ownProjectCount: null,
+    error: serializeSupabaseError(error),
+  }));
+  let payload: Record<string, unknown>;
+
+  try {
+    payload = {
+      id: project.id,
+      user_id: userId,
+      title: project.title || 'Untitled concept',
+      caption: project.caption ?? project.prompt,
+      prompt: project.prompt,
+      final_prompt: project.finalPrompt ?? project.prompt,
+      thumbnail_url: storageUrl(project.thumbnailUrl ?? project.keyframeUrl ?? project.referenceImageUrl ?? project.videoUrl, 'Generated project thumbnail'),
+      style_preset: project.engine ?? project.provider ?? 'replicate',
+      status: project.status || 'completed',
+      provider: project.provider,
+      engine: project.engine ?? project.provider,
+      display_engine: project.displayEngine ?? null,
+      model: project.model ?? null,
+      generation_mode: project.generationMode ?? null,
+      identity_id: project.identityId ?? null,
+      keyframe_url: storageUrl(project.keyframeUrl, 'Generated identity keyframe'),
+      output_type: 'video',
+      video_url: storageUrl(project.videoUrl, 'Generated project video'),
+      cover_asset_url: storageUrl(project.videoUrl, 'Generated project video'),
+      reference_image_url: storageUrl(project.referenceImageUrl, 'Project reference image'),
+      reference_image_urls: cleanJsonRecord(project.referenceImageUrls),
+      additional_reference_image_urls: stripBase64Media(project.additionalReferenceImageUrls) ?? null,
+      likeness_feedback: cleanJsonRecord(project.likenessFeedback),
+      character_id: project.characterId,
+      character_name: project.characterName,
+      character_avatar: storageUrl(project.characterAvatar, 'Project character avatar'),
+      is_default_self_character: Boolean(project.isDefaultSelfCharacter),
+      creator_name: project.creatorName ?? null,
+      creator_username: project.creatorUsername ?? null,
+      creator_avatar: storageUrl(project.creatorAvatar, 'Project creator avatar'),
+      aspect_ratio: project.aspectRatio ?? null,
+      created_at: project.createdAt,
+      updated_at: project.updatedAt ?? new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error('SUPABASE PROJECT SAVE PAYLOAD BUILD FAILED:', {
+      projectId: project.id,
+      userId,
+      authDiagnostics,
+      projectsTableProbe,
+      error: serializeSupabaseError(error),
+    });
+    throw error;
+  }
+
   const removableProjectColumns = [
     'thumbnail_url',
     'additional_reference_image_urls',
@@ -1072,11 +1187,46 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
     'final_prompt',
     'engine',
     'aspect_ratio',
+    'creator_avatar',
+    'creator_username',
+    'creator_name',
+    'is_default_self_character',
+    'character_avatar',
+    'character_name',
+    'character_id',
+    'video_url',
+    'output_type',
+    'provider',
+    'privacy',
+    'duration_seconds',
   ] as const;
   let payloadForUpsert: Partial<typeof payload> = payload;
   let result: { data: DbRow | null; error: unknown } = { data: null, error: null };
+  const removedColumns: string[] = [];
+
+  console.info('SUPABASE PROJECT SAVE PREFLIGHT:', {
+    projectId: project.id,
+    userId,
+    authDiagnostics,
+    projectsTableProbe,
+    payloadColumns: Object.keys(payload),
+    media: {
+      hasVideoUrl: Boolean(project.videoUrl),
+      videoUrlKind: project.videoUrl?.startsWith('http') ? 'http' : project.videoUrl?.startsWith('/') ? 'relative' : 'other',
+      hasThumbnailUrl: Boolean(project.thumbnailUrl),
+      hasReferenceImageUrl: Boolean(project.referenceImageUrl),
+      hasKeyframeUrl: Boolean(project.keyframeUrl),
+    },
+  });
 
   for (let attempt = 0; attempt <= removableProjectColumns.length; attempt += 1) {
+    console.info('SUPABASE PROJECT SAVE ATTEMPT:', {
+      projectId: project.id,
+      attempt: attempt + 1,
+      columns: Object.keys(payloadForUpsert),
+      removedColumns,
+    });
+
     result = await client
       .from('projects')
       .upsert(
@@ -1089,12 +1239,47 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
     const column = missingColumnName(result.error, removableProjectColumns);
     if (!result.error || !column) break;
 
+    console.warn('SUPABASE PROJECT SAVE MISSING COLUMN, RETRYING:', {
+      projectId: project.id,
+      missingColumn: column,
+      error: serializeSupabaseError(result.error),
+    });
+
     const { [column]: _removedColumn, ...nextPayload } = payloadForUpsert;
     payloadForUpsert = nextPayload;
+    removedColumns.push(column);
   }
 
-  if (result.error) throw result.error;
+  if (result.error) {
+    const exactError = serializeSupabaseError(result.error);
+    const rlsHint = rlsHintForProjectSave(result.error);
+    console.error('SUPABASE PROJECT SAVE FAILED EXACT ERROR:', {
+      projectId: project.id,
+      userId,
+      error: exactError,
+      errorSummary: supabaseErrorSummary(result.error),
+      rlsHint,
+      authDiagnostics,
+      projectsTableProbe,
+      attemptedColumns: Object.keys(payloadForUpsert),
+      removedColumns,
+      requiredTables: ['projects'],
+      expectedRlsPolicies: ['projects_select_own', 'projects_insert_own', 'projects_update_own'],
+    });
+    throw new Error(
+      [
+        `Supabase project save failed: ${supabaseErrorSummary(result.error)}`,
+        rlsHint,
+      ].filter(Boolean).join(' '),
+    );
+  }
   if (!result.data) throw new Error('Unable to save project.');
+  console.info('SUPABASE PROJECT SAVE SUCCEEDED:', {
+    projectId: project.id,
+    userId,
+    removedColumns,
+    returnedColumns: Object.keys(result.data),
+  });
   return mapProjectRow(result.data);
 }
 

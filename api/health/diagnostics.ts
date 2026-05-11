@@ -1,9 +1,7 @@
-import { Router } from 'express';
-import { getEnvironmentDiagnostics } from '../lib/envDiagnostics';
-import { supabaseAdmin } from '../lib/supabaseAdmin';
-import { query } from '../services/db';
-
-export const healthRouter = Router();
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { getEnvironmentDiagnostics } from '../../backend/src/lib/envDiagnostics';
+import { supabaseAdmin } from '../../backend/src/lib/supabaseAdmin';
+import { query } from '../../backend/src/services/db';
 
 function serializeDiagnosticError(error: unknown) {
   if (error instanceof Error) {
@@ -14,10 +12,7 @@ function serializeDiagnosticError(error: unknown) {
     };
   }
 
-  if (!error || typeof error !== 'object') {
-    return { message: String(error) };
-  }
-
+  if (!error || typeof error !== 'object') return { message: String(error) };
   return Object.fromEntries(
     Object.entries(error as Record<string, unknown>).map(([key, value]) => [
       key,
@@ -73,13 +68,11 @@ async function checkRlsPolicies() {
   }
 }
 
-healthRouter.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'lumora-api' });
-});
-
-healthRouter.get('/api/health/diagnostics', async (_req, res) => {
-  res.json({
-    service: 'lumora-api',
+export default async function handler(_req: IncomingMessage, res: ServerResponse) {
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify({
+    service: 'lumora-vercel-api',
     checkedAt: new Date().toISOString(),
     ...getEnvironmentDiagnostics(),
     database: {
@@ -90,5 +83,5 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
       ]),
       rlsPolicies: await checkRlsPolicies(),
     },
-  });
-});
+  }));
+}

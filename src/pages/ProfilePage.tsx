@@ -2919,6 +2919,16 @@ export default function ProfilePage() {
           >
             {showDebugInfo ? 'Hide debug' : 'Show debug'}
           </button>
+          <button
+            type="button"
+            className="ghost-btn"
+            style={{ flex: 'unset', padding: '8px 12px' }}
+            onClick={() => {
+              window.location.href = '/diagnostics';
+            }}
+          >
+            API diagnostics
+          </button>
         </div>
         {showDebugInfo ? (
           <>

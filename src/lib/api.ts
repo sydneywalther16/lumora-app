@@ -8,11 +8,34 @@ function buildRequestHeaders(headers: HeadersInit | undefined) {
   return requestHeaders;
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(
-    `${baseUrl}${path}`,
-    Object.assign({}, init, { headers: buildRequestHeaders(init.headers) }),
-  );
+type RequestInitWithTimeout = RequestInit & {
+  timeoutMs?: number;
+};
+
+async function request<T>(path: string, init: RequestInitWithTimeout = {}): Promise<T> {
+  const { timeoutMs, signal, ...fetchInit } = init;
+  const controller = timeoutMs ? new AbortController() : null;
+  const timeoutId = controller
+    ? window.setTimeout(() => controller.abort(), timeoutMs)
+    : null;
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `${baseUrl}${path}`,
+      Object.assign({}, fetchInit, {
+        headers: buildRequestHeaders(init.headers),
+        signal: signal ?? controller?.signal,
+      }),
+    );
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('Generation request timed out. Try again in a moment.');
+    }
+    throw error;
+  } finally {
+    if (timeoutId) window.clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
@@ -26,6 +49,7 @@ export type GenerationPayload = {
   title?: string;
   prompt: string;
   stylePreset?: string | string[];
+  userId?: string | null;
   outputType?: 'image' | 'video';
   characterId?: string | null;
   characterName?: string | null;
@@ -34,7 +58,11 @@ export type GenerationPayload = {
   duration?: number;
   aspectRatio?: VideoAspectRatio;
   engine?: VideoEngine;
+  quality?: 'fast' | 'quality';
   privacy?: PrivacySetting;
+  referenceImages?: SeedanceReferenceImage[];
+  referenceImageUrls?: Partial<ReferenceImageUrls> | null;
+  additionalReferenceImageUrls?: string[] | null;
 };
 
 export type GenerationResponse = {
@@ -42,16 +70,29 @@ export type GenerationResponse = {
   jobId: string;
   status: string;
   engine: VideoEngine;
+  provider?: string | null;
   characterId: string | null;
   characterName: string | null;
   characterAvatar?: string | null;
   isDefaultSelfCharacter?: boolean | null;
   prompt: string;
   outputUrl: string;
+  videoUrl?: string;
+  error?: string;
   generationMode?: GenerationMode | null;
+  finalPrompt?: string | null;
+  durationSeconds?: number | null;
+  aspectRatio?: string | null;
+  resolution?: string | null;
   model?: string | null;
+  projectId?: string | null;
+  storagePath?: string | null;
+  warnings?: string[] | null;
   displayEngine?: string | null;
   referenceImageUrl?: string | null;
+  referenceImages?: SeedanceReferenceImage[] | null;
+  referenceImageCount?: number | null;
+  multimodalReferenceMode?: boolean | null;
   createdAt: string;
   message?: string;
 };
@@ -90,6 +131,7 @@ export type CharacterStatus = 'draft' | 'processing' | 'ready' | 'failed';
 export type PrivacySetting = 'private' | 'approved_only' | 'public';
 export type VideoEngine =
   | 'seedance-2.0'
+  | 'seedance-quality'
   | 'sora-2'
   | 'sora-2-pro'
   | 'replicate'
@@ -101,10 +143,47 @@ export type VideoAspectRatio = '9:16' | '16:9' | '1:1';
 export type GenerationMode =
   | 'self-reference-video'
   | 'image-to-video'
+  | 'reference-image-to-video'
   | 'text-to-video-fallback'
-  | 'seedance-identity'
-  | 'identity-keyframe-to-video'
-  | 'reference-photo-animation-fallback';
+  | 'seedance-text-to-video'
+  | 'seedance-multimodal-reference';
+
+export type SeedanceReferenceImage = {
+  url: string;
+  label?: string;
+  role?: string;
+  token?: string;
+};
+
+export type ApiHealthDiagnostics = {
+  service: string;
+  checkedAt: string;
+  ok: boolean;
+  mode: string;
+  configured: Record<string, boolean>;
+  missingRecommended: string[];
+  generationProviders: Array<{
+    id: string;
+    ready: boolean;
+    status: 'ready' | 'not_configured' | 'placeholder';
+  }>;
+  database?: {
+    serviceRoleConfigured: boolean;
+    tables: Array<{
+      ok: boolean;
+      table: string;
+      source: string;
+      count?: number | null;
+      error?: unknown;
+    }>;
+    rlsPolicies: {
+      ok: boolean;
+      source: string;
+      policies?: Array<Record<string, unknown>>;
+      error?: unknown;
+    };
+  };
+};
 
 export type MediaUploadInput = {
   url?: string;
@@ -280,9 +359,21 @@ export const api = {
     request<GenerationResponse>('/api/generations', {
       method: 'POST',
       body: JSON.stringify(payload),
+      timeoutMs: 240_000,
+    }),
+
+  createSeedanceGeneration: (payload: GenerationPayload) =>
+    request<GenerationResponse>('/api/generations/seedance', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 240_000,
     }),
 
   listGenerationJobs: () => request<{ jobs: GenerationJob[] }>('/api/generations'),
+
+  healthDiagnostics: () => request<ApiHealthDiagnostics>('/api/health/diagnostics', {
+    timeoutMs: 15_000,
+  }),
 
   listCharacters: () => request<{ characters: CharacterProfile[] }>('/api/characters'),
 

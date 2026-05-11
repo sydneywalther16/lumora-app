@@ -16,6 +16,7 @@ const envSchema = z.object({
   OPENAI_VIDEO_MODEL: z.string().default('sora-2'),
   GOOGLE_API_KEY: z.string().min(1).optional(),
   RUNWAY_API_KEY: z.string().min(1).optional(),
+  REPLICATE_API_TOKEN: z.string().min(1).optional(),
   RESEND_API_KEY: z.string().min(1).optional(),
   NOTIFICATION_FROM: z.string().email().default('alerts@example.com'),
 });
