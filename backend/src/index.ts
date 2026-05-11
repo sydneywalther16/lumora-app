@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { ZodError } from 'zod';
 import { env } from './lib/env';
+import { corsOptionsDelegate, logCorsConfiguration } from './lib/corsConfig';
 import { logEnvironmentDiagnostics } from './lib/envDiagnostics';
 import { healthRouter } from './routes/health';
 import { projectsRouter } from './routes/projects';
@@ -12,29 +13,10 @@ import { notificationsRouter } from './routes/notifications';
 import { postsRouter } from './routes/posts';
 
 const app = express();
-const LOCAL_ORIGIN_WHITELIST = [
-  'http://localhost:4173',
-  'http://localhost:4174',
-  'http://localhost:4175',
-  'http://localhost:4176',
-  'http://127.0.0.1:4173',
-  'http://127.0.0.1:4174',
-  'http://127.0.0.1:4175',
-  'http://127.0.0.1:4176',
-];
-
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (!origin || LOCAL_ORIGIN_WHITELIST.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-      callback(new Error('Not allowed by CORS'));
-    },
-    credentials: true,
-  }),
-);
+app.use(cors(corsOptionsDelegate));
+app.options(/.*/, (_req, res) => {
+  res.sendStatus(204);
+});
 app.use('/api/billing/webhook', express.raw({ type: 'application/json' }));
 app.use((req, res, next) => {
   if (req.path === '/api/billing/webhook') return next();
@@ -66,6 +48,7 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 
 const server = app.listen(env.API_PORT, () => {
   console.log(`Lumora API listening on http://localhost:${env.API_PORT}`);
+  logCorsConfiguration();
   logEnvironmentDiagnostics();
 });
 

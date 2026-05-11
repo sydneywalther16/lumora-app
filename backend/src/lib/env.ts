@@ -4,6 +4,7 @@ import { z } from 'zod';
 const envSchema = z.object({
   API_PORT: z.coerce.number().default(8787),
   APP_URL: z.string().url().default('http://localhost:4173'),
+  WEB_ORIGIN: z.string().optional(),
   SUPABASE_URL: z.string().url().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   SUPABASE_JWT_SECRET: z.string().min(1).optional(),
