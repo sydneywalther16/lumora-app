@@ -183,26 +183,113 @@ function userPrompt(input: CreativeBrainCompletionInput) {
   ].filter(Boolean).join('\n\n');
 }
 
+function temperatureForAttempt(attempt: number) {
+  return attempt === 1 ? 0.7 : 0.2;
+}
+
+function supportsTemperatureOverride(model: string) {
+  const normalizedModel = model.trim().toLowerCase();
+  if (!normalizedModel) return false;
+
+  const defaultTemperatureOnlyPatterns = [
+    /^gpt-5(?:[-.]|$)/,
+    /^o\d(?:[-.]|$)/,
+  ];
+
+  if (defaultTemperatureOnlyPatterns.some((pattern) => pattern.test(normalizedModel))) {
+    return false;
+  }
+
+  const adjustableTemperaturePatterns = [
+    /^gpt-4(?:[-.]|$)/,
+    /^gpt-4o(?:[-.]|$)/,
+    /^gpt-4\.1(?:[-.]|$)/,
+    /^gpt-3\.5(?:[-.]|$)/,
+  ];
+
+  return adjustableTemperaturePatterns.some((pattern) => pattern.test(normalizedModel));
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function errorStringValue(value: unknown) {
+  return typeof value === 'string' ? value : '';
+}
+
+function openAIErrorText(error: unknown) {
+  const record = recordValue(error);
+  const nestedError = recordValue(record?.error);
+
+  return [
+    error instanceof Error ? error.message : '',
+    errorStringValue(record?.message),
+    errorStringValue(record?.param),
+    errorStringValue(record?.code),
+    errorStringValue(nestedError?.message),
+    errorStringValue(nestedError?.param),
+    errorStringValue(nestedError?.code),
+  ].filter(Boolean).join(' ');
+}
+
+function isUnsupportedTemperatureError(error: unknown) {
+  const text = openAIErrorText(error).toLowerCase();
+  return (
+    text.includes('temperature') &&
+    (
+      text.includes('unsupported') ||
+      text.includes('does not support') ||
+      text.includes('only the default') ||
+      text.includes('default (1)')
+    )
+  );
+}
+
 class OpenAICreativeBrainProvider implements CreativeBrainProvider {
   readonly id = 'openai' as const;
   readonly model = env.OPENAI_CHAT_MODEL ?? env.OPENAI_MODEL ?? 'gpt-4.1-mini';
 
   async completeJson(input: CreativeBrainCompletionInput): Promise<string> {
-    if (!openai) {
+    const client = openai;
+    if (!client) {
       throw new CreativeBrainConfigurationError();
     }
 
-    const response = await openai.chat.completions.create({
-      model: this.model,
-      temperature: input.attempt === 1 ? 0.7 : 0.2,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: systemPrompt() },
-        { role: 'user', content: userPrompt(input) },
-      ],
-    });
+    const complete = async (includeTemperature: boolean) => {
+      const response = await client.chat.completions.create({
+        model: this.model,
+        ...(includeTemperature ? { temperature: temperatureForAttempt(input.attempt) } : {}),
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: systemPrompt() },
+          { role: 'user', content: userPrompt(input) },
+        ],
+      });
 
-    return response.choices[0]?.message?.content ?? '';
+      return response.choices[0]?.message?.content ?? '';
+    };
+
+    const includeTemperature = supportsTemperatureOverride(this.model);
+
+    try {
+      return await complete(includeTemperature);
+    } catch (error) {
+      if (includeTemperature && isUnsupportedTemperatureError(error)) {
+        console.warn('CREATIVE BRAIN TEMPERATURE FALLBACK:', {
+          provider: this.id,
+          model: this.model,
+          attempt: input.attempt,
+          temperature: temperatureForAttempt(input.attempt),
+          error: openAIErrorText(error),
+        });
+        return complete(false);
+      }
+
+      throw error;
+    }
   }
 }
 
