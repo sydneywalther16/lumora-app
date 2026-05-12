@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { checkRateLimit, sendRateLimitHeaders } from '../_lib/rateLimit';
 import { persistCompletedGeneration } from '../../backend/src/services/generationPersistence';
 import { createSeedanceGeneration } from '../../backend/src/services/generationService';
+import { isSeedanceModerationError } from '../../backend/src/services/providers/seedanceProvider';
 import { createVideoGeneration } from '../../backend/src/video';
 
 type GenerationRequest = IncomingMessage & {
@@ -256,6 +257,38 @@ export default async function handler(req: GenerationRequest, res: ServerRespons
   } catch (error) {
     console.error('VERCEL GENERATION PROVIDER FAILED:', { engine, error });
     const message = errorMessage(error);
+    if (isSeedanceModerationError(error)) {
+      console.warn('VERCEL SEEDANCE MODERATION RESPONSE:', {
+        engine,
+        prompt: finalPrompt,
+        diagnostics: error.diagnostics,
+        exactProviderMessage: error.diagnostics.providerMessage,
+      });
+      sendJson(res, error.statusCode, {
+        id: null,
+        jobId: null,
+        status: 'failed',
+        engine,
+        provider: 'replicate',
+        prompt: finalPrompt,
+        outputUrl: '',
+        videoUrl: '',
+        error: 'Seedance moderation paused this render after Lumora tried a safer cinematic rewrite.',
+        message: 'Seedance moderation paused this render after Lumora tried a safer cinematic rewrite.',
+        moderation: true,
+        suggestion: error.suggestion,
+        suggestedPrompt: error.suggestedPrompt,
+        sanitizedPrompt: error.sanitizedPrompt,
+        moderationDiagnostics: error.diagnostics,
+        referenceImages: error.referenceImages,
+        referenceImageCount: error.referenceImages.length,
+        multimodalReferenceMode: error.referenceImages.length > 1,
+        generationMode: error.referenceImages.length > 0 ? 'seedance-multimodal-reference' : 'seedance-text-to-video',
+        createdAt: new Date().toISOString(),
+      });
+      return;
+    }
+
     sendJson(res, 500, {
       id: null,
       jobId: null,

@@ -12,6 +12,18 @@ type RequestInitWithTimeout = RequestInit & {
   timeoutMs?: number;
 };
 
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly payload: unknown;
+
+  constructor(message: string, status: number, payload: unknown) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
 async function request<T>(path: string, init: RequestInitWithTimeout = {}): Promise<T> {
   const { timeoutMs, signal, ...fetchInit } = init;
   const controller = timeoutMs ? new AbortController() : null;
@@ -39,7 +51,13 @@ async function request<T>(path: string, init: RequestInitWithTimeout = {}): Prom
 
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.error ?? 'Request failed');
+    const record = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+    const message = typeof record.error === 'string'
+      ? record.error
+      : typeof record.message === 'string'
+        ? record.message
+        : 'Request failed';
+    throw new ApiRequestError(message, response.status, payload);
   }
 
   return response.json() as Promise<T>;
@@ -65,6 +83,182 @@ export type GenerationPayload = {
   additionalReferenceImageUrls?: string[] | null;
 };
 
+export type CreativeBrainShot = {
+  id: string;
+  title: string;
+  description: string;
+  cameraFraming: string;
+  cameraMovement: string;
+  subjectAction: string;
+  environmentFocus: string;
+  durationHint: string;
+  transition: string;
+};
+
+export type CreativeBrainScenePlan = {
+  cinematicTone: string;
+  visualStyle: string;
+  soundtrackMood: string;
+  continuityNotes: string[];
+  shotList: CreativeBrainShot[];
+  cameraFraming: string[];
+  environmentDescription: string;
+  emotionalPacing: string;
+  sceneTransitions: string[];
+  promptRewrite: string;
+};
+
+export type CreativeBrainPlanPayload = {
+  prompt: string;
+  characterMetadata?: Record<string, unknown> | null;
+  styleTheme?: string | null;
+};
+
+export type CreativeBrainPlanResponse = {
+  id: string;
+  provider: string;
+  model: string;
+  plan: CreativeBrainScenePlan;
+  rawText: string;
+  attempts: number;
+  createdAt: string;
+};
+
+export type SceneExecutorClipStatus = 'queued' | 'processing' | 'completed' | 'failed';
+
+export const continuityMemoryFields = [
+  'characterAppearance',
+  'wardrobe',
+  'hairstyle',
+  'emotionalTone',
+  'environment',
+  'props',
+  'weather',
+  'timeOfDay',
+  'soundtrackMood',
+  'cameraStyle',
+  'previousSceneSummary',
+] as const;
+
+export type ContinuityMemoryField = typeof continuityMemoryFields[number];
+
+export type ContinuityMemoryState = Record<ContinuityMemoryField, string>;
+
+export type ContinuityMemoryLocks = Partial<Record<ContinuityMemoryField, boolean>>;
+
+export type ContinuityDriftAlert = {
+  field: ContinuityMemoryField;
+  previousValue: string;
+  nextValue: string;
+  severity: 'low' | 'medium' | 'high';
+  reason: string;
+  detectedAt: string;
+  sceneExecutionId?: string | null;
+  sceneId?: string | null;
+  clipOrder?: number | null;
+};
+
+export type SceneMemorySummary = {
+  sceneExecutionId: string;
+  sceneId: string;
+  clipOrder: number;
+  title: string;
+  summary: string;
+  capturedAt: string;
+  continuityConfidence: number;
+  driftAlerts: ContinuityDriftAlert[];
+};
+
+export type ContinuityMemoryRecord = {
+  id: string | null;
+  userId: string;
+  projectId: string | null;
+  characterId: string | null;
+  memoryScope: string;
+  state: ContinuityMemoryState;
+  lockedFields: ContinuityMemoryLocks;
+  continuityConfidence: number;
+  driftAlerts: ContinuityDriftAlert[];
+  sceneMemorySummaries: SceneMemorySummary[];
+  previousSceneSummary: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+export type ContinuityMemoryScopePayload = {
+  userId: string;
+  projectId?: string | null;
+  characterId?: string | null;
+};
+
+export type ContinuityMemoryPatchPayload = ContinuityMemoryScopePayload & {
+  state?: Partial<ContinuityMemoryState>;
+  lockedFields?: ContinuityMemoryLocks;
+};
+
+export type SceneClipMetadata = {
+  previousScene: string | null;
+  emotionalState: string;
+  wardrobe: string;
+  environmentContinuity: string;
+  continuityNotes: string[];
+  cameraFraming: string;
+  cameraMovement: string;
+  sceneTransition: string;
+  shotDescription: string;
+  subjectAction: string;
+  durationHint: string;
+  referenceImageCount: number;
+  continuityMemoryScope?: string | null;
+  continuityConfidence?: number | null;
+  continuityDrift?: ContinuityDriftAlert[];
+  memorySnapshot?: ContinuityMemoryState | null;
+  sceneMemorySummary?: SceneMemorySummary | null;
+};
+
+export type SceneExecutorClip = {
+  id: string;
+  jobId: string | null;
+  sceneExecutionId: string;
+  sceneId: string;
+  clipOrder: number;
+  status: SceneExecutorClipStatus;
+  title: string;
+  prompt: string;
+  finalPrompt?: string | null;
+  videoUrl?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  providerJobId?: string | null;
+  error?: string | null;
+  metadata: SceneClipMetadata;
+  createdAt: string;
+};
+
+export type SceneExecutorResult = {
+  id: string;
+  status: 'completed' | 'failed';
+  provider: 'seedance';
+  engine: 'seedance-2.0' | 'seedance-quality';
+  clips: SceneExecutorClip[];
+  failedClip?: SceneExecutorClip | null;
+  scenePlan: CreativeBrainScenePlan;
+  continuityMemory?: ContinuityMemoryRecord | null;
+  createdAt: string;
+  completedAt: string;
+};
+
+export type SceneExecutorPayload = {
+  scenePlan: CreativeBrainScenePlan;
+  userId: string;
+  projectId?: string | null;
+  characterId?: string | null;
+  characterMetadata?: Record<string, unknown> | null;
+  referenceImages?: SeedanceReferenceImage[];
+  quality?: 'fast' | 'quality';
+  privacy?: PrivacySetting;
+};
+
 export type GenerationResponse = {
   id: string;
   jobId: string;
@@ -79,6 +273,11 @@ export type GenerationResponse = {
   outputUrl: string;
   videoUrl?: string;
   error?: string;
+  moderation?: boolean;
+  suggestion?: string | null;
+  suggestedPrompt?: string | null;
+  sanitizedPrompt?: string | null;
+  moderationDiagnostics?: ProviderModerationDiagnostics | null;
   generationMode?: GenerationMode | null;
   finalPrompt?: string | null;
   durationSeconds?: number | null;
@@ -153,6 +352,21 @@ export type SeedanceReferenceImage = {
   label?: string;
   role?: string;
   token?: string;
+};
+
+export type ProviderModerationDiagnostics = {
+  detected: boolean;
+  provider: string;
+  model: string;
+  retryAttempted: boolean;
+  retrySucceeded: boolean;
+  retryMode: string | null;
+  providerJobId: string | null;
+  providerStatus: string | null;
+  providerMessage: string;
+  sanitizedPrompt: string;
+  suggestedPrompt: string;
+  referenceImageCount: number;
 };
 
 export type ApiHealthDiagnostics = {
@@ -352,6 +566,13 @@ export type LumoraPost = {
   isDefaultSelfCharacter?: boolean | null;
 };
 
+function continuityMemorySearchParams(payload: ContinuityMemoryScopePayload) {
+  const params = new URLSearchParams({ userId: payload.userId });
+  if (payload.projectId) params.set('projectId', payload.projectId);
+  if (payload.characterId) params.set('characterId', payload.characterId);
+  return params.toString();
+}
+
 export const api = {
   health: () => request<{ ok: boolean; service: string }>('/health'),
 
@@ -374,6 +595,35 @@ export const api = {
   healthDiagnostics: () => request<ApiHealthDiagnostics>('/api/health/diagnostics', {
     timeoutMs: 15_000,
   }),
+
+  createCreativeBrainPlan: (payload: CreativeBrainPlanPayload) =>
+    request<CreativeBrainPlanResponse>('/api/creative-brain/plan', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 90_000,
+    }),
+
+  executeScenePlan: (payload: SceneExecutorPayload) =>
+    request<SceneExecutorResult>('/api/creative-brain/execute', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 900_000,
+    }),
+
+  getContinuityMemory: (payload: ContinuityMemoryScopePayload) =>
+    request<{ memory: ContinuityMemoryRecord }>(
+      `/api/creative-brain/memory?${continuityMemorySearchParams(payload)}`,
+      {
+        timeoutMs: 20_000,
+      },
+    ),
+
+  updateContinuityMemory: (payload: ContinuityMemoryPatchPayload) =>
+    request<{ memory: ContinuityMemoryRecord }>('/api/creative-brain/memory', {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+      timeoutMs: 20_000,
+    }),
 
   listCharacters: () => request<{ characters: CharacterProfile[] }>('/api/characters'),
 

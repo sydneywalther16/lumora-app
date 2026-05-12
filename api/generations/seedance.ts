@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { checkRateLimit, sendRateLimitHeaders } from '../_lib/rateLimit';
 import { createSeedanceGeneration } from '../../backend/src/services/generationService';
+import { isSeedanceModerationError } from '../../backend/src/services/providers/seedanceProvider';
 
 type SeedanceRequest = IncomingMessage & {
   body?: unknown;
@@ -175,6 +176,38 @@ export default async function handler(req: SeedanceRequest, res: ServerResponse)
     });
   } catch (error) {
     const message = errorMessage(error);
+    if (isSeedanceModerationError(error)) {
+      console.warn('SEEDANCE MODERATION RESPONSE:', {
+        prompt: finalPrompt,
+        quality,
+        diagnostics: error.diagnostics,
+        exactProviderMessage: error.diagnostics.providerMessage,
+      });
+      sendJson(res, error.statusCode, {
+        id: null,
+        jobId: null,
+        status: 'failed',
+        engine: quality === 'quality' ? 'seedance-quality' : 'seedance-2.0',
+        provider: 'replicate',
+        prompt: finalPrompt,
+        outputUrl: '',
+        videoUrl: '',
+        error: 'Seedance moderation paused this render after Lumora tried a safer cinematic rewrite.',
+        message: 'Seedance moderation paused this render after Lumora tried a safer cinematic rewrite.',
+        moderation: true,
+        suggestion: error.suggestion,
+        suggestedPrompt: error.suggestedPrompt,
+        sanitizedPrompt: error.sanitizedPrompt,
+        moderationDiagnostics: error.diagnostics,
+        referenceImages: error.referenceImages,
+        referenceImageCount: error.referenceImages.length,
+        multimodalReferenceMode: error.referenceImages.length > 1,
+        generationMode: error.referenceImages.length > 0 ? 'seedance-multimodal-reference' : 'seedance-text-to-video',
+        createdAt: new Date().toISOString(),
+      });
+      return;
+    }
+
     sendJson(res, 500, {
       id: null,
       jobId: null,

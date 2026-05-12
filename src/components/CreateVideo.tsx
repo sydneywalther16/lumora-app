@@ -1,12 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   api,
+  ApiRequestError,
+  continuityMemoryFields,
+  type CreativeBrainScenePlan,
+  type ContinuityMemoryField,
+  type ContinuityMemoryLocks,
+  type ContinuityMemoryRecord,
+  type ContinuityMemoryState,
   type GenerationMode,
   type LumoraIdentityFeedback,
   type LumoraIdentityFeedbackChoice,
   type LumoraIdentityProfile,
   type GenerationResponse,
   type ReferenceImageUrls,
+  type SceneExecutorResult,
   type SeedanceReferenceImage,
   type VideoAspectRatio,
   type VideoEngine,
@@ -109,6 +117,53 @@ const referenceImageLabels: Partial<Record<keyof ReferenceImageUrls, string>> = 
   expressive: 'Expression',
 };
 
+const continuityMemoryLabels: Record<ContinuityMemoryField, string> = {
+  characterAppearance: 'Character appearance',
+  wardrobe: 'Wardrobe',
+  hairstyle: 'Hairstyle',
+  emotionalTone: 'Emotional tone',
+  environment: 'Environment',
+  props: 'Props',
+  weather: 'Weather',
+  timeOfDay: 'Time of day',
+  soundtrackMood: 'Soundtrack mood',
+  cameraStyle: 'Camera style',
+  previousSceneSummary: 'Previous scene',
+};
+
+const emptyContinuityMemoryState: ContinuityMemoryState = {
+  characterAppearance: '',
+  wardrobe: '',
+  hairstyle: '',
+  emotionalTone: '',
+  environment: '',
+  props: '',
+  weather: '',
+  timeOfDay: '',
+  soundtrackMood: '',
+  cameraStyle: '',
+  previousSceneSummary: '',
+};
+
+function normalizeContinuityMemoryState(value?: Partial<ContinuityMemoryState> | null): ContinuityMemoryState {
+  return continuityMemoryFields.reduce<ContinuityMemoryState>((state, field) => {
+    state[field] = typeof value?.[field] === 'string' ? value[field].trim() : '';
+    return state;
+  }, { ...emptyContinuityMemoryState });
+}
+
+function continuityMemoryChanged(
+  left: ContinuityMemoryState,
+  right: ContinuityMemoryState,
+  leftLocks: ContinuityMemoryLocks,
+  rightLocks: ContinuityMemoryLocks,
+) {
+  return continuityMemoryFields.some((field) => (
+    left[field] !== right[field] ||
+    Boolean(leftLocks[field]) !== Boolean(rightLocks[field])
+  ));
+}
+
 type GenerateVideoApiResponse = {
   videoUrl?: unknown;
   video?: unknown;
@@ -128,6 +183,10 @@ type GenerateVideoApiResponse = {
   referenceImages?: unknown;
   referenceImageCount?: unknown;
   multimodalReferenceMode?: unknown;
+  moderation?: unknown;
+  suggestedPrompt?: unknown;
+  sanitizedPrompt?: unknown;
+  moderationDiagnostics?: unknown;
   warnings?: unknown;
   error?: string;
   suggestion?: string;
@@ -317,6 +376,8 @@ function formatUnknownDetail(value: unknown): string {
 
 const providerSafetyFilterMessage =
   'Provider safety filter blocked this render. Try a safer, fully clothed editorial prompt.';
+const providerModerationMessage =
+  'Seedance moderation paused this render. Lumora retried with a safer cinematic rewrite, but the provider still blocked it.';
 const providerQueueBusyMessage = 'Provider queue is busy. Retrying generation...';
 const replicateThrottledMessage =
   'Replicate is temporarily throttling this account. Wait a minute and try again.';
@@ -327,8 +388,19 @@ function isProviderSafetyFilterError(value: string): boolean {
     lower.includes('provider safety filter') ||
     lower.includes('generation blocked by provider safety filter') ||
     lower.includes('flagged as sensitive') ||
-    lower.includes('e005')
+    lower.includes('e005') ||
+    lower.includes('moderation')
   );
+}
+
+function isProviderModerationPayload(value: unknown): value is {
+  moderation?: boolean;
+  suggestedPrompt?: string;
+  sanitizedPrompt?: string;
+  suggestion?: string;
+  moderationDiagnostics?: unknown;
+} {
+  return Boolean(value) && typeof value === 'object' && Boolean((value as { moderation?: unknown }).moderation);
 }
 
 function isProviderQueueBusyError(value: string): boolean {
@@ -371,6 +443,28 @@ function parseGenerateResponse(text: string): {
   }
 }
 
+function formatCreativePlan(plan: CreativeBrainScenePlan) {
+  return JSON.stringify(plan, null, 2);
+}
+
+function parseCreativePlanDraft(value: string): CreativeBrainScenePlan | null {
+  try {
+    const parsed = JSON.parse(value) as CreativeBrainScenePlan;
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      typeof parsed.cinematicTone === 'string' &&
+      Array.isArray(parsed.shotList)
+    ) {
+      return parsed;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
 export default function CreateVideo({
   refreshKey = 0,
   characterId,
@@ -408,6 +502,25 @@ export default function CreateVideo({
   const [toast, setToast] = useState<ToastState>(null);
   const [generationLoading, setGenerationLoading] = useState(false);
   const [generationError, setGenerationError] = useState('');
+  const [generationSafeRewrite, setGenerationSafeRewrite] = useState('');
+  const [generationModerationDetail, setGenerationModerationDetail] = useState('');
+  const [creativePlanLoading, setCreativePlanLoading] = useState(false);
+  const [creativePlanError, setCreativePlanError] = useState('');
+  const [creativePlanStatus, setCreativePlanStatus] = useState('');
+  const [creativePlan, setCreativePlan] = useState<CreativeBrainScenePlan | null>(null);
+  const [creativePlanDraft, setCreativePlanDraft] = useState('');
+  const [continuityMemory, setContinuityMemory] = useState<ContinuityMemoryRecord | null>(null);
+  const [continuityMemoryDraft, setContinuityMemoryDraft] = useState<ContinuityMemoryState>(emptyContinuityMemoryState);
+  const [continuityMemoryLocks, setContinuityMemoryLocks] = useState<ContinuityMemoryLocks>({});
+  const [continuityMemoryLoading, setContinuityMemoryLoading] = useState(false);
+  const [continuityMemorySaving, setContinuityMemorySaving] = useState(false);
+  const [continuityMemoryStatus, setContinuityMemoryStatus] = useState('');
+  const [continuityMemoryError, setContinuityMemoryError] = useState('');
+  const [sceneExecutionLoading, setSceneExecutionLoading] = useState(false);
+  const [sceneExecutionError, setSceneExecutionError] = useState('');
+  const [sceneExecutionStatus, setSceneExecutionStatus] = useState('');
+  const [sceneExecutionPlan, setSceneExecutionPlan] = useState<CreativeBrainScenePlan | null>(null);
+  const [sceneExecutionResult, setSceneExecutionResult] = useState<SceneExecutorResult | null>(null);
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
   const [finalGeneratedPrompt, setFinalGeneratedPrompt] = useState('');
   const [generatedModel, setGeneratedModel] = useState('');
@@ -444,6 +557,7 @@ export default function CreateVideo({
     characterAvatar,
   });
   const seedanceReferenceCount = seedanceReferenceImages.length;
+  const sceneExecutorUserId = authUser?.id ?? identityProfile?.userId ?? null;
   const seedanceMultimodalActive = isSeedanceEngine && seedanceReferenceCount > 1;
   const seedanceSingleReferenceWarning = isSeedanceEngine && seedanceReferenceCount === 1;
   const selectedGenerationMode: GenerationMode = isSeedanceEngine
@@ -537,6 +651,16 @@ export default function CreateVideo({
     (!requiresReferenceImage || hasGenerationReference);
   const generateBusy = !canGenerate || busy || generationLoading || referenceLoading;
   const saveBusy = busy || generationLoading;
+  const sceneExecuteDisabledReason = !creativePlan
+    ? 'Build a Creative Brain plan first'
+    : !sceneExecutorUserId
+      ? 'Sign in to save clip jobs'
+      : !isSeedanceEngine
+        ? 'Select Seedance Fast or Seedance Quality'
+        : sceneExecutionLoading
+          ? 'Rendering shot clips...'
+          : '';
+  const sceneExecuteBusy = Boolean(sceneExecuteDisabledReason) || generationLoading || busy;
   const engineRoutingMessage =
     isSeedanceEngine
       ? `${selectedProviderOption.label} sends ${seedanceReferenceCount} reference image${seedanceReferenceCount === 1 ? '' : 's'} to Seedance without forcing a first frame.`
@@ -547,6 +671,18 @@ export default function CreateVideo({
       : isSoraEngine
       ? 'Lumora Identity Character currently routes through Replicate image-to-video. Sora remains optional elsewhere.'
       : 'Kling runs through Replicate and uses your self-character reference image first.';
+  const continuityMemoryDirty = continuityMemory
+    ? continuityMemoryChanged(
+        continuityMemoryDraft,
+        continuityMemory.state,
+        continuityMemoryLocks,
+        continuityMemory.lockedFields,
+      )
+    : continuityMemoryFields.some((field) => continuityMemoryDraft[field].trim()) ||
+      continuityMemoryFields.some((field) => Boolean(continuityMemoryLocks[field]));
+  const continuityConfidencePercent = Math.round((continuityMemory?.continuityConfidence ?? 0.5) * 100);
+  const recentDriftAlerts = continuityMemory?.driftAlerts.slice(0, 3) ?? [];
+  const recentSceneMemorySummaries = continuityMemory?.sceneMemorySummaries.slice(0, 3) ?? [];
 
   useEffect(() => {
     const savedPrompt = localStorage.getItem('remixPrompt');
@@ -562,6 +698,45 @@ export default function CreateVideo({
       localStorage.removeItem('remixTitle');
     }
   }, [setActivePrompt, setDraftTitle]);
+
+  useEffect(() => {
+    if (!sceneExecutorUserId) {
+      setContinuityMemory(null);
+      setContinuityMemoryDraft(emptyContinuityMemoryState);
+      setContinuityMemoryLocks({});
+      setContinuityMemoryStatus('');
+      setContinuityMemoryError('');
+      return;
+    }
+
+    let active = true;
+    setContinuityMemoryLoading(true);
+    setContinuityMemoryError('');
+
+    api.getContinuityMemory({
+      userId: sceneExecutorUserId,
+      characterId,
+    }).then(({ memory }) => {
+      if (!active) return;
+      setContinuityMemory(memory);
+      setContinuityMemoryDraft(normalizeContinuityMemoryState(memory.state));
+      setContinuityMemoryLocks(memory.lockedFields);
+      setContinuityMemoryStatus(memory.id ? 'Continuity memory loaded.' : 'Continuity memory ready.');
+    }).catch((error) => {
+      if (!active) return;
+      setContinuityMemory(null);
+      setContinuityMemoryDraft(emptyContinuityMemoryState);
+      setContinuityMemoryLocks({});
+      setContinuityMemoryError(error instanceof Error ? error.message : 'Continuity Memory could not load.');
+      setContinuityMemoryStatus('');
+    }).finally(() => {
+      if (active) setContinuityMemoryLoading(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [sceneExecutorUserId, characterId]);
 
   useEffect(() => {
     return () => {
@@ -596,6 +771,214 @@ export default function CreateVideo({
       progressTimerRef.current = null;
     }
     setGenerationStatusState(state);
+  }
+
+  function handleContinuityMemoryFieldChange(field: ContinuityMemoryField, value: string) {
+    setContinuityMemoryDraft((current) => ({
+      ...current,
+      [field]: value,
+    }));
+    setContinuityMemoryStatus('Continuity memory edited.');
+    setContinuityMemoryError('');
+  }
+
+  function handleContinuityMemoryLockChange(field: ContinuityMemoryField, locked: boolean) {
+    setContinuityMemoryLocks((current) => ({
+      ...current,
+      [field]: locked,
+    }));
+    setContinuityMemoryStatus(locked ? `${continuityMemoryLabels[field]} locked.` : `${continuityMemoryLabels[field]} unlocked.`);
+    setContinuityMemoryError('');
+  }
+
+  async function saveContinuityMemory(options: { silent?: boolean } = {}) {
+    if (!sceneExecutorUserId) {
+      if (!options.silent) setContinuityMemoryError('Sign in before saving continuity memory.');
+      return null;
+    }
+
+    setContinuityMemorySaving(true);
+    if (!options.silent) {
+      setContinuityMemoryStatus('Saving continuity memory...');
+      setContinuityMemoryError('');
+    }
+
+    try {
+      const { memory } = await api.updateContinuityMemory({
+        userId: sceneExecutorUserId,
+        characterId,
+        state: continuityMemoryDraft,
+        lockedFields: continuityMemoryLocks,
+      });
+      setContinuityMemory(memory);
+      setContinuityMemoryDraft(normalizeContinuityMemoryState(memory.state));
+      setContinuityMemoryLocks(memory.lockedFields);
+      if (!options.silent) {
+        setContinuityMemoryStatus('Continuity memory saved.');
+        showToast({ type: 'success', message: 'Continuity memory saved.' });
+      }
+      return memory;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Continuity Memory could not save.';
+      setContinuityMemoryError(message);
+      if (!options.silent) showToast({ type: 'error', message });
+      return null;
+    } finally {
+      setContinuityMemorySaving(false);
+    }
+  }
+
+  async function handleBuildCreativePlan() {
+    if (!activePrompt.trim()) {
+      setCreativePlanError('Add a prompt before asking Creative Brain for a plan.');
+      return;
+    }
+
+    setCreativePlanLoading(true);
+    setCreativePlanError('');
+    setCreativePlanStatus('Creative Brain is planning the scene...');
+
+    try {
+      const styleTheme = selectedStylePrompt(selectedStyles, activePrompt);
+      const response = await api.createCreativeBrainPlan({
+        prompt: activePrompt,
+        styleTheme: styleTheme || null,
+        characterMetadata: {
+          characterId,
+          characterName,
+          isDefaultSelfCharacter,
+          characterDescription,
+          identityStatus: identityStatusLabel,
+          identityAppearanceSummary: identityProfile?.appearanceSummary ?? null,
+          continuityMemory: continuityMemoryDraft,
+          continuityLocks: continuityMemoryLocks,
+          continuityConfidence: continuityMemory?.continuityConfidence ?? null,
+          referenceImageCount: seedanceReferenceCount,
+          references: seedanceReferenceImages.map((reference) => ({
+            token: reference.token,
+            label: reference.label,
+            role: reference.role,
+          })),
+        },
+      });
+
+      setCreativePlan(response.plan);
+      setCreativePlanDraft(formatCreativePlan(response.plan));
+      setSceneExecutionResult(null);
+      setSceneExecutionPlan(null);
+      setSceneExecutionError('');
+      setCreativePlanStatus(`Creative Brain plan ready (${response.provider}, ${response.model}). Review or edit before rendering.`);
+    } catch (error) {
+      setCreativePlanError(error instanceof Error ? error.message : 'Creative Brain could not create a scene plan.');
+      setCreativePlanStatus('');
+    } finally {
+      setCreativePlanLoading(false);
+    }
+  }
+
+  function handleCreativePlanDraftChange(value: string) {
+    setCreativePlanDraft(value);
+    const nextPlan = parseCreativePlanDraft(value);
+    if (nextPlan) {
+      setCreativePlan(nextPlan);
+      setCreativePlanError('');
+      setCreativePlanStatus('Creative Brain plan edited.');
+      setSceneExecutionResult(null);
+      setSceneExecutionPlan(null);
+      setSceneExecutionError('');
+    } else {
+      setCreativePlanError('Scene plan JSON is editable, but it needs valid JSON before Lumora can treat it as the active plan.');
+    }
+  }
+
+  async function handleExecuteScenePlan() {
+    if (sceneExecutionLoading) return;
+
+    const activePlan = parseCreativePlanDraft(creativePlanDraft) ?? creativePlan;
+    if (!activePlan) {
+      setSceneExecutionError('Build or fix a Creative Brain plan before rendering shot clips.');
+      return;
+    }
+
+    if (!sceneExecutorUserId) {
+      setSceneExecutionError('Sign in before rendering a storyboard so Lumora can save each clip job.');
+      return;
+    }
+
+    if (!isSeedanceEngine) {
+      setSceneExecutionError('Scene Executor renders Seedance clips. Select Seedance Fast or Seedance Quality first.');
+      return;
+    }
+
+    if (continuityMemoryDirty) {
+      const savedMemory = await saveContinuityMemory({ silent: true });
+      if (!savedMemory) {
+        setSceneExecutionError('Save continuity memory before rendering storyboard clips.');
+        return;
+      }
+    }
+
+    setSceneExecutionLoading(true);
+    setSceneExecutionError('');
+    setSceneExecutionStatus('Scene Executor queued each storyboard shot and is rendering clips sequentially...');
+    setSceneExecutionPlan(activePlan);
+    setSceneExecutionResult(null);
+
+    try {
+      const result = await api.executeScenePlan({
+        scenePlan: activePlan,
+        userId: sceneExecutorUserId,
+        characterId,
+        referenceImages: seedanceReferenceImages,
+        quality: engine === SEEDANCE_QUALITY_ENGINE_ID ? 'quality' : 'fast',
+        privacy: 'private',
+        characterMetadata: {
+          characterId,
+          characterName,
+          isDefaultSelfCharacter,
+          characterDescription,
+          styleTheme: selectedStylePrompt(selectedStyles, activePrompt) || null,
+          identityStatus: identityStatusLabel,
+          identityAppearanceSummary: identityProfile?.appearanceSummary ?? null,
+          continuityMemory: continuityMemoryDraft,
+          continuityLocks: continuityMemoryLocks,
+          continuityConfidence: continuityMemory?.continuityConfidence ?? null,
+          referenceImageCount: seedanceReferenceCount,
+          references: seedanceReferenceImages.map((reference) => ({
+            token: reference.token,
+            label: reference.label,
+            role: reference.role,
+          })),
+        },
+      });
+
+      setSceneExecutionResult(result);
+      if (result.continuityMemory) {
+        setContinuityMemory(result.continuityMemory);
+        setContinuityMemoryDraft(normalizeContinuityMemoryState(result.continuityMemory.state));
+        setContinuityMemoryLocks(result.continuityMemory.lockedFields);
+        setContinuityMemoryStatus('Continuity memory updated from completed clips.');
+      }
+      setSceneExecutionStatus(
+        result.status === 'completed'
+          ? `Scene Executor completed ${result.clips.length} Seedance clip${result.clips.length === 1 ? '' : 's'}.`
+          : 'Scene Executor stopped after a clip failed. Completed clips remain saved in generation jobs.',
+      );
+      if (result.status === 'completed') {
+        showToast({ type: 'success', message: 'Storyboard clips generated and saved.' });
+      } else {
+        showToast({ type: 'error', message: result.failedClip?.error || 'A storyboard clip failed to render.' });
+      }
+    } catch (error) {
+      const message = error instanceof ApiRequestError || error instanceof Error
+        ? error.message
+        : 'Scene Executor could not render the storyboard.';
+      setSceneExecutionError(message);
+      setSceneExecutionStatus('');
+      showToast({ type: 'error', message });
+    } finally {
+      setSceneExecutionLoading(false);
+    }
   }
 
   async function handleGenerate() {
@@ -680,6 +1063,8 @@ export default function CreateVideo({
     }
 
     setGenerationError('');
+    setGenerationSafeRewrite('');
+    setGenerationModerationDetail('');
     setGeneratedVideoUrl(null);
     setFinalGeneratedPrompt('');
     setGeneratedModel('');
@@ -726,6 +1111,9 @@ export default function CreateVideo({
           referenceImages: seedanceResult.referenceImages ?? selectedSeedanceReferences,
           referenceImageCount: seedanceResult.referenceImageCount ?? selectedSeedanceReferences.length,
           multimodalReferenceMode: seedanceResult.multimodalReferenceMode ?? selectedSeedanceReferences.length > 1,
+          suggestedPrompt: seedanceResult.suggestedPrompt ?? undefined,
+          sanitizedPrompt: seedanceResult.sanitizedPrompt ?? undefined,
+          moderationDiagnostics: seedanceResult.moderationDiagnostics ?? undefined,
           warnings: seedanceResult.warnings ?? undefined,
         };
       } else if (selectedIsBackendProviderEngine) {
@@ -993,20 +1381,40 @@ export default function CreateVideo({
     } catch (error) {
       console.error('Generation failed', error);
       const message = error instanceof Error ? error.message : 'Unable to create draft render';
-      const displayMessage = isProviderSafetyFilterError(message)
+      const apiPayload = error instanceof ApiRequestError ? error.payload : null;
+      const moderationPayload = isProviderModerationPayload(apiPayload) ? apiPayload : null;
+      const suggestedRewrite =
+        moderationPayload?.suggestedPrompt ||
+        moderationPayload?.sanitizedPrompt ||
+        '';
+      const displayMessage = moderationPayload
+        ? providerModerationMessage
+        : isProviderSafetyFilterError(message)
         ? providerSafetyFilterMessage
         : isReplicateThrottledError(message)
           ? replicateThrottledMessage
         : isProviderQueueBusyError(message)
           ? providerQueueBusyMessage
         : message;
+      setGenerationSafeRewrite(suggestedRewrite);
+      setGenerationModerationDetail(
+        moderationPayload?.suggestion ||
+        (moderationPayload
+          ? 'Lumora preserved your references and prepared a safer cinematic prompt you can try next.'
+          : ''),
+      );
       setGenerationError(
-        isSoraEngine && !isProviderSafetyFilterError(displayMessage)
+        isSoraEngine && !isProviderSafetyFilterError(displayMessage) && !moderationPayload
           ? `${displayMessage} Self-character likeness is currently routed through Replicate.`
           : displayMessage,
       );
       finishGenerationProgress('failed');
-      showToast({ type: 'error', message: 'Generation failed. You can retry when ready.' });
+      showToast({
+        type: 'error',
+        message: moderationPayload
+          ? 'Seedance moderation paused this render. A safer rewrite is ready.'
+          : 'Generation failed. You can retry when ready.',
+      });
     } finally {
       releaseGenerateLock();
     }
@@ -1132,6 +1540,207 @@ export default function CreateVideo({
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="continuity-memory-panel">
+          <div className="row-between">
+            <div>
+              <span className="eyebrow">Continuity Memory</span>
+              <strong>Cinematic state</strong>
+            </div>
+            <span className="tiny-pill">{continuityConfidencePercent}%</span>
+          </div>
+          {continuityMemoryLoading ? <p className="muted">Loading continuity memory...</p> : null}
+          {continuityMemoryStatus ? <p className="muted">{continuityMemoryStatus}</p> : null}
+          {continuityMemoryError ? <p className="creative-plan-error">{continuityMemoryError}</p> : null}
+          <div className="continuity-memory-grid">
+            {continuityMemoryFields.map((field) => (
+              <label key={field} className="continuity-memory-field">
+                <span className="continuity-memory-label">
+                  <strong>{continuityMemoryLabels[field]}</strong>
+                  <span className="continuity-lock-toggle">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(continuityMemoryLocks[field])}
+                      onChange={(event) => handleContinuityMemoryLockChange(field, event.target.checked)}
+                    />
+                    Lock
+                  </span>
+                </span>
+                <textarea
+                  value={continuityMemoryDraft[field]}
+                  onChange={(event) => handleContinuityMemoryFieldChange(field, event.target.value)}
+                  rows={field === 'previousSceneSummary' ? 3 : 2}
+                />
+              </label>
+            ))}
+          </div>
+          {recentDriftAlerts.length ? (
+            <div className="continuity-drift-list">
+              <span className="eyebrow">Drift</span>
+              {recentDriftAlerts.map((alert) => (
+                <p key={`${alert.field}-${alert.detectedAt}-${alert.clipOrder}`}>
+                  <strong>{continuityMemoryLabels[alert.field]}</strong> {alert.reason}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          {recentSceneMemorySummaries.length ? (
+            <div className="scene-memory-summary-list">
+              <span className="eyebrow">Scene Memory</span>
+              {recentSceneMemorySummaries.map((summary) => (
+                <p key={`${summary.sceneExecutionId}-${summary.sceneId}-${summary.clipOrder}`}>
+                  <strong>{summary.title}</strong> {summary.summary}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          <div className="scene-executor-actions">
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={() => void saveContinuityMemory()}
+              disabled={!sceneExecutorUserId || continuityMemorySaving || !continuityMemoryDirty}
+            >
+              {continuityMemorySaving ? 'Saving...' : continuityMemoryDirty ? 'Save memory' : 'Memory saved'}
+            </button>
+            <small className="muted">
+              {sceneExecutorUserId ? (continuityMemoryDirty ? 'Unsaved changes' : 'Ready') : 'Sign in to persist memory'}
+            </small>
+          </div>
+        </div>
+
+        <div className="creative-brain-panel">
+          <div className="row-between">
+            <div>
+              <span className="eyebrow">Creative Brain Plan</span>
+              <strong>Storyboard before rendering</strong>
+            </div>
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={() => void handleBuildCreativePlan()}
+              disabled={creativePlanLoading || !hasPrompt}
+            >
+              {creativePlanLoading ? 'Planning...' : creativePlan ? 'Refresh plan' : 'Build plan'}
+            </button>
+          </div>
+          <p className="muted">
+            Generate an editable cinematic orchestration plan. This does not start video rendering.
+          </p>
+          {creativePlanStatus ? <p className="muted">{creativePlanStatus}</p> : null}
+          {creativePlanError ? <p className="creative-plan-error">{creativePlanError}</p> : null}
+          {creativePlan ? (
+            <div className="creative-plan-preview">
+              <div className="creative-plan-summary">
+                <span><strong>Tone</strong>{creativePlan.cinematicTone}</span>
+                <span><strong>Style</strong>{creativePlan.visualStyle}</span>
+                <span><strong>Sound</strong>{creativePlan.soundtrackMood}</span>
+              </div>
+              <p><strong>Environment:</strong> {creativePlan.environmentDescription}</p>
+              <p><strong>Pacing:</strong> {creativePlan.emotionalPacing}</p>
+              <ol className="creative-shot-list">
+                {creativePlan.shotList.map((shot) => (
+                  <li key={shot.id}>
+                    <strong>{shot.title}</strong>
+                    <span>{shot.description}</span>
+                    <small>{shot.cameraFraming} / {shot.cameraMovement} / {shot.transition}</small>
+                  </li>
+                ))}
+              </ol>
+              <label className="field-block creative-plan-editor">
+                <span>Edit scene plan JSON</span>
+                <textarea
+                  value={creativePlanDraft}
+                  onChange={(event) => handleCreativePlanDraftChange(event.target.value)}
+                  rows={12}
+                />
+              </label>
+              <div className="scene-executor-actions">
+                <button
+                  type="button"
+                  className="primary-btn"
+                  onClick={() => void handleExecuteScenePlan()}
+                  disabled={sceneExecuteBusy}
+                  aria-busy={sceneExecutionLoading}
+                  title={sceneExecuteDisabledReason || undefined}
+                >
+                  {sceneExecutionLoading ? 'Rendering shot clips...' : 'Render storyboard clips'}
+                </button>
+                <small className="muted">
+                  {sceneExecuteDisabledReason || 'Creates one Seedance clip per shot, saves clip jobs, and keeps clips separate.'}
+                </small>
+              </div>
+              {sceneExecutionStatus ? <p className="muted">{sceneExecutionStatus}</p> : null}
+              {sceneExecutionError ? <p className="creative-plan-error">{sceneExecutionError}</p> : null}
+              {sceneExecutionPlan || sceneExecutionResult ? (
+                <div className="scene-progress-panel" aria-live="polite">
+                  <div className="row-between">
+                    <div>
+                      <span className="eyebrow">Scene Progress</span>
+                      <strong>Sequential clip render</strong>
+                    </div>
+                    <span className="tiny-pill">
+                      {sceneExecutionLoading
+                        ? 'Processing'
+                        : sceneExecutionResult?.status === 'completed'
+                          ? 'Completed'
+                          : sceneExecutionResult?.status === 'failed'
+                            ? 'Failed'
+                            : 'Queued'}
+                    </span>
+                  </div>
+                  <ol className="scene-progress-list">
+                    {sceneExecutionResult
+                      ? sceneExecutionResult.clips.map((clip) => (
+                          <li key={clip.id} className={`scene-progress-item ${clip.status}`}>
+                            <span className="scene-progress-index">{clip.clipOrder}</span>
+                            <span>
+                              <strong>{clip.title}</strong>
+                              <small>{clip.metadata.cameraFraming} / {clip.metadata.cameraMovement}</small>
+                              {clip.error ? <small className="creative-plan-error">{clip.error}</small> : null}
+                            </span>
+                            <span className="tiny-pill">{clip.status}</span>
+                          </li>
+                        ))
+                      : sceneExecutionPlan?.shotList.map((shot, index) => (
+                          <li
+                            key={shot.id}
+                            className={`scene-progress-item ${sceneExecutionLoading && index === 0 ? 'processing' : 'queued'}`}
+                          >
+                            <span className="scene-progress-index">{index + 1}</span>
+                            <span>
+                              <strong>{shot.title}</strong>
+                              <small>{shot.cameraFraming} / {shot.cameraMovement}</small>
+                            </span>
+                            <span className="tiny-pill">
+                              {sceneExecutionLoading && index === 0 ? 'processing' : 'queued'}
+                            </span>
+                          </li>
+                        ))}
+                  </ol>
+                  {sceneExecutionResult?.clips.some((clip) => Boolean(clip.videoUrl)) ? (
+                    <div className="scene-clip-timeline">
+                      {sceneExecutionResult.clips
+                        .filter((clip) => Boolean(clip.videoUrl))
+                        .map((clip) => (
+                          <article key={`${clip.id}-video`} className="scene-clip-card">
+                            <div className="row-between">
+                              <span className="eyebrow">Clip {clip.clipOrder}</span>
+                              <span className="tiny-pill">{clip.model || sceneExecutionResult.engine}</span>
+                            </div>
+                            <strong>{clip.title}</strong>
+                            {clip.videoUrl ? (
+                              <video src={clip.videoUrl} controls playsInline preload="metadata" />
+                            ) : null}
+                          </article>
+                        ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <div className="field-block">
@@ -1357,6 +1966,26 @@ export default function CreateVideo({
         {generationError ? (
           <div className="generation-error-card">
             <p>{generationError}</p>
+            {generationModerationDetail ? <p>{generationModerationDetail}</p> : null}
+            {generationSafeRewrite ? (
+              <div className="safe-rewrite-card">
+                <span className="eyebrow">safe cinematic rewrite</span>
+                <p>{generationSafeRewrite}</p>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => {
+                    setActivePrompt(generationSafeRewrite);
+                    setGenerationError('');
+                    setGenerationModerationDetail('');
+                    setGenerationSafeRewrite('');
+                    setStatus('Safe rewrite loaded. References are unchanged.');
+                  }}
+                >
+                  Use safe rewrite
+                </button>
+              </div>
+            ) : null}
             <button type="button" className="ghost-btn" onClick={handleGenerate} disabled={generateBusy}>
               Retry generation
             </button>

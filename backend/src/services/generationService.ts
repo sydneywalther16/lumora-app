@@ -2,6 +2,7 @@ import { query } from './db';
 import { persistCompletedGeneration } from './generationPersistence';
 import {
   generateSeedanceVideo,
+  type SeedanceModerationDiagnostics,
   type SeedanceQualityMode,
   type SeedanceReferenceImage,
 } from './providers/seedanceProvider';
@@ -20,6 +21,10 @@ export type GenerationRecord = {
   privacy: string;
   resultAssetUrl: string | null;
   errorMessage: string | null;
+  sceneExecutionId?: string | null;
+  sceneId?: string | null;
+  clipOrder?: number | null;
+  sceneMetadata?: Record<string, unknown> | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -47,6 +52,9 @@ export type SeedanceGenerationRecord = {
   referenceImages: SeedanceReferenceImage[];
   referenceImageCount: number;
   multimodalReferenceMode: boolean;
+  moderationDiagnostics?: SeedanceModerationDiagnostics;
+  suggestedPrompt?: string;
+  sanitizedPrompt?: string;
   rawOutput: unknown;
 };
 
@@ -109,6 +117,9 @@ export async function createSeedanceGeneration(input: {
     referenceImages: result.referenceImages,
     referenceImageCount: result.referenceImageCount,
     multimodalReferenceMode: result.multimodalReferenceMode,
+    moderationDiagnostics: result.moderationDiagnostics,
+    suggestedPrompt: result.suggestedPrompt,
+    sanitizedPrompt: result.sanitizedPrompt,
     rawOutput: result.rawOutput,
   };
 }
@@ -126,6 +137,11 @@ export async function createGenerationJob(input: {
   aspectRatio?: string | null;
   privacy?: string;
   resultAssetUrl?: string | null;
+  errorMessage?: string | null;
+  sceneExecutionId?: string | null;
+  sceneId?: string | null;
+  clipOrder?: number | null;
+  sceneMetadata?: Record<string, unknown> | null;
 }) {
   const result = await query<GenerationRecord>(
     `insert into generation_jobs (
@@ -140,9 +156,14 @@ export async function createGenerationJob(input: {
        duration_seconds,
        aspect_ratio,
        privacy,
-       result_asset_url
+       result_asset_url,
+       error_message,
+       scene_execution_id,
+       scene_id,
+       clip_order,
+       scene_metadata
      )
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb)
      returning
        id,
        project_id as "projectId",
@@ -157,6 +178,10 @@ export async function createGenerationJob(input: {
        privacy,
        result_asset_url as "resultAssetUrl",
        error_message as "errorMessage",
+       scene_execution_id as "sceneExecutionId",
+       scene_id as "sceneId",
+       clip_order as "clipOrder",
+       scene_metadata as "sceneMetadata",
        created_at as "createdAt",
        updated_at as "updatedAt"`,
     [
@@ -172,6 +197,11 @@ export async function createGenerationJob(input: {
       input.aspectRatio ?? null,
       input.privacy ?? 'private',
       input.resultAssetUrl ?? null,
+      input.errorMessage ?? null,
+      input.sceneExecutionId ?? null,
+      input.sceneId ?? null,
+      input.clipOrder ?? null,
+      JSON.stringify(input.sceneMetadata ?? {}),
     ],
   );
 
@@ -194,6 +224,10 @@ export async function listGenerationJobsForUser(userId: string) {
        gj.privacy,
        gj.result_asset_url as "resultAssetUrl",
        gj.error_message as "errorMessage",
+       gj.scene_execution_id as "sceneExecutionId",
+       gj.scene_id as "sceneId",
+       gj.clip_order as "clipOrder",
+       gj.scene_metadata as "sceneMetadata",
        gj.created_at as "createdAt",
        gj.updated_at as "updatedAt"
      from generation_jobs gj
@@ -210,6 +244,7 @@ export async function listGenerationJobsForUser(userId: string) {
 export async function updateGenerationJobStatus(input: {
   jobId: string;
   status: string;
+  providerJobId?: string | null;
   resultAssetUrl?: string | null;
   errorMessage?: string | null;
 }) {
@@ -217,8 +252,9 @@ export async function updateGenerationJobStatus(input: {
     `update generation_jobs gj
      set
        status = $2,
-       result_asset_url = coalesce($3, result_asset_url),
-       error_message = $4,
+       provider_job_id = coalesce($3, provider_job_id),
+       result_asset_url = coalesce($4, result_asset_url),
+       error_message = $5,
        updated_at = now()
      where id = $1
      returning
@@ -235,9 +271,58 @@ export async function updateGenerationJobStatus(input: {
        gj.privacy,
        gj.result_asset_url as "resultAssetUrl",
        gj.error_message as "errorMessage",
+       gj.scene_execution_id as "sceneExecutionId",
+       gj.scene_id as "sceneId",
+       gj.clip_order as "clipOrder",
+       gj.scene_metadata as "sceneMetadata",
        gj.created_at as "createdAt",
        gj.updated_at as "updatedAt"`,
-    [input.jobId, input.status, input.resultAssetUrl ?? null, input.errorMessage ?? null],
+    [
+      input.jobId,
+      input.status,
+      input.providerJobId ?? null,
+      input.resultAssetUrl ?? null,
+      input.errorMessage ?? null,
+    ],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+export async function updateGenerationJobSceneMetadata(input: {
+  jobId: string;
+  sceneMetadata: Record<string, unknown>;
+}) {
+  const result = await query<GenerationRecord>(
+    `update generation_jobs gj
+     set
+       scene_metadata = $2::jsonb,
+       updated_at = now()
+     where id = $1
+     returning
+       gj.id,
+       gj.project_id as "projectId",
+       gj.character_id as "characterId",
+       '' as title,
+       gj.prompt,
+       gj.status,
+       gj.output_type as "outputType",
+       gj.provider,
+       gj.duration_seconds as "durationSeconds",
+       gj.aspect_ratio as "aspectRatio",
+       gj.privacy,
+       gj.result_asset_url as "resultAssetUrl",
+       gj.error_message as "errorMessage",
+       gj.scene_execution_id as "sceneExecutionId",
+       gj.scene_id as "sceneId",
+       gj.clip_order as "clipOrder",
+       gj.scene_metadata as "sceneMetadata",
+       gj.created_at as "createdAt",
+       gj.updated_at as "updatedAt"`,
+    [
+      input.jobId,
+      JSON.stringify(input.sceneMetadata),
+    ],
   );
 
   return result.rows[0] ?? null;

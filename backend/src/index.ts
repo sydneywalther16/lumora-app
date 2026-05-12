@@ -6,6 +6,7 @@ import { corsOptionsDelegate, logCorsConfiguration } from './lib/corsConfig';
 import { logEnvironmentDiagnostics } from './lib/envDiagnostics';
 import { healthRouter } from './routes/health';
 import { projectsRouter } from './routes/projects';
+import { creativeBrainRouter } from './routes/creativeBrain';
 import { generationsRouter } from './routes/generations';
 import { charactersRouter } from './routes/characters';
 import { billingRouter } from './routes/billing';
@@ -30,6 +31,7 @@ app.get('/health', (_req, res) => {
 app.use(healthRouter);
 app.use('/api/projects', projectsRouter);
 app.use('/api/characters', charactersRouter);
+app.use('/api/creative-brain', creativeBrainRouter);
 app.use('/api/generations', generationsRouter);
 app.use('/api/posts', postsRouter);
 app.use('/api/billing', billingRouter);

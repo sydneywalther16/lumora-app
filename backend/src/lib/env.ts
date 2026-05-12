@@ -13,6 +13,8 @@ const envSchema = z.object({
   STRIPE_SECRET_KEY: z.string().min(1).optional(),
   STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
   OPENAI_API_KEY: z.string().min(1).optional(),
+  OPENAI_MODEL: z.string().min(1).optional(),
+  OPENAI_CHAT_MODEL: z.string().min(1).optional(),
   OPENAI_IMAGE_MODEL: z.string().default('gpt-image-1'),
   OPENAI_VIDEO_MODEL: z.string().default('sora-2'),
   GOOGLE_API_KEY: z.string().min(1).optional(),

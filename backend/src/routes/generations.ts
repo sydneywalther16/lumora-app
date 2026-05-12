@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createRateLimit } from '../middleware/rateLimit';
 import { persistCompletedGeneration } from '../services/generationPersistence';
 import { createSeedanceGeneration } from '../services/generationService';
+import { isSeedanceModerationError } from '../services/providers/seedanceProvider';
 import { createVideoGeneration } from '../video';
 
 const generationEngines = ['seedance-2.0', 'seedance-quality', 'veo', 'runway', 'mock', 'openai'] as const;
@@ -120,6 +121,38 @@ generationsRouter.post('/seedance', generationRateLimit, async (req, res) => {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Seedance generation failed.';
+    if (isSeedanceModerationError(error)) {
+      console.warn('SEEDANCE GENERATION MODERATION RESPONSE:', {
+        engine: payload.engine ?? 'seedance-2.0',
+        quality,
+        diagnostics: error.diagnostics,
+        exactProviderMessage: error.diagnostics.providerMessage,
+      });
+      res.status(error.statusCode).json({
+        id: null,
+        jobId: null,
+        status: 'failed',
+        engine: quality === 'quality' ? 'seedance-quality' : 'seedance-2.0',
+        provider: 'replicate',
+        prompt,
+        outputUrl: '',
+        videoUrl: '',
+        error: 'Seedance moderation paused this render after Lumora tried a safer cinematic rewrite.',
+        message: 'Seedance moderation paused this render after Lumora tried a safer cinematic rewrite.',
+        moderation: true,
+        suggestion: error.suggestion,
+        suggestedPrompt: error.suggestedPrompt,
+        sanitizedPrompt: error.sanitizedPrompt,
+        moderationDiagnostics: error.diagnostics,
+        referenceImages: error.referenceImages,
+        referenceImageCount: error.referenceImages.length,
+        multimodalReferenceMode: error.referenceImages.length > 1,
+        generationMode: error.referenceImages.length > 0 ? 'seedance-multimodal-reference' : 'seedance-text-to-video',
+        createdAt: new Date().toISOString(),
+      });
+      return;
+    }
+
     console.error('SEEDANCE GENERATION FAILED:', {
       engine: payload.engine ?? 'seedance-2.0',
       quality,
@@ -242,6 +275,37 @@ generationsRouter.post('/', generationRateLimit, async (req, res) => {
       engine: payload.engine,
       error,
     });
+    if (isSeedanceModerationError(error)) {
+      console.warn('GENERATION PROVIDER MODERATION RESPONSE:', {
+        engine: payload.engine,
+        diagnostics: error.diagnostics,
+        exactProviderMessage: error.diagnostics.providerMessage,
+      });
+      res.status(error.statusCode).json({
+        id: null,
+        jobId: null,
+        status: 'failed',
+        engine: payload.engine,
+        provider: 'replicate',
+        prompt,
+        outputUrl: '',
+        videoUrl: '',
+        error: 'Seedance moderation paused this render after Lumora tried a safer cinematic rewrite.',
+        message: 'Seedance moderation paused this render after Lumora tried a safer cinematic rewrite.',
+        moderation: true,
+        suggestion: error.suggestion,
+        suggestedPrompt: error.suggestedPrompt,
+        sanitizedPrompt: error.sanitizedPrompt,
+        moderationDiagnostics: error.diagnostics,
+        referenceImages: error.referenceImages,
+        referenceImageCount: error.referenceImages.length,
+        multimodalReferenceMode: error.referenceImages.length > 1,
+        generationMode: error.referenceImages.length > 0 ? 'seedance-multimodal-reference' : 'seedance-text-to-video',
+        createdAt: new Date().toISOString(),
+      });
+      return;
+    }
+
     res.status(500).json({
       id: null,
       jobId: null,

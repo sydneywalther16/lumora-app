@@ -27,6 +27,9 @@ export type SeedanceVideoResult = {
   referenceImageCount: number;
   multimodalReferenceMode: boolean;
   warnings: string[];
+  moderationDiagnostics?: SeedanceModerationDiagnostics;
+  suggestedPrompt?: string;
+  sanitizedPrompt?: string;
   rawOutput: unknown;
   logs?: string;
   metrics?: Prediction['metrics'];
@@ -40,6 +43,21 @@ export type SeedanceReferenceImage = {
   token?: string;
 };
 
+export type SeedanceModerationDiagnostics = {
+  detected: boolean;
+  provider: 'replicate';
+  model: string;
+  retryAttempted: boolean;
+  retrySucceeded: boolean;
+  retryMode: 'safe-cinematic-rewrite' | null;
+  providerJobId: string | null;
+  providerStatus: string | null;
+  providerMessage: string;
+  sanitizedPrompt: string;
+  suggestedPrompt: string;
+  referenceImageCount: number;
+};
+
 type GenerateSeedanceVideoOptions = {
   quality?: SeedanceQualityMode;
   timeoutMs?: number;
@@ -48,6 +66,46 @@ type GenerateSeedanceVideoOptions = {
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const RISKY_PROMPT_REWRITES: Array<[RegExp, string]> = [
+  [/\bonlyfans\b/gi, 'creator portfolio'],
+  [/\bsexy\b/gi, 'stylish'],
+  [/\bsexiness\b/gi, 'confidence'],
+  [/\bseductive\b/gi, 'confident'],
+  [/\bseducing\b/gi, 'posing confidently'],
+  [/\bsensual\b/gi, 'elegant'],
+  [/\bsultry\b/gi, 'cinematic'],
+  [/\bprovocative\b/gi, 'editorial'],
+  [/\badult\b/gi, 'editorial'],
+  [/\berotic\b/gi, 'fashion-inspired'],
+  [/\bnude\b/gi, 'fully clothed'],
+  [/\bnudity\b/gi, 'fully clothed styling'],
+  [/\blingerie\b/gi, 'fashion outfit'],
+  [/\bboudoir\b/gi, 'studio portrait'],
+  [/\bfetish\b/gi, 'avant-garde fashion'],
+  [/\bthirst\s*trap\b/gi, 'confident editorial portrait'],
+  [/\brevealing\b/gi, 'tailored'],
+  [/\bsheer\b/gi, 'layered'],
+  [/\bsee[-\s]?through\b/gi, 'layered'],
+  [/\bcleavage\b/gi, 'neckline'],
+  [/\bskimpy\b/gi, 'minimalist'],
+  [/\bbedroom\b/gi, 'cinematic studio'],
+  [/\bglamour\b/gi, 'editorial fashion'],
+];
+
+const MODERATION_MATCHERS = [
+  'flagged as sensitive',
+  'input or output was flagged',
+  'sensitive',
+  'e005',
+  'moderation',
+  'safety filter',
+  'safety-filter',
+  'content policy',
+  'policy violation',
+  'blocked by provider safety',
+  'nsfw',
+];
 
 function modelForQuality(quality: SeedanceQualityMode) {
   return quality === 'quality' ? SEEDANCE_QUALITY_MODEL : SEEDANCE_FAST_MODEL;
@@ -139,6 +197,112 @@ function buildMultimodalSeedancePrompt(prompt: string, referenceImages: Seedance
     'Generate a fresh photorealistic cinematic scene with consistent identity across shots.',
     prompt,
   ].join(' ');
+}
+
+function collapseWhitespace(value: string) {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+export function stripRiskyPromptWording(prompt: string) {
+  let sanitizedPrompt = prompt;
+  const replacements: string[] = [];
+
+  for (const [pattern, replacement] of RISKY_PROMPT_REWRITES) {
+    if (pattern.test(sanitizedPrompt)) {
+      replacements.push(replacement);
+      sanitizedPrompt = sanitizedPrompt.replace(pattern, replacement);
+    }
+  }
+
+  return {
+    prompt: collapseWhitespace(sanitizedPrompt),
+    changed: replacements.length > 0,
+    replacements: Array.from(new Set(replacements)),
+  };
+}
+
+export function safeCinematicRewrite(prompt: string) {
+  const sanitized = stripRiskyPromptWording(prompt);
+  return collapseWhitespace([
+    'Create a family-safe, fully clothed, photorealistic cinematic video.',
+    'Editorial fashion styling, confident neutral posing, natural movement, polished studio-safe composition.',
+    sanitized.prompt,
+  ].join(' '));
+}
+
+function stringifyProviderResponse(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (value instanceof Error) return value.message;
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function providerResponseText(value: unknown) {
+  const parts: string[] = [];
+
+  if (value instanceof Error) {
+    parts.push(value.message);
+    const errorRecord = value as Error & {
+      response?: unknown;
+      error?: unknown;
+      logs?: unknown;
+    };
+    parts.push(stringifyProviderResponse(errorRecord.response));
+    parts.push(stringifyProviderResponse(errorRecord.error));
+    parts.push(stringifyProviderResponse(errorRecord.logs));
+  } else if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    parts.push(stringifyProviderResponse(record.error));
+    parts.push(stringifyProviderResponse(record.logs));
+    parts.push(stringifyProviderResponse(record.status));
+    parts.push(stringifyProviderResponse(value));
+  } else {
+    parts.push(stringifyProviderResponse(value));
+  }
+
+  return parts.filter(Boolean).join(' ');
+}
+
+export function isSeedanceModerationResponse(value: unknown) {
+  const lowerText = providerResponseText(value).toLowerCase();
+  return MODERATION_MATCHERS.some((matcher) => lowerText.includes(matcher));
+}
+
+export class SeedanceModerationError extends Error {
+  readonly statusCode = 422;
+  readonly suggestion = 'Try a safer cinematic editorial prompt with fully clothed styling and neutral posing.';
+  readonly suggestedPrompt: string;
+  readonly sanitizedPrompt: string;
+  readonly diagnostics: SeedanceModerationDiagnostics;
+  readonly referenceImages: SeedanceReferenceImage[];
+
+  constructor(input: {
+    message?: string;
+    suggestedPrompt: string;
+    sanitizedPrompt: string;
+    diagnostics: SeedanceModerationDiagnostics;
+    referenceImages: SeedanceReferenceImage[];
+  }) {
+    super(input.message ?? 'Provider moderation paused this render.');
+    this.name = 'SeedanceModerationError';
+    this.suggestedPrompt = input.suggestedPrompt;
+    this.sanitizedPrompt = input.sanitizedPrompt;
+    this.diagnostics = input.diagnostics;
+    this.referenceImages = input.referenceImages;
+  }
+}
+
+export function isSeedanceModerationError(error: unknown): error is SeedanceModerationError {
+  return error instanceof SeedanceModerationError || (
+    Boolean(error) &&
+    typeof error === 'object' &&
+    (error as { name?: unknown }).name === 'SeedanceModerationError'
+  );
 }
 
 function responseStatus(error: unknown): number | null {
@@ -258,6 +422,140 @@ async function pollPrediction(input: {
   return prediction;
 }
 
+function buildSeedanceRequestInput(prompt: string, referenceImages: SeedanceReferenceImage[]) {
+  return {
+    prompt,
+    ...(referenceImages.length
+      ? { reference_images: referenceImages.map((reference) => reference.url) }
+      : {}),
+    ...DEFAULT_SEEDANCE_SETTINGS,
+  };
+}
+
+function moderationDiagnostics(input: {
+  model: string;
+  prediction?: Prediction | null;
+  providerResponse: unknown;
+  retryAttempted: boolean;
+  retrySucceeded: boolean;
+  retryMode: SeedanceModerationDiagnostics['retryMode'];
+  sanitizedPrompt: string;
+  suggestedPrompt: string;
+  referenceImageCount: number;
+}): SeedanceModerationDiagnostics {
+  return {
+    detected: true,
+    provider: 'replicate',
+    model: input.model,
+    retryAttempted: input.retryAttempted,
+    retrySucceeded: input.retrySucceeded,
+    retryMode: input.retryMode,
+    providerJobId: input.prediction?.id ?? null,
+    providerStatus: input.prediction?.status ?? null,
+    providerMessage: providerResponseText(input.providerResponse),
+    sanitizedPrompt: input.sanitizedPrompt,
+    suggestedPrompt: input.suggestedPrompt,
+    referenceImageCount: input.referenceImageCount,
+  };
+}
+
+async function runSeedanceAttempt(input: {
+  replicate: Replicate;
+  model: typeof SEEDANCE_FAST_MODEL | typeof SEEDANCE_QUALITY_MODEL;
+  quality: SeedanceQualityMode;
+  prompt: string;
+  referenceImages: SeedanceReferenceImage[];
+  timeoutMs: number;
+  pollIntervalMs: number;
+  attemptLabel: 'primary' | 'moderation_retry';
+}) {
+  const requestInput = buildSeedanceRequestInput(input.prompt, input.referenceImages);
+
+  console.info('SEEDANCE PROVIDER REQUEST:', {
+    model: input.model,
+    quality: input.quality,
+    attempt: input.attemptLabel,
+    inputKeys: Object.keys(requestInput),
+    referenceImageCount: input.referenceImages.length,
+    prompt: input.prompt,
+  });
+
+  const prediction = await withReplicateRetry(
+    () => input.replicate.predictions.create({
+      model: input.model,
+      input: requestInput,
+      wait: false,
+    }),
+    {
+      model: input.model,
+      action: 'predictions.create',
+      quality: input.quality,
+      attempt: input.attemptLabel,
+    },
+  );
+  console.info('SEEDANCE PREDICTION CREATED:', {
+    providerJobId: prediction.id,
+    model: input.model,
+    quality: input.quality,
+    attempt: input.attemptLabel,
+    status: prediction.status,
+  });
+
+  const completedPrediction = await pollPrediction({
+    replicate: input.replicate,
+    prediction,
+    model: input.model,
+    timeoutMs: input.timeoutMs,
+    pollIntervalMs: input.pollIntervalMs,
+  });
+
+  if (completedPrediction.status !== 'succeeded') {
+    const providerResponse = {
+      status: completedPrediction.status,
+      error: completedPrediction.error,
+      logs: completedPrediction.logs,
+    };
+
+    if (isSeedanceModerationResponse(providerResponse)) {
+      console.warn('SEEDANCE PROVIDER MODERATION RESPONSE:', {
+        providerJobId: completedPrediction.id,
+        model: input.model,
+        attempt: input.attemptLabel,
+        providerResponse,
+      });
+      throw Object.assign(new Error('Seedance provider moderation response.'), {
+        name: 'SeedanceProviderModerationResponse',
+        prediction: completedPrediction,
+        providerResponse,
+      });
+    }
+
+    console.error('SEEDANCE PREDICTION FAILED:', {
+      providerJobId: completedPrediction.id,
+      model: input.model,
+      status: completedPrediction.status,
+      error: completedPrediction.error,
+      logs: completedPrediction.logs,
+    });
+    throw new Error(
+      typeof completedPrediction.error === 'string'
+        ? completedPrediction.error
+        : `Seedance prediction ${completedPrediction.status}.`,
+    );
+  }
+
+  const videoUrl = extractVideoUrl(completedPrediction.output);
+
+  if (!videoUrl) {
+    throw new Error('Seedance generation completed without a usable video URL.');
+  }
+
+  return {
+    completedPrediction,
+    videoUrl,
+  };
+}
+
 export async function generateSeedanceVideo(
   prompt: string,
   options: GenerateSeedanceVideoOptions = {},
@@ -278,14 +576,9 @@ export async function generateSeedanceVideo(
   const quality = options.quality ?? 'fast';
   const model = modelForQuality(quality);
   const referenceImages = normalizeReferenceImages(options.referenceImages);
-  const finalPrompt = buildMultimodalSeedancePrompt(safePrompt, referenceImages);
-  const requestInput = {
-    prompt: finalPrompt,
-    ...(referenceImages.length
-      ? { reference_images: referenceImages.map((reference) => reference.url) }
-      : {}),
-    ...DEFAULT_SEEDANCE_SETTINGS,
-  };
+  const sanitized = stripRiskyPromptWording(safePrompt);
+  const suggestedPrompt = safeCinematicRewrite(safePrompt);
+  const finalPrompt = buildMultimodalSeedancePrompt(sanitized.prompt, referenceImages);
 
   console.info('SEEDANCE MULTIMODAL REFERENCES:', {
     model,
@@ -297,78 +590,169 @@ export async function generateSeedanceVideo(
       role: reference.role ?? null,
       url: reference.url,
     })),
-    inputKeys: Object.keys(requestInput),
   });
   console.info('SEEDANCE FINAL PROMPT:', {
     model,
     prompt: finalPrompt,
+    sanitizedChanged: sanitized.changed,
+    replacements: sanitized.replacements,
   });
 
-  const prediction = await withReplicateRetry(
-    () => replicate.predictions.create({
+  try {
+    const attempt = await runSeedanceAttempt({
+      replicate,
       model,
-      input: requestInput,
-      wait: false,
-    }),
-    {
-      model,
-      action: 'predictions.create',
       quality,
-    },
-  );
-  console.info('SEEDANCE PREDICTION CREATED:', {
-    providerJobId: prediction.id,
-    model,
-    quality,
-    status: prediction.status,
-  });
-
-  const completedPrediction = await pollPrediction({
-    replicate,
-    prediction,
-    model,
-    timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    pollIntervalMs: options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
-  });
-
-  if (completedPrediction.status !== 'succeeded') {
-    console.error('SEEDANCE PREDICTION FAILED:', {
-      providerJobId: completedPrediction.id,
-      model,
-      status: completedPrediction.status,
-      error: completedPrediction.error,
-      logs: completedPrediction.logs,
+      prompt: finalPrompt,
+      referenceImages,
+      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      pollIntervalMs: options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
+      attemptLabel: 'primary',
     });
-    throw new Error(
-      typeof completedPrediction.error === 'string'
-        ? completedPrediction.error
-        : `Seedance prediction ${completedPrediction.status}.`,
-    );
+
+    return {
+      id: randomUUID(),
+      provider: 'replicate',
+      model,
+      status: 'completed',
+      providerJobId: attempt.completedPrediction.id,
+      videoUrl: attempt.videoUrl,
+      finalPrompt,
+      referenceImages,
+      referenceImageCount: referenceImages.length,
+      multimodalReferenceMode: referenceImages.length > 1,
+      warnings: [
+        ...(referenceImages.length === 1
+          ? ['Only one reference image was sent to Seedance. Add side, full-body, expression, or outfit references for stronger multimodal identity consistency.']
+          : []),
+        ...(sanitized.changed
+          ? ['Lumora automatically softened risky glamour/adult wording before sending this prompt to Seedance.']
+          : []),
+      ],
+      suggestedPrompt,
+      sanitizedPrompt: sanitized.prompt,
+      rawOutput: attempt.completedPrediction.output,
+      logs: attempt.completedPrediction.logs,
+      metrics: attempt.completedPrediction.metrics,
+      settings: DEFAULT_SEEDANCE_SETTINGS,
+    };
+  } catch (error) {
+    if (!isSeedanceModerationResponse(error)) {
+      throw error;
+    }
+
+    const moderationError = error as {
+      prediction?: Prediction;
+      providerResponse?: unknown;
+    };
+    const initialDiagnostics = moderationDiagnostics({
+      model,
+      prediction: moderationError.prediction ?? null,
+      providerResponse: moderationError.providerResponse ?? error,
+      retryAttempted: true,
+      retrySucceeded: false,
+      retryMode: 'safe-cinematic-rewrite',
+      sanitizedPrompt: sanitized.prompt,
+      suggestedPrompt,
+      referenceImageCount: referenceImages.length,
+    });
+    console.warn('SEEDANCE MODERATION DIAGNOSTICS:', initialDiagnostics);
+    console.info('SEEDANCE MODERATION RETRY MODE:', {
+      model,
+      quality,
+      retryMode: 'safe-cinematic-rewrite',
+      referenceImageCount: referenceImages.length,
+      sanitizedPrompt: suggestedPrompt,
+      referencesPreserved: referenceImages.map((reference) => ({
+        token: reference.token,
+        url: reference.url,
+      })),
+    });
+
+    const retryFinalPrompt = buildMultimodalSeedancePrompt(suggestedPrompt, referenceImages);
+
+    try {
+      const retryAttempt = await runSeedanceAttempt({
+        replicate,
+        model,
+        quality,
+        prompt: retryFinalPrompt,
+        referenceImages,
+        timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        pollIntervalMs: options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
+        attemptLabel: 'moderation_retry',
+      });
+      const retryDiagnostics: SeedanceModerationDiagnostics = {
+        ...initialDiagnostics,
+        retrySucceeded: true,
+        providerJobId: retryAttempt.completedPrediction.id,
+        providerStatus: retryAttempt.completedPrediction.status,
+        providerMessage: providerResponseText({
+          status: retryAttempt.completedPrediction.status,
+          logs: retryAttempt.completedPrediction.logs,
+        }),
+        sanitizedPrompt: suggestedPrompt,
+      };
+      console.info('SEEDANCE MODERATION RETRY SUCCEEDED:', retryDiagnostics);
+
+      return {
+        id: randomUUID(),
+        provider: 'replicate',
+        model,
+        status: 'completed',
+        providerJobId: retryAttempt.completedPrediction.id,
+        videoUrl: retryAttempt.videoUrl,
+        finalPrompt: retryFinalPrompt,
+        referenceImages,
+        referenceImageCount: referenceImages.length,
+        multimodalReferenceMode: referenceImages.length > 1,
+        warnings: [
+          'Provider moderation flagged the first Seedance attempt, so Lumora retried automatically with a safer cinematic rewrite.',
+          ...(referenceImages.length === 1
+            ? ['Only one reference image was sent to Seedance. Add side, full-body, expression, or outfit references for stronger multimodal identity consistency.']
+            : []),
+        ],
+        moderationDiagnostics: retryDiagnostics,
+        suggestedPrompt,
+        sanitizedPrompt: suggestedPrompt,
+        rawOutput: retryAttempt.completedPrediction.output,
+        logs: retryAttempt.completedPrediction.logs,
+        metrics: retryAttempt.completedPrediction.metrics,
+        settings: DEFAULT_SEEDANCE_SETTINGS,
+      };
+    } catch (retryError) {
+      if (!isSeedanceModerationResponse(retryError)) {
+        throw retryError;
+      }
+
+      const retryModerationError = retryError as {
+        prediction?: Prediction;
+        providerResponse?: unknown;
+      };
+      const retryDiagnostics = moderationDiagnostics({
+        model,
+        prediction: retryModerationError.prediction ?? null,
+        providerResponse: retryModerationError.providerResponse ?? retryError,
+        retryAttempted: true,
+        retrySucceeded: false,
+        retryMode: 'safe-cinematic-rewrite',
+        sanitizedPrompt: suggestedPrompt,
+        suggestedPrompt,
+        referenceImageCount: referenceImages.length,
+      });
+
+      console.warn('SEEDANCE PROVIDER MODERATION RESPONSE EXACT:', {
+        diagnostics: retryDiagnostics,
+        providerResponse: retryModerationError.providerResponse ?? providerResponseText(retryError),
+      });
+
+      throw new SeedanceModerationError({
+        message: 'Seedance moderation paused this render after Lumora tried a safer cinematic rewrite.',
+        suggestedPrompt,
+        sanitizedPrompt: suggestedPrompt,
+        diagnostics: retryDiagnostics,
+        referenceImages,
+      });
+    }
   }
-
-  const videoUrl = extractVideoUrl(completedPrediction.output);
-
-  if (!videoUrl) {
-    throw new Error('Seedance generation completed without a usable video URL.');
-  }
-
-  return {
-    id: randomUUID(),
-    provider: 'replicate',
-    model,
-    status: 'completed',
-    providerJobId: completedPrediction.id,
-    videoUrl,
-    finalPrompt,
-    referenceImages,
-    referenceImageCount: referenceImages.length,
-    multimodalReferenceMode: referenceImages.length > 1,
-    warnings: referenceImages.length === 1
-      ? ['Only one reference image was sent to Seedance. Add side, full-body, expression, or outfit references for stronger multimodal identity consistency.']
-      : [],
-    rawOutput: completedPrediction.output,
-    logs: completedPrediction.logs,
-    metrics: completedPrediction.metrics,
-    settings: DEFAULT_SEEDANCE_SETTINGS,
-  };
 }
