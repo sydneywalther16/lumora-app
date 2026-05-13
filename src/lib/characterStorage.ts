@@ -287,6 +287,12 @@ export function saveLocalCharacter(payload: {
   consentConfirmed: boolean;
   visibility: PrivacySetting;
   stylePreferences: Record<string, string>;
+  appearanceSummary?: string | null;
+  wardrobeTendencies?: string | null;
+  emotionalTendencies?: string | null;
+  soundtrackTendencies?: string | null;
+  cinematicStyle?: string | null;
+  relationshipMemory?: CharacterProfile['relationshipMemory'];
   referenceImageUrls: ReferenceImageUrls;
   sourceCaptureVideoUrl: string | null;
   voiceSampleUrl: string | null;
@@ -296,10 +302,19 @@ export function saveLocalCharacter(payload: {
     id: createId(),
     ownerUserId: 'local',
     name: payload.name,
+    displayName: payload.name,
     status: 'ready',
     consentConfirmed: payload.consentConfirmed,
     visibility: payload.visibility,
-    stylePreferences: payload.stylePreferences,
+    stylePreferences: {
+      ...payload.stylePreferences,
+      appearanceSummary: payload.appearanceSummary ?? '',
+      wardrobeTendencies: payload.wardrobeTendencies ?? '',
+      emotionalTendencies: payload.emotionalTendencies ?? '',
+      soundtrackTendencies: payload.soundtrackTendencies ?? '',
+      cinematicStyle: payload.cinematicStyle ?? '',
+      relationshipMemory: payload.relationshipMemory ?? {},
+    },
     referenceImageUrls: {
       manualReferenceImageUrl: cleanMediaUrl(payload.referenceImageUrls.manualReferenceImageUrl),
       frontFace: cleanMediaUrl(payload.referenceImageUrls.frontFace) || '',
@@ -320,6 +335,21 @@ export function saveLocalCharacter(payload: {
     },
     sourceCaptureVideoUrl: cleanMediaUrl(payload.sourceCaptureVideoUrl),
     voiceSampleUrl: cleanMediaUrl(payload.voiceSampleUrl),
+    appearanceSummary: payload.appearanceSummary ?? '',
+    wardrobeTendencies: payload.wardrobeTendencies ?? '',
+    emotionalTendencies: payload.emotionalTendencies ?? '',
+    soundtrackTendencies: payload.soundtrackTendencies ?? '',
+    cinematicStyle: payload.cinematicStyle ?? '',
+    continuityState: {
+      characterAppearance: payload.appearanceSummary ?? '',
+      wardrobe: payload.wardrobeTendencies ?? '',
+      emotionalTone: payload.emotionalTendencies ?? '',
+      soundtrackMood: payload.soundtrackTendencies ?? '',
+      cameraStyle: payload.cinematicStyle ?? '',
+    },
+    memorySnapshots: [],
+    relationshipMemory: payload.relationshipMemory ?? {},
+    appearanceDrift: [],
     createdAt: now,
     updatedAt: now,
   };
@@ -330,4 +360,54 @@ export function saveLocalCharacter(payload: {
     // ignore localStorage failures for now
   }
   return character;
+}
+
+export function updateLocalCharacterProfile(input: {
+  characterId: string;
+  name?: string;
+  appearanceSummary?: string;
+  wardrobeTendencies?: string;
+  emotionalTendencies?: string;
+  soundtrackTendencies?: string;
+  cinematicStyle?: string;
+  relationshipMemory?: CharacterProfile['relationshipMemory'];
+}): CharacterProfile | null {
+  const characters = getStoredCharacters();
+  const current = characters.find((character) => character.id === input.characterId);
+  if (!current) return null;
+
+  const updated: CharacterProfile = {
+    ...current,
+    name: input.name ?? current.name,
+    displayName: input.name ?? current.displayName ?? current.name,
+    stylePreferences: {
+      ...current.stylePreferences,
+      appearanceSummary: input.appearanceSummary ?? current.appearanceSummary ?? '',
+      wardrobeTendencies: input.wardrobeTendencies ?? current.wardrobeTendencies ?? '',
+      emotionalTendencies: input.emotionalTendencies ?? current.emotionalTendencies ?? '',
+      soundtrackTendencies: input.soundtrackTendencies ?? current.soundtrackTendencies ?? '',
+      cinematicStyle: input.cinematicStyle ?? current.cinematicStyle ?? '',
+      relationshipMemory: input.relationshipMemory ?? current.relationshipMemory ?? {},
+    },
+    appearanceSummary: input.appearanceSummary ?? current.appearanceSummary ?? '',
+    wardrobeTendencies: input.wardrobeTendencies ?? current.wardrobeTendencies ?? '',
+    emotionalTendencies: input.emotionalTendencies ?? current.emotionalTendencies ?? '',
+    soundtrackTendencies: input.soundtrackTendencies ?? current.soundtrackTendencies ?? '',
+    cinematicStyle: input.cinematicStyle ?? current.cinematicStyle ?? '',
+    continuityState: {
+      ...(current.continuityState ?? {}),
+      characterAppearance: input.appearanceSummary ?? current.appearanceSummary ?? '',
+      wardrobe: input.wardrobeTendencies ?? current.wardrobeTendencies ?? '',
+      emotionalTone: input.emotionalTendencies ?? current.emotionalTendencies ?? '',
+      soundtrackMood: input.soundtrackTendencies ?? current.soundtrackTendencies ?? '',
+      cameraStyle: input.cinematicStyle ?? current.cinematicStyle ?? '',
+    },
+    relationshipMemory: input.relationshipMemory ?? current.relationshipMemory ?? {},
+    updatedAt: new Date().toISOString(),
+  };
+
+  saveStoredCharacters(characters.map((character) => (
+    character.id === input.characterId ? updated : character
+  )));
+  return updated;
 }

@@ -3,11 +3,13 @@ import {
   api,
   ApiRequestError,
   continuityMemoryFields,
+  type ApiHealthDiagnostics,
   type CreativeBrainScenePlan,
   type ContinuityMemoryField,
   type ContinuityMemoryLocks,
   type ContinuityMemoryRecord,
   type ContinuityMemoryState,
+  type CharacterProfile,
   type GenerationMode,
   type LumoraIdentityFeedback,
   type LumoraIdentityFeedbackChoice,
@@ -40,6 +42,7 @@ type CreateVideoProps = {
   characterAvatar: string | null;
   isDefaultSelfCharacter: boolean;
   characterDescription?: string;
+  characterProfile?: CharacterProfile | null;
   referenceImageUrl?: string | null;
   referenceImageUrls?: Partial<ReferenceImageUrls> | null;
   additionalReferenceImageUrls?: string[];
@@ -465,6 +468,30 @@ function parseCreativePlanDraft(value: string): CreativeBrainScenePlan | null {
   return null;
 }
 
+const characterProfilesMigrationWarning = 'Character Profiles need the latest database migration.';
+
+function characterProfileSchemaWarning(diagnostics: ApiHealthDiagnostics) {
+  const missingCharacterId = diagnostics.database?.schemaChecks?.some((check) => (
+    check.name === 'column.generation_jobs.character_id' && !check.ok
+  ));
+
+  return missingCharacterId ? characterProfilesMigrationWarning : '';
+}
+
+function friendlyCharacterProfileError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+
+  if (
+    lower.includes('generation_jobs') &&
+    (lower.includes('character_id') || lower.includes('character profiles'))
+  ) {
+    return characterProfilesMigrationWarning;
+  }
+
+  return message;
+}
+
 export default function CreateVideo({
   refreshKey = 0,
   characterId,
@@ -472,6 +499,7 @@ export default function CreateVideo({
   characterAvatar,
   isDefaultSelfCharacter,
   characterDescription,
+  characterProfile,
   referenceImageUrl,
   referenceImageUrls,
   additionalReferenceImageUrls = [],
@@ -521,6 +549,7 @@ export default function CreateVideo({
   const [sceneExecutionStatus, setSceneExecutionStatus] = useState('');
   const [sceneExecutionPlan, setSceneExecutionPlan] = useState<CreativeBrainScenePlan | null>(null);
   const [sceneExecutionResult, setSceneExecutionResult] = useState<SceneExecutorResult | null>(null);
+  const [schemaWarning, setSchemaWarning] = useState('');
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
   const [finalGeneratedPrompt, setFinalGeneratedPrompt] = useState('');
   const [generatedModel, setGeneratedModel] = useState('');
@@ -700,6 +729,22 @@ export default function CreateVideo({
   }, [setActivePrompt, setDraftTitle]);
 
   useEffect(() => {
+    let active = true;
+
+    api.healthDiagnostics()
+      .then((diagnostics) => {
+        if (active) setSchemaWarning(characterProfileSchemaWarning(diagnostics));
+      })
+      .catch(() => {
+        if (active) setSchemaWarning('');
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!sceneExecutorUserId) {
       setContinuityMemory(null);
       setContinuityMemoryDraft(emptyContinuityMemoryState);
@@ -842,10 +887,26 @@ export default function CreateVideo({
       const styleTheme = selectedStylePrompt(selectedStyles, activePrompt);
       const response = await api.createCreativeBrainPlan({
         prompt: activePrompt,
+        userId: sceneExecutorUserId,
+        characterId,
         styleTheme: styleTheme || null,
         characterMetadata: {
           characterId,
           characterName,
+          characterProfile: characterProfile ? {
+            id: characterProfile.id,
+            characterId: characterProfile.characterId ?? characterProfile.id,
+            displayName: characterProfile.displayName ?? characterProfile.name,
+            appearanceSummary: characterProfile.appearanceSummary ?? characterDescription ?? '',
+            wardrobeTendencies: characterProfile.wardrobeTendencies ?? '',
+            emotionalTendencies: characterProfile.emotionalTendencies ?? '',
+            soundtrackTendencies: characterProfile.soundtrackTendencies ?? '',
+            cinematicStyle: characterProfile.cinematicStyle ?? '',
+            continuityState: characterProfile.continuityState ?? {},
+            relationshipMemory: characterProfile.relationshipMemory ?? {},
+            memorySnapshots: characterProfile.memorySnapshots ?? [],
+            appearanceDrift: characterProfile.appearanceDrift ?? [],
+          } : null,
           isDefaultSelfCharacter,
           characterDescription,
           identityStatus: identityStatusLabel,
@@ -869,7 +930,7 @@ export default function CreateVideo({
       setSceneExecutionError('');
       setCreativePlanStatus(`Creative Brain plan ready (${response.provider}, ${response.model}). Review or edit before rendering.`);
     } catch (error) {
-      setCreativePlanError(error instanceof Error ? error.message : 'Creative Brain could not create a scene plan.');
+      setCreativePlanError(error instanceof Error ? friendlyCharacterProfileError(error) : 'Creative Brain could not create a scene plan.');
       setCreativePlanStatus('');
     } finally {
       setCreativePlanLoading(false);
@@ -935,6 +996,20 @@ export default function CreateVideo({
         characterMetadata: {
           characterId,
           characterName,
+          characterProfile: characterProfile ? {
+            id: characterProfile.id,
+            characterId: characterProfile.characterId ?? characterProfile.id,
+            displayName: characterProfile.displayName ?? characterProfile.name,
+            appearanceSummary: characterProfile.appearanceSummary ?? characterDescription ?? '',
+            wardrobeTendencies: characterProfile.wardrobeTendencies ?? '',
+            emotionalTendencies: characterProfile.emotionalTendencies ?? '',
+            soundtrackTendencies: characterProfile.soundtrackTendencies ?? '',
+            cinematicStyle: characterProfile.cinematicStyle ?? '',
+            continuityState: characterProfile.continuityState ?? {},
+            relationshipMemory: characterProfile.relationshipMemory ?? {},
+            memorySnapshots: characterProfile.memorySnapshots ?? [],
+            appearanceDrift: characterProfile.appearanceDrift ?? [],
+          } : null,
           isDefaultSelfCharacter,
           characterDescription,
           styleTheme: selectedStylePrompt(selectedStyles, activePrompt) || null,
@@ -971,7 +1046,7 @@ export default function CreateVideo({
       }
     } catch (error) {
       const message = error instanceof ApiRequestError || error instanceof Error
-        ? error.message
+        ? friendlyCharacterProfileError(error)
         : 'Scene Executor could not render the storyboard.';
       setSceneExecutionError(message);
       setSceneExecutionStatus('');
@@ -1514,6 +1589,12 @@ export default function CreateVideo({
           <span className="eyebrow">video</span>
           <h3>Create video</h3>
         </div>
+
+        {schemaWarning ? (
+          <div className="generation-warning-list" role="status">
+            <p>{schemaWarning}</p>
+          </div>
+        ) : null}
 
         <label className="field-block">
           <span>Project title</span>

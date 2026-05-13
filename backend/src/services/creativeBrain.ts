@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { env } from '../lib/env';
 import { openai } from '../lib/openaiClient';
+import { buildCharacterProfilePrompt, characterProfileFromMetadata } from './characterProfiles';
 
 export type CreativeBrainProviderId = 'openai';
 
@@ -170,9 +171,12 @@ function systemPrompt() {
 }
 
 function userPrompt(input: CreativeBrainCompletionInput) {
+  const characterProfile = characterProfileFromMetadata(input.characterMetadata);
+
   return [
     `User prompt: ${input.prompt}`,
     `Style/theme: ${input.styleTheme?.trim() || 'not specified'}`,
+    characterProfile ? buildCharacterProfilePrompt(characterProfile) : '',
     `Character metadata JSON: ${compactJson(input.characterMetadata)}`,
     input.previousOutput
       ? `Previous malformed output to repair: ${input.previousOutput.slice(0, 6000)}`

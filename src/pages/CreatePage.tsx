@@ -246,8 +246,13 @@ export default function CreatePage() {
   const effectiveIsDefaultSelfCharacter = remixProject
     ? Boolean(remixProject.isDefaultSelfCharacter)
     : hasSelfCharacter;
-  const effectiveCharacterId = remixProject?.characterId ?? activeSelfCharacter?.id ?? null;
-  const effectiveCharacterName = remixProject?.characterName ?? activeSelfCharacter?.name ?? profile.displayName;
+  const effectiveCharacterId = remixProject?.characterId ?? activeSelfCharacter?.id ?? selectedCharacter?.id ?? null;
+  const effectiveCharacterName = remixProject?.characterName
+    ?? activeSelfCharacter?.displayName
+    ?? activeSelfCharacter?.name
+    ?? selectedCharacter?.displayName
+    ?? selectedCharacter?.name
+    ?? profile.displayName;
   const effectiveCharacterAvatar = remixProject?.characterAvatar ?? effectiveReferenceImageUrl;
   const identityProfile = hasSelfCharacter
     ? buildLumoraIdentityProfile({
@@ -318,7 +323,8 @@ export default function CreatePage() {
         characterName={effectiveCharacterName}
         characterAvatar={effectiveCharacterAvatar}
         isDefaultSelfCharacter={effectiveIsDefaultSelfCharacter}
-        characterDescription={identityProfile?.appearanceSummary ?? remixProject?.characterName ?? ""}
+        characterDescription={identityProfile?.appearanceSummary ?? selectedCharacter?.appearanceSummary ?? remixProject?.characterName ?? ""}
+        characterProfile={remixProject ? null : selectedCharacter ?? activeSelfCharacter}
         referenceImageUrl={effectiveReferenceImageUrl}
         referenceImageUrls={effectiveReferenceImageUrls}
         additionalReferenceImageUrls={effectiveAdditionalReferenceImageUrls}

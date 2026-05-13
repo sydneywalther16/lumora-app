@@ -11,10 +11,16 @@ import {
   getContinuityMemory,
   saveContinuityMemoryPatch,
 } from '../services/memoryEngine';
+import {
+  getCinematicCharacterProfileForUser,
+  publicCharacterProfile,
+} from '../services/characterProfiles';
 import { executeScenePlan } from '../services/sceneExecutor';
 
 const creativeBrainPlanRequestSchema = z.object({
   prompt: z.string().min(1),
+  userId: z.string().optional().nullable(),
+  characterId: z.string().optional().nullable(),
   characterMetadata: z.record(z.string(), z.unknown()).optional().nullable(),
   styleTheme: z.string().optional().nullable(),
 });
@@ -101,11 +107,18 @@ function seedanceReferenceImages(
 
 creativeBrainRouter.post('/plan', creativeBrainRateLimit, async (req, res) => {
   const payload = creativeBrainPlanRequestSchema.parse(req.body);
+  const characterProfile = payload.userId && payload.characterId
+    ? await getCinematicCharacterProfileForUser(payload.userId, payload.characterId).catch(() => null)
+    : null;
+  const characterMetadata = {
+    ...(payload.characterMetadata ?? {}),
+    ...(characterProfile ? { characterProfile: publicCharacterProfile(characterProfile) } : {}),
+  };
 
   try {
     const result = await createCreativeBrainPlan({
       prompt: payload.prompt,
-      characterMetadata: payload.characterMetadata ?? null,
+      characterMetadata,
       styleTheme: payload.styleTheme ?? null,
     });
 

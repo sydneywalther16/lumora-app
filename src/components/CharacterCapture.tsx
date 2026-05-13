@@ -36,6 +36,24 @@ function compactPreferences(preferences: Record<string, string>) {
   );
 }
 
+const characterProfilesMigrationWarning = 'Character Profiles need the latest database migration.';
+
+function characterCaptureErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+
+  if (
+    lower.includes('character_id') ||
+    lower.includes('appearance_summary') ||
+    lower.includes('relationship_memory') ||
+    lower.includes('continuity_state')
+  ) {
+    return characterProfilesMigrationWarning;
+  }
+
+  return error instanceof Error ? error.message : 'Unable to save character.';
+}
+
 export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
   const { user, session, loading, configured } = useSession();
   const authUser = session?.user ?? user;
@@ -45,6 +63,12 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
   const [characterVibe, setCharacterVibe] = useState('');
   const [fashionStyle, setFashionStyle] = useState('');
   const [voicePersonality, setVoicePersonality] = useState('');
+  const [appearanceSummary, setAppearanceSummary] = useState('');
+  const [wardrobeTendencies, setWardrobeTendencies] = useState('');
+  const [emotionalTendencies, setEmotionalTendencies] = useState('');
+  const [soundtrackTendencies, setSoundtrackTendencies] = useState('');
+  const [cinematicStyle, setCinematicStyle] = useState('');
+  const [relationshipNotes, setRelationshipNotes] = useState('');
   const [frontFace, setFrontFace] = useState<File | null>(null);
   const [leftAngle, setLeftAngle] = useState<File | null>(null);
   const [rightAngle, setRightAngle] = useState<File | null>(null);
@@ -104,6 +128,12 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
         characterVibe,
         fashionStyle,
         voicePersonality,
+        appearanceSummary,
+        wardrobeTendencies,
+        emotionalTendencies,
+        soundtrackTendencies,
+        cinematicStyle,
+        relationshipNotes,
       });
 
       if (authUser) {
@@ -174,6 +204,19 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
             videoReferenceUrl2: videoUpload2?.url ?? '',
             videoReferencePath2: videoUpload2?.objectPath ?? '',
           },
+          appearanceSummary,
+          wardrobeTendencies: wardrobeTendencies || fashionStyle,
+          emotionalTendencies: emotionalTendencies || characterVibe,
+          soundtrackTendencies,
+          cinematicStyle,
+          relationshipMemory: relationshipNotes.trim()
+            ? {
+                notes: {
+                  relationshipSummary: relationshipNotes.trim(),
+                  updatedAt: new Date().toISOString(),
+                },
+              }
+            : {},
           referenceImageUrls: {
             frontFace: frontUpload.url,
             frontFaceUrl: frontUpload.url,
@@ -217,6 +260,19 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
           consentConfirmed,
           visibility,
           stylePreferences,
+          appearanceSummary,
+          wardrobeTendencies: wardrobeTendencies || fashionStyle,
+          emotionalTendencies: emotionalTendencies || characterVibe,
+          soundtrackTendencies,
+          cinematicStyle,
+          relationshipMemory: relationshipNotes.trim()
+            ? {
+                notes: {
+                  relationshipSummary: relationshipNotes.trim(),
+                  updatedAt: new Date().toISOString(),
+                },
+              }
+            : {},
           referenceImageUrls,
           sourceCaptureVideoUrl,
           voiceSampleUrl,
@@ -229,6 +285,12 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
       setCharacterVibe('');
       setFashionStyle('');
       setVoicePersonality('');
+      setAppearanceSummary('');
+      setWardrobeTendencies('');
+      setEmotionalTendencies('');
+      setSoundtrackTendencies('');
+      setCinematicStyle('');
+      setRelationshipNotes('');
       setFrontFace(null);
       setLeftAngle(null);
       setRightAngle(null);
@@ -239,7 +301,7 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
       setStatus(authUser ? 'Character saved to your account.' : 'Character saved locally.');
       onCreated?.();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Unable to save character.');
+      setStatus(characterCaptureErrorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -312,8 +374,64 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
       </label>
 
       <label className="field-block">
+        <span>Appearance summary</span>
+        <textarea
+          value={appearanceSummary}
+          onChange={(event) => setAppearanceSummary(event.target.value)}
+          rows={3}
+          placeholder="Face shape, hair, build, makeup, defining silhouette"
+        />
+      </label>
+
+      <label className="field-block">
         <span>Fashion style</span>
         <input value={fashionStyle} onChange={(event) => setFashionStyle(event.target.value)} placeholder="Neon street couture" />
+      </label>
+
+      <label className="field-block">
+        <span>Wardrobe tendencies</span>
+        <input
+          value={wardrobeTendencies}
+          onChange={(event) => setWardrobeTendencies(event.target.value)}
+          placeholder="Structured jackets, silver jewelry, glossy boots"
+        />
+      </label>
+
+      <label className="field-block">
+        <span>Emotional tendencies</span>
+        <input
+          value={emotionalTendencies}
+          onChange={(event) => setEmotionalTendencies(event.target.value)}
+          placeholder="Guarded confidence, dry humor, slow-burn vulnerability"
+        />
+      </label>
+
+      <label className="field-block">
+        <span>Soundtrack tendencies</span>
+        <input
+          value={soundtrackTendencies}
+          onChange={(event) => setSoundtrackTendencies(event.target.value)}
+          placeholder="Low synth pulse, airy vocal textures"
+        />
+      </label>
+
+      <label className="field-block">
+        <span>Cinematic style</span>
+        <input
+          value={cinematicStyle}
+          onChange={(event) => setCinematicStyle(event.target.value)}
+          placeholder="Handheld closeups, glossy night exteriors"
+        />
+      </label>
+
+      <label className="field-block">
+        <span>Relationship memory</span>
+        <textarea
+          value={relationshipNotes}
+          onChange={(event) => setRelationshipNotes(event.target.value)}
+          rows={3}
+          placeholder="Recurring dynamics with other cast members"
+        />
       </label>
 
       <label className="field-block">

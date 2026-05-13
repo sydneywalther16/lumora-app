@@ -7,6 +7,7 @@ import {
   listCharacterProfilesForUser,
   updateCharacterProfileForUser,
   type CharacterReferenceImageUrls,
+  type CharacterRelationshipMemory,
 } from '../services/characterService';
 import { persistMediaUpload } from '../services/storageService';
 
@@ -24,10 +25,17 @@ const mediaUploadSchema = z.object({
 
 const createCharacterSchema = z.object({
   name: z.string().min(1).max(120),
+  displayName: z.string().min(1).max(120).optional().nullable(),
   consentConfirmed: z.boolean().optional(),
   consent_confirmed: z.boolean().optional(),
   visibility: visibilitySchema.default('private'),
   stylePreferences: z.record(z.string(), z.unknown()).default({}),
+  appearanceSummary: z.string().optional().nullable(),
+  wardrobeTendencies: z.string().optional().nullable(),
+  emotionalTendencies: z.string().optional().nullable(),
+  soundtrackTendencies: z.string().optional().nullable(),
+  cinematicStyle: z.string().optional().nullable(),
+  relationshipMemory: z.record(z.string(), z.unknown()).optional().default({}),
   referenceImages: z.object({
     frontFace: mediaUploadSchema,
     leftAngle: mediaUploadSchema,
@@ -40,11 +48,18 @@ const createCharacterSchema = z.object({
 
 const patchCharacterSchema = z.object({
   name: z.string().min(1).max(120).optional(),
+  displayName: z.string().min(1).max(120).optional(),
   status: statusSchema.optional(),
   consentConfirmed: z.boolean().optional(),
   consent_confirmed: z.boolean().optional(),
   visibility: visibilitySchema.optional(),
   stylePreferences: z.record(z.string(), z.unknown()).optional(),
+  appearanceSummary: z.string().optional(),
+  wardrobeTendencies: z.string().optional(),
+  emotionalTendencies: z.string().optional(),
+  soundtrackTendencies: z.string().optional(),
+  cinematicStyle: z.string().optional(),
+  relationshipMemory: z.record(z.string(), z.unknown()).optional(),
   referenceImages: z.object({
     frontFace: mediaUploadSchema.optional(),
     leftAngle: mediaUploadSchema.optional(),
@@ -60,6 +75,10 @@ charactersRouter.use(requireAuth);
 
 function stringRouteParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? '' : value ?? '';
+}
+
+function relationshipMemoryValue(value: Record<string, unknown> | undefined) {
+  return (value ?? {}) as Record<string, CharacterRelationshipMemory>;
 }
 
 charactersRouter.get('/', async (req: AuthedRequest, res) => {
@@ -144,13 +163,27 @@ charactersRouter.post('/', async (req: AuthedRequest, res) => {
   const character = await createCharacterProfile({
     ownerUserId: req.userId!,
     name: payload.name,
+    displayName: payload.displayName ?? payload.name,
     consentConfirmed,
     visibility: payload.visibility,
-    stylePreferences: payload.stylePreferences,
+    stylePreferences: {
+      ...payload.stylePreferences,
+      appearanceSummary: payload.appearanceSummary ?? payload.stylePreferences.appearanceSummary ?? '',
+      wardrobeTendencies: payload.wardrobeTendencies ?? payload.stylePreferences.wardrobeTendencies ?? '',
+      emotionalTendencies: payload.emotionalTendencies ?? payload.stylePreferences.emotionalTendencies ?? '',
+      soundtrackTendencies: payload.soundtrackTendencies ?? payload.stylePreferences.soundtrackTendencies ?? '',
+      cinematicStyle: payload.cinematicStyle ?? payload.stylePreferences.cinematicStyle ?? '',
+    },
     referenceImageUrls,
     sourceCaptureVideoUrl,
     voiceSampleUrl,
     status: 'ready',
+    appearanceSummary: payload.appearanceSummary,
+    wardrobeTendencies: payload.wardrobeTendencies,
+    emotionalTendencies: payload.emotionalTendencies,
+    soundtrackTendencies: payload.soundtrackTendencies,
+    cinematicStyle: payload.cinematicStyle,
+    relationshipMemory: relationshipMemoryValue(payload.relationshipMemory),
   });
 
   res.status(201).json({ character });
@@ -237,6 +270,7 @@ charactersRouter.patch('/:id', async (req: AuthedRequest, res) => {
     ownerUserId: req.userId!,
     characterId,
     name: payload.name,
+    displayName: payload.displayName,
     status: payload.status,
     visibility: payload.visibility,
     consentConfirmed,
@@ -244,6 +278,14 @@ charactersRouter.patch('/:id', async (req: AuthedRequest, res) => {
     referenceImageUrls,
     sourceCaptureVideoUrl,
     voiceSampleUrl,
+    appearanceSummary: payload.appearanceSummary,
+    wardrobeTendencies: payload.wardrobeTendencies,
+    emotionalTendencies: payload.emotionalTendencies,
+    soundtrackTendencies: payload.soundtrackTendencies,
+    cinematicStyle: payload.cinematicStyle,
+    relationshipMemory: payload.relationshipMemory
+      ? relationshipMemoryValue(payload.relationshipMemory)
+      : undefined,
   });
 
   res.json({ character });

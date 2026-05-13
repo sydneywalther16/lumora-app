@@ -5,6 +5,14 @@ import {
   type CreativeBrainShot,
 } from './creativeBrain';
 import {
+  buildCharacterProfilePrompt,
+  characterProfileFromMetadata,
+  getCinematicCharacterProfileForUser,
+  inheritCharacterContinuity,
+  updateCharacterProfileFromMemory,
+  type CharacterProfile,
+} from './characterProfiles';
+import {
   createGenerationJob,
   updateGenerationJobSceneMetadata,
   updateGenerationJobStatus,
@@ -125,9 +133,11 @@ function shotPrompt(input: {
   previousScene: string | null;
   metadata: SceneClipMetadata;
   continuityMemory: ContinuityMemoryRecord;
+  characterProfile: CharacterProfile | null;
 }) {
   return [
     input.scenePlan.promptRewrite,
+    buildCharacterProfilePrompt(input.characterProfile),
     buildContinuityMemoryPrompt(input.continuityMemory),
     `Shot ${input.clipOrder} of ${input.clipCount}: ${input.shot.title}.`,
     input.shot.description,
@@ -151,6 +161,7 @@ function clipMetadata(input: {
   referenceImageCount: number;
   characterMetadata?: Record<string, unknown> | null;
   continuityMemory: ContinuityMemoryRecord;
+  characterProfile: CharacterProfile | null;
 }): SceneClipMetadata {
   return {
     previousScene: input.previousScene,
@@ -196,11 +207,30 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
   const createdAt = new Date().toISOString();
   const clips: SceneExecutorClip[] = [];
   const engine = input.quality === 'quality' ? 'seedance-quality' : 'seedance-2.0';
-  let continuityMemory = await getContinuityMemory({
-    userId: input.userId,
-    projectId: input.projectId ?? null,
-    characterId: input.characterId ?? null,
-  });
+  const storedCharacterProfile = input.characterId
+    ? await getCinematicCharacterProfileForUser(input.userId, input.characterId).catch((error) => {
+        console.warn('SCENE EXECUTOR CHARACTER PROFILE LOAD FAILED:', {
+          userId: input.userId,
+          characterId: input.characterId,
+          error,
+        });
+        return null;
+      })
+    : null;
+  const characterProfile = storedCharacterProfile ?? characterProfileFromMetadata(input.characterMetadata, input.characterId);
+  const executionCharacterId = stringValue(characterProfile?.characterId) ?? stringValue(input.characterId);
+
+  let continuityMemory = characterProfile
+    ? await inheritCharacterContinuity({
+        userId: input.userId,
+        projectId: input.projectId ?? null,
+        profile: characterProfile,
+      })
+    : await getContinuityMemory({
+        userId: input.userId,
+        projectId: input.projectId ?? null,
+        characterId: executionCharacterId,
+      });
   let previousScene: string | null = continuityMemory.previousSceneSummary;
 
   console.info('SCENE EXECUTOR START:', {
@@ -210,6 +240,8 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
     engine,
     memoryScope: continuityMemory.memoryScope,
     continuityConfidence: continuityMemory.continuityConfidence,
+    characterId: executionCharacterId,
+    characterDisplayName: characterProfile?.displayName ?? null,
   });
 
   for (const [index, shot] of parsedPlan.shotList.entries()) {
@@ -221,6 +253,7 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
       referenceImageCount: input.referenceImages?.length ?? 0,
       characterMetadata: input.characterMetadata,
       continuityMemory,
+      characterProfile,
     });
     const prompt = shotPrompt({
       scenePlan: parsedPlan,
@@ -230,6 +263,7 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
       previousScene,
       metadata,
       continuityMemory,
+      characterProfile,
     });
     const queuedJob = await createGenerationJob({
       userId: input.userId,
@@ -239,7 +273,7 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
       outputType: 'video',
       prompt,
       status: 'queued',
-      characterId: input.characterId ?? null,
+      characterId: executionCharacterId,
       durationSeconds: 5,
       aspectRatio: '16:9',
       privacy: input.privacy ?? 'private',
@@ -333,7 +367,7 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
           metadata,
           userId: input.userId,
           projectId: input.projectId ?? null,
-          characterId: input.characterId ?? null,
+          characterId: executionCharacterId,
           characterMetadata: input.characterMetadata,
         });
 
@@ -358,6 +392,15 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
             metadata: clip.metadata,
           }),
         });
+        if (storedCharacterProfile) {
+          await updateCharacterProfileFromMemory({
+            ownerUserId: input.userId,
+            characterId: storedCharacterProfile.characterId,
+            memory: continuityMemory,
+            sceneSummary: memoryUpdate.sceneSummary,
+            driftAlerts: memoryUpdate.driftAlerts,
+          });
+        }
       } catch (memoryError) {
         previousScene = sceneContinuitySummary({ shot, metadata });
         console.error('MEMORY ENGINE UPDATE FAILED:', {

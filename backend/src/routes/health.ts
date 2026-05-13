@@ -1,77 +1,8 @@
 import { Router } from 'express';
 import { getEnvironmentDiagnostics } from '../lib/envDiagnostics';
-import { supabaseAdmin } from '../lib/supabaseAdmin';
-import { query } from '../services/db';
+import { buildDatabaseDiagnostics } from '../services/schemaDiagnostics';
 
 export const healthRouter = Router();
-
-function serializeDiagnosticError(error: unknown) {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      stack: error.stack,
-    };
-  }
-
-  if (!error || typeof error !== 'object') {
-    return { message: String(error) };
-  }
-
-  return Object.fromEntries(
-    Object.entries(error as Record<string, unknown>).map(([key, value]) => [
-      key,
-      value && typeof value === 'object' ? JSON.stringify(value) : value,
-    ]),
-  );
-}
-
-async function checkSupabaseTable(tableName: string) {
-  if (!supabaseAdmin) {
-    return {
-      ok: false,
-      table: tableName,
-      source: 'supabase-service-role',
-      error: 'Supabase service role client is not configured.',
-    };
-  }
-
-  const { count, error } = await supabaseAdmin
-    .from(tableName)
-    .select('id', { count: 'exact', head: true });
-
-  return {
-    ok: !error,
-    table: tableName,
-    source: 'supabase-service-role',
-    count: count ?? null,
-    error: error ? serializeDiagnosticError(error) : null,
-  };
-}
-
-async function checkRlsPolicies() {
-  try {
-    const result = await query<Record<string, unknown>>(
-      `select tablename, policyname, cmd, roles, qual, with_check
-       from pg_policies
-       where schemaname = 'public'
-         and tablename in ('projects', 'generation_jobs')
-       order by tablename, policyname`,
-    );
-
-    return {
-      ok: true,
-      source: 'database-url',
-      policies: result.rows,
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      source: 'database-url',
-      error: serializeDiagnosticError(error),
-    };
-  }
-}
 
 healthRouter.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'lumora-api' });
@@ -82,13 +13,6 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
     service: 'lumora-api',
     checkedAt: new Date().toISOString(),
     ...getEnvironmentDiagnostics(),
-    database: {
-      serviceRoleConfigured: Boolean(supabaseAdmin),
-      tables: await Promise.all([
-        checkSupabaseTable('projects'),
-        checkSupabaseTable('generation_jobs'),
-      ]),
-      rlsPolicies: await checkRlsPolicies(),
-    },
+    database: await buildDatabaseDiagnostics(),
   });
 });

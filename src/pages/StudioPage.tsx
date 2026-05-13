@@ -5,6 +5,19 @@ import { loadStudioProjects, type StudioProject } from '../lib/projectStorage';
 import { useSession } from '../hooks/useSession';
 import { loadSupabaseProfilePosts, loadSupabaseProjects } from '../lib/supabaseAppData';
 
+const characterProfilesMigrationWarning = 'Character Profiles need the latest database migration.';
+
+function studioLoadErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+
+  if (lower.includes('character_id')) {
+    return characterProfilesMigrationWarning;
+  }
+
+  return error instanceof Error ? error.message : 'Unable to load studio projects.';
+}
+
 export default function StudioPage() {
   const { user, session, loading, configured } = useSession();
   const authUser = session?.user ?? user;
@@ -44,7 +57,7 @@ export default function StudioPage() {
         setStatus(
           fallbackJobs.length
             ? 'Showing local Studio backups while account projects are unavailable.'
-            : error instanceof Error ? error.message : 'Unable to load studio projects.',
+            : studioLoadErrorMessage(error),
         );
       }
     }

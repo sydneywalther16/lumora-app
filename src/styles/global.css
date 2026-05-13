@@ -1307,6 +1307,36 @@ button {
   gap: 10px;
 }
 
+.character-profile-editor,
+.character-memory-viewer {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--control-border);
+  border-radius: 14px;
+  background: var(--control-background);
+}
+
+.character-profile-editor {
+  margin-top: 12px;
+}
+
+.character-profile-editor textarea {
+  min-height: 74px;
+  resize: vertical;
+}
+
+.character-memory-viewer p {
+  margin: 0;
+  color: var(--muted-text);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.character-memory-viewer strong {
+  color: var(--text-primary);
+}
+
 .character-tile {
   display: grid;
   grid-template-columns: 52px minmax(0, 1fr);

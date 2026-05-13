@@ -7,6 +7,54 @@ import {
   type SeedanceReferenceImage,
 } from './providers/seedanceProvider';
 
+const optionalGenerationJobColumns = [
+  'character_id',
+  'duration_seconds',
+  'aspect_ratio',
+  'privacy',
+  'scene_execution_id',
+  'scene_id',
+  'clip_order',
+  'scene_metadata',
+] as const;
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function stringValue(value: unknown) {
+  return typeof value === 'string' ? value : '';
+}
+
+function optionalGenerationSchemaError(error: unknown) {
+  const record = recordValue(error);
+  const text = [
+    error instanceof Error ? error.message : '',
+    stringValue(record.message),
+    stringValue(record.code),
+    stringValue(record.column),
+  ].join(' ').toLowerCase();
+
+  return (
+    text.includes('42703') ||
+    optionalGenerationJobColumns.some((column) => text.includes(column))
+  ) && optionalGenerationJobColumns.some((column) => text.includes(column));
+}
+
+function warnOptionalGenerationSchemaFallback(operation: string, error: unknown) {
+  console.warn('GENERATION JOB OPTIONAL SCHEMA FALLBACK:', {
+    operation,
+    missingMigration: 'Run Character Profiles / Scene Executor migrations in Supabase.',
+    error: error instanceof Error ? error.message : error,
+  });
+}
+
+function generationCharacterId(value: string | null | undefined) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
 export type GenerationRecord = {
   id: string;
   projectId: string | null;
@@ -143,7 +191,76 @@ export async function createGenerationJob(input: {
   clipOrder?: number | null;
   sceneMetadata?: Record<string, unknown> | null;
 }) {
-  const result = await query<GenerationRecord>(
+  try {
+    const result = await query<GenerationRecord>(
+      `insert into generation_jobs (
+         user_id,
+         project_id,
+         provider,
+         provider_job_id,
+         output_type,
+         prompt,
+         status,
+         character_id,
+         duration_seconds,
+         aspect_ratio,
+         privacy,
+         result_asset_url,
+         error_message,
+         scene_execution_id,
+         scene_id,
+         clip_order,
+         scene_metadata
+       )
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb)
+       returning
+         id,
+         project_id as "projectId",
+         character_id as "characterId",
+         '' as title,
+         prompt,
+         status,
+         output_type as "outputType",
+         provider,
+         duration_seconds as "durationSeconds",
+         aspect_ratio as "aspectRatio",
+         privacy,
+         result_asset_url as "resultAssetUrl",
+         error_message as "errorMessage",
+         scene_execution_id as "sceneExecutionId",
+         scene_id as "sceneId",
+         clip_order as "clipOrder",
+         scene_metadata as "sceneMetadata",
+         created_at as "createdAt",
+         updated_at as "updatedAt"`,
+      [
+        input.userId,
+        input.projectId,
+        input.provider,
+        input.providerJobId ?? null,
+        input.outputType,
+        input.prompt,
+        input.status,
+        generationCharacterId(input.characterId),
+        input.durationSeconds ?? null,
+        input.aspectRatio ?? null,
+        input.privacy ?? 'private',
+        input.resultAssetUrl ?? null,
+        input.errorMessage ?? null,
+        input.sceneExecutionId ?? null,
+        input.sceneId ?? null,
+        input.clipOrder ?? null,
+        JSON.stringify(input.sceneMetadata ?? {}),
+      ],
+    );
+
+    return result.rows[0];
+  } catch (error) {
+    if (!optionalGenerationSchemaError(error)) throw error;
+    warnOptionalGenerationSchemaFallback('createGenerationJob', error);
+  }
+
+  const fallback = await query<GenerationRecord>(
     `insert into generation_jobs (
        user_id,
        project_id,
@@ -152,36 +269,28 @@ export async function createGenerationJob(input: {
        output_type,
        prompt,
        status,
-       character_id,
-       duration_seconds,
-       aspect_ratio,
-       privacy,
        result_asset_url,
-       error_message,
-       scene_execution_id,
-       scene_id,
-       clip_order,
-       scene_metadata
+       error_message
      )
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      returning
        id,
        project_id as "projectId",
-       character_id as "characterId",
+       null::text as "characterId",
        '' as title,
        prompt,
        status,
        output_type as "outputType",
        provider,
-       duration_seconds as "durationSeconds",
-       aspect_ratio as "aspectRatio",
-       privacy,
+       null::integer as "durationSeconds",
+       null::text as "aspectRatio",
+       'private'::text as privacy,
        result_asset_url as "resultAssetUrl",
        error_message as "errorMessage",
-       scene_execution_id as "sceneExecutionId",
-       scene_id as "sceneId",
-       clip_order as "clipOrder",
-       scene_metadata as "sceneMetadata",
+       null::text as "sceneExecutionId",
+       null::text as "sceneId",
+       null::integer as "clipOrder",
+       null::jsonb as "sceneMetadata",
        created_at as "createdAt",
        updated_at as "updatedAt"`,
     [
@@ -192,42 +301,70 @@ export async function createGenerationJob(input: {
       input.outputType,
       input.prompt,
       input.status,
-      input.characterId ?? null,
-      input.durationSeconds ?? null,
-      input.aspectRatio ?? null,
-      input.privacy ?? 'private',
       input.resultAssetUrl ?? null,
       input.errorMessage ?? null,
-      input.sceneExecutionId ?? null,
-      input.sceneId ?? null,
-      input.clipOrder ?? null,
-      JSON.stringify(input.sceneMetadata ?? {}),
     ],
   );
 
-  return result.rows[0];
+  return fallback.rows[0];
 }
 
 export async function listGenerationJobsForUser(userId: string) {
-  const result = await query<GenerationRecord>(
+  try {
+    const result = await query<GenerationRecord>(
+      `select
+         gj.id,
+         gj.project_id as "projectId",
+         gj.character_id as "characterId",
+         coalesce(p.title, 'Untitled concept') as title,
+         gj.prompt,
+         gj.status,
+         gj.output_type as "outputType",
+         gj.provider,
+         gj.duration_seconds as "durationSeconds",
+         gj.aspect_ratio as "aspectRatio",
+         gj.privacy,
+         gj.result_asset_url as "resultAssetUrl",
+         gj.error_message as "errorMessage",
+         gj.scene_execution_id as "sceneExecutionId",
+         gj.scene_id as "sceneId",
+         gj.clip_order as "clipOrder",
+         gj.scene_metadata as "sceneMetadata",
+         gj.created_at as "createdAt",
+         gj.updated_at as "updatedAt"
+       from generation_jobs gj
+       left join projects p on p.id = gj.project_id
+       where gj.user_id = $1
+       order by gj.created_at desc
+       limit 50`,
+      [userId],
+    );
+
+    return result.rows;
+  } catch (error) {
+    if (!optionalGenerationSchemaError(error)) throw error;
+    warnOptionalGenerationSchemaFallback('listGenerationJobsForUser', error);
+  }
+
+  const fallback = await query<GenerationRecord>(
     `select
        gj.id,
        gj.project_id as "projectId",
-       gj.character_id as "characterId",
+       null::text as "characterId",
        coalesce(p.title, 'Untitled concept') as title,
        gj.prompt,
        gj.status,
        gj.output_type as "outputType",
        gj.provider,
-       gj.duration_seconds as "durationSeconds",
-       gj.aspect_ratio as "aspectRatio",
-       gj.privacy,
+       null::integer as "durationSeconds",
+       null::text as "aspectRatio",
+       'private'::text as privacy,
        gj.result_asset_url as "resultAssetUrl",
        gj.error_message as "errorMessage",
-       gj.scene_execution_id as "sceneExecutionId",
-       gj.scene_id as "sceneId",
-       gj.clip_order as "clipOrder",
-       gj.scene_metadata as "sceneMetadata",
+       null::text as "sceneExecutionId",
+       null::text as "sceneId",
+       null::integer as "clipOrder",
+       null::jsonb as "sceneMetadata",
        gj.created_at as "createdAt",
        gj.updated_at as "updatedAt"
      from generation_jobs gj
@@ -238,7 +375,7 @@ export async function listGenerationJobsForUser(userId: string) {
     [userId],
   );
 
-  return result.rows;
+  return fallback.rows;
 }
 
 export async function updateGenerationJobStatus(input: {
@@ -248,7 +385,54 @@ export async function updateGenerationJobStatus(input: {
   resultAssetUrl?: string | null;
   errorMessage?: string | null;
 }) {
-  const result = await query<GenerationRecord>(
+  const values = [
+    input.jobId,
+    input.status,
+    input.providerJobId ?? null,
+    input.resultAssetUrl ?? null,
+    input.errorMessage ?? null,
+  ];
+
+  try {
+    const result = await query<GenerationRecord>(
+      `update generation_jobs gj
+       set
+         status = $2,
+         provider_job_id = coalesce($3, provider_job_id),
+         result_asset_url = coalesce($4, result_asset_url),
+         error_message = $5,
+         updated_at = now()
+       where id = $1
+       returning
+         gj.id,
+         gj.project_id as "projectId",
+         gj.character_id as "characterId",
+         '' as title,
+         gj.prompt,
+         gj.status,
+         gj.output_type as "outputType",
+         gj.provider,
+         gj.duration_seconds as "durationSeconds",
+         gj.aspect_ratio as "aspectRatio",
+         gj.privacy,
+         gj.result_asset_url as "resultAssetUrl",
+         gj.error_message as "errorMessage",
+         gj.scene_execution_id as "sceneExecutionId",
+         gj.scene_id as "sceneId",
+         gj.clip_order as "clipOrder",
+         gj.scene_metadata as "sceneMetadata",
+         gj.created_at as "createdAt",
+         gj.updated_at as "updatedAt"`,
+      values,
+    );
+
+    return result.rows[0] ?? null;
+  } catch (error) {
+    if (!optionalGenerationSchemaError(error)) throw error;
+    warnOptionalGenerationSchemaFallback('updateGenerationJobStatus', error);
+  }
+
+  const fallback = await query<GenerationRecord>(
     `update generation_jobs gj
      set
        status = $2,
@@ -260,76 +444,149 @@ export async function updateGenerationJobStatus(input: {
      returning
        gj.id,
        gj.project_id as "projectId",
-       gj.character_id as "characterId",
+       null::text as "characterId",
        '' as title,
        gj.prompt,
        gj.status,
        gj.output_type as "outputType",
        gj.provider,
-       gj.duration_seconds as "durationSeconds",
-       gj.aspect_ratio as "aspectRatio",
-       gj.privacy,
+       null::integer as "durationSeconds",
+       null::text as "aspectRatio",
+       'private'::text as privacy,
        gj.result_asset_url as "resultAssetUrl",
        gj.error_message as "errorMessage",
-       gj.scene_execution_id as "sceneExecutionId",
-       gj.scene_id as "sceneId",
-       gj.clip_order as "clipOrder",
-       gj.scene_metadata as "sceneMetadata",
+       null::text as "sceneExecutionId",
+       null::text as "sceneId",
+       null::integer as "clipOrder",
+       null::jsonb as "sceneMetadata",
        gj.created_at as "createdAt",
        gj.updated_at as "updatedAt"`,
-    [
-      input.jobId,
-      input.status,
-      input.providerJobId ?? null,
-      input.resultAssetUrl ?? null,
-      input.errorMessage ?? null,
-    ],
+    values,
   );
 
-  return result.rows[0] ?? null;
+  return fallback.rows[0] ?? null;
 }
 
 export async function updateGenerationJobSceneMetadata(input: {
   jobId: string;
   sceneMetadata: Record<string, unknown>;
 }) {
-  const result = await query<GenerationRecord>(
-    `update generation_jobs gj
-     set
-       scene_metadata = $2::jsonb,
-       updated_at = now()
-     where id = $1
-     returning
-       gj.id,
-       gj.project_id as "projectId",
-       gj.character_id as "characterId",
-       '' as title,
-       gj.prompt,
-       gj.status,
-       gj.output_type as "outputType",
-       gj.provider,
-       gj.duration_seconds as "durationSeconds",
-       gj.aspect_ratio as "aspectRatio",
-       gj.privacy,
-       gj.result_asset_url as "resultAssetUrl",
-       gj.error_message as "errorMessage",
-       gj.scene_execution_id as "sceneExecutionId",
-       gj.scene_id as "sceneId",
-       gj.clip_order as "clipOrder",
-       gj.scene_metadata as "sceneMetadata",
-       gj.created_at as "createdAt",
-       gj.updated_at as "updatedAt"`,
-    [
-      input.jobId,
-      JSON.stringify(input.sceneMetadata),
-    ],
-  );
+  const values = [input.jobId, JSON.stringify(input.sceneMetadata)];
 
-  return result.rows[0] ?? null;
+  try {
+    const result = await query<GenerationRecord>(
+      `update generation_jobs gj
+       set
+         scene_metadata = $2::jsonb,
+         updated_at = now()
+       where id = $1
+       returning
+         gj.id,
+         gj.project_id as "projectId",
+         gj.character_id as "characterId",
+         '' as title,
+         gj.prompt,
+         gj.status,
+         gj.output_type as "outputType",
+         gj.provider,
+         gj.duration_seconds as "durationSeconds",
+         gj.aspect_ratio as "aspectRatio",
+         gj.privacy,
+         gj.result_asset_url as "resultAssetUrl",
+         gj.error_message as "errorMessage",
+         gj.scene_execution_id as "sceneExecutionId",
+         gj.scene_id as "sceneId",
+         gj.clip_order as "clipOrder",
+         gj.scene_metadata as "sceneMetadata",
+         gj.created_at as "createdAt",
+         gj.updated_at as "updatedAt"`,
+      values,
+    );
+
+    return result.rows[0] ?? null;
+  } catch (error) {
+    if (!optionalGenerationSchemaError(error)) throw error;
+    warnOptionalGenerationSchemaFallback('updateGenerationJobSceneMetadata', error);
+  }
+
+  try {
+    const fallback = await query<GenerationRecord>(
+      `update generation_jobs gj
+       set
+         scene_metadata = $2::jsonb,
+         updated_at = now()
+       where id = $1
+       returning
+         gj.id,
+         gj.project_id as "projectId",
+         null::text as "characterId",
+         '' as title,
+         gj.prompt,
+         gj.status,
+         gj.output_type as "outputType",
+         gj.provider,
+         null::integer as "durationSeconds",
+         null::text as "aspectRatio",
+         'private'::text as privacy,
+         gj.result_asset_url as "resultAssetUrl",
+         gj.error_message as "errorMessage",
+         null::text as "sceneExecutionId",
+         null::text as "sceneId",
+         null::integer as "clipOrder",
+         gj.scene_metadata as "sceneMetadata",
+         gj.created_at as "createdAt",
+         gj.updated_at as "updatedAt"`,
+      values,
+    );
+
+    return fallback.rows[0] ?? null;
+  } catch (error) {
+    if (!optionalGenerationSchemaError(error)) throw error;
+    warnOptionalGenerationSchemaFallback('updateGenerationJobSceneMetadata.noop', error);
+    return null;
+  }
 }
 
 export async function claimQueuedGenerationJob() {
-  const result = await query<GenerationRecord>(
+  try {
+    const result = await query<GenerationRecord>(
+      `update generation_jobs gj
+       set
+         status = 'processing',
+         updated_at = now()
+       where gj.id = (
+         select id
+         from generation_jobs
+         where status = 'queued-demo'
+         order by created_at asc
+         for update skip locked
+         limit 1
+       )
+       returning
+         gj.id,
+         gj.project_id as "projectId",
+         gj.character_id as "characterId",
+         '' as title,
+         gj.prompt,
+         gj.status,
+         gj.output_type as "outputType",
+         gj.provider,
+         gj.duration_seconds as "durationSeconds",
+         gj.aspect_ratio as "aspectRatio",
+         gj.privacy,
+         gj.result_asset_url as "resultAssetUrl",
+         gj.error_message as "errorMessage",
+         gj.created_at as "createdAt",
+         gj.updated_at as "updatedAt"`,
+    );
+
+    return result.rows[0] ?? null;
+  } catch (error) {
+    if (!optionalGenerationSchemaError(error)) throw error;
+    warnOptionalGenerationSchemaFallback('claimQueuedGenerationJob', error);
+  }
+
+  const fallback = await query<GenerationRecord>(
     `update generation_jobs gj
      set
        status = 'processing',
@@ -345,20 +602,20 @@ export async function claimQueuedGenerationJob() {
      returning
        gj.id,
        gj.project_id as "projectId",
-       gj.character_id as "characterId",
+       null::text as "characterId",
        '' as title,
        gj.prompt,
        gj.status,
        gj.output_type as "outputType",
        gj.provider,
-       gj.duration_seconds as "durationSeconds",
-       gj.aspect_ratio as "aspectRatio",
-       gj.privacy,
+       null::integer as "durationSeconds",
+       null::text as "aspectRatio",
+       'private'::text as privacy,
        gj.result_asset_url as "resultAssetUrl",
        gj.error_message as "errorMessage",
        gj.created_at as "createdAt",
        gj.updated_at as "updatedAt"`,
   );
 
-  return result.rows[0] ?? null;
+  return fallback.rows[0] ?? null;
 }

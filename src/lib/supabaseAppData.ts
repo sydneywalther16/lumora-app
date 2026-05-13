@@ -1,5 +1,9 @@
 import type {
+  CharacterAppearanceDrift,
+  CharacterMemorySnapshot,
   CharacterProfile,
+  CharacterRelationshipMemory,
+  ContinuityMemoryState,
   CreatorSelfStylePreferences,
   LumoraIdentityFeedback,
   LumoraIdentityProfile,
@@ -216,6 +220,26 @@ function stripBase64Media(value: unknown): unknown {
 
 function cleanJsonRecord(value: unknown): Record<string, unknown> {
   return jsonRecord(stripBase64Media(value));
+}
+
+function memorySnapshots(value: unknown): CharacterMemorySnapshot[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is CharacterMemorySnapshot => isObject(item))
+    : [];
+}
+
+function relationshipMemory(value: unknown): Record<string, CharacterRelationshipMemory> {
+  return jsonRecord(value) as Record<string, CharacterRelationshipMemory>;
+}
+
+function appearanceDrift(value: unknown): CharacterAppearanceDrift[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is CharacterAppearanceDrift => isObject(item))
+    : [];
+}
+
+function continuityState(value: unknown): Partial<ContinuityMemoryState> {
+  return jsonRecord(value) as Partial<ContinuityMemoryState>;
 }
 
 function toIso(value: unknown): string {
@@ -779,8 +803,10 @@ function mapCharacterRow(row: DbRow): CharacterProfile {
 
   return {
     id: stringValue(row.id),
+    characterId: stringValue(row.character_id) || stringValue(row.id),
     ownerUserId: stringValue(row.owner_user_id),
     name: stringValue(row.name) || 'Untitled character',
+    displayName: nullableString(row.display_name) ?? stringValue(row.name) ?? 'Untitled character',
     status: row.status ?? 'ready',
     consentConfirmed: booleanValue(row.consent_confirmed),
     visibility: (row.visibility ?? 'private') as PrivacySetting,
@@ -796,6 +822,15 @@ function mapCharacterRow(row: DbRow): CharacterProfile {
     voiceSampleName: nullableString(row.voice_sample_name),
     voiceSampleNumbers: nullableString(row.voice_sample_numbers),
     identityProfile: mapIdentityProfile(stylePreferences.identityProfile),
+    appearanceSummary: nullableString(row.appearance_summary) ?? stringValue(stylePreferences.appearanceSummary),
+    wardrobeTendencies: nullableString(row.wardrobe_tendencies) ?? stringValue(stylePreferences.wardrobeTendencies ?? stylePreferences.fashionStyle),
+    emotionalTendencies: nullableString(row.emotional_tendencies) ?? stringValue(stylePreferences.emotionalTendencies ?? stylePreferences.characterVibe),
+    soundtrackTendencies: nullableString(row.soundtrack_tendencies) ?? stringValue(stylePreferences.soundtrackTendencies),
+    cinematicStyle: nullableString(row.cinematic_style) ?? stringValue(stylePreferences.cinematicStyle),
+    continuityState: continuityState(row.continuity_state),
+    memorySnapshots: memorySnapshots(row.memory_snapshots),
+    relationshipMemory: relationshipMemory(row.relationship_memory),
+    appearanceDrift: appearanceDrift(row.appearance_drift),
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
     isSelf: booleanValue(row.is_self),
@@ -818,8 +853,10 @@ function mapSelfCharacterRow(row: DbRow): CharacterProfile {
 
   return {
     id: CREATOR_SELF_CHARACTER_ID,
+    characterId: CREATOR_SELF_CHARACTER_ID,
     ownerUserId: stringValue(row.user_id),
     name: stringValue(row.name) || 'Creator Self',
+    displayName: stringValue(row.name) || 'Creator Self',
     status: row.status ?? 'ready',
     consentConfirmed: booleanValue(row.consent_confirmed),
     visibility: (row.visibility ?? 'private') as PrivacySetting,
@@ -837,6 +874,15 @@ function mapSelfCharacterRow(row: DbRow): CharacterProfile {
     identityProfile,
     creatorSelfFeatures: stringRecord(row.creator_self_features),
     creatorSelfStylePreferences: mapStylePreferences(row.creator_self_style_preferences),
+    appearanceSummary: identityProfile?.appearanceSummary ?? stringValue(stylePreferences.appearanceSummary),
+    wardrobeTendencies: stringValue(stylePreferences.videoWardrobe ?? stylePreferences.wardrobeTendencies),
+    emotionalTendencies: stringValue(stylePreferences.characterVibe ?? stylePreferences.emotionalTendencies),
+    soundtrackTendencies: stringValue(stylePreferences.soundtrackTendencies),
+    cinematicStyle: stringValue(stylePreferences.cinematicStyle),
+    continuityState: continuityState(stylePreferences.continuityState),
+    memorySnapshots: memorySnapshots(stylePreferences.memorySnapshots),
+    relationshipMemory: relationshipMemory(stylePreferences.relationshipMemory),
+    appearanceDrift: appearanceDrift(stylePreferences.appearanceDrift),
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
     isSelf: true,
@@ -880,9 +926,16 @@ export async function loadSupabaseCharacters(userId: string): Promise<CharacterP
 export async function saveSupabaseCharacter(input: {
   userId: string;
   name: string;
+  displayName?: string | null;
   consentConfirmed: boolean;
   visibility: PrivacySetting;
   stylePreferences: Record<string, unknown>;
+  appearanceSummary?: string | null;
+  wardrobeTendencies?: string | null;
+  emotionalTendencies?: string | null;
+  soundtrackTendencies?: string | null;
+  cinematicStyle?: string | null;
+  relationshipMemory?: Record<string, CharacterRelationshipMemory>;
   referenceImageUrls: ReferenceImageUrls;
   referencePhotoNames?: Record<string, string | null>;
   sourceCaptureVideoUrl: string | null;
@@ -897,10 +950,19 @@ export async function saveSupabaseCharacter(input: {
     .insert({
       owner_user_id: input.userId,
       name: input.name,
+      display_name: input.displayName ?? input.name,
       status: 'ready',
       consent_confirmed: input.consentConfirmed,
       visibility: input.visibility,
-      style_preferences: cleanJsonRecord(input.stylePreferences),
+      style_preferences: cleanJsonRecord({
+        ...input.stylePreferences,
+        appearanceSummary: input.appearanceSummary ?? input.stylePreferences.appearanceSummary,
+        wardrobeTendencies: input.wardrobeTendencies ?? input.stylePreferences.wardrobeTendencies,
+        emotionalTendencies: input.emotionalTendencies ?? input.stylePreferences.emotionalTendencies,
+        soundtrackTendencies: input.soundtrackTendencies ?? input.stylePreferences.soundtrackTendencies,
+        cinematicStyle: input.cinematicStyle ?? input.stylePreferences.cinematicStyle,
+        relationshipMemory: input.relationshipMemory ?? input.stylePreferences.relationshipMemory,
+      }),
       reference_image_urls: cleanJsonRecord(cleanReferenceImageUrls(input.referenceImageUrls)),
       reference_photo_names: cleanJsonRecord(input.referencePhotoNames),
       source_capture_video_url: storageUrl(input.sourceCaptureVideoUrl, 'Character capture video'),
@@ -908,9 +970,89 @@ export async function saveSupabaseCharacter(input: {
       voice_sample_url: storageUrl(input.voiceSampleUrl, 'Character voice sample'),
       voice_sample_name: input.voiceSampleName ?? null,
       voice_sample_numbers: input.voiceSampleNumbers ?? null,
+      appearance_summary: input.appearanceSummary ?? '',
+      wardrobe_tendencies: input.wardrobeTendencies ?? '',
+      emotional_tendencies: input.emotionalTendencies ?? '',
+      soundtrack_tendencies: input.soundtrackTendencies ?? '',
+      cinematic_style: input.cinematicStyle ?? '',
+      continuity_state: cleanJsonRecord({
+        characterAppearance: input.appearanceSummary ?? '',
+        wardrobe: input.wardrobeTendencies ?? '',
+        emotionalTone: input.emotionalTendencies ?? '',
+        soundtrackMood: input.soundtrackTendencies ?? '',
+        cameraStyle: input.cinematicStyle ?? '',
+      }),
+      relationship_memory: cleanJsonRecord(input.relationshipMemory),
       is_self: false,
       is_creator_self: false,
     })
+    .select('*')
+    .single();
+
+  if (error) throw error;
+  return mapCharacterRow(data);
+}
+
+export async function updateSupabaseCharacterProfile(input: {
+  userId: string;
+  characterId: string;
+  name?: string;
+  displayName?: string | null;
+  stylePreferences?: Record<string, unknown>;
+  appearanceSummary?: string | null;
+  wardrobeTendencies?: string | null;
+  emotionalTendencies?: string | null;
+  soundtrackTendencies?: string | null;
+  cinematicStyle?: string | null;
+  relationshipMemory?: Record<string, CharacterRelationshipMemory>;
+}): Promise<CharacterProfile> {
+  const client = getClient();
+  const existingResult = await client
+    .from('characters')
+    .select('*')
+    .eq('owner_user_id', input.userId)
+    .eq('id', input.characterId)
+    .maybeSingle();
+
+  if (existingResult.error) throw existingResult.error;
+  if (!existingResult.data) throw new Error('Character profile not found.');
+
+  const existing = mapCharacterRow(existingResult.data);
+  const stylePreferences = cleanJsonRecord({
+    ...existing.stylePreferences,
+    ...(input.stylePreferences ?? {}),
+    appearanceSummary: input.appearanceSummary ?? existing.appearanceSummary ?? '',
+    wardrobeTendencies: input.wardrobeTendencies ?? existing.wardrobeTendencies ?? '',
+    emotionalTendencies: input.emotionalTendencies ?? existing.emotionalTendencies ?? '',
+    soundtrackTendencies: input.soundtrackTendencies ?? existing.soundtrackTendencies ?? '',
+    cinematicStyle: input.cinematicStyle ?? existing.cinematicStyle ?? '',
+    relationshipMemory: input.relationshipMemory ?? existing.relationshipMemory ?? {},
+  });
+
+  const { data, error } = await client
+    .from('characters')
+    .update({
+      name: input.name ?? existing.name,
+      display_name: input.displayName ?? input.name ?? existing.displayName ?? existing.name,
+      style_preferences: stylePreferences,
+      appearance_summary: input.appearanceSummary ?? existing.appearanceSummary ?? '',
+      wardrobe_tendencies: input.wardrobeTendencies ?? existing.wardrobeTendencies ?? '',
+      emotional_tendencies: input.emotionalTendencies ?? existing.emotionalTendencies ?? '',
+      soundtrack_tendencies: input.soundtrackTendencies ?? existing.soundtrackTendencies ?? '',
+      cinematic_style: input.cinematicStyle ?? existing.cinematicStyle ?? '',
+      relationship_memory: cleanJsonRecord(input.relationshipMemory ?? existing.relationshipMemory ?? {}),
+      continuity_state: cleanJsonRecord({
+        ...(existing.continuityState ?? {}),
+        characterAppearance: input.appearanceSummary ?? existing.appearanceSummary ?? '',
+        wardrobe: input.wardrobeTendencies ?? existing.wardrobeTendencies ?? '',
+        emotionalTone: input.emotionalTendencies ?? existing.emotionalTendencies ?? '',
+        soundtrackMood: input.soundtrackTendencies ?? existing.soundtrackTendencies ?? '',
+        cameraStyle: input.cinematicStyle ?? existing.cinematicStyle ?? '',
+      }),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('owner_user_id', input.userId)
+    .eq('id', input.characterId)
     .select('*')
     .single();
 

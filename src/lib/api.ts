@@ -110,6 +110,8 @@ export type CreativeBrainScenePlan = {
 
 export type CreativeBrainPlanPayload = {
   prompt: string;
+  userId?: string | null;
+  characterId?: string | null;
   characterMetadata?: Record<string, unknown> | null;
   styleTheme?: string | null;
 };
@@ -382,12 +384,39 @@ export type ApiHealthDiagnostics = {
     status: 'ready' | 'not_configured' | 'placeholder';
   }>;
   database?: {
+    ok?: boolean;
     serviceRoleConfigured: boolean;
     tables: Array<{
       ok: boolean;
+      name?: string;
+      label?: string;
       table: string;
       source: string;
       count?: number | null;
+      details?: Record<string, unknown>;
+      remediation?: string;
+      error?: unknown;
+    }>;
+    schemaChecks?: Array<{
+      ok: boolean;
+      name: string;
+      label: string;
+      source: string;
+      table?: string;
+      column?: string;
+      count?: number | null;
+      details?: Record<string, unknown>;
+      remediation?: string;
+      error?: unknown;
+    }>;
+    serviceRoleAccess?: Array<{
+      ok: boolean;
+      name: string;
+      label: string;
+      source: string;
+      table?: string;
+      details?: Record<string, unknown>;
+      remediation?: string;
       error?: unknown;
     }>;
     rlsPolicies: {
@@ -499,10 +528,43 @@ export type CreatorSelfStylePreferences = {
   colorsToAvoid?: string;
 };
 
+export type CharacterRelationshipMemory = {
+  targetCharacterId?: string | null;
+  targetDisplayName?: string | null;
+  relationshipSummary: string;
+  emotionalDynamic?: string | null;
+  lastSceneSummary?: string | null;
+  updatedAt: string;
+};
+
+export type CharacterMemorySnapshot = {
+  sceneExecutionId?: string | null;
+  sceneId?: string | null;
+  clipOrder?: number | null;
+  summary: string;
+  continuityState: Partial<ContinuityMemoryState>;
+  continuityConfidence: number;
+  capturedAt: string;
+};
+
+export type CharacterAppearanceDrift = {
+  field: 'appearanceSummary';
+  expected: string;
+  observed: string;
+  severity: 'low' | 'medium' | 'high';
+  reason: string;
+  detectedAt: string;
+  sceneExecutionId?: string | null;
+  sceneId?: string | null;
+  clipOrder?: number | null;
+};
+
 export type CharacterProfile = {
   id: string;
+  characterId?: string;
   ownerUserId: string;
   name: string;
+  displayName?: string | null;
   status: CharacterStatus;
   consentConfirmed: boolean;
   visibility: PrivacySetting;
@@ -520,6 +582,15 @@ export type CharacterProfile = {
   identityProfile?: LumoraIdentityProfile | null;
   creatorSelfFeatures?: Record<string, string>;
   creatorSelfStylePreferences?: CreatorSelfStylePreferences;
+  appearanceSummary?: string;
+  wardrobeTendencies?: string;
+  emotionalTendencies?: string;
+  soundtrackTendencies?: string;
+  cinematicStyle?: string;
+  continuityState?: Partial<ContinuityMemoryState>;
+  memorySnapshots?: CharacterMemorySnapshot[];
+  relationshipMemory?: Record<string, CharacterRelationshipMemory>;
+  appearanceDrift?: CharacterAppearanceDrift[];
   createdAt: string;
   updatedAt: string;
   isSelf?: boolean;
@@ -531,6 +602,12 @@ export type CreateCharacterPayload = {
   consentConfirmed: boolean;
   visibility?: PrivacySetting;
   stylePreferences?: Record<string, unknown>;
+  appearanceSummary?: string | null;
+  wardrobeTendencies?: string | null;
+  emotionalTendencies?: string | null;
+  soundtrackTendencies?: string | null;
+  cinematicStyle?: string | null;
+  relationshipMemory?: Record<string, CharacterRelationshipMemory>;
   referenceImages: {
     frontFace: MediaUploadInput;
     leftAngle: MediaUploadInput;

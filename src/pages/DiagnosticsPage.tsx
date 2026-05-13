@@ -72,10 +72,28 @@ export default function DiagnosticsPage() {
                   <span>service role</span>
                   <strong>{diagnostics.database.serviceRoleConfigured ? 'OK' : 'Missing'}</strong>
                 </p>
+                {typeof diagnostics.database.ok === 'boolean' ? (
+                  <p className="diagnostic-row">
+                    <span>schema rollout</span>
+                    <strong>{diagnostics.database.ok ? 'OK' : 'Needs migration'}</strong>
+                  </p>
+                ) : null}
                 {diagnostics.database.tables.map((table) => (
                   <p key={table.table} className="diagnostic-row">
-                    <span>{table.table}</span>
+                    <span>{table.label ?? table.table}</span>
                     <strong>{table.ok ? 'OK' : 'Error'}</strong>
+                  </p>
+                ))}
+                {diagnostics.database.schemaChecks?.map((check) => (
+                  <p key={check.name} className="diagnostic-row">
+                    <span>{check.label}</span>
+                    <strong>{check.ok ? 'OK' : 'Missing'}</strong>
+                  </p>
+                ))}
+                {diagnostics.database.serviceRoleAccess?.map((check) => (
+                  <p key={check.name} className="diagnostic-row">
+                    <span>{check.label}</span>
+                    <strong>{check.ok ? 'OK' : 'Check'}</strong>
                   </p>
                 ))}
                 <p className="diagnostic-row">

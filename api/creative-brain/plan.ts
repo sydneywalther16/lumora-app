@@ -3,6 +3,10 @@ import {
   createCreativeBrainPlan,
   CreativeBrainConfigurationError,
 } from '../../backend/src/services/creativeBrain';
+import {
+  getCinematicCharacterProfileForUser,
+  publicCharacterProfile,
+} from '../../backend/src/services/characterProfiles';
 import { checkRateLimit, sendRateLimitHeaders } from '../_lib/rateLimit';
 
 type CreativeBrainRequest = IncomingMessage & {
@@ -11,6 +15,8 @@ type CreativeBrainRequest = IncomingMessage & {
 
 type CreativeBrainRequestBody = {
   prompt?: unknown;
+  userId?: unknown;
+  characterId?: unknown;
   characterMetadata?: unknown;
   styleTheme?: unknown;
 };
@@ -98,11 +104,20 @@ export default async function handler(req: CreativeBrainRequest, res: ServerResp
     sendJson(res, 400, { error: 'Creative Brain requires a prompt.' });
     return;
   }
+  const userId = stringValue(body.userId);
+  const characterId = stringValue(body.characterId);
 
   try {
+    const characterProfile = userId && characterId
+      ? await getCinematicCharacterProfileForUser(userId, characterId).catch(() => null)
+      : null;
+    const characterMetadata = {
+      ...(recordValue(body.characterMetadata) ?? {}),
+      ...(characterProfile ? { characterProfile: publicCharacterProfile(characterProfile) } : {}),
+    };
     const result = await createCreativeBrainPlan({
       prompt,
-      characterMetadata: recordValue(body.characterMetadata),
+      characterMetadata,
       styleTheme: stringValue(body.styleTheme),
     });
     sendJson(res, 200, result);
