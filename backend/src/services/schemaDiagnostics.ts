@@ -345,7 +345,7 @@ async function checkProfileStatsQuery(): Promise<SchemaDiagnosticCheck> {
   }
 }
 
-async function checkCharacterDeletionCleanupDiagnostics(): Promise<SchemaDiagnosticCheck> {
+async function checkCharacterDeletionCleanupDiagnostics(): Promise<SchemaDiagnosticCheck[]> {
   try {
     const result = await query<{
       characterProfilesCount: number;
@@ -390,23 +390,82 @@ async function checkCharacterDeletionCleanupDiagnostics(): Promise<SchemaDiagnos
              )
          ), 0) as "orphanedGenerationReferences"`,
     );
-
-    return {
-      ok: true,
-      name: 'query.characters.deletion-cleanup',
-      label: 'character deletion cleanup diagnostics query works',
-      source: 'database-url',
-      details: result.rows[0] ?? {},
+    const details = result.rows[0] ?? {
+      characterProfilesCount: 0,
+      orphanedMemoryEntries: 0,
+      orphanedModerationMemoryEntries: 0,
+      orphanedGenerationReferences: 0,
     };
+
+    return [
+      {
+        ok: details.orphanedMemoryEntries === 0 && details.orphanedModerationMemoryEntries === 0,
+        name: 'query.characters.deletion-cleanup',
+        label: 'deleted character cleanup validation',
+        source: 'database-url',
+        details,
+        remediation: details.orphanedMemoryEntries === 0 && details.orphanedModerationMemoryEntries === 0
+          ? undefined
+          : 'Run character cleanup for orphaned continuity or orchestration memory rows.',
+      },
+      {
+        ok: details.orphanedMemoryEntries === 0,
+        name: 'query.characters.orphaned-continuity-memory',
+        label: 'orphaned continuity memory check',
+        source: 'database-url',
+        count: details.orphanedMemoryEntries,
+        remediation: details.orphanedMemoryEntries === 0 ? undefined : 'Delete continuity_memory_states rows for removed character profiles when safe.',
+      },
+      {
+        ok: details.orphanedModerationMemoryEntries === 0,
+        name: 'query.characters.orphaned-orchestration-memory',
+        label: 'orphaned orchestration memory check',
+        source: 'database-url',
+        count: details.orphanedModerationMemoryEntries,
+        remediation: details.orphanedModerationMemoryEntries === 0 ? undefined : 'Delete moderation_orchestration_memory rows for removed character profiles when safe.',
+      },
+      {
+        ok: true,
+        name: 'query.characters.orphaned-generation-references',
+        label: 'orphaned generation references tracked',
+        source: 'database-url',
+        count: details.orphanedGenerationReferences,
+        details: {
+          preservedHistoryReferences: details.orphanedGenerationReferences,
+          note: 'Historical generation references may remain so old videos and scene snapshots keep rendering.',
+        },
+      },
+    ];
   } catch (error) {
-    return {
+    const failedCheck = {
       ok: false,
-      name: 'query.characters.deletion-cleanup',
-      label: 'character deletion cleanup diagnostics query works',
-      source: 'database-url',
+      source: 'database-url' as const,
       error: serializeDiagnosticError(error),
       remediation: 'Apply Character Profiles, Memory Engine, Scene Executor, and Moderation Orchestrator migrations.',
     };
+
+    return [
+      {
+        ...failedCheck,
+        name: 'query.characters.deletion-cleanup',
+        label: 'deleted character cleanup validation',
+      },
+      {
+        ...failedCheck,
+        name: 'query.characters.orphaned-continuity-memory',
+        label: 'orphaned continuity memory check',
+      },
+      {
+        ...failedCheck,
+        name: 'query.characters.orphaned-orchestration-memory',
+        label: 'orphaned orchestration memory check',
+      },
+      {
+        ...failedCheck,
+        name: 'query.characters.orphaned-generation-references',
+        label: 'orphaned generation references tracked',
+      },
+    ];
   }
 }
 
@@ -581,7 +640,7 @@ export async function buildDatabaseDiagnostics() {
     ...mediaFallbackChecks,
     publishedPostsQuery,
     profileStatsQuery,
-    characterDeletionCleanupDiagnostics,
+    ...characterDeletionCleanupDiagnostics,
     ownProfileRlsPolicies,
     ...indexChecks,
   ];

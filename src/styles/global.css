@@ -1307,6 +1307,211 @@ button {
   gap: 10px;
 }
 
+.character-hub-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: grid;
+  place-items: center;
+  padding: clamp(12px, 3vw, 28px);
+  background: color-mix(in srgb, var(--app-background) 72%, transparent);
+  backdrop-filter: blur(18px);
+  animation: castOverlayIn 160ms ease-out;
+}
+
+.character-hub-panel {
+  position: relative;
+  width: min(760px, 100%);
+  height: min(860px, 100%);
+  max-height: calc(100dvh - 24px);
+  overflow: hidden;
+  border: 1px solid var(--surface-border);
+  border-radius: 28px;
+  background: var(--panel-background);
+  box-shadow: var(--modal-shadow);
+}
+
+.character-hub-scroll {
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: clamp(18px, 4vw, 30px);
+}
+
+.character-hub-view {
+  display: grid;
+  gap: 16px;
+}
+
+.character-hub-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--surface-border);
+  border-radius: 999px;
+  color: var(--muted-text);
+  background: var(--surface-strong);
+  box-shadow: var(--selected-shadow);
+}
+
+.character-hub-close:hover {
+  color: var(--text-primary);
+  border-color: var(--selected-outline);
+}
+
+.character-list-view {
+  padding-right: 44px;
+}
+
+.character-list-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.character-cast-row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 76px;
+  padding: 10px 12px;
+  text-align: left;
+  color: var(--control-text);
+  border: 1px solid var(--surface-border);
+  border-radius: 20px;
+  background: var(--control-background);
+  transition: transform 150ms ease, border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+}
+
+.character-cast-row:hover {
+  transform: translateY(-1px);
+  border-color: var(--selected-outline);
+  background: var(--surface-strong);
+  box-shadow: var(--selected-shadow);
+}
+
+.character-cast-row-self {
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  margin-bottom: 6px;
+  border-color: color-mix(in srgb, var(--selected-outline) 55%, var(--surface-border));
+  background: linear-gradient(135deg, var(--surface-strong), var(--control-background));
+}
+
+.character-cast-row strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.character-detail-page {
+  gap: 14px;
+}
+
+.character-detail-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-right: 44px;
+}
+
+.character-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.character-actions-button {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid var(--surface-border);
+  border-radius: 999px;
+  color: var(--text-primary);
+  background: var(--surface-strong);
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.character-actions-button:hover {
+  border-color: var(--selected-outline);
+  box-shadow: var(--selected-shadow);
+}
+
+.character-detail-hero {
+  padding: 14px;
+  border: 1px solid var(--surface-border);
+  border-radius: 24px;
+  background: var(--surface-strong);
+}
+
+.character-detail-identity {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+}
+
+.character-detail-editor {
+  padding: 14px;
+  border-radius: 20px;
+}
+
+.character-detail-sections {
+  display: grid;
+  gap: 10px;
+}
+
+.character-section-card {
+  padding: 12px;
+  border-radius: 18px;
+}
+
+@keyframes castOverlayIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 640px) {
+  .character-hub-overlay {
+    align-items: end;
+    padding: 0;
+  }
+
+  .character-hub-panel {
+    width: 100%;
+    height: 92dvh;
+    max-height: 92dvh;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 28px 28px 0 0;
+  }
+
+  .character-hub-scroll {
+    padding: 18px 16px 24px;
+  }
+
+  .character-list-view,
+  .character-detail-topbar {
+    padding-right: 42px;
+  }
+
+  .character-detail-identity {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+}
+
 .character-profile-editor,
 .character-memory-viewer {
   display: grid;

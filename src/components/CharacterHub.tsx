@@ -86,6 +86,78 @@ function metadataLine(label: string, value: unknown) {
   return <p><strong>{label}</strong> {text}</p>;
 }
 
+function compactValue(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    return value
+      .map(compactValue)
+      .filter(Boolean)
+      .slice(0, 4)
+      .join(', ');
+  }
+  if (value && typeof value === 'object') {
+    const pairs = Object.entries(value as Record<string, unknown>)
+      .map(([key, entryValue]) => [key, compactValue(entryValue)] as const)
+      .filter(([, entryValue]) => entryValue)
+      .slice(0, 4);
+    return pairs.map(([key, entryValue]) => `${key}: ${entryValue}`).join(' / ');
+  }
+  return '';
+}
+
+function stylePreferenceEntries(character: CharacterProfile): Array<readonly [string, string]> {
+  const preferences = character.stylePreferences ?? {};
+  const entries: Array<[string, unknown]> = [
+    ['Everyday style', preferences.everydayStyle],
+    ['Glam style', preferences.glamStyle],
+    ['Wardrobe', preferences.videoWardrobe ?? preferences.fashionStyle],
+    ['Colors to favor', preferences.colorsToFavor],
+    ['Colors to avoid', preferences.colorsToAvoid ?? preferences.colorsItemsToAvoid],
+    ['Character vibe', preferences.characterVibe],
+  ];
+
+  return entries
+    .map(([label, value]) => [label, compactValue(value)] as const)
+    .filter(([, value]) => value);
+}
+
+function orchestrationMemoryEntries(character: CharacterProfile): Array<readonly [string, string]> {
+  const preferences = character.stylePreferences ?? {};
+  const entries: Array<[string, unknown]> = [
+    ['Rendering mode', preferences.renderingMode ?? preferences.realismMode ?? preferences.preferredRenderingMode],
+    ['Successful fallback', preferences.successfulFallbackPath ?? preferences.lastSuccessfulFallbackPath],
+    ['Provider preference', preferences.providerFallbackPreference ?? preferences.stylizationFallbackPreference],
+    ['Moderation memory', preferences.moderationMemory ?? preferences.moderationRewritePreferences ?? preferences.moderationSafeRewritePreferences],
+    ['Continuity inheritance', preferences.continuityInheritance ?? preferences.inheritedContinuity],
+  ];
+
+  return entries
+    .map(([label, value]) => [label, compactValue(value)] as const)
+    .filter(([, value]) => value);
+}
+
+function CharacterHubFrame({
+  children,
+  onClose,
+}: {
+  children: ReactNode;
+  onClose: () => void;
+}) {
+  return (
+    <div className="character-hub-overlay" role="presentation">
+      <div className="character-hub-panel" role="dialog" aria-modal="true" aria-label="Characters">
+        <div className="character-hub-scroll">
+          {children}
+        </div>
+        <button type="button" className="character-hub-close" aria-label="Close characters" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ModalShell({ children }: { children: ReactNode }) {
   return (
     <div
@@ -169,6 +241,17 @@ export default function CharacterHub({
       setConfirmDeleteOpen(false);
       setDeleteStatus('');
     }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || typeof document === 'undefined') return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
   }, [open]);
 
   useEffect(() => {
@@ -328,7 +411,8 @@ export default function CharacterHub({
 
   if (creatingCharacter) {
     return (
-      <section style={{ marginTop: '18px', display: 'grid', gap: '18px' }}>
+      <CharacterHubFrame onClose={onClose}>
+      <section className="character-hub-view">
         <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <div>
             <span className="eyebrow">characters</span>
@@ -343,12 +427,14 @@ export default function CharacterHub({
         </div>
         <CharacterCapture onCreated={() => void refreshAfterCreate()} />
       </section>
+      </CharacterHubFrame>
     );
   }
 
   if (selfSetupOpen) {
     return (
-      <section style={{ marginTop: '18px', display: 'grid', gap: '18px' }}>
+      <CharacterHubFrame onClose={onClose}>
+      <section className="character-hub-view character-detail-page">
         <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <div>
             <span className="eyebrow">characters</span>
@@ -368,6 +454,7 @@ export default function CharacterHub({
           </article>
         )}
       </section>
+      </CharacterHubFrame>
     );
   }
 
@@ -376,26 +463,30 @@ export default function CharacterHub({
     const memoryEntries = Object.entries(selectedCharacter.continuityState ?? {})
       .filter(([, value]) => Boolean(value))
       .slice(0, 8);
+    const styleEntries = stylePreferenceEntries(selectedCharacter);
+    const orchestrationEntries = orchestrationMemoryEntries(selectedCharacter);
 
     return (
-      <section style={{ marginTop: '18px', display: 'grid', gap: '18px' }}>
-        <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start' }}>
+      <CharacterHubFrame onClose={onClose}>
+      <section className="character-hub-view character-detail-page">
+        <div className="character-detail-topbar">
           <button type="button" className="text-btn" onClick={returnToList}>
             Back
           </button>
-          <button
-            type="button"
-            className="text-btn"
-            aria-label="Character actions"
-            onClick={() => setActionsOpen(true)}
-            style={{ fontSize: '1.35rem', lineHeight: 1 }}
-          >
-            ...
-          </button>
+          <div className="character-detail-actions">
+            <button
+              type="button"
+              className="character-actions-button"
+              aria-label="Character actions"
+              onClick={() => setActionsOpen(true)}
+            >
+              ...
+            </button>
+          </div>
         </div>
 
-        <article className="list-card" style={{ borderRadius: '26px', padding: '18px', background: 'var(--surface-strong)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '72px minmax(0, 1fr)', gap: '14px', alignItems: 'center' }}>
+        <article className="character-detail-hero">
+          <div className="character-detail-identity">
             <CharacterThumbnail character={selectedCharacter} size={72} />
             <div style={{ minWidth: 0 }}>
               <span className="tiny-pill">{selectedIsSelf ? 'Self' : 'Cast member'}</span>
@@ -421,7 +512,7 @@ export default function CharacterHub({
             {children}
           </>
         ) : (
-          <div className="character-profile-editor" style={{ marginTop: 0 }}>
+          <div className="character-profile-editor character-detail-editor" style={{ marginTop: 0 }}>
             <div className="row-between">
               <div>
                 <span className="eyebrow">profile</span>
@@ -472,7 +563,8 @@ export default function CharacterHub({
           </div>
         )}
 
-        <div className="character-memory-viewer">
+        <div className="character-detail-sections">
+        <div className="character-memory-viewer character-section-card">
           <span className="eyebrow">reference photos</span>
           {refs.length ? (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(92px, 1fr))', gap: '10px' }}>
@@ -490,7 +582,7 @@ export default function CharacterHub({
           )}
         </div>
 
-        <div className="character-memory-viewer">
+        <div className="character-memory-viewer character-section-card">
           <span className="eyebrow">continuity memory</span>
           {memoryEntries.length ? (
             memoryEntries.map(([field, value]) => (
@@ -506,7 +598,29 @@ export default function CharacterHub({
           ))}
         </div>
 
-        <div className="character-memory-viewer">
+        <div className="character-memory-viewer character-section-card">
+          <span className="eyebrow">style preferences</span>
+          {styleEntries.length ? (
+            styleEntries.map(([label, value]) => (
+              <p key={label}><strong>{label}</strong> {value}</p>
+            ))
+          ) : (
+            <p className="muted">No style preferences saved yet.</p>
+          )}
+        </div>
+
+        <div className="character-memory-viewer character-section-card">
+          <span className="eyebrow">orchestration memory</span>
+          {orchestrationEntries.length ? (
+            orchestrationEntries.map(([label, value]) => (
+              <p key={label}><strong>{label}</strong> {value}</p>
+            ))
+          ) : (
+            <p className="muted">No orchestration memory saved yet.</p>
+          )}
+        </div>
+
+        <div className="character-memory-viewer character-section-card">
           <span className="eyebrow">style and voice</span>
           {metadataLine('Soundtrack', selectedCharacter.soundtrackTendencies)}
           {metadataLine('Voice sample', selectedCharacter.voiceSampleName || selectedCharacter.voiceSampleNumbers || selectedCharacter.voiceSampleUrl)}
@@ -514,6 +628,7 @@ export default function CharacterHub({
           {!selectedCharacter.soundtrackTendencies && !selectedCharacter.voiceSampleUrl && !selectedCharacter.sourceCaptureVideoUrl ? (
             <p className="muted">No voice or style media saved yet.</p>
           ) : null}
+        </div>
         </div>
 
         {actionsOpen ? (
@@ -552,7 +667,7 @@ export default function CharacterHub({
             <div style={{ display: 'grid', gap: '12px' }}>
               <h3 style={{ margin: 0 }}>Delete character?</h3>
               <p className="muted" style={{ margin: 0 }}>
-                This permanently removes the character, continuity memory, and reusable cast profile from Lumora.
+                This permanently removes the reusable cast profile and continuity memory from Lumora.
               </p>
               {deleteStatus ? <p className="muted">{deleteStatus}</p> : null}
               <div className="button-row">
@@ -573,11 +688,13 @@ export default function CharacterHub({
           </ModalShell>
         ) : null}
       </section>
+      </CharacterHubFrame>
     );
   }
 
   return (
-    <section style={{ marginTop: '18px', display: 'grid', gap: '16px' }}>
+    <CharacterHubFrame onClose={onClose}>
+    <section className="character-hub-view character-list-view">
       <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div>
           <span className="eyebrow">characters</span>
@@ -586,9 +703,6 @@ export default function CharacterHub({
             Manage your reusable cinematic cast.
           </p>
         </div>
-        <button type="button" className="text-btn" onClick={onClose}>
-          Close
-        </button>
       </div>
 
       <div className="row-between" style={{ gap: '12px', flexWrap: 'wrap' }}>
@@ -602,13 +716,12 @@ export default function CharacterHub({
         )}
       </div>
 
-      <div style={{ display: 'grid', gap: '10px' }}>
+      <div className="character-list-stack">
         {selfCharacter ? (
           <button
             type="button"
-            className="list-card"
+            className="character-cast-row character-cast-row-self"
             role="button"
-            style={{ display: 'grid', gridTemplateColumns: '56px minmax(0, 1fr) auto', gap: '12px', alignItems: 'center', padding: '12px', textAlign: 'left' }}
             onClick={() => openCharacterDetail(selfCharacter)}
           >
             <CharacterThumbnail character={selfCharacter} />
@@ -618,9 +731,8 @@ export default function CharacterHub({
         ) : (
           <button
             type="button"
-            className="list-card"
+            className="character-cast-row character-cast-row-self"
             role="button"
-            style={{ display: 'grid', gridTemplateColumns: '56px minmax(0, 1fr) auto', gap: '12px', alignItems: 'center', padding: '12px', textAlign: 'left' }}
             onClick={openSelfSetup}
           >
             <span className="character-avatar" style={{ width: '56px', height: '56px', borderRadius: '18px' }}>S</span>
@@ -633,9 +745,8 @@ export default function CharacterHub({
           <button
             key={character.id}
             type="button"
-            className="list-card"
+            className="character-cast-row"
             role="button"
-            style={{ display: 'grid', gridTemplateColumns: '56px minmax(0, 1fr)', gap: '12px', alignItems: 'center', padding: '12px', textAlign: 'left' }}
             onClick={() => openCharacterDetail(character)}
           >
             <CharacterThumbnail character={character} />
@@ -651,5 +762,6 @@ export default function CharacterHub({
         ) : null}
       </div>
     </section>
+    </CharacterHubFrame>
   );
 }
