@@ -411,3 +411,20 @@ export function updateLocalCharacterProfile(input: {
   )));
   return updated;
 }
+
+export function deleteLocalCharacterProfile(characterId: string): boolean {
+  const characters = getStoredCharacters();
+  const current = characters.find((character) => (
+    character.id === characterId || character.characterId === characterId
+  ));
+
+  if (!current) return false;
+  if (current.id === CREATOR_SELF_CHARACTER_ID || current.characterId === CREATOR_SELF_CHARACTER_ID || current.isCreatorSelf === true) {
+    return false;
+  }
+
+  saveStoredCharacters(characters.filter((character) => (
+    character.id !== current.id && character.characterId !== current.characterId
+  )));
+  return true;
+}

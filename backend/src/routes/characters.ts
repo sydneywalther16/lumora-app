@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireAuth, type AuthedRequest } from '../middleware/auth';
 import {
   createCharacterProfile,
+  deleteCharacterProfileForUser,
   getCharacterProfileForUser,
   listCharacterProfilesForUser,
   updateCharacterProfileForUser,
@@ -100,6 +101,44 @@ charactersRouter.get('/:id', async (req: AuthedRequest, res) => {
   }
 
   res.json({ character });
+});
+
+charactersRouter.delete('/:id', async (req: AuthedRequest, res) => {
+  const characterId = stringRouteParam(req.params.id);
+  if (!characterId) {
+    res.status(400).json({ error: 'Character id is required.' });
+    return;
+  }
+
+  try {
+    const result = await deleteCharacterProfileForUser({
+      ownerUserId: req.userId!,
+      characterId,
+    });
+
+    if (!result) {
+      res.status(404).json({ error: 'Character profile not found.' });
+      return;
+    }
+
+    res.json({
+      deleted: true,
+      characterId: result.character.characterId,
+      preservedGenerationReferences: result.preservedGenerationReferences,
+      cleanup: {
+        characterProfiles: result.deletedCharacterProfiles,
+        continuityMemory: result.deletedContinuityMemory,
+        moderationMemory: result.deletedModerationMemory,
+      },
+    });
+  } catch (error) {
+    const statusCode = typeof (error as { statusCode?: unknown })?.statusCode === 'number'
+      ? (error as { statusCode: number }).statusCode
+      : 500;
+    res.status(statusCode).json({
+      error: error instanceof Error ? error.message : 'Unable to delete character profile.',
+    });
+  }
 });
 
 charactersRouter.post('/', async (req: AuthedRequest, res) => {

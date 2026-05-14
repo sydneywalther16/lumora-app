@@ -675,6 +675,17 @@ export type CreateCharacterPayload = {
   voiceSample?: MediaUploadInput;
 };
 
+export type DeleteCharacterResponse = {
+  deleted: boolean;
+  characterId: string;
+  preservedGenerationReferences: number;
+  cleanup: {
+    characterProfiles: number;
+    continuityMemory: number;
+    moderationMemory: number;
+  };
+};
+
 export type LumoraPost = {
   id: string;
   userId?: string | null;
@@ -782,6 +793,11 @@ export const api = {
     request<{ character: CharacterProfile }>(`/api/characters/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
+    }),
+
+  deleteCharacter: (id: string) =>
+    request<DeleteCharacterResponse>(`/api/characters/${id}`, {
+      method: 'DELETE',
     }),
 
   listProjects: () => request<{ projects: Array<Record<string, unknown>> }>('/api/projects'),

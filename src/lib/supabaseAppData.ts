@@ -1078,7 +1078,58 @@ export async function updateSupabaseCharacterProfile(input: {
     .maybeSingle();
 
   if (existingResult.error) throw existingResult.error;
-  if (!existingResult.data) throw new Error('Character profile not found.');
+  if (!existingResult.data) {
+    const profileResult = await client
+      .from('character_profiles')
+      .select('*')
+      .eq('owner_user_id', input.userId)
+      .eq('id', input.characterId)
+      .maybeSingle();
+
+    if (profileResult.error) throw profileResult.error;
+    if (!profileResult.data) throw new Error('Character profile not found.');
+
+    const existingProfile = mapCharacterProfileRow(profileResult.data);
+    const stylePreferences = cleanJsonRecord({
+      ...existingProfile.stylePreferences,
+      ...(input.stylePreferences ?? {}),
+      appearanceSummary: input.appearanceSummary ?? existingProfile.appearanceSummary ?? '',
+      wardrobeTendencies: input.wardrobeTendencies ?? existingProfile.wardrobeTendencies ?? '',
+      emotionalTendencies: input.emotionalTendencies ?? existingProfile.emotionalTendencies ?? '',
+      soundtrackTendencies: input.soundtrackTendencies ?? existingProfile.soundtrackTendencies ?? '',
+      cinematicStyle: input.cinematicStyle ?? existingProfile.cinematicStyle ?? '',
+      relationshipMemory: input.relationshipMemory ?? existingProfile.relationshipMemory ?? {},
+    });
+    const { data, error } = await client
+      .from('character_profiles')
+      .update({
+        name: input.name ?? existingProfile.name,
+        display_name: input.displayName ?? input.name ?? existingProfile.displayName ?? existingProfile.name,
+        style_preferences: stylePreferences,
+        appearance_summary: input.appearanceSummary ?? existingProfile.appearanceSummary ?? '',
+        wardrobe_tendencies: input.wardrobeTendencies ?? existingProfile.wardrobeTendencies ?? '',
+        emotional_tendencies: input.emotionalTendencies ?? existingProfile.emotionalTendencies ?? '',
+        soundtrack_tendencies: input.soundtrackTendencies ?? existingProfile.soundtrackTendencies ?? '',
+        cinematic_style: input.cinematicStyle ?? existingProfile.cinematicStyle ?? '',
+        relationship_memory: cleanJsonRecord(input.relationshipMemory ?? existingProfile.relationshipMemory ?? {}),
+        continuity_state: cleanJsonRecord({
+          ...(existingProfile.continuityState ?? {}),
+          characterAppearance: input.appearanceSummary ?? existingProfile.appearanceSummary ?? '',
+          wardrobe: input.wardrobeTendencies ?? existingProfile.wardrobeTendencies ?? '',
+          emotionalTone: input.emotionalTendencies ?? existingProfile.emotionalTendencies ?? '',
+          soundtrackMood: input.soundtrackTendencies ?? existingProfile.soundtrackTendencies ?? '',
+          cameraStyle: input.cinematicStyle ?? existingProfile.cinematicStyle ?? '',
+        }),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('owner_user_id', input.userId)
+      .eq('id', input.characterId)
+      .select('*')
+      .single();
+
+    if (error) throw error;
+    return mapCharacterProfileRow(data);
+  }
 
   const existing = mapCharacterRow(existingResult.data);
   const stylePreferences = cleanJsonRecord({
@@ -1121,6 +1172,101 @@ export async function updateSupabaseCharacterProfile(input: {
 
   if (error) throw error;
   return mapCharacterRow(data);
+}
+
+function missingCleanupSchemaError(error: unknown) {
+  const message = error && typeof error === 'object'
+    ? JSON.stringify(error)
+    : String(error);
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('42p01') ||
+    lower.includes('42703') ||
+    lower.includes('continuity_memory_states') ||
+    lower.includes('moderation_orchestration_memory') ||
+    lower.includes('character_profiles') ||
+    lower.includes('characters')
+  );
+}
+
+function isUuidLike(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+async function bestEffortDeleteByCharacterIds(input: {
+  table: string;
+  userColumn: string;
+  userId: string;
+  characterIds: string[];
+}) {
+  const client = getClient();
+  const { error } = await client
+    .from(input.table)
+    .delete()
+    .eq(input.userColumn, input.userId)
+    .in('character_id', input.characterIds);
+
+  if (error && !missingCleanupSchemaError(error)) throw error;
+}
+
+export async function deleteSupabaseCharacterProfile(input: {
+  userId: string;
+  character: CharacterProfile;
+}): Promise<void> {
+  const client = getClient();
+  const characterIds = Array.from(new Set([
+    input.character.id,
+    input.character.characterId,
+  ].filter((value): value is string => Boolean(value && value.trim()))));
+
+  if (input.character.id === CREATOR_SELF_CHARACTER_ID || input.character.characterId === CREATOR_SELF_CHARACTER_ID || input.character.isCreatorSelf) {
+    throw new Error('Self character cannot be deleted in v1.');
+  }
+
+  await bestEffortDeleteByCharacterIds({
+    table: 'continuity_memory_states',
+    userColumn: 'user_id',
+    userId: input.userId,
+    characterIds,
+  });
+  await bestEffortDeleteByCharacterIds({
+    table: 'moderation_orchestration_memory',
+    userColumn: 'user_id',
+    userId: input.userId,
+    characterIds,
+  });
+
+  const profileDelete = await client
+    .from('character_profiles')
+    .delete()
+    .eq('owner_user_id', input.userId)
+    .in('character_id', characterIds);
+
+  if (profileDelete.error && !missingCleanupSchemaError(profileDelete.error)) {
+    throw profileDelete.error;
+  }
+
+  const profileIdDelete = isUuidLike(input.character.id)
+    ? await client
+        .from('character_profiles')
+        .delete()
+        .eq('owner_user_id', input.userId)
+        .eq('id', input.character.id)
+    : { error: null };
+
+  if (profileIdDelete.error && !missingCleanupSchemaError(profileIdDelete.error)) {
+    throw profileIdDelete.error;
+  }
+
+  const legacyDelete = await client
+    .from('characters')
+    .delete()
+    .eq('owner_user_id', input.userId)
+    .in('id', characterIds);
+
+  if (legacyDelete.error && !missingCleanupSchemaError(legacyDelete.error)) {
+    throw legacyDelete.error;
+  }
 }
 
 export async function saveSupabaseCreatorSelfCharacter(input: {

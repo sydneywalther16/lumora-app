@@ -138,6 +138,14 @@ export type CharacterProfilePatch = Partial<{
   appearanceDrift: CharacterAppearanceDrift[];
 }>;
 
+export type DeleteCharacterProfileResult = {
+  character: CharacterProfile;
+  deletedCharacterProfiles: number;
+  deletedContinuityMemory: number;
+  deletedModerationMemory: number;
+  preservedGenerationReferences: number;
+};
+
 const emptyContinuityState: ContinuityMemoryState = {
   characterAppearance: '',
   wardrobe: '',
@@ -269,6 +277,97 @@ function rowToCharacterProfile(row: CharacterProfileRow): CharacterProfile {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+function optionalCleanupSchemaError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('42p01') ||
+    lower.includes('42703') ||
+    lower.includes('continuity_memory_states') ||
+    lower.includes('moderation_orchestration_memory') ||
+    lower.includes('generation_jobs')
+  );
+}
+
+function characterProfileIdentifiers(profile: CharacterProfile, requestedCharacterId: string) {
+  return Array.from(new Set([
+    requestedCharacterId,
+    profile.id,
+    profile.characterId,
+  ].filter((value): value is string => Boolean(value && value.trim()))));
+}
+
+function isSelfCharacterProfile(profile: CharacterProfile) {
+  return profile.id === 'creator-self' || profile.characterId === 'creator-self';
+}
+
+async function safeCountGenerationReferences(input: {
+  ownerUserId: string;
+  characterIds: string[];
+}) {
+  try {
+    const result = await query<{ count: number }>(
+      `select count(*)::int
+       from generation_jobs
+       where user_id = $1
+         and character_id = any($2::text[])`,
+      [input.ownerUserId, input.characterIds],
+    );
+    return result.rows[0]?.count ?? 0;
+  } catch (error) {
+    if (optionalCleanupSchemaError(error)) return 0;
+    throw error;
+  }
+}
+
+async function safeDeleteContinuityMemory(input: {
+  ownerUserId: string;
+  characterIds: string[];
+}) {
+  try {
+    const memoryScopes = input.characterIds.map((id) => `character:${id}`);
+    const result = await query<{ count: number }>(
+      `with deleted as (
+         delete from continuity_memory_states
+         where user_id = $1
+           and (
+             character_id = any($2::text[])
+             or memory_scope = any($3::text[])
+           )
+         returning 1
+       )
+       select count(*)::int from deleted`,
+      [input.ownerUserId, input.characterIds, memoryScopes],
+    );
+    return result.rows[0]?.count ?? 0;
+  } catch (error) {
+    if (optionalCleanupSchemaError(error)) return 0;
+    throw error;
+  }
+}
+
+async function safeDeleteModerationMemory(input: {
+  ownerUserId: string;
+  characterIds: string[];
+}) {
+  try {
+    const result = await query<{ count: number }>(
+      `with deleted as (
+         delete from moderation_orchestration_memory
+         where user_id = $1
+           and character_id = any($2::text[])
+         returning 1
+       )
+       select count(*)::int from deleted`,
+      [input.ownerUserId, input.characterIds],
+    );
+    return result.rows[0]?.count ?? 0;
+  } catch (error) {
+    if (optionalCleanupSchemaError(error)) return 0;
+    throw error;
+  }
 }
 
 function uniqueTokens(value: string) {
@@ -565,6 +664,53 @@ export async function updateCharacterProfileForUser(input: {
   );
 
   return result.rows[0] ? rowToCharacterProfile(result.rows[0]) : null;
+}
+
+export async function deleteCharacterProfileForUser(input: {
+  ownerUserId: string;
+  characterId: string;
+}): Promise<DeleteCharacterProfileResult | null> {
+  const current = await getCharacterProfileForUser(input.ownerUserId, input.characterId);
+  if (!current) return null;
+
+  if (isSelfCharacterProfile(current)) {
+    throw Object.assign(new Error('Self character cannot be deleted in v1.'), {
+      statusCode: 409,
+      code: 'SELF_CHARACTER_DELETE_DISABLED',
+    });
+  }
+
+  const characterIds = characterProfileIdentifiers(current, input.characterId);
+  const preservedGenerationReferences = await safeCountGenerationReferences({
+    ownerUserId: input.ownerUserId,
+    characterIds,
+  });
+  const deletedContinuityMemory = await safeDeleteContinuityMemory({
+    ownerUserId: input.ownerUserId,
+    characterIds,
+  });
+  const deletedModerationMemory = await safeDeleteModerationMemory({
+    ownerUserId: input.ownerUserId,
+    characterIds,
+  });
+  const result = await query<{ count: number }>(
+    `with deleted as (
+       delete from character_profiles
+       where owner_user_id = $1
+         and (id::text = $2 or character_id = $2)
+       returning 1
+     )
+     select count(*)::int from deleted`,
+    [input.ownerUserId, input.characterId],
+  );
+
+  return {
+    character: current,
+    deletedCharacterProfiles: result.rows[0]?.count ?? 0,
+    deletedContinuityMemory,
+    deletedModerationMemory,
+    preservedGenerationReferences,
+  };
 }
 
 export async function inheritCharacterContinuity(input: {

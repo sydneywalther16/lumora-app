@@ -1744,7 +1744,7 @@ export default function ProfilePage() {
     if (localStorage.getItem('lumora_open_characters_hub') !== '1') return;
     localStorage.removeItem('lumora_open_characters_hub');
     setCharacterHubOpen(true);
-    void openSelfCharacterEditor();
+    setEditingSelfCharacter(false);
   }, [isHydrated]);
 
   async function refreshProfileData() {
@@ -1938,6 +1938,11 @@ export default function ProfilePage() {
 
   function closeCharactersHub() {
     setCharacterHubOpen(false);
+    setEditingSelfCharacter(false);
+  }
+
+  function openCharactersHub() {
+    setCharacterHubOpen(true);
     setEditingSelfCharacter(false);
   }
 
@@ -2931,7 +2936,7 @@ export default function ProfilePage() {
             <button type="button" className="primary-btn" onClick={openProfileEditor}>
               Edit profile
             </button>
-            <button type="button" className="ghost-btn" onClick={() => void openSelfCharacterEditor()}>
+            <button type="button" className="ghost-btn" onClick={openCharactersHub}>
               Characters
             </button>
           </div>

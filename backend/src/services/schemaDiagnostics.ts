@@ -345,6 +345,71 @@ async function checkProfileStatsQuery(): Promise<SchemaDiagnosticCheck> {
   }
 }
 
+async function checkCharacterDeletionCleanupDiagnostics(): Promise<SchemaDiagnosticCheck> {
+  try {
+    const result = await query<{
+      characterProfilesCount: number;
+      orphanedMemoryEntries: number;
+      orphanedModerationMemoryEntries: number;
+      orphanedGenerationReferences: number;
+    }>(
+      `select
+         coalesce((select count(*)::int from character_profiles), 0) as "characterProfilesCount",
+         coalesce((
+           select count(*)::int
+           from continuity_memory_states cms
+           where cms.character_id is not null
+             and not exists (
+               select 1
+               from character_profiles cp
+               where cp.owner_user_id = cms.user_id
+                 and (cp.character_id = cms.character_id or cp.id::text = cms.character_id)
+             )
+         ), 0) as "orphanedMemoryEntries",
+         coalesce((
+           select count(*)::int
+           from moderation_orchestration_memory mom
+           where mom.character_id is not null
+             and mom.user_id is not null
+             and not exists (
+               select 1
+               from character_profiles cp
+               where cp.owner_user_id = mom.user_id
+                 and (cp.character_id = mom.character_id or cp.id::text = mom.character_id)
+             )
+         ), 0) as "orphanedModerationMemoryEntries",
+         coalesce((
+           select count(*)::int
+           from generation_jobs gj
+           where gj.character_id is not null
+             and not exists (
+               select 1
+               from character_profiles cp
+               where cp.owner_user_id = gj.user_id
+                 and (cp.character_id = gj.character_id or cp.id::text = gj.character_id)
+             )
+         ), 0) as "orphanedGenerationReferences"`,
+    );
+
+    return {
+      ok: true,
+      name: 'query.characters.deletion-cleanup',
+      label: 'character deletion cleanup diagnostics query works',
+      source: 'database-url',
+      details: result.rows[0] ?? {},
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      name: 'query.characters.deletion-cleanup',
+      label: 'character deletion cleanup diagnostics query works',
+      source: 'database-url',
+      error: serializeDiagnosticError(error),
+      remediation: 'Apply Character Profiles, Memory Engine, Scene Executor, and Moderation Orchestrator migrations.',
+    };
+  }
+}
+
 async function checkOwnProfileRlsPolicies(): Promise<SchemaDiagnosticCheck> {
   try {
     const result = await query<{ policyCount: number }>(
@@ -486,6 +551,7 @@ export async function buildDatabaseDiagnostics() {
   ]);
   const publishedPostsQuery = await checkPublishedPostsQuery();
   const profileStatsQuery = await checkProfileStatsQuery();
+  const characterDeletionCleanupDiagnostics = await checkCharacterDeletionCleanupDiagnostics();
   const ownProfileRlsPolicies = await checkOwnProfileRlsPolicies();
   const indexChecks = await Promise.all([
     checkIndexExists('generation_jobs_character_id_text_idx'),
@@ -515,6 +581,7 @@ export async function buildDatabaseDiagnostics() {
     ...mediaFallbackChecks,
     publishedPostsQuery,
     profileStatsQuery,
+    characterDeletionCleanupDiagnostics,
     ownProfileRlsPolicies,
     ...indexChecks,
   ];

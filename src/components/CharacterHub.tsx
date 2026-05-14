@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { type CharacterProfile, type CharacterRelationshipMemory } from '../lib/api';
-import { isCreatorSelfCharacter, updateLocalCharacterProfile } from '../lib/characterStorage';
+import { type CharacterProfile, type CharacterRelationshipMemory, type ReferenceImageUrls } from '../lib/api';
+import { deleteLocalCharacterProfile, updateLocalCharacterProfile } from '../lib/characterStorage';
 import { getBestThumbnail } from '../lib/mediaThumbnail';
-import { loadSupabaseCharacters, updateSupabaseCharacterProfile } from '../lib/supabaseAppData';
+import {
+  deleteSupabaseCharacterProfile,
+  loadSupabaseCharacters,
+  updateSupabaseCharacterProfile,
+} from '../lib/supabaseAppData';
 import { useSession } from '../hooks/useSession';
 import CharacterCapture from './CharacterCapture';
 
@@ -10,7 +14,7 @@ type CharacterHubProps = {
   open: boolean;
   characters: CharacterProfile[];
   onClose: () => void;
-  onEditSelf: () => void;
+  onEditSelf: () => void | Promise<void>;
   onRefresh: (characters?: CharacterProfile[]) => void | Promise<void>;
   children?: ReactNode;
 };
@@ -27,19 +31,7 @@ function characterTimestamp(character: CharacterProfile) {
 }
 
 function characterIsSelf(character: CharacterProfile): boolean {
-  return isCreatorSelfCharacter(character);
-}
-
-function characterSummary(character: CharacterProfile) {
-  const style = character.stylePreferences ?? {};
-  const vibe = typeof style.characterVibe === 'string' ? style.characterVibe : '';
-  return (
-    character.appearanceSummary ||
-    character.wardrobeTendencies ||
-    character.emotionalTendencies ||
-    vibe ||
-    'No appearance memory saved yet.'
-  );
+  return character.id === 'creator-self' || character.characterId === 'creator-self' || character.isCreatorSelf === true;
 }
 
 function characterProfileEditorError(error: unknown) {
@@ -58,18 +50,71 @@ function characterProfileEditorError(error: unknown) {
   return error instanceof Error ? error.message : 'Unable to save character profile.';
 }
 
-function CharacterThumbnail({ character }: { character: CharacterProfile }) {
+function displayName(character: CharacterProfile | null | undefined) {
+  return character?.displayName || character?.name || 'Untitled character';
+}
+
+function CharacterThumbnail({ character, size = 56 }: { character: CharacterProfile; size?: number }) {
   const thumbnail = getBestThumbnail(character);
-  const name = character.displayName || character.name;
+  const name = displayName(character);
 
   return (
-    <span className="character-avatar" style={{ width: '58px', height: '58px', borderRadius: '18px' }}>
+    <span className="character-avatar" style={{ width: `${size}px`, height: `${size}px`, borderRadius: size > 60 ? '22px' : '18px' }}>
       {thumbnail ? (
         <img src={thumbnail} alt={name} />
       ) : (
         characterInitial(name)
       )}
     </span>
+  );
+}
+
+function referenceEntries(character: CharacterProfile) {
+  const references = character.referenceImageUrls ?? {} as ReferenceImageUrls;
+  return [
+    ['Front', references.frontFaceUrl || references.frontFace],
+    ['Left', references.leftAngleUrl || references.leftAngle],
+    ['Right', references.rightAngleUrl || references.rightAngle],
+    ['Full body', references.fullBodyUrl || references.fullBody],
+    ['Expression', references.expressiveUrl || references.expressive],
+  ].filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].trim().length > 0);
+}
+
+function metadataLine(label: string, value: unknown) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text) return null;
+  return <p><strong>{label}</strong> {text}</p>;
+}
+
+function ModalShell({ children }: { children: ReactNode }) {
+  return (
+    <div
+      role="presentation"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 60,
+        display: 'grid',
+        placeItems: 'center',
+        padding: '18px',
+        background: 'var(--modal-backdrop)',
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        style={{
+          width: 'min(460px, 100%)',
+          borderRadius: '26px',
+          padding: '18px',
+          background: 'var(--modal-surface)',
+          boxShadow: 'var(--modal-shadow)',
+          border: '1px solid var(--surface-border)',
+        }}
+      >
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -84,19 +129,22 @@ export default function CharacterHub({
   const { user, session } = useSession();
   const authUser = session?.user ?? user;
   const selfCharacter = useMemo(
-    () => characters.find(isCreatorSelfCharacter) ?? null,
+    () => characters.find(characterIsSelf) ?? null,
     [characters],
   );
-  const otherCharacters = useMemo(
-    () => characters
+  const visibleCharacters = useMemo(() => {
+    const otherCharacters = characters
       .filter((character) => !characterIsSelf(character))
       .sort((a, b) => characterTimestamp(b) - characterTimestamp(a))
-      .slice(0, Math.max(0, characterLimit - (selfCharacter ? 1 : 0))),
-    [characters, selfCharacter],
-  );
+      .slice(0, Math.max(0, characterLimit - (selfCharacter ? 1 : 0)));
+
+    return selfCharacter ? [selfCharacter, ...otherCharacters] : otherCharacters;
+  }, [characters, selfCharacter]);
   const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null);
-  const selectedCharacter = otherCharacters.find((character) => character.id === selectedCharacterId) ?? null;
   const [creatingCharacter, setCreatingCharacter] = useState(false);
+  const [selfSetupOpen, setSelfSetupOpen] = useState(false);
+  const selectedCharacter = visibleCharacters.find((character) => character.id === selectedCharacterId) ?? null;
+  const selectedIsSelf = Boolean(selectedCharacter && characterIsSelf(selectedCharacter));
   const [editorName, setEditorName] = useState('');
   const [appearanceSummary, setAppearanceSummary] = useState('');
   const [wardrobeTendencies, setWardrobeTendencies] = useState('');
@@ -106,7 +154,22 @@ export default function CharacterHub({
   const [relationshipNotes, setRelationshipNotes] = useState('');
   const [editorStatus, setEditorStatus] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [deleteStatus, setDeleteStatus] = useState('');
+  const [deletingCharacter, setDeletingCharacter] = useState(false);
   const atCharacterLimit = characters.length >= characterLimit;
+
+  useEffect(() => {
+    if (!open) {
+      setSelectedCharacterId(null);
+      setCreatingCharacter(false);
+      setSelfSetupOpen(false);
+      setActionsOpen(false);
+      setConfirmDeleteOpen(false);
+      setDeleteStatus('');
+    }
+  }, [open]);
 
   useEffect(() => {
     if (!selectedCharacter) {
@@ -121,7 +184,7 @@ export default function CharacterHub({
       return;
     }
 
-    setEditorName(selectedCharacter.displayName || selectedCharacter.name);
+    setEditorName(displayName(selectedCharacter));
     setAppearanceSummary(selectedCharacter.appearanceSummary ?? '');
     setWardrobeTendencies(selectedCharacter.wardrobeTendencies ?? '');
     setEmotionalTendencies(selectedCharacter.emotionalTendencies ?? '');
@@ -134,9 +197,39 @@ export default function CharacterHub({
         .join('\n'),
     );
     setEditorStatus('');
+    setDeleteStatus('');
   }, [selectedCharacter]);
 
   if (!open) return null;
+
+  function returnToList() {
+    setSelectedCharacterId(null);
+    setCreatingCharacter(false);
+    setSelfSetupOpen(false);
+    setActionsOpen(false);
+    setConfirmDeleteOpen(false);
+    setDeleteStatus('');
+  }
+
+  function openCharacterDetail(character: CharacterProfile) {
+    setSelectedCharacterId(character.id);
+    setCreatingCharacter(false);
+    setSelfSetupOpen(false);
+    setActionsOpen(false);
+    setConfirmDeleteOpen(false);
+    if (characterIsSelf(character)) {
+      void onEditSelf();
+    }
+  }
+
+  function openSelfSetup() {
+    setSelectedCharacterId(null);
+    setCreatingCharacter(false);
+    setSelfSetupOpen(true);
+    setActionsOpen(false);
+    setConfirmDeleteOpen(false);
+    void onEditSelf();
+  }
 
   async function refreshAfterCreate() {
     setCreatingCharacter(false);
@@ -149,7 +242,7 @@ export default function CharacterHub({
   }
 
   async function handleSaveProfile() {
-    if (!selectedCharacter) return;
+    if (!selectedCharacter || selectedIsSelf) return;
 
     setSavingProfile(true);
     setEditorStatus('Saving character profile...');
@@ -202,8 +295,289 @@ export default function CharacterHub({
     }
   }
 
+  async function handleConfirmDelete() {
+    if (!selectedCharacter || selectedIsSelf) return;
+
+    setDeletingCharacter(true);
+    setDeleteStatus('Deleting character...');
+
+    try {
+      if (authUser) {
+        await deleteSupabaseCharacterProfile({
+          userId: authUser.id,
+          character: selectedCharacter,
+        });
+        const latestCharacters = await loadSupabaseCharacters(authUser.id);
+        await onRefresh(latestCharacters);
+      } else {
+        const deleted = deleteLocalCharacterProfile(selectedCharacter.id);
+        if (!deleted) throw new Error('Character profile not found.');
+        await onRefresh();
+      }
+
+      setConfirmDeleteOpen(false);
+      setActionsOpen(false);
+      setSelectedCharacterId(null);
+      setDeleteStatus('');
+    } catch (error) {
+      setDeleteStatus(error instanceof Error ? error.message : 'Unable to delete character.');
+    } finally {
+      setDeletingCharacter(false);
+    }
+  }
+
+  if (creatingCharacter) {
+    return (
+      <section style={{ marginTop: '18px', display: 'grid', gap: '18px' }}>
+        <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div>
+            <span className="eyebrow">characters</span>
+            <h2 style={{ marginTop: '8px' }}>Create Cast Member</h2>
+            <p className="muted" style={{ margin: '8px 0 0' }}>
+              Add a reusable cinematic identity to your cast.
+            </p>
+          </div>
+          <button type="button" className="text-btn" onClick={returnToList}>
+            Back
+          </button>
+        </div>
+        <CharacterCapture onCreated={() => void refreshAfterCreate()} />
+      </section>
+    );
+  }
+
+  if (selfSetupOpen) {
+    return (
+      <section style={{ marginTop: '18px', display: 'grid', gap: '18px' }}>
+        <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div>
+            <span className="eyebrow">characters</span>
+            <h2 style={{ marginTop: '8px' }}>Self Character</h2>
+            <p className="muted" style={{ margin: '8px 0 0' }}>
+              Build the pinned identity Lumora can reuse across your cinematic scenes.
+            </p>
+          </div>
+          <button type="button" className="text-btn" onClick={returnToList}>
+            Back
+          </button>
+        </div>
+
+        {children || (
+          <article className="list-card" style={{ borderRadius: '22px', padding: '16px' }}>
+            <p className="muted">Loading self character editor...</p>
+          </article>
+        )}
+      </section>
+    );
+  }
+
+  if (selectedCharacter) {
+    const refs = referenceEntries(selectedCharacter);
+    const memoryEntries = Object.entries(selectedCharacter.continuityState ?? {})
+      .filter(([, value]) => Boolean(value))
+      .slice(0, 8);
+
+    return (
+      <section style={{ marginTop: '18px', display: 'grid', gap: '18px' }}>
+        <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start' }}>
+          <button type="button" className="text-btn" onClick={returnToList}>
+            Back
+          </button>
+          <button
+            type="button"
+            className="text-btn"
+            aria-label="Character actions"
+            onClick={() => setActionsOpen(true)}
+            style={{ fontSize: '1.35rem', lineHeight: 1 }}
+          >
+            ...
+          </button>
+        </div>
+
+        <article className="list-card" style={{ borderRadius: '26px', padding: '18px', background: 'var(--surface-strong)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '72px minmax(0, 1fr)', gap: '14px', alignItems: 'center' }}>
+            <CharacterThumbnail character={selectedCharacter} size={72} />
+            <div style={{ minWidth: 0 }}>
+              <span className="tiny-pill">{selectedIsSelf ? 'Self' : 'Cast member'}</span>
+              <h2 style={{ margin: '8px 0 0' }}>{displayName(selectedCharacter)}</h2>
+              <p className="muted" style={{ margin: '6px 0 0' }}>
+                {selectedCharacter.status} / {selectedCharacter.visibility.replace('_', ' ')}
+              </p>
+            </div>
+          </div>
+        </article>
+
+        {selectedIsSelf ? (
+          <>
+            <div className="character-memory-viewer">
+              <span className="eyebrow">self character memory</span>
+              {metadataLine('Appearance', selectedCharacter.appearanceSummary)}
+              {metadataLine('Wardrobe', selectedCharacter.wardrobeTendencies)}
+              {metadataLine('Style', selectedCharacter.cinematicStyle)}
+              {!selectedCharacter.appearanceSummary && !selectedCharacter.wardrobeTendencies && !selectedCharacter.cinematicStyle ? (
+                <p className="muted">Open the editor below to build your reusable self character.</p>
+              ) : null}
+            </div>
+            {children}
+          </>
+        ) : (
+          <div className="character-profile-editor" style={{ marginTop: 0 }}>
+            <div className="row-between">
+              <div>
+                <span className="eyebrow">profile</span>
+                <strong>Character detail</strong>
+              </div>
+              <span className="tiny-pill">Editable</span>
+            </div>
+
+            <label className="field-block">
+              <span>Display name</span>
+              <input value={editorName} onChange={(event) => setEditorName(event.target.value)} />
+            </label>
+
+            <label className="field-block">
+              <span>Appearance summary</span>
+              <textarea value={appearanceSummary} onChange={(event) => setAppearanceSummary(event.target.value)} rows={3} />
+            </label>
+
+            <label className="field-block">
+              <span>Wardrobe tendencies</span>
+              <input value={wardrobeTendencies} onChange={(event) => setWardrobeTendencies(event.target.value)} />
+            </label>
+
+            <label className="field-block">
+              <span>Emotional tendencies</span>
+              <input value={emotionalTendencies} onChange={(event) => setEmotionalTendencies(event.target.value)} />
+            </label>
+
+            <label className="field-block">
+              <span>Soundtrack tendencies</span>
+              <input value={soundtrackTendencies} onChange={(event) => setSoundtrackTendencies(event.target.value)} />
+            </label>
+
+            <label className="field-block">
+              <span>Cinematic style</span>
+              <input value={cinematicStyle} onChange={(event) => setCinematicStyle(event.target.value)} />
+            </label>
+
+            <label className="field-block">
+              <span>Relationship memory</span>
+              <textarea value={relationshipNotes} onChange={(event) => setRelationshipNotes(event.target.value)} rows={3} />
+            </label>
+
+            <button type="button" className="ghost-btn" onClick={() => void handleSaveProfile()} disabled={savingProfile}>
+              {savingProfile ? 'Saving...' : 'Save character profile'}
+            </button>
+            {editorStatus ? <p className="muted">{editorStatus}</p> : null}
+          </div>
+        )}
+
+        <div className="character-memory-viewer">
+          <span className="eyebrow">reference photos</span>
+          {refs.length ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(92px, 1fr))', gap: '10px' }}>
+              {refs.map(([label, url]) => (
+                <div key={`${label}-${url}`} style={{ display: 'grid', gap: '6px' }}>
+                  <div style={{ aspectRatio: '1', borderRadius: '16px', overflow: 'hidden', background: 'var(--control-background)' }}>
+                    <img src={url} alt={`${displayName(selectedCharacter)} ${label}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  </div>
+                  <span className="muted" style={{ fontSize: '0.78rem' }}>{label}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">No reference photos saved yet.</p>
+          )}
+        </div>
+
+        <div className="character-memory-viewer">
+          <span className="eyebrow">continuity memory</span>
+          {memoryEntries.length ? (
+            memoryEntries.map(([field, value]) => (
+              <p key={field}><strong>{field}</strong> {String(value)}</p>
+            ))
+          ) : (
+            <p className="muted">No continuity memory captured yet.</p>
+          )}
+          {(selectedCharacter.memorySnapshots ?? []).slice(0, 3).map((snapshot) => (
+            <p key={`${snapshot.sceneExecutionId}-${snapshot.sceneId}-${snapshot.clipOrder}`}>
+              <strong>{snapshot.continuityConfidence ? `${Math.round(snapshot.continuityConfidence * 100)}%` : 'Memory'}</strong> {snapshot.summary}
+            </p>
+          ))}
+        </div>
+
+        <div className="character-memory-viewer">
+          <span className="eyebrow">style and voice</span>
+          {metadataLine('Soundtrack', selectedCharacter.soundtrackTendencies)}
+          {metadataLine('Voice sample', selectedCharacter.voiceSampleName || selectedCharacter.voiceSampleNumbers || selectedCharacter.voiceSampleUrl)}
+          {metadataLine('Source capture', selectedCharacter.sourceCaptureVideo2Name || selectedCharacter.sourceCaptureVideoUrl)}
+          {!selectedCharacter.soundtrackTendencies && !selectedCharacter.voiceSampleUrl && !selectedCharacter.sourceCaptureVideoUrl ? (
+            <p className="muted">No voice or style media saved yet.</p>
+          ) : null}
+        </div>
+
+        {actionsOpen ? (
+          <ModalShell>
+            <div style={{ display: 'grid', gap: '12px' }}>
+              <div className="row-between">
+                <strong>Character actions</strong>
+                <button type="button" className="text-btn" onClick={() => setActionsOpen(false)}>
+                  Cancel
+                </button>
+              </div>
+              {selectedIsSelf ? (
+                <p className="muted">Self character deletion is disabled in v1.</p>
+              ) : (
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  style={{ color: 'var(--danger-text, #ff6b81)' }}
+                  onClick={() => {
+                    setActionsOpen(false);
+                    setConfirmDeleteOpen(true);
+                  }}
+                >
+                  Delete Character
+                </button>
+              )}
+              <button type="button" className="ghost-btn" onClick={() => setActionsOpen(false)}>
+                Cancel
+              </button>
+            </div>
+          </ModalShell>
+        ) : null}
+
+        {confirmDeleteOpen ? (
+          <ModalShell>
+            <div style={{ display: 'grid', gap: '12px' }}>
+              <h3 style={{ margin: 0 }}>Delete character?</h3>
+              <p className="muted" style={{ margin: 0 }}>
+                This permanently removes the character, continuity memory, and reusable cast profile from Lumora.
+              </p>
+              {deleteStatus ? <p className="muted">{deleteStatus}</p> : null}
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="primary-btn"
+                  style={{ background: 'linear-gradient(135deg, #ff5b74, #b92746)' }}
+                  onClick={() => void handleConfirmDelete()}
+                  disabled={deletingCharacter}
+                >
+                  {deletingCharacter ? 'Deleting...' : 'Confirm Delete Character'}
+                </button>
+                <button type="button" className="ghost-btn" onClick={() => setConfirmDeleteOpen(false)} disabled={deletingCharacter}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </ModalShell>
+        ) : null}
+      </section>
+    );
+  }
+
   return (
-    <section style={{ marginTop: '18px', display: 'grid', gap: '18px' }}>
+    <section style={{ marginTop: '18px', display: 'grid', gap: '16px' }}>
       <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div>
           <span className="eyebrow">characters</span>
@@ -217,173 +591,63 @@ export default function CharacterHub({
         </button>
       </div>
 
-      <article className="list-card" style={{ borderRadius: '24px', padding: '16px', background: 'var(--surface-strong)' }}>
-        <div className="row-between" style={{ gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '58px minmax(0, 1fr)', gap: '12px', alignItems: 'center', minWidth: 0 }}>
-            {selfCharacter ? (
-              <CharacterThumbnail character={selfCharacter} />
-            ) : (
-              <span className="character-avatar" style={{ width: '58px', height: '58px', borderRadius: '18px' }}>S</span>
-            )}
-            <div style={{ minWidth: 0 }}>
-              <span className="tiny-pill">Self</span>
-              <strong style={{ display: 'block', marginTop: '6px' }}>
-                {selfCharacter?.displayName || selfCharacter?.name || 'Create your self character'}
-              </strong>
-              <p className="muted" style={{ margin: '5px 0 0' }}>
-                {selfCharacter ? characterSummary(selfCharacter) : 'Pin yourself as the default reusable Lumora identity.'}
-              </p>
-            </div>
-          </div>
-          <button type="button" className="ghost-btn" style={{ flex: 'unset' }} onClick={onEditSelf}>
-            {selfCharacter ? 'Edit' : 'Create self'}
+      <div className="row-between" style={{ gap: '12px', flexWrap: 'wrap' }}>
+        <span className="tiny-pill">{Math.min(characters.length, characterLimit)} / {characterLimit}</span>
+        {!atCharacterLimit ? (
+          <button type="button" className="ghost-btn" style={{ flex: 'unset' }} onClick={() => setCreatingCharacter(true)}>
+            Create character
           </button>
-        </div>
-      </article>
-
-      {children}
-
-      <div style={{ display: 'grid', gap: '12px' }}>
-        <div className="row-between" style={{ gap: '12px', flexWrap: 'wrap' }}>
-          <div>
-            <span className="eyebrow">cast members</span>
-            <h3 style={{ marginTop: '8px' }}>Other characters</h3>
-          </div>
-          <span className="tiny-pill">{Math.min(characters.length, characterLimit)} / {characterLimit}</span>
-        </div>
-
-        {otherCharacters.length ? (
-          <div style={{ display: 'grid', gap: '10px' }}>
-            {otherCharacters.map((character) => {
-              const selected = selectedCharacter?.id === character.id;
-              return (
-                <article
-                  key={character.id}
-                  className="list-card"
-                  style={{
-                    borderRadius: '22px',
-                    padding: '12px',
-                    background: 'var(--surface-strong)',
-                    borderColor: selected ? 'var(--selected-outline)' : 'var(--surface-border)',
-                  }}
-                >
-                  <div className="row-between" style={{ gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '58px minmax(0, 1fr)', gap: '12px', alignItems: 'center', minWidth: 0 }}>
-                      <CharacterThumbnail character={character} />
-                      <div style={{ minWidth: 0 }}>
-                        <strong style={{ display: 'block' }}>{character.displayName || character.name}</strong>
-                        <p className="muted" style={{ margin: '5px 0 0' }}>
-                          {characterSummary(character)}
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      className="ghost-btn"
-                      style={{ flex: 'unset' }}
-                      onClick={() => setSelectedCharacterId(selected ? null : character.id)}
-                    >
-                      {selected ? 'Close edit' : 'Edit'}
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
         ) : (
-          <article className="list-card" style={{ borderRadius: '22px', padding: '16px' }}>
-            <h3>No other characters yet</h3>
-            <p className="muted">Create cast members here and reuse them in future scenes.</p>
-          </article>
+          <span className="muted">You've reached the 25 character limit.</span>
         )}
       </div>
 
-      {selectedCharacter ? (
-        <div className="character-profile-editor">
-          <div className="row-between">
-            <div>
-              <span className="eyebrow">profile</span>
-              <strong>Character memory</strong>
-            </div>
-            <span className="tiny-pill">Cast member</span>
-          </div>
-
-          <label className="field-block">
-            <span>Display name</span>
-            <input value={editorName} onChange={(event) => setEditorName(event.target.value)} />
-          </label>
-
-          <label className="field-block">
-            <span>Appearance summary</span>
-            <textarea value={appearanceSummary} onChange={(event) => setAppearanceSummary(event.target.value)} rows={3} />
-          </label>
-
-          <label className="field-block">
-            <span>Wardrobe tendencies</span>
-            <input value={wardrobeTendencies} onChange={(event) => setWardrobeTendencies(event.target.value)} />
-          </label>
-
-          <label className="field-block">
-            <span>Emotional tendencies</span>
-            <input value={emotionalTendencies} onChange={(event) => setEmotionalTendencies(event.target.value)} />
-          </label>
-
-          <label className="field-block">
-            <span>Soundtrack tendencies</span>
-            <input value={soundtrackTendencies} onChange={(event) => setSoundtrackTendencies(event.target.value)} />
-          </label>
-
-          <label className="field-block">
-            <span>Cinematic style</span>
-            <input value={cinematicStyle} onChange={(event) => setCinematicStyle(event.target.value)} />
-          </label>
-
-          <label className="field-block">
-            <span>Relationship memory</span>
-            <textarea value={relationshipNotes} onChange={(event) => setRelationshipNotes(event.target.value)} rows={3} />
-          </label>
-
-          <div className="character-memory-viewer">
-            <span className="eyebrow">continuity</span>
-            {Object.entries(selectedCharacter.continuityState ?? {}).filter(([, value]) => Boolean(value)).length ? (
-              Object.entries(selectedCharacter.continuityState ?? {})
-                .filter(([, value]) => Boolean(value))
-                .slice(0, 5)
-                .map(([field, value]) => (
-                  <p key={field}><strong>{field}</strong> {String(value)}</p>
-                ))
-            ) : (
-              <p className="muted">No continuity memory captured yet.</p>
-            )}
-          </div>
-
-          <button type="button" className="ghost-btn" onClick={() => void handleSaveProfile()} disabled={savingProfile}>
-            {savingProfile ? 'Saving...' : 'Save character profile'}
+      <div style={{ display: 'grid', gap: '10px' }}>
+        {selfCharacter ? (
+          <button
+            type="button"
+            className="list-card"
+            role="button"
+            style={{ display: 'grid', gridTemplateColumns: '56px minmax(0, 1fr) auto', gap: '12px', alignItems: 'center', padding: '12px', textAlign: 'left' }}
+            onClick={() => openCharacterDetail(selfCharacter)}
+          >
+            <CharacterThumbnail character={selfCharacter} />
+            <strong style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayName(selfCharacter)}</strong>
+            <span className="tiny-pill">Self</span>
           </button>
-          {editorStatus ? <p className="muted">{editorStatus}</p> : null}
-        </div>
-      ) : null}
+        ) : (
+          <button
+            type="button"
+            className="list-card"
+            role="button"
+            style={{ display: 'grid', gridTemplateColumns: '56px minmax(0, 1fr) auto', gap: '12px', alignItems: 'center', padding: '12px', textAlign: 'left' }}
+            onClick={openSelfSetup}
+          >
+            <span className="character-avatar" style={{ width: '56px', height: '56px', borderRadius: '18px' }}>S</span>
+            <strong>Create your self character</strong>
+            <span className="tiny-pill">Self</span>
+          </button>
+        )}
 
-      <div style={{ display: 'grid', gap: '12px' }}>
-        <div className="row-between" style={{ gap: '12px', flexWrap: 'wrap' }}>
-          <div>
-            <span className="eyebrow">new character</span>
-            <h3 style={{ marginTop: '8px' }}>Create cast member</h3>
-          </div>
-          {!atCharacterLimit ? (
-            <button type="button" className="ghost-btn" style={{ flex: 'unset' }} onClick={() => setCreatingCharacter((current) => !current)}>
-              {creatingCharacter ? 'Hide creator' : 'Create character'}
-            </button>
-          ) : null}
-        </div>
+        {visibleCharacters.filter((character) => !characterIsSelf(character)).map((character) => (
+          <button
+            key={character.id}
+            type="button"
+            className="list-card"
+            role="button"
+            style={{ display: 'grid', gridTemplateColumns: '56px minmax(0, 1fr)', gap: '12px', alignItems: 'center', padding: '12px', textAlign: 'left' }}
+            onClick={() => openCharacterDetail(character)}
+          >
+            <CharacterThumbnail character={character} />
+            <strong style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayName(character)}</strong>
+          </button>
+        ))}
 
-        {atCharacterLimit ? (
+        {!visibleCharacters.length ? (
           <article className="list-card" style={{ borderRadius: '22px', padding: '16px' }}>
-            <h3>You’ve reached the 25 character limit.</h3>
-            <p className="muted">Edit an existing character to keep continuity tight.</p>
+            <h3>No characters yet</h3>
+            <p className="muted">Create reusable cast members and bring them back across scenes.</p>
           </article>
-        ) : creatingCharacter ? (
-          <CharacterCapture onCreated={() => void refreshAfterCreate()} />
         ) : null}
       </div>
     </section>
