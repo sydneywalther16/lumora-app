@@ -1,4 +1,5 @@
 import type { LumoraPost } from './api';
+import { getBestPoster, getBestThumbnail } from './mediaThumbnail';
 
 const STORAGE_KEY = 'lumora_posts';
 
@@ -27,7 +28,16 @@ export function loadPostedPublications(): LumoraPost[] {
           (typeof item.videoUrl === 'string' || typeof item.imageUrl === 'string')
         );
       })
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      .map((post) => ({
+        ...post,
+        status: post.status ?? 'published',
+        privacy: post.privacy ?? 'public',
+        publishedAt: post.publishedAt ?? post.createdAt,
+        thumbnailUrl: getBestThumbnail(post),
+        posterUrl: getBestPoster(post),
+      }))
+      .filter((post) => post.status === 'published' && post.privacy !== 'private')
+      .sort((a, b) => new Date(b.publishedAt ?? b.createdAt).getTime() - new Date(a.publishedAt ?? a.createdAt).getTime());
   } catch {
     return [];
   }
@@ -43,9 +53,14 @@ export function savePostedItem(post: LumoraPost) {
       ...post,
       imageUrl: cleanMediaUrl(post.imageUrl),
       videoUrl: cleanMediaUrl(post.videoUrl),
+      thumbnailUrl: cleanMediaUrl(getBestThumbnail(post)),
+      posterUrl: cleanMediaUrl(getBestPoster(post)),
       characterAvatar: cleanMediaUrl(post.characterAvatar),
       creatorAvatar: cleanMediaUrl(post.creatorAvatar),
       avatar: cleanMediaUrl(post.avatar),
+      status: 'published',
+      privacy: post.privacy ?? 'public',
+      publishedAt: post.publishedAt ?? new Date().toISOString(),
     },
   ];
 

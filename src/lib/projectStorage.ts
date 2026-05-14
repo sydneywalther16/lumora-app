@@ -1,4 +1,5 @@
 import type { GenerationMode, LumoraIdentityFeedback, ReferenceImageUrls, VideoEngine } from './api';
+import { getBestPoster, getBestThumbnail } from './mediaThumbnail';
 
 export type StudioProject = {
   id: string;
@@ -8,7 +9,17 @@ export type StudioProject = {
   finalPrompt?: string | null;
   videoUrl: string;
   thumbnailUrl?: string | null;
+  posterUrl?: string | null;
   status: string;
+  publishedAt?: string | null;
+  postedAt?: string | null;
+  isPosted?: boolean | null;
+  privacy?: string | null;
+  visibility?: string | null;
+  viewCount?: number | null;
+  likeCount?: number | null;
+  commentCount?: number | null;
+  shareCount?: number | null;
   provider: VideoEngine;
   engine?: VideoEngine | null;
   displayEngine?: string | null;
@@ -46,6 +57,15 @@ function cleanOptionalMediaUrl(value?: string | null): string | null {
   return value.startsWith('data:') || value.startsWith('blob:') ? null : value;
 }
 
+function numberValue(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+export function isUnpublishedDraftProject(project: StudioProject) {
+  const status = project.status.toLowerCase();
+  return !project.isPosted && !project.publishedAt && status !== 'published' && status !== 'archived';
+}
+
 export function loadStudioProjects(): StudioProject[] {
   if (typeof window === 'undefined') return [];
 
@@ -76,7 +96,17 @@ export function loadStudioProjects(): StudioProject[] {
         title: typeof project.title === 'string' ? project.title : null,
         caption: typeof project.caption === 'string' ? project.caption : null,
         finalPrompt: typeof project.finalPrompt === 'string' ? project.finalPrompt : null,
-        thumbnailUrl: typeof project.thumbnailUrl === 'string' ? project.thumbnailUrl : null,
+        thumbnailUrl: getBestThumbnail(project),
+        posterUrl: getBestPoster(project),
+        publishedAt: typeof project.publishedAt === 'string' ? project.publishedAt : null,
+        postedAt: typeof project.postedAt === 'string' ? project.postedAt : null,
+        isPosted: typeof project.isPosted === 'boolean' ? project.isPosted : false,
+        privacy: typeof project.privacy === 'string' ? project.privacy : null,
+        visibility: typeof project.visibility === 'string' ? project.visibility : null,
+        viewCount: numberValue(project.viewCount),
+        likeCount: numberValue(project.likeCount),
+        commentCount: numberValue(project.commentCount),
+        shareCount: numberValue(project.shareCount),
         engine: typeof project.engine === 'string' ? project.engine as VideoEngine : null,
         displayEngine: typeof project.displayEngine === 'string' ? project.displayEngine : null,
         aspectRatio: typeof project.aspectRatio === 'string' ? project.aspectRatio : null,
@@ -124,7 +154,8 @@ export function saveStudioProject(project: StudioProject) {
     {
       ...project,
       videoUrl: cleanMediaUrl(project.videoUrl),
-      thumbnailUrl: cleanOptionalMediaUrl(project.thumbnailUrl),
+      thumbnailUrl: cleanOptionalMediaUrl(getBestThumbnail(project)),
+      posterUrl: cleanOptionalMediaUrl(getBestPoster(project)),
       keyframeUrl: cleanOptionalMediaUrl(project.keyframeUrl),
       referenceImageUrl: cleanOptionalMediaUrl(project.referenceImageUrl),
       additionalReferenceImageUrls:
@@ -141,4 +172,39 @@ export function saveStudioProject(project: StudioProject) {
   } catch {
     // ignore storage failures for now
   }
+}
+
+export function updateStudioProject(projectId: string, patch: Partial<StudioProject>): StudioProject | null {
+  if (typeof window === 'undefined') return null;
+
+  const projects = loadStudioProjects();
+  const current = projects.find((project) => project.id === projectId);
+  if (!current) return null;
+
+  const updated: StudioProject = {
+    ...current,
+    ...patch,
+    updatedAt: patch.updatedAt ?? new Date().toISOString(),
+  };
+  const nextProjects = projects.map((project) => (project.id === projectId ? updated : project));
+
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextProjects));
+  } catch {
+    // ignore storage failures for now
+  }
+
+  return updated;
+}
+
+export function markStudioProjectPublished(projectId: string, privacy = 'public') {
+  const now = new Date().toISOString();
+  return updateStudioProject(projectId, {
+    status: 'published',
+    isPosted: true,
+    publishedAt: now,
+    postedAt: now,
+    privacy,
+    visibility: privacy,
+  });
 }

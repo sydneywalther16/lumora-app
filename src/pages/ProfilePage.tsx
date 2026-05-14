@@ -40,6 +40,7 @@ import {
   buildLumoraIdentityProfile,
   identityProfileToStylePreferences,
 } from '../lib/identityCharacter';
+import { getBestPoster, getBestThumbnail } from '../lib/mediaThumbnail';
 import { resolveRenderableReferenceUrl } from '../lib/selfCharacterReference';
 import SelfReferencePreview, { normalizeReference } from '../components/SelfReferencePreview';
 
@@ -226,6 +227,21 @@ function formatPostedDate(iso: string) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return 'Just now';
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function friendlyProfileLoadError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+
+  if (lower.includes('character_id')) {
+    return 'Character Profiles need the latest database migration.';
+  }
+
+  if (lower.includes('status') || lower.includes('published_at') || lower.includes('thumbnail_url')) {
+    return 'Drafts and Feed need the latest database migration.';
+  }
+
+  return error instanceof Error ? error.message : 'Unable to load Supabase profile data.';
 }
 
 function formatSelfVoiceSamplePrompt(numbers: string | null | undefined) {
@@ -963,7 +979,8 @@ function ProfilePostTile({
 }) {
   const title = post.title || post.caption || 'Untitled post';
   const bodyText = post.caption || post.prompt || 'No prompt available';
-  const mediaUrl = post.videoUrl || post.imageUrl;
+  const thumbnailUrl = getBestThumbnail(post);
+  const mediaUrl = thumbnailUrl || post.imageUrl;
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
   const characterLabel = post.isDefaultSelfCharacter
     ? 'Created as self'
@@ -989,19 +1006,7 @@ function ProfilePostTile({
         border: '1px solid var(--surface-border)',
       }}
     >
-      {post.videoUrl ? (
-        <video
-          src={post.videoUrl}
-          muted
-          loop
-          playsInline
-          preload="metadata"
-          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', background: '#000' }}
-          onError={(event) => {
-            event.currentTarget.style.display = 'none';
-          }}
-        />
-      ) : mediaUrl ? (
+      {mediaUrl ? (
         <img
           src={mediaUrl}
           alt={title}
@@ -1074,7 +1079,9 @@ function ProfilePostPreviewModal({
 }) {
   const title = post.title || post.caption || 'Untitled post';
   const bodyText = post.caption || post.prompt || 'No prompt available';
-  const mediaUrl = post.videoUrl || post.imageUrl;
+  const thumbnailUrl = getBestThumbnail(post);
+  const posterUrl = getBestPoster(post);
+  const mediaUrl = thumbnailUrl || post.imageUrl;
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
   const authorUsername = post.creatorUsername || post.username || 'lumora.creator';
   const authorAvatar = post.creatorAvatar || post.avatar || fallbackAvatar;
@@ -1147,6 +1154,7 @@ function ProfilePostPreviewModal({
             muted
             loop
             playsInline
+            poster={posterUrl ?? undefined}
             style={{ width: '100%', maxHeight: '62vh', objectFit: 'contain', display: 'block', background: '#000' }}
           />
         ) : mediaUrl ? (
@@ -1371,7 +1379,7 @@ function ProfileMenuDetail({
             'Create or sync your self character',
             'Generate a concept',
             'Edit caption and privacy',
-            'Post from Studio',
+            'Post from Drafts',
           ].map((step) => (
             <p key={step} style={mutedTextStyle}>
               {step}
@@ -1541,6 +1549,8 @@ function ProfileMenuSidebar({
 }
 
 function ProjectCard({ project, onOpen }: { project: StudioProject; onOpen: () => void }) {
+  const thumbnailUrl = getBestThumbnail(project);
+  const posterUrl = getBestPoster(project);
   const characterLabel = project.isDefaultSelfCharacter
     ? 'Created as self'
     : project.characterName
@@ -1573,18 +1583,27 @@ function ProjectCard({ project, onOpen }: { project: StudioProject; onOpen: () =
           {project.status}
         </span>
       </div>
-      <video
-        src={project.videoUrl}
-        controls
-        muted
-        loop
-        playsInline
-        onClick={(event) => event.stopPropagation()}
-        style={{ width: '100%', borderRadius: '20px', objectFit: 'cover', background: '#000', marginTop: '14px' }}
-        onError={(event) => {
-          event.currentTarget.style.display = 'none';
-        }}
-      />
+      {project.videoUrl ? (
+        <video
+          src={project.videoUrl}
+          controls
+          muted
+          loop
+          playsInline
+          poster={posterUrl ?? undefined}
+          onClick={(event) => event.stopPropagation()}
+          style={{ width: '100%', borderRadius: '20px', objectFit: 'cover', background: '#000', marginTop: '14px' }}
+          onError={(event) => {
+            event.currentTarget.style.display = 'none';
+          }}
+        />
+      ) : thumbnailUrl ? (
+        <img
+          src={thumbnailUrl}
+          alt={project.title || project.prompt || 'Cast video'}
+          style={{ width: '100%', borderRadius: '20px', objectFit: 'cover', background: '#000', marginTop: '14px' }}
+        />
+      ) : null}
     </article>
   );
 }
@@ -1779,7 +1798,7 @@ export default function ProfilePage() {
         return;
       } catch (error) {
         console.error('Unable to load Supabase profile data:', error);
-        setSaveMessage(error instanceof Error ? error.message : 'Unable to load Supabase profile data.');
+        setSaveMessage(friendlyProfileLoadError(error));
         const localRecovery = getLocalRecoveryAvailability({
           supabaseProfileExists: false,
           loadedCreatorSelf: null,
@@ -2755,7 +2774,7 @@ export default function ProfilePage() {
 
   function openCompletedProject(project: StudioProject) {
     localStorage.setItem('lumora_open_studio_project_id', project.id);
-    window.location.href = '/studio';
+    window.location.href = '/drafts';
   }
 
   function openDraftInCreate(draft: Draft) {
@@ -3395,7 +3414,7 @@ export default function ProfilePage() {
         ) : (
           <article className="list-card" style={{ borderRadius: '28px', padding: '18px' }}>
             <h3>No posts yet</h3>
-            <p className="muted">Create and post a video from Studio to see it appear here.</p>
+            <p className="muted">Create and post a video from Drafts to see it appear here.</p>
           </article>
         )}
       </SectionCard>
@@ -3428,7 +3447,7 @@ export default function ProfilePage() {
         ) : (
           <article className="list-card" style={{ borderRadius: '28px', padding: '18px' }}>
             <h3>No drafts yet</h3>
-            <p className="muted">Save a concept in Create or Studio and it will be available here.</p>
+            <p className="muted">Save a concept in Create or Drafts and it will be available here.</p>
           </article>
         )}
       </SectionCard>

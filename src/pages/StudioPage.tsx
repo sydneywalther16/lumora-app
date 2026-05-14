@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import StudioList from '../components/StudioList';
-import { type GenerationJob, type LumoraPost, type VideoEngine } from '../lib/api';
-import { loadStudioProjects, type StudioProject } from '../lib/projectStorage';
+import { type GenerationJob, type VideoEngine } from '../lib/api';
+import { isUnpublishedDraftProject, loadStudioProjects, type StudioProject } from '../lib/projectStorage';
 import { useSession } from '../hooks/useSession';
-import { loadSupabaseProfilePosts, loadSupabaseProjects } from '../lib/supabaseAppData';
+import { listDrafts } from '../lib/supabaseAppData';
+import { getBestPoster, getBestThumbnail } from '../lib/mediaThumbnail';
 
 const characterProfilesMigrationWarning = 'Character Profiles need the latest database migration.';
 
@@ -15,14 +16,14 @@ function studioLoadErrorMessage(error: unknown) {
     return characterProfilesMigrationWarning;
   }
 
-  return error instanceof Error ? error.message : 'Unable to load studio projects.';
+  return error instanceof Error ? error.message : 'Unable to load drafts.';
 }
 
 export default function StudioPage() {
   const { user, session, loading, configured } = useSession();
   const authUser = session?.user ?? user;
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
-  const [status, setStatus] = useState('Loading studio...');
+  const [status, setStatus] = useState('Loading drafts...');
 
   useEffect(() => {
     console.info('STUDIO OK');
@@ -33,30 +34,29 @@ export default function StudioPage() {
 
     async function loadJobs() {
       if (configured && loading && !authUser) {
-        setStatus('Loading studio...');
+        setStatus('Loading drafts...');
         return;
       }
 
       try {
-        const localProjects = loadStudioProjects();
+        const localProjects = loadStudioProjects().filter(isUnpublishedDraftProject);
         const projects = authUser
           ? mergeProjects(
-              await loadSupabaseProjects(authUser.id),
-              mapPostsToProjects(await loadSupabaseProfilePosts(authUser.id)),
+              await listDrafts(authUser.id),
               localProjects,
             )
           : localProjects;
         if (!active) return;
         const mappedJobs = mapProjectsToJobs(projects);
         setJobs(mappedJobs);
-        setStatus(mappedJobs.length ? '' : 'No projects yet');
+        setStatus(mappedJobs.length ? '' : 'No drafts yet');
       } catch (error) {
         if (!active) return;
-        const fallbackJobs = mapProjectsToJobs(loadStudioProjects());
+        const fallbackJobs = mapProjectsToJobs(loadStudioProjects().filter(isUnpublishedDraftProject));
         setJobs(fallbackJobs);
         setStatus(
           fallbackJobs.length
-            ? 'Showing local Studio backups while account projects are unavailable.'
+            ? 'Showing local Draft backups while account drafts are unavailable.'
             : studioLoadErrorMessage(error),
         );
       }
@@ -79,33 +79,6 @@ export default function StudioPage() {
         return true;
       })
       .sort((a, b) => new Date(b.updatedAt ?? b.createdAt).getTime() - new Date(a.updatedAt ?? a.createdAt).getTime());
-  }
-
-  function mapPostsToProjects(posts: LumoraPost[]): StudioProject[] {
-    return posts
-      .filter((post) => Boolean(post.videoUrl))
-      .map((post) => ({
-        id: post.sourceGenerationId || post.id,
-        title: post.title ?? 'Posted video',
-        caption: post.caption ?? post.prompt ?? '',
-        prompt: post.prompt ?? post.caption ?? '',
-        finalPrompt: post.prompt ?? null,
-        videoUrl: post.videoUrl ?? '',
-        thumbnailUrl: post.imageUrl ?? post.videoUrl ?? null,
-        status: post.status || 'completed',
-        provider: (post.provider || 'replicate') as VideoEngine,
-        engine: (post.provider || 'replicate') as VideoEngine,
-        displayEngine: post.provider ?? null,
-        characterId: post.characterId ?? null,
-        characterName: post.characterName ?? null,
-        characterAvatar: post.characterAvatar ?? null,
-        isDefaultSelfCharacter: post.isDefaultSelfCharacter ?? false,
-        creatorName: post.creatorName ?? post.displayName ?? null,
-        creatorUsername: post.creatorUsername ?? post.username ?? null,
-        creatorAvatar: post.creatorAvatar ?? post.avatar ?? null,
-        createdAt: post.createdAt,
-        updatedAt: post.createdAt,
-      }));
   }
 
   function mapProjectsToJobs(projects: StudioProject[]): GenerationJob[] {
@@ -136,6 +109,8 @@ export default function StudioPage() {
       aspectRatio: project.aspectRatio ?? null,
       privacy: 'private',
       resultAssetUrl: project.videoUrl,
+      thumbnailUrl: getBestThumbnail(project),
+      posterUrl: getBestPoster(project),
       referenceImageUrl: project.referenceImageUrl ?? null,
       referenceImageUrls: project.referenceImageUrls ?? null,
       additionalReferenceImageUrls: project.additionalReferenceImageUrls ?? null,
@@ -150,13 +125,22 @@ export default function StudioPage() {
     <div className="page">
       <section className="headline-card">
         <div>
-          <span className="eyebrow">projects</span>
-          <h2>Your content factory</h2>
+          <span className="eyebrow">drafts</span>
+          <h2>Unpublished drafts</h2>
         </div>
-        <p>Everything in one place: drafts, renders, queued exports, and published concepts.</p>
+        <p>Review unpublished renders, post them to your profile, or remix before they go live.</p>
       </section>
       {status ? <p className="muted">{status}</p> : null}
-      <StudioList jobs={jobs} />
+      <StudioList
+        jobs={jobs}
+        onPublished={(jobId) => {
+          setJobs((current) => {
+            const nextJobs = current.filter((job) => job.id !== jobId && job.projectId !== jobId);
+            setStatus(nextJobs.length ? '' : 'No drafts yet');
+            return nextJobs;
+          });
+        }}
+      />
     </div>
   );
 }

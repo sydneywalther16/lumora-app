@@ -88,6 +88,8 @@ export type SeedanceGenerationRecord = {
   prompt: string;
   outputUrl: string;
   videoUrl: string;
+  thumbnailUrl: string | null;
+  posterUrl: string | null;
   durationSeconds: 5;
   aspectRatio: '16:9';
   resolution: '720p';
@@ -122,6 +124,7 @@ export async function createSeedanceGeneration(input: {
     referenceImages: input.referenceImages,
   });
   const createdAt = new Date().toISOString();
+  const referenceThumbnailUrl = input.referenceImages?.map((reference) => reference.url).find(Boolean) ?? input.characterAvatar ?? null;
   const persistence = await persistCompletedGeneration({
     userId: input.userId ?? null,
     id: result.id,
@@ -133,7 +136,7 @@ export async function createSeedanceGeneration(input: {
     model: result.model,
     displayEngine: input.quality === 'quality' ? 'Seedance Quality' : 'Seedance Fast',
     videoUrl: result.videoUrl,
-    thumbnailUrl: result.videoUrl,
+    thumbnailUrl: referenceThumbnailUrl,
     characterId: input.characterId ?? null,
     characterName: input.characterName ?? null,
     characterAvatar: input.characterAvatar ?? null,
@@ -153,6 +156,8 @@ export async function createSeedanceGeneration(input: {
     prompt: result.finalPrompt,
     outputUrl: persistence.videoUrl,
     videoUrl: persistence.videoUrl,
+    thumbnailUrl: referenceThumbnailUrl,
+    posterUrl: referenceThumbnailUrl,
     durationSeconds: result.settings.duration,
     aspectRatio: result.settings.aspect_ratio,
     resolution: result.settings.resolution,

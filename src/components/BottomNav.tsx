@@ -4,7 +4,7 @@ const items = [
   ['Home', '/home'],
   ['For You', '/for-you'],
   ['Create', '/create'],
-  ['Studio', '/studio'],
+  ['Drafts', '/drafts'],
   ['Inbox', '/inbox'],
   ['Profile', '/profile'],
 ] as const;

@@ -3,25 +3,30 @@ import { Link } from 'react-router-dom';
 import { loadLumoraProfile } from '../lib/profileStorage';
 import { CREATOR_SELF_CHARACTER_ID, getStoredCharacters } from '../lib/characterStorage';
 import { savePostedItem } from '../lib/postStorage';
+import { markStudioProjectPublished } from '../lib/projectStorage';
 import { useSession } from '../hooks/useSession';
 import {
   loadSupabaseCharacters,
   loadSupabaseProfile,
   loadSupabaseProfilePosts,
-  saveSupabasePost,
+  publishDraft,
 } from '../lib/supabaseAppData';
 import type { GenerationJob, LumoraPost, PrivacySetting } from '../lib/api';
+import { getBestPoster, getBestThumbnail } from '../lib/mediaThumbnail';
 
 type Props = {
   jobs: GenerationJob[];
+  onPublished?: (jobId: string) => void;
 };
 
 const privacyOptions: PrivacySetting[] = ['private', 'approved_only', 'public'];
 
 function formatStatus(status: string) {
+  if (status === 'draft') return 'Draft';
   if (status === 'queued-demo') return 'Queued';
   if (status === 'processing') return 'Rendering';
   if (status === 'completed') return 'Completed';
+  if (status === 'published') return 'Published';
   if (status === 'failed') return 'Failed';
   return status;
 }
@@ -73,16 +78,36 @@ function getJobCharacterLabel(job: GenerationJob) {
   return '';
 }
 
-export default function StudioList({ jobs }: Props) {
+function friendlyPublishError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+
+  if (
+    lower.includes('status') ||
+    lower.includes('published_at') ||
+    lower.includes('thumbnail_url') ||
+    lower.includes('poster_url') ||
+    lower.includes('character_id') ||
+    lower.includes('visibility')
+  ) {
+    return 'Draft publishing needs the latest database migration.';
+  }
+
+  return error instanceof Error ? `Unable to post to Home feed: ${error.message}` : 'Unable to post to Home feed.';
+}
+
+export default function StudioList({ jobs, onPublished }: Props) {
   const { user, session, loading, configured } = useSession();
   const authUser = session?.user ?? user;
   const [selectedJob, setSelectedJob] = useState<GenerationJob | null>(null);
   const [postedProjectIds, setPostedProjectIds] = useState<string[]>([]);
   const [publishMessage, setPublishMessage] = useState<string | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
-  const [publishPrivacy, setPublishPrivacy] = useState<PrivacySetting>('private');
+  const [publishPrivacy, setPublishPrivacy] = useState<PrivacySetting>('public');
   const [captionDraft, setCaptionDraft] = useState('');
   const [failedVideoIds, setFailedVideoIds] = useState<Set<string>>(new Set());
+  const [hiddenJobIds, setHiddenJobIds] = useState<Set<string>>(new Set());
+  const visibleJobs = jobs.filter((job) => !hiddenJobIds.has(job.id));
 
   useEffect(() => {
     let active = true;
@@ -118,7 +143,7 @@ export default function StudioList({ jobs }: Props) {
   function openJob(job: GenerationJob) {
     setPublishMessage(null);
     setPublishError(null);
-    setPublishPrivacy('private');
+    setPublishPrivacy('public');
     setCaptionDraft(job.caption || job.prompt || '');
     setSelectedJob(job);
   }
@@ -176,6 +201,15 @@ export default function StudioList({ jobs }: Props) {
       currentCharacter?.referenceImageUrls.frontFaceUrl ||
       currentCharacter?.referenceImageUrls.frontFace ||
       (isDefaultSelfCharacter ? profile.defaultSelfCharacterAvatar : null);
+    const thumbnailUrl = getBestThumbnail({
+      ...job,
+      characterAvatar,
+    });
+    const posterUrl = getBestPoster({
+      ...job,
+      characterAvatar,
+    });
+    const publishedAt = new Date().toISOString();
 
     const post: LumoraPost = {
       id: createLocalPostId(),
@@ -188,7 +222,6 @@ export default function StudioList({ jobs }: Props) {
       characterName,
       characterAvatar,
       provider: job.provider || 'mock',
-      status: job.status || 'completed',
       privacy: publishPrivacy,
       createdAt: job.createdAt || new Date().toISOString(),
       creatorName: profile.displayName,
@@ -198,6 +231,12 @@ export default function StudioList({ jobs }: Props) {
       username: profile.username || 'lumora.creator',
       avatar: profile.avatar || null,
       isDefaultSelfCharacter,
+      thumbnailUrl,
+      posterUrl,
+      status: 'published',
+      visibility: publishPrivacy,
+      publishedAt,
+      updatedAt: publishedAt,
     };
 
     if (!post.id || !post.videoUrl) {
@@ -210,23 +249,34 @@ export default function StudioList({ jobs }: Props) {
       return;
     }
 
+    setHiddenJobIds((current) => new Set(current).add(job.id));
+    setSelectedJob(null);
+
     try {
       if (authUser) {
-        await saveSupabasePost(authUser.id, post);
+        await publishDraft({
+          userId: authUser.id,
+          projectId: job.projectId ?? job.id,
+          post,
+          privacy: publishPrivacy,
+        });
       } else {
         savePostedItem(post);
+        markStudioProjectPublished(job.id, publishPrivacy);
       }
 
       setPostedProjectIds((current) =>
         current.includes(job.id) ? current : [job.id, ...current]
       );
       setPublishMessage('Posted to Home feed.');
+      onPublished?.(job.id);
     } catch (error) {
-      setPublishError(
-        error instanceof Error
-          ? `Unable to post to Home feed: ${error.message}`
-          : 'Unable to post to Home feed.'
-      );
+      setHiddenJobIds((current) => {
+        const next = new Set(current);
+        next.delete(job.id);
+        return next;
+      });
+      setPublishError(friendlyPublishError(error));
     }
   }
 
@@ -277,29 +327,66 @@ export default function StudioList({ jobs }: Props) {
     window.location.href = '/create';
   }
 
-  if (!jobs.length) {
+  const publishToast = publishMessage || publishError ? (
+    <div
+      role="status"
+      style={{
+        position: 'fixed',
+        left: '50%',
+        bottom: '88px',
+        zIndex: 10000,
+        transform: 'translateX(-50%)',
+        width: 'min(360px, calc(100% - 36px))',
+        padding: '12px 14px',
+        borderRadius: '18px',
+        border: publishError ? '1px solid var(--warning-border)' : '1px solid var(--surface-border)',
+        background: publishError ? 'var(--warning-background)' : 'var(--surface-strong)',
+        color: publishError ? 'var(--warning-text)' : 'var(--text-primary)',
+        boxShadow: 'var(--modal-shadow)',
+        textAlign: 'center',
+        fontWeight: 700,
+      }}
+    >
+      {publishError || publishMessage}
+    </div>
+  ) : null;
+
+  if (!jobs.length || !visibleJobs.length) {
     return (
-      <section className="list-stack">
-        <article className="list-card">
-          <div className="row-between">
-            <h3>No projects yet</h3>
-            <span className="tiny-pill status-drafting">Ready</span>
-          </div>
-          <p>Your generated concepts will appear here once you queue one from Create.</p>
-          <Link className="primary-btn" to="/create" style={{ display: 'inline-flex', width: 'fit-content', flex: 'unset' }}>
-            Create a video
-          </Link>
-        </article>
-      </section>
+      <>
+        {publishToast}
+        <section className="list-stack">
+          <article className="list-card">
+            <div className="row-between">
+              <h3>{jobs.length ? 'Posting draft...' : 'No drafts yet'}</h3>
+              <span className="tiny-pill status-drafting">Ready</span>
+            </div>
+            <p>
+              {jobs.length
+                ? 'This draft is being published. It will leave Drafts once the save finishes.'
+                : 'Your unpublished renders will appear here once you generate one from Create.'}
+            </p>
+            {!jobs.length ? (
+              <Link className="primary-btn" to="/create" style={{ display: 'inline-flex', width: 'fit-content', flex: 'unset' }}>
+                Create a video
+              </Link>
+            ) : null}
+          </article>
+        </section>
+      </>
     );
   }
 
   return (
     <>
+      {publishToast}
+
       <section className="list-stack">
-        {jobs.map((job) => {
+        {visibleJobs.map((job) => {
           const statusLabel = formatStatus(job.status);
           const videoFailed = failedVideoIds.has(job.id);
+          const thumbnailUrl = getBestThumbnail(job);
+          const posterUrl = getBestPoster(job);
 
           return (
             <article
@@ -307,7 +394,7 @@ export default function StudioList({ jobs }: Props) {
               key={job.id}
               role="button"
               tabIndex={0}
-              aria-label={`Open project ${job.title}`}
+              aria-label={`Open draft ${job.title}`}
               onClick={() => openJob(job)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') {
@@ -342,11 +429,11 @@ export default function StudioList({ jobs }: Props) {
                   !videoFailed ? (
                     <video
                       controls
-                      autoPlay
                       muted
                       loop
                       playsInline
-                      poster="/demo-video.mp4"
+                      preload="metadata"
+                      poster={posterUrl ?? undefined}
                       onError={() => {
                         setFailedVideoIds((current) => new Set(current).add(job.id));
                       }}
@@ -375,17 +462,33 @@ export default function StudioList({ jobs }: Props) {
                         justifyContent: 'center',
                       }}
                     >
-                      <img
-                        src="/demo-video.mp4"
-                        alt="Video thumbnail"
-                        style={{
-                          width: '100%',
-                          height: '100%',
-                          objectFit: 'cover',
-                        }}
-                      />
+                      {thumbnailUrl ? (
+                        <img
+                          src={thumbnailUrl}
+                          alt="Video thumbnail"
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                          }}
+                        />
+                      ) : (
+                        <strong>Preview unavailable</strong>
+                      )}
                     </div>
                   )
+                ) : thumbnailUrl ? (
+                  <img
+                    src={thumbnailUrl}
+                    alt={job.title}
+                    style={{
+                      width: '100%',
+                      height: '260px',
+                      objectFit: 'cover',
+                      borderRadius: '16px',
+                      display: 'block',
+                    }}
+                  />
                 ) : (
                   <div
                     style={{
@@ -460,10 +563,20 @@ export default function StudioList({ jobs }: Props) {
                       </button>
                     </>
                   ) : (
-                    <button type="button" className="text-btn" disabled>
-                      Processing
-                    </button>
+                    <button type="button" className="text-btn" disabled>Processing</button>
                   )}
+                  {job.resultAssetUrl ? (
+                    <button
+                      type="button"
+                      className="text-btn"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void postToFeed(job, job.caption || job.prompt || '');
+                      }}
+                    >
+                      Post
+                    </button>
+                  ) : null}
                 </div>
               </div>
             </article>
@@ -518,7 +631,7 @@ export default function StudioList({ jobs }: Props) {
                 muted
                 loop
                 playsInline
-                poster="/demo-video.mp4"
+                poster={getBestPoster(selectedJob) ?? undefined}
                 style={{
                   width: '100%',
                   maxHeight: '62vh',

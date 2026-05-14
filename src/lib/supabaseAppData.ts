@@ -12,6 +12,12 @@ import type {
   ReferenceImageUrls,
   VideoEngine,
 } from './api';
+import {
+  getBestPoster,
+  getBestThumbnail,
+  normalizeMediaCard,
+  repairMissingThumbnailIfNeeded,
+} from './mediaThumbnail';
 import type { LumoraProfile } from './profileStorage';
 import type { StudioProject } from './projectStorage';
 import { supabase } from './supabase';
@@ -1268,6 +1274,8 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
   let payload: Record<string, unknown>;
 
   try {
+    const thumbnailUrl = getBestThumbnail(project);
+    const posterUrl = getBestPoster(project);
     payload = {
       id: project.id,
       user_id: userId,
@@ -1275,9 +1283,13 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
       caption: project.caption ?? project.prompt,
       prompt: project.prompt,
       final_prompt: project.finalPrompt ?? project.prompt,
-      thumbnail_url: storageUrl(project.thumbnailUrl ?? project.keyframeUrl ?? project.referenceImageUrl ?? project.videoUrl, 'Generated project thumbnail'),
+      thumbnail_url: storageUrl(thumbnailUrl, 'Generated project thumbnail'),
+      poster_url: storageUrl(posterUrl, 'Generated project poster'),
       style_preset: project.engine ?? project.provider ?? 'replicate',
-      status: project.status || 'completed',
+      status: project.status || 'draft',
+      published_at: project.publishedAt ?? null,
+      posted_at: project.postedAt ?? null,
+      is_posted: Boolean(project.isPosted),
       provider: project.provider,
       engine: project.engine ?? project.provider,
       display_engine: project.displayEngine ?? null,
@@ -1299,6 +1311,12 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
       creator_name: project.creatorName ?? null,
       creator_username: project.creatorUsername ?? null,
       creator_avatar: storageUrl(project.creatorAvatar, 'Project creator avatar'),
+      privacy: project.privacy ?? 'private',
+      visibility: project.visibility ?? project.privacy ?? 'private',
+      view_count: project.viewCount ?? 0,
+      like_count: project.likeCount ?? 0,
+      comment_count: project.commentCount ?? 0,
+      share_count: project.shareCount ?? 0,
       aspect_ratio: project.aspectRatio ?? null,
       created_at: project.createdAt,
       updated_at: project.updatedAt ?? new Date().toISOString(),
@@ -1316,6 +1334,15 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
 
   const removableProjectColumns = [
     'thumbnail_url',
+    'poster_url',
+    'published_at',
+    'posted_at',
+    'is_posted',
+    'visibility',
+    'view_count',
+    'like_count',
+    'comment_count',
+    'share_count',
     'additional_reference_image_urls',
     'reference_image_url',
     'reference_image_urls',
@@ -1426,15 +1453,38 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
 }
 
 function mapProjectRow(row: DbRow): StudioProject {
+  const rawProject = {
+    ...row,
+    thumbnailUrl: nullableString(row.thumbnail_url),
+    posterUrl: nullableString(row.poster_url),
+    coverAssetUrl: nullableString(row.cover_asset_url),
+    imageUrl: nullableString(row.image_url),
+    videoUrl: nullableString(row.video_url) || nullableString(row.cover_asset_url),
+    keyframeUrl: nullableString(row.keyframe_url),
+    referenceImageUrl: nullableString(row.reference_image_url),
+    referenceImageUrls: jsonRecord(row.reference_image_urls),
+    characterAvatar: nullableString(row.character_avatar),
+  };
+
   return {
     id: stringValue(row.id),
     title: nullableString(row.title),
     caption: nullableString(row.caption),
     prompt: stringValue(row.prompt),
     finalPrompt: nullableString(row.final_prompt),
-    thumbnailUrl: nullableString(row.thumbnail_url) || nullableString(row.cover_asset_url),
+    thumbnailUrl: getBestThumbnail(rawProject),
+    posterUrl: getBestPoster(rawProject),
     videoUrl: stringValue(row.video_url) || stringValue(row.cover_asset_url),
     status: stringValue(row.status) || 'draft',
+    publishedAt: nullableString(row.published_at),
+    postedAt: nullableString(row.posted_at),
+    isPosted: booleanValue(row.is_posted) || stringValue(row.status) === 'published',
+    privacy: nullableString(row.privacy),
+    visibility: nullableString(row.visibility) ?? nullableString(row.privacy),
+    viewCount: Number(row.view_count ?? 0),
+    likeCount: Number(row.like_count ?? 0),
+    commentCount: Number(row.comment_count ?? 0),
+    shareCount: Number(row.share_count ?? 0),
     provider: (row.provider ?? 'mock') as VideoEngine,
     engine: nullableString(row.engine) as VideoEngine | null,
     displayEngine: nullableString(row.display_engine),
@@ -1513,6 +1563,7 @@ export async function loadSupabaseProfilePosts(userId: string): Promise<LumoraPo
     .from('posts')
     .select('*')
     .eq('user_id', userId)
+    .eq('status', 'published')
     .order('created_at', { ascending: false });
 
   if (error) throw error;
@@ -1525,6 +1576,7 @@ export async function loadSupabasePublicPosts(): Promise<LumoraPost[]> {
     .from('posts')
     .select('*')
     .eq('privacy', 'public')
+    .eq('status', 'published')
     .order('created_at', { ascending: false })
     .limit(50);
 
@@ -1532,8 +1584,125 @@ export async function loadSupabasePublicPosts(): Promise<LumoraPost[]> {
   return (data ?? []).map(mapPostRow);
 }
 
+async function loadFollowedUserIds(userId: string | null | undefined): Promise<Set<string>> {
+  if (!userId) return new Set();
+
+  const client = getClient();
+  const { data, error } = await client
+    .from('follows')
+    .select('following_user_id')
+    .eq('follower_user_id', userId);
+
+  if (error) return new Set();
+  return new Set((data ?? []).map((row) => stringValue(row.following_user_id)).filter(Boolean));
+}
+
+function postSearchText(post: LumoraPost) {
+  const postExtras = post as LumoraPost & {
+    tags?: string[] | string | null;
+    character?: { name?: string | null } | null;
+  };
+  const tags = Array.isArray(postExtras.tags) ? postExtras.tags.join(' ') : postExtras.tags;
+
+  return [
+    post.title,
+    post.caption,
+    post.prompt,
+    post.creatorName,
+    post.creatorUsername,
+    post.displayName,
+    post.username,
+    post.characterName,
+    postExtras.character?.name,
+    tags,
+    post.provider,
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function scorePost(post: LumoraPost, input: {
+  currentUserId?: string | null;
+  followedUserIds: Set<string>;
+  searchQuery?: string | null;
+}) {
+  const ageHours = Math.max(1, (Date.now() - new Date(post.publishedAt ?? post.createdAt).getTime()) / 36e5);
+  const recencyScore = Math.max(0, 36 - Math.min(36, ageHours)) / 36;
+  const engagement =
+    (post.viewCount ?? 0) +
+    (post.likeCount ?? 0) * 4 +
+    (post.commentCount ?? 0) * 3 +
+    (post.shareCount ?? 0) * 5;
+  const viralScore = Math.log10(engagement + 1);
+  const trendingScore = viralScore * recencyScore;
+  const followBoost = post.userId && input.followedUserIds.has(post.userId) ? 4 : 0;
+  const ownPostPenalty = input.currentUserId && post.userId === input.currentUserId ? -0.75 : 0;
+  const query = input.searchQuery?.trim().toLowerCase() ?? '';
+  const relevanceScore = query && postSearchText(post).includes(query) ? 5 : 0;
+
+  return followBoost + trendingScore + viralScore + recencyScore + relevanceScore + ownPostPenalty;
+}
+
+export async function listForYouFeed(input: {
+  currentUserId?: string | null;
+  searchQuery?: string | null;
+} = {}): Promise<LumoraPost[]> {
+  const client = getClient();
+  const query = input.searchQuery?.trim().toLowerCase() ?? '';
+  const [{ data, error }, followedUserIds] = await Promise.all([
+    client
+      .from('posts')
+      .select('*')
+      .eq('privacy', 'public')
+      .eq('status', 'published')
+      .order('published_at', { ascending: false, nullsFirst: false })
+      .limit(120),
+    loadFollowedUserIds(input.currentUserId),
+  ]);
+
+  if (error) throw error;
+
+  return (data ?? [])
+    .map(mapPostRow)
+    .filter((post) => !query || postSearchText(post).includes(query))
+    .sort((left, right) => (
+      scorePost(right, { ...input, followedUserIds }) - scorePost(left, { ...input, followedUserIds })
+    ));
+}
+
+function isDraftProject(project: StudioProject) {
+  const status = (project.status || 'draft').toLowerCase();
+  return !project.isPosted && !project.publishedAt && status !== 'published' && status !== 'archived';
+}
+
+export async function listDrafts(userId: string): Promise<StudioProject[]> {
+  return (await loadSupabaseProjects(userId)).filter(isDraftProject);
+}
+
+export async function publishDraft(input: {
+  userId: string;
+  projectId?: string | null;
+  post: LumoraPost;
+  privacy?: PrivacySetting;
+}): Promise<LumoraPost> {
+  const privacy = input.privacy ?? (input.post.privacy as PrivacySetting | undefined) ?? 'public';
+  return saveSupabasePost(input.userId, {
+    ...input.post,
+    sourceGenerationId: input.projectId ?? input.post.sourceGenerationId ?? null,
+    privacy,
+    visibility: input.post.visibility ?? privacy,
+    status: 'published',
+    publishedAt: input.post.publishedAt ?? new Date().toISOString(),
+  });
+}
+
+export const listProfilePosts = loadSupabaseProfilePosts;
+export { repairMissingThumbnailIfNeeded };
+
 export async function saveSupabasePost(userId: string, post: LumoraPost): Promise<LumoraPost> {
   const client = getClient();
+  const normalized = normalizeMediaCard(post);
+  const publishedAt = post.publishedAt ?? new Date().toISOString();
+  const thumbnailUrl = getBestThumbnail(post);
+  const posterUrl = getBestPoster(post);
   const payload = {
     user_id: userId,
     title: post.title || post.caption || 'Lumora post',
@@ -1541,8 +1710,11 @@ export async function saveSupabasePost(userId: string, post: LumoraPost): Promis
     prompt: post.prompt ?? null,
     image_url: storageUrl(post.imageUrl, 'Post image'),
     video_url: storageUrl(post.videoUrl, 'Post video'),
+    thumbnail_url: storageUrl(thumbnailUrl, 'Post thumbnail'),
+    poster_url: storageUrl(posterUrl, 'Post poster'),
     source_generation_id: post.sourceGenerationId ?? null,
-    privacy: post.privacy ?? 'private',
+    privacy: post.privacy ?? post.visibility ?? 'public',
+    visibility: post.visibility ?? post.privacy ?? 'public',
     character_id: post.characterId ?? null,
     character_name: post.characterName ?? null,
     character_avatar: storageUrl(post.characterAvatar, 'Post character avatar'),
@@ -1551,7 +1723,12 @@ export async function saveSupabasePost(userId: string, post: LumoraPost): Promis
     creator_username: post.creatorUsername ?? post.username ?? null,
     creator_avatar: storageUrl(post.creatorAvatar ?? post.avatar, 'Post creator avatar'),
     provider: post.provider ?? null,
-    status: post.status ?? 'published',
+    status: 'published',
+    published_at: publishedAt,
+    view_count: post.viewCount ?? 0,
+    like_count: post.likeCount ?? 0,
+    comment_count: post.commentCount ?? 0,
+    share_count: post.shareCount ?? 0,
     updated_at: new Date().toISOString(),
   };
 
@@ -1589,7 +1766,13 @@ export async function saveSupabasePost(userId: string, post: LumoraPost): Promis
       .from('projects')
       .update({
         is_posted: true,
-        posted_at: new Date().toISOString(),
+        status: 'published',
+        published_at: publishedAt,
+        posted_at: publishedAt,
+        privacy: payload.privacy,
+        visibility: payload.visibility,
+        thumbnail_url: storageUrl(thumbnailUrl ?? normalized.thumbnailUrl, 'Published project thumbnail'),
+        poster_url: storageUrl(posterUrl ?? normalized.posterUrl, 'Published project poster'),
         updated_at: new Date().toISOString(),
       })
       .eq('id', post.sourceGenerationId)
@@ -1600,6 +1783,21 @@ export async function saveSupabasePost(userId: string, post: LumoraPost): Promis
 }
 
 function mapPostRow(row: DbRow): LumoraPost {
+  const rawPost = repairMissingThumbnailIfNeeded({
+    id: stringValue(row.id),
+    title: nullableString(row.title),
+    caption: nullableString(row.caption),
+    prompt: nullableString(row.prompt),
+    imageUrl: nullableString(row.image_url),
+    videoUrl: nullableString(row.video_url),
+    thumbnailUrl: nullableString(row.thumbnail_url),
+    posterUrl: nullableString(row.poster_url),
+    characterAvatar: nullableString(row.character_avatar),
+    creatorAvatar: nullableString(row.creator_avatar),
+  });
+  const thumbnailUrl = getBestThumbnail(rawPost);
+  const posterUrl = getBestPoster(rawPost);
+
   return {
     id: stringValue(row.id),
     userId: nullableString(row.user_id),
@@ -1608,14 +1806,23 @@ function mapPostRow(row: DbRow): LumoraPost {
     prompt: nullableString(row.prompt),
     imageUrl: nullableString(row.image_url),
     videoUrl: nullableString(row.video_url),
+    thumbnailUrl,
+    posterUrl,
     sourceGenerationId: nullableString(row.source_generation_id),
     createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+    publishedAt: nullableString(row.published_at) ?? toIso(row.created_at),
     characterId: nullableString(row.character_id),
     characterName: nullableString(row.character_name),
     characterAvatar: nullableString(row.character_avatar),
     provider: nullableString(row.provider),
-    status: nullableString(row.status),
+    status: nullableString(row.status) ?? 'published',
     privacy: nullableString(row.privacy),
+    visibility: nullableString(row.visibility) ?? nullableString(row.privacy),
+    viewCount: Number(row.view_count ?? 0),
+    likeCount: Number(row.like_count ?? 0),
+    commentCount: Number(row.comment_count ?? 0),
+    shareCount: Number(row.share_count ?? 0),
     displayName: nullableString(row.creator_name),
     username: nullableString(row.creator_username),
     avatar: nullableString(row.creator_avatar),

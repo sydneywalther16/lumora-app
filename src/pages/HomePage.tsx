@@ -9,6 +9,7 @@ import { loadLumoraProfile } from '../lib/profileStorage';
 import { loadLocalProfileAvatarUrl } from '../lib/localAvatarStorage';
 import { useSession } from '../hooks/useSession';
 import { loadSupabasePublicPosts } from '../lib/supabaseAppData';
+import { getBestPoster, getBestThumbnail } from '../lib/mediaThumbnail';
 
 function formatPostedDate(iso: string): string {
   const date = new Date(iso);
@@ -136,9 +137,11 @@ function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
   const [videoFailed, setVideoFailed] = useState(false);
   const stats = getPostStats(post.id);
 
-  const videoUrl = post.videoUrl || post.imageUrl;
+  const thumbnailUrl = getBestThumbnail(post);
+  const posterUrl = getBestPoster(post);
+  const mediaUrl = thumbnailUrl || post.imageUrl;
   const title = post.title || post.caption || 'Untitled Lumora post';
-  const bodyText = post.caption || post.prompt || 'Posted from Studio';
+  const bodyText = post.caption || post.prompt || 'Posted from Drafts';
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
   const authorUsername = post.creatorUsername || post.username || 'lumora.creator';
   const authorAvatar = post.creatorAvatar || post.avatar || fallbackAuthorAvatar;
@@ -167,6 +170,7 @@ function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
           muted
           loop
           playsInline
+          poster={posterUrl ?? undefined}
           onError={() => setVideoFailed(true)}
           style={{
             width: '100%',
@@ -178,9 +182,9 @@ function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
             background: 'var(--media-background)',
           }}
         />
-      ) : videoUrl && !videoFailed ? (
+      ) : mediaUrl && !videoFailed ? (
         <img
-          src={videoUrl}
+          src={mediaUrl}
           alt={title}
           style={{
             width: '100%',
@@ -312,12 +316,12 @@ export default function HomePage() {
           : loadPostedPublications();
         if (!active) return;
         setLocalPosts(savedPosts);
-        setFeedMessage(savedPosts.length ? '' : 'Post a public concept from Studio to add it to Home.');
+        setFeedMessage(savedPosts.length ? '' : 'Post a public concept from Drafts to add it to Home.');
       } catch {
         const savedPosts = loadPostedPublications();
         if (!active) return;
         setLocalPosts(savedPosts);
-        setFeedMessage(savedPosts.length ? '' : 'Post a concept from Studio to add it to Home.');
+        setFeedMessage(savedPosts.length ? '' : 'Post a concept from Drafts to add it to Home.');
       }
     }
 
@@ -382,7 +386,7 @@ export default function HomePage() {
                 Local
               </span>
             </div>
-            <p>Try another category, or post a concept from Studio that matches this lane.</p>
+            <p>Try another category, or post a concept from Drafts that matches this lane.</p>
           </article>
         </section>
       ) : !localPosts.length && filteredDemoPosts.length ? (
@@ -399,7 +403,7 @@ export default function HomePage() {
         </section>
       ) : null}
 
-      <BottomSheet title={localPosts.length ? 'Feed is live' : 'Quick studio note'}>
+      <BottomSheet title={localPosts.length ? 'Feed is live' : 'Quick Drafts note'}>
         <p>
           {localPosts.length
             ? 'Your posted concepts are showing in Home.'

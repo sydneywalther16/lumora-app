@@ -34,7 +34,8 @@ export default function App() {
         <Route path="/trends" element={<Navigate to="/for-you" replace />} />
         <Route path="/create" element={<CreatePage />} />
         <Route path="/capture" element={<CharacterCapturePage />} />
-        <Route path="/studio" element={<StudioPage />} />
+        <Route path="/drafts" element={<StudioPage />} />
+        <Route path="/studio" element={<Navigate to="/drafts" replace />} />
         <Route path="/inbox" element={<InboxPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/diagnostics" element={<DiagnosticsPage />} />

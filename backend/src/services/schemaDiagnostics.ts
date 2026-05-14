@@ -17,6 +17,8 @@ export type SchemaDiagnosticCheck = {
 const requiredTables = [
   'projects',
   'generation_jobs',
+  'posts',
+  'follows',
   'character_profiles',
   'continuity_memory_states',
 ] as const;
@@ -27,6 +29,32 @@ const requiredGenerationJobColumns = [
   'scene_id',
   'clip_order',
   'scene_metadata',
+] as const;
+
+const feedProjectColumns = [
+  'status',
+  'published_at',
+  'thumbnail_url',
+  'poster_url',
+  'privacy',
+  'visibility',
+  'view_count',
+  'like_count',
+  'comment_count',
+  'share_count',
+] as const;
+
+const feedPostColumns = [
+  'status',
+  'published_at',
+  'thumbnail_url',
+  'poster_url',
+  'privacy',
+  'visibility',
+  'view_count',
+  'like_count',
+  'comment_count',
+  'share_count',
 ] as const;
 
 export function serializeDiagnosticError(error: unknown) {
@@ -64,7 +92,7 @@ async function checkSupabaseTable(tableName: typeof requiredTables[number]): Pro
 
   const { count, error } = await supabaseAdmin
     .from(tableName)
-    .select('id', { count: 'exact', head: true });
+    .select('*', { count: 'exact', head: true });
 
   return {
     ok: !error,
@@ -246,7 +274,7 @@ async function checkRlsPolicies() {
       `select tablename, policyname, cmd, roles, qual, with_check
        from pg_policies
        where schemaname = 'public'
-         and tablename in ('projects', 'generation_jobs', 'character_profiles', 'continuity_memory_states')
+         and tablename in ('projects', 'posts', 'follows', 'generation_jobs', 'character_profiles', 'continuity_memory_states')
        order by tablename, policyname`,
     );
 
@@ -270,6 +298,12 @@ export async function buildDatabaseDiagnostics() {
   const generationJobColumnChecks = await Promise.all(
     requiredGenerationJobColumns.map((column) => checkColumnExists('generation_jobs', column)),
   );
+  const feedProjectColumnChecks = await Promise.all(
+    feedProjectColumns.map((column) => checkColumnExists('projects', column)),
+  );
+  const feedPostColumnChecks = await Promise.all(
+    feedPostColumns.map((column) => checkColumnExists('posts', column)),
+  );
   const indexChecks = await Promise.all([
     checkIndexExists('generation_jobs_character_id_text_idx'),
     checkIndexExists('generation_jobs_scene_execution_idx'),
@@ -277,10 +311,20 @@ export async function buildDatabaseDiagnostics() {
     checkIndexExists('character_profiles_owner_character_id_idx'),
     checkIndexExists('continuity_memory_states_user_updated_idx'),
     checkIndexExists('continuity_memory_states_character_idx'),
+    checkIndexExists('projects_user_drafts_idx'),
+    checkIndexExists('posts_public_published_idx'),
+    checkIndexExists('follows_follower_idx'),
+    checkIndexExists('follows_following_idx'),
   ]);
   const serviceRoleAccess = await Promise.all(requiredTables.map(checkServiceRoleAccess));
   const rlsPolicies = await checkRlsPolicies();
-  const schemaChecks = [...tableChecks, ...generationJobColumnChecks, ...indexChecks];
+  const schemaChecks = [
+    ...tableChecks,
+    ...generationJobColumnChecks,
+    ...feedProjectColumnChecks,
+    ...feedPostColumnChecks,
+    ...indexChecks,
+  ];
 
   return {
     ok:

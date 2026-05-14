@@ -30,6 +30,7 @@ import {
   SEEDANCE_ENGINE_ID,
   SEEDANCE_QUALITY_ENGINE_ID,
 } from '../lib/providers/seedance';
+import { getBestPoster, getBestThumbnail } from '../lib/mediaThumbnail';
 import { useSession } from '../hooks/useSession';
 import { useAppStore } from '../store/useAppStore';
 import SelfReferencePreview, { normalizeReference } from './SelfReferencePreview';
@@ -171,6 +172,9 @@ type GenerateVideoApiResponse = {
   videoUrl?: unknown;
   video?: unknown;
   outputUrl?: unknown;
+  thumbnailUrl?: unknown;
+  posterUrl?: unknown;
+  previewImageUrl?: unknown;
   provider?: string;
   model?: string;
   finalPrompt?: string;
@@ -1301,7 +1305,22 @@ export default function CreateVideo({
         : formatUrlList(data.additionalReferenceImageUrls).length
           ? formatUrlList(data.additionalReferenceImageUrls)
           : additionalReferenceImageUrls;
-      const nextThumbnailUrl = nextReferenceImageUrl || nextVideoUrl;
+      const nextThumbnailUrl = getBestThumbnail({
+        thumbnailUrl: data.thumbnailUrl,
+        posterUrl: data.posterUrl,
+        previewImageUrl: data.previewImageUrl,
+        referenceImageUrl: nextReferenceImageUrl,
+        referenceImageUrls: referencePayload,
+        characterAvatar,
+      });
+      const nextPosterUrl = getBestPoster({
+        thumbnailUrl: nextThumbnailUrl,
+        posterUrl: data.posterUrl,
+        previewImageUrl: data.previewImageUrl,
+        referenceImageUrl: nextReferenceImageUrl,
+        referenceImageUrls: referencePayload,
+        characterAvatar,
+      });
       const nextWarnings = Array.from(new Set([
         ...formatWarnings(data.warnings),
         ...(data.referenceImageNote ? [data.referenceImageNote] : []),
@@ -1319,7 +1338,7 @@ export default function CreateVideo({
       }
 
       const nextFinalPrompt = data.finalPrompt || currentPrompt;
-      let studioSaveStatus = 'Video generated and saved to Studio.';
+      let studioSaveStatus = 'Video generated and saved to Drafts.';
       setGeneratedVideoUrl(nextVideoUrl);
       setFinalGeneratedPrompt(nextFinalPrompt);
       setGeneratedModel(data.model || '');
@@ -1342,6 +1361,9 @@ export default function CreateVideo({
         isDefaultSelfCharacter,
         prompt: currentPrompt,
         outputUrl: nextVideoUrl,
+        thumbnailUrl: nextThumbnailUrl,
+        posterUrl: nextPosterUrl,
+        previewImageUrl: typeof data.previewImageUrl === 'string' ? data.previewImageUrl : null,
         generationMode: nextGenerationMode,
         finalPrompt: nextFinalPrompt,
         model: data.model || null,
@@ -1376,7 +1398,8 @@ export default function CreateVideo({
           finalPrompt: nextFinalPrompt,
           videoUrl: result.outputUrl,
           thumbnailUrl: nextThumbnailUrl,
-          status: result.status,
+          posterUrl: nextPosterUrl,
+          status: 'draft',
           provider: generationProvider,
           engine: selectedEngine,
           aspectRatio: nextAspectRatio,
@@ -1433,12 +1456,12 @@ export default function CreateVideo({
               ...studioProject,
               storage: 'local-fallback',
             });
-            studioSaveStatus = 'Video generated. Account save failed, so a local Studio backup was saved.';
+            studioSaveStatus = 'Video generated. Account save failed, so a local Drafts backup was saved.';
             setGenerationWarnings((current) => [
               ...current,
               saveError instanceof Error
-                ? `Account save failed: ${saveError.message}. A local Studio backup was saved.`
-                : 'Account save failed. A local Studio backup was saved.',
+                ? `Account save failed: ${saveError.message}. A local Drafts backup was saved.`
+                : 'Account save failed. A local Drafts backup was saved.',
             ]);
           }
         } else {
@@ -1452,7 +1475,7 @@ export default function CreateVideo({
 
       finishGenerationProgress('completed');
       setStatus(studioSaveStatus);
-      showToast({ type: 'success', message: 'Generation completed and saved to Studio.' });
+      showToast({ type: 'success', message: 'Generation completed and saved to Drafts.' });
     } catch (error) {
       console.error('Generation failed', error);
       const message = error instanceof Error ? error.message : 'Unable to create draft render';
@@ -1918,7 +1941,7 @@ export default function CreateVideo({
                 : engine === 'veo'
                 ? 'Veo Experimental currently fails over safely when production credentials are not available.'
                 : engine === 'mock'
-                ? 'Demo Mode returns a known video so you can test Studio save and playback.'
+                ? 'Demo Mode returns a known video so you can test Drafts save and playback.'
                 : selfReferenceMode
                 ? primaryReferenceImage.url
                   ? 'Build a reusable photorealistic character from your reference photos and videos.'
@@ -2094,11 +2117,11 @@ export default function CreateVideo({
               type="button"
               className="ghost-btn"
               onClick={() => {
-                window.location.href = '/studio';
+                window.location.href = '/drafts';
               }}
               style={{ flex: 'unset', width: '100%' }}
             >
-              View in Studio
+              View in Drafts
             </button>
             <button
               type="button"
@@ -2160,12 +2183,13 @@ export default function CreateVideo({
               autoPlay
               loop
               playsInline
+              poster={getBestPoster(generationResult) ?? undefined}
               style={{ width: '100%', borderRadius: 12 }}
             />
           ) : null}
           <div className="button-row">
-            <button type="button" className="ghost-btn" onClick={() => { window.location.href = '/studio'; }}>
-              Open in Studio
+            <button type="button" className="ghost-btn" onClick={() => { window.location.href = '/drafts'; }}>
+              Open in Drafts
             </button>
             <button type="button" className="ghost-btn" onClick={handleRemixResult}>
               Remix result

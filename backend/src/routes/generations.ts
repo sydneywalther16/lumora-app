@@ -77,6 +77,15 @@ function seedanceReferenceImages(
   });
 }
 
+function firstReferenceThumbnail(
+  value: Array<z.infer<typeof seedanceReferenceImageSchema>> | undefined,
+  fallback?: string | null,
+) {
+  const reference = value?.find(Boolean);
+  if (!reference) return fallback ?? null;
+  return typeof reference === 'string' ? reference : reference.url;
+}
+
 export const generationsRouter = Router();
 const generationRateLimit = createRateLimit({
   windowMs: 60_000,
@@ -242,7 +251,7 @@ generationsRouter.post('/', generationRateLimit, async (req, res) => {
       provider: payload.engine,
       engine: payload.engine,
       videoUrl: providerResult.resultAssetUrl,
-      thumbnailUrl: providerResult.resultAssetUrl,
+      thumbnailUrl: firstReferenceThumbnail(payload.referenceImages, payload.characterAvatar),
       characterId: payload.characterId ?? null,
       characterName: payload.characterName ?? null,
       characterAvatar: payload.characterAvatar ?? null,
@@ -263,6 +272,8 @@ generationsRouter.post('/', generationRateLimit, async (req, res) => {
       prompt,
       outputUrl: persistence.videoUrl,
       videoUrl: persistence.videoUrl,
+      thumbnailUrl: firstReferenceThumbnail(payload.referenceImages, payload.characterAvatar),
+      posterUrl: firstReferenceThumbnail(payload.referenceImages, payload.characterAvatar),
       projectId: persistence.projectId,
       storagePath: persistence.storagePath,
       warnings: persistence.warnings,

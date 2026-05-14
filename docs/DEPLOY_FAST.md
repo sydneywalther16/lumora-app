@@ -55,6 +55,26 @@ It is idempotent and safe to run again. It creates or repairs:
 - `generation_jobs.scene_metadata`
 - Character profile memory/index/RLS support
 
+## Feed, Drafts, and thumbnails rollout
+Apply the social feed and Drafts lifecycle migration after the Character Profiles repair migration:
+
+```powershell
+.\scripts\copy-migration-to-clipboard.ps1 feed-drafts
+```
+
+Paste into Supabase SQL Editor and click **Run**.
+
+The migration is:
+- `backend/supabase/migrations/20260512_feed_drafts_thumbnails.sql`
+
+It is idempotent and safe to run again. It creates or repairs:
+- Draft/publish lifecycle columns on `projects`
+- Published feed lifecycle columns on `posts`
+- `thumbnail_url` / `poster_url` fallbacks
+- engagement counters used by For You ranking
+- `follows` table for v1 recommendation boosts
+- explicit RLS so users can read public posts and their own drafts
+
 ## 2) Frontend env vars (Vercel)
 Set these on Vercel:
 - `VITE_SUPABASE_URL`
@@ -135,6 +155,13 @@ Expected database success state:
 - `generation_jobs.scene_id exists` is `OK`
 - `generation_jobs.clip_order exists` is `OK`
 - `generation_jobs.scene_metadata exists` is `OK`
+- `projects.status exists` is `OK`
+- `projects.published_at exists` is `OK`
+- `projects.thumbnail_url exists` is `OK`
+- `posts.status exists` is `OK`
+- `posts.published_at exists` is `OK`
+- `posts.thumbnail_url exists` is `OK`
+- `follows table exists` is `OK`
 - service role read/write checks are `OK`
 - RLS policies are available
 
@@ -143,4 +170,7 @@ Expected app success state:
 - `/create` shows the Character Profile selector and Continuity Memory panel.
 - Creative Brain can build a storyboard plan.
 - Scene Executor can render storyboard clips without `generation_jobs.character_id` errors.
-- `/studio` still shows older projects, including jobs with no character selected.
+- `/drafts` shows only unpublished drafts with thumbnails.
+- `/studio` redirects to `/drafts`.
+- Publishing a draft removes it from Drafts and makes it eligible for Profile, Home, and For You.
+- `/for-you` shows the discovery search bar and thumbnail grid.

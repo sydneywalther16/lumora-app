@@ -1,4 +1,5 @@
 import type { CreatorSelfStylePreferences, LumoraPost } from './api';
+import { getBestPoster, getBestThumbnail } from './mediaThumbnail';
 import type { StudioProject } from './projectStorage';
 
 type SelfReferenceImageUrls = {
@@ -256,7 +257,21 @@ export function loadProfilePosts(): LumoraPost[] {
         (typeof item.videoUrl === 'string' || typeof item.imageUrl === 'string') &&
         typeof item.createdAt === 'string'
       );
-    });
+    })
+      .map((post) => ({
+        ...post,
+        status: post.status ?? 'published',
+        privacy: post.privacy ?? 'public',
+        visibility: post.visibility ?? post.privacy ?? 'public',
+        publishedAt: post.publishedAt ?? post.createdAt,
+        thumbnailUrl: post.thumbnailUrl ?? getBestThumbnail(post),
+        posterUrl: post.posterUrl ?? getBestPoster(post),
+      }))
+      .filter((post) => {
+        const status = (post.status || 'published').toLowerCase();
+        const visibility = (post.visibility || post.privacy || 'public').toLowerCase();
+        return status === 'published' && visibility !== 'private';
+      });
   } catch {
     return [];
   }
