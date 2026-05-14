@@ -19,6 +19,8 @@ type CharacterHubProps = {
   children?: ReactNode;
 };
 
+type DetailSectionKey = 'identity' | 'appearance' | 'style' | 'voice' | 'memory' | 'references';
+
 const characterLimit = 25;
 const characterProfilesMigrationWarning = 'Character Profiles need the latest database migration.';
 
@@ -84,6 +86,29 @@ function metadataLine(label: string, value: unknown) {
   const text = typeof value === 'string' ? value.trim() : '';
   if (!text) return null;
   return <p><strong>{label}</strong> {text}</p>;
+}
+
+function summaryText(...values: Array<string | null | undefined>) {
+  return values.find((value) => typeof value === 'string' && value.trim().length > 0)?.trim() ?? '';
+}
+
+function formatPercent(value: number | null | undefined) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return 'New';
+  return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
+}
+
+function latestContinuityConfidence(character: CharacterProfile) {
+  const latestSnapshot = character.memorySnapshots?.find((snapshot) => typeof snapshot.continuityConfidence === 'number');
+  return latestSnapshot?.continuityConfidence ?? null;
+}
+
+function uniqueSceneCount(character: CharacterProfile) {
+  const sceneKeys = new Set(
+    (character.memorySnapshots ?? [])
+      .map((snapshot) => snapshot.sceneId || snapshot.sceneExecutionId)
+      .filter((value): value is string => Boolean(value)),
+  );
+  return sceneKeys.size || (character.memorySnapshots?.length ?? 0);
 }
 
 function compactValue(value: unknown): string {
@@ -155,6 +180,44 @@ function CharacterHubFrame({
         </button>
       </div>
     </div>
+  );
+}
+
+function CharacterDetailSection({
+  id,
+  title,
+  summary,
+  expanded,
+  onToggle,
+  children,
+}: {
+  id: DetailSectionKey;
+  title: string;
+  summary?: string;
+  expanded: boolean;
+  onToggle: (section: DetailSectionKey) => void;
+  children: ReactNode;
+}) {
+  return (
+    <section className={`character-accordion-section${expanded ? ' is-open' : ''}`}>
+      <button
+        type="button"
+        className="character-accordion-trigger"
+        aria-expanded={expanded}
+        onClick={() => onToggle(id)}
+      >
+        <span>
+          <strong>{title}</strong>
+          {summary ? <small>{summary}</small> : null}
+        </span>
+        <span className="character-accordion-icon" aria-hidden="true">{expanded ? '-' : '+'}</span>
+      </button>
+      <div className="character-accordion-content" aria-hidden={!expanded}>
+        <div className="character-accordion-inner">
+          {children}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -230,6 +293,7 @@ export default function CharacterHub({
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [deleteStatus, setDeleteStatus] = useState('');
   const [deletingCharacter, setDeletingCharacter] = useState(false);
+  const [expandedSections, setExpandedSections] = useState<DetailSectionKey[]>(['appearance', 'memory']);
   const atCharacterLimit = characters.length >= characterLimit;
 
   useEffect(() => {
@@ -281,6 +345,7 @@ export default function CharacterHub({
     );
     setEditorStatus('');
     setDeleteStatus('');
+    setExpandedSections(characterIsSelf(selectedCharacter) ? ['memory'] : ['appearance', 'memory']);
   }, [selectedCharacter]);
 
   if (!open) return null;
@@ -311,7 +376,21 @@ export default function CharacterHub({
     setSelfSetupOpen(true);
     setActionsOpen(false);
     setConfirmDeleteOpen(false);
+    setExpandedSections([]);
     void onEditSelf();
+  }
+
+  function toggleDetailSection(section: DetailSectionKey) {
+    setExpandedSections((current) => {
+      if (current.includes(section)) {
+        return current.filter((item) => item !== section);
+      }
+      return [section, ...current].slice(0, 2);
+    });
+  }
+
+  function detailSectionIsOpen(section: DetailSectionKey) {
+    return expandedSections.includes(section);
   }
 
   async function refreshAfterCreate() {
@@ -435,24 +514,46 @@ export default function CharacterHub({
     return (
       <CharacterHubFrame onClose={onClose}>
       <section className="character-hub-view character-detail-page">
-        <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-          <div>
-            <span className="eyebrow">characters</span>
-            <h2 style={{ marginTop: '8px' }}>Self Character</h2>
-            <p className="muted" style={{ margin: '8px 0 0' }}>
-              Build the pinned identity Lumora can reuse across your cinematic scenes.
-            </p>
-          </div>
+        <div className="character-detail-topbar">
           <button type="button" className="text-btn" onClick={returnToList}>
             Back
           </button>
         </div>
 
-        {children || (
-          <article className="list-card" style={{ borderRadius: '22px', padding: '16px' }}>
-            <p className="muted">Loading self character editor...</p>
-          </article>
-        )}
+        <article className="character-detail-hero">
+          <div className="character-detail-identity">
+            <span className="character-avatar" style={{ width: '104px', height: '104px', borderRadius: '24px' }}>S</span>
+            <div style={{ minWidth: 0 }}>
+              <span className="tiny-pill">Self</span>
+              <h2 style={{ margin: '8px 0 0' }}>Create your self character</h2>
+              <p className="character-hero-summary">
+                Build the pinned identity Lumora can reuse across your cinematic scenes.
+              </p>
+              <div className="character-quick-stats" aria-label="Self character setup stats">
+                <span><strong>New</strong> continuity</span>
+                <span><strong>0</strong> scenes</span>
+                <span><strong>0</strong> memories</span>
+                <span><strong>Self</strong> pinned</span>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <div className="character-detail-sections">
+          <CharacterDetailSection
+            id="identity"
+            title="Identity"
+            summary="Reference photos, voice, and style setup"
+            expanded={detailSectionIsOpen('identity')}
+            onToggle={toggleDetailSection}
+          >
+            {children || (
+              <article className="list-card" style={{ borderRadius: '18px', padding: '14px' }}>
+                <p className="muted">Loading self character editor...</p>
+              </article>
+            )}
+          </CharacterDetailSection>
+        </div>
       </section>
       </CharacterHubFrame>
     );
@@ -465,6 +566,14 @@ export default function CharacterHub({
       .slice(0, 8);
     const styleEntries = stylePreferenceEntries(selectedCharacter);
     const orchestrationEntries = orchestrationMemoryEntries(selectedCharacter);
+    const continuityConfidence = latestContinuityConfidence(selectedCharacter);
+    const appearanceHero = summaryText(
+      selectedCharacter.appearanceSummary,
+      selectedCharacter.continuityState?.characterAppearance,
+      selectedCharacter.identityProfile?.appearanceSummary,
+    ) || 'No appearance summary saved yet.';
+    const sceneAppearances = uniqueSceneCount(selectedCharacter);
+    const memorySnapshotCount = selectedCharacter.memorySnapshots?.length ?? 0;
 
     return (
       <CharacterHubFrame onClose={onClose}>
@@ -487,148 +596,199 @@ export default function CharacterHub({
 
         <article className="character-detail-hero">
           <div className="character-detail-identity">
-            <CharacterThumbnail character={selectedCharacter} size={72} />
+            <CharacterThumbnail character={selectedCharacter} size={104} />
             <div style={{ minWidth: 0 }}>
               <span className="tiny-pill">{selectedIsSelf ? 'Self' : 'Cast member'}</span>
               <h2 style={{ margin: '8px 0 0' }}>{displayName(selectedCharacter)}</h2>
-              <p className="muted" style={{ margin: '6px 0 0' }}>
-                {selectedCharacter.status} / {selectedCharacter.visibility.replace('_', ' ')}
-              </p>
+              <p className="character-hero-summary">{appearanceHero}</p>
+              <div className="character-quick-stats" aria-label="Character quick stats">
+                <span><strong>{formatPercent(continuityConfidence)}</strong> continuity</span>
+                <span><strong>{sceneAppearances}</strong> scenes</span>
+                <span><strong>{memorySnapshotCount}</strong> memories</span>
+                <span><strong>{orchestrationEntries.length}</strong> orchestration</span>
+              </div>
             </div>
           </div>
         </article>
 
-        {selectedIsSelf ? (
-          <>
-            <div className="character-memory-viewer">
-              <span className="eyebrow">self character memory</span>
-              {metadataLine('Appearance', selectedCharacter.appearanceSummary)}
-              {metadataLine('Wardrobe', selectedCharacter.wardrobeTendencies)}
-              {metadataLine('Style', selectedCharacter.cinematicStyle)}
-              {!selectedCharacter.appearanceSummary && !selectedCharacter.wardrobeTendencies && !selectedCharacter.cinematicStyle ? (
-                <p className="muted">Open the editor below to build your reusable self character.</p>
+        <div className="character-detail-sections">
+          <CharacterDetailSection
+            id="identity"
+            title="Identity"
+            summary={`${selectedCharacter.status} / ${selectedCharacter.visibility.replace('_', ' ')}`}
+            expanded={detailSectionIsOpen('identity')}
+            onToggle={toggleDetailSection}
+          >
+            {selectedIsSelf ? (
+              children || (
+                <article className="list-card" style={{ borderRadius: '18px', padding: '14px' }}>
+                  <p className="muted">Loading self character editor...</p>
+                </article>
+              )
+            ) : (
+              <div className="character-compact-form">
+                <label className="field-block">
+                  <span>Display name</span>
+                  <input value={editorName} onChange={(event) => setEditorName(event.target.value)} />
+                </label>
+                {metadataLine('Profile', `${selectedCharacter.status} / ${selectedCharacter.visibility.replace('_', ' ')}`)}
+              </div>
+            )}
+          </CharacterDetailSection>
+
+          <CharacterDetailSection
+            id="appearance"
+            title="Appearance"
+            summary={appearanceHero}
+            expanded={detailSectionIsOpen('appearance')}
+            onToggle={toggleDetailSection}
+          >
+            {selectedIsSelf ? (
+              <div className="character-memory-viewer character-section-card">
+                {metadataLine('Appearance', selectedCharacter.appearanceSummary)}
+                {metadataLine('Wardrobe', selectedCharacter.wardrobeTendencies)}
+                {metadataLine('Emotional tone', selectedCharacter.emotionalTendencies)}
+                {!selectedCharacter.appearanceSummary && !selectedCharacter.wardrobeTendencies && !selectedCharacter.emotionalTendencies ? (
+                  <p className="muted">No appearance memory saved yet.</p>
+                ) : null}
+              </div>
+            ) : (
+              <div className="character-compact-form">
+                <label className="field-block">
+                  <span>Appearance summary</span>
+                  <textarea value={appearanceSummary} onChange={(event) => setAppearanceSummary(event.target.value)} rows={2} />
+                </label>
+                <label className="field-block">
+                  <span>Wardrobe tendencies</span>
+                  <input value={wardrobeTendencies} onChange={(event) => setWardrobeTendencies(event.target.value)} />
+                </label>
+                <label className="field-block">
+                  <span>Emotional tendencies</span>
+                  <input value={emotionalTendencies} onChange={(event) => setEmotionalTendencies(event.target.value)} />
+                </label>
+              </div>
+            )}
+          </CharacterDetailSection>
+
+          <CharacterDetailSection
+            id="style"
+            title="Style"
+            summary={summaryText(cinematicStyle, selectedCharacter.cinematicStyle, styleEntries[0]?.[1]) || 'No style saved yet.'}
+            expanded={detailSectionIsOpen('style')}
+            onToggle={toggleDetailSection}
+          >
+            <div className="character-compact-form">
+              {!selectedIsSelf ? (
+                <>
+                  <label className="field-block">
+                    <span>Cinematic style</span>
+                    <input value={cinematicStyle} onChange={(event) => setCinematicStyle(event.target.value)} />
+                  </label>
+                  <label className="field-block">
+                    <span>Soundtrack tendencies</span>
+                    <input value={soundtrackTendencies} onChange={(event) => setSoundtrackTendencies(event.target.value)} />
+                  </label>
+                </>
+              ) : null}
+              {styleEntries.length ? (
+                <div className="character-memory-viewer character-section-card">
+                  {styleEntries.map(([label, value]) => (
+                    <p key={label}><strong>{label}</strong> {value}</p>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted">No style preferences saved yet.</p>
+              )}
+            </div>
+          </CharacterDetailSection>
+
+          <CharacterDetailSection
+            id="voice"
+            title="Voice"
+            summary={summaryText(selectedCharacter.voiceSampleName, selectedCharacter.voiceSampleNumbers, selectedCharacter.sourceCaptureVideo2Name) || 'No voice media saved yet.'}
+            expanded={detailSectionIsOpen('voice')}
+            onToggle={toggleDetailSection}
+          >
+            <div className="character-memory-viewer character-section-card">
+              {metadataLine('Soundtrack', selectedCharacter.soundtrackTendencies)}
+              {metadataLine('Voice sample', selectedCharacter.voiceSampleName || selectedCharacter.voiceSampleNumbers || selectedCharacter.voiceSampleUrl)}
+              {metadataLine('Source capture', selectedCharacter.sourceCaptureVideo2Name || selectedCharacter.sourceCaptureVideoUrl)}
+              {!selectedCharacter.soundtrackTendencies && !selectedCharacter.voiceSampleUrl && !selectedCharacter.sourceCaptureVideoUrl ? (
+                <p className="muted">No voice or profile media saved yet.</p>
               ) : null}
             </div>
-            {children}
-          </>
-        ) : (
-          <div className="character-profile-editor character-detail-editor" style={{ marginTop: 0 }}>
-            <div className="row-between">
-              <div>
-                <span className="eyebrow">profile</span>
-                <strong>Character detail</strong>
+          </CharacterDetailSection>
+
+          <CharacterDetailSection
+            id="memory"
+            title="Memory / Continuity"
+            summary={`${formatPercent(continuityConfidence)} continuity / ${memorySnapshotCount} memories`}
+            expanded={detailSectionIsOpen('memory')}
+            onToggle={toggleDetailSection}
+          >
+            <div className="character-compact-form">
+              {!selectedIsSelf ? (
+                <label className="field-block">
+                  <span>Relationship memory</span>
+                  <textarea value={relationshipNotes} onChange={(event) => setRelationshipNotes(event.target.value)} rows={2} />
+                </label>
+              ) : null}
+              <div className="character-memory-viewer character-section-card">
+                {memoryEntries.length ? (
+                  memoryEntries.map(([field, value]) => (
+                    <p key={field}><strong>{field}</strong> {String(value)}</p>
+                  ))
+                ) : (
+                  <p className="muted">No continuity memory captured yet.</p>
+                )}
+                {(selectedCharacter.memorySnapshots ?? []).slice(0, 3).map((snapshot) => (
+                  <p key={`${snapshot.sceneExecutionId}-${snapshot.sceneId}-${snapshot.clipOrder}`}>
+                    <strong>{snapshot.continuityConfidence ? `${Math.round(snapshot.continuityConfidence * 100)}%` : 'Memory'}</strong> {snapshot.summary}
+                  </p>
+                ))}
               </div>
-              <span className="tiny-pill">Editable</span>
+              <div className="character-memory-viewer character-section-card">
+                <span className="eyebrow">orchestration</span>
+                {orchestrationEntries.length ? (
+                  orchestrationEntries.map(([label, value]) => (
+                    <p key={label}><strong>{label}</strong> {value}</p>
+                  ))
+                ) : (
+                  <p className="muted">No orchestration memory saved yet.</p>
+                )}
+              </div>
             </div>
+          </CharacterDetailSection>
 
-            <label className="field-block">
-              <span>Display name</span>
-              <input value={editorName} onChange={(event) => setEditorName(event.target.value)} />
-            </label>
-
-            <label className="field-block">
-              <span>Appearance summary</span>
-              <textarea value={appearanceSummary} onChange={(event) => setAppearanceSummary(event.target.value)} rows={3} />
-            </label>
-
-            <label className="field-block">
-              <span>Wardrobe tendencies</span>
-              <input value={wardrobeTendencies} onChange={(event) => setWardrobeTendencies(event.target.value)} />
-            </label>
-
-            <label className="field-block">
-              <span>Emotional tendencies</span>
-              <input value={emotionalTendencies} onChange={(event) => setEmotionalTendencies(event.target.value)} />
-            </label>
-
-            <label className="field-block">
-              <span>Soundtrack tendencies</span>
-              <input value={soundtrackTendencies} onChange={(event) => setSoundtrackTendencies(event.target.value)} />
-            </label>
-
-            <label className="field-block">
-              <span>Cinematic style</span>
-              <input value={cinematicStyle} onChange={(event) => setCinematicStyle(event.target.value)} />
-            </label>
-
-            <label className="field-block">
-              <span>Relationship memory</span>
-              <textarea value={relationshipNotes} onChange={(event) => setRelationshipNotes(event.target.value)} rows={3} />
-            </label>
-
-            <button type="button" className="ghost-btn" onClick={() => void handleSaveProfile()} disabled={savingProfile}>
-              {savingProfile ? 'Saving...' : 'Save character profile'}
-            </button>
-            {editorStatus ? <p className="muted">{editorStatus}</p> : null}
-          </div>
-        )}
-
-        <div className="character-detail-sections">
-        <div className="character-memory-viewer character-section-card">
-          <span className="eyebrow">reference photos</span>
-          {refs.length ? (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(92px, 1fr))', gap: '10px' }}>
-              {refs.map(([label, url]) => (
-                <div key={`${label}-${url}`} style={{ display: 'grid', gap: '6px' }}>
-                  <div style={{ aspectRatio: '1', borderRadius: '16px', overflow: 'hidden', background: 'var(--control-background)' }}>
-                    <img src={url} alt={`${displayName(selectedCharacter)} ${label}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          <CharacterDetailSection
+            id="references"
+            title="References"
+            summary={refs.length ? `${refs.length} saved references` : 'No references saved yet.'}
+            expanded={detailSectionIsOpen('references')}
+            onToggle={toggleDetailSection}
+          >
+            {refs.length ? (
+              <div className="character-reference-grid">
+                {refs.map(([label, url]) => (
+                  <div key={`${label}-${url}`} className="character-reference-item">
+                    <img src={url} alt={`${displayName(selectedCharacter)} ${label}`} />
+                    <span>{label}</span>
                   </div>
-                  <span className="muted" style={{ fontSize: '0.78rem' }}>{label}</span>
-                </div>
-              ))}
+                ))}
+              </div>
+            ) : (
+              <p className="muted">No reference photos saved yet.</p>
+            )}
+          </CharacterDetailSection>
+
+          {!selectedIsSelf ? (
+            <div className="character-detail-save-row">
+              <button type="button" className="ghost-btn" onClick={() => void handleSaveProfile()} disabled={savingProfile}>
+                {savingProfile ? 'Saving...' : 'Save character profile'}
+              </button>
+              {editorStatus ? <p className="muted">{editorStatus}</p> : null}
             </div>
-          ) : (
-            <p className="muted">No reference photos saved yet.</p>
-          )}
-        </div>
-
-        <div className="character-memory-viewer character-section-card">
-          <span className="eyebrow">continuity memory</span>
-          {memoryEntries.length ? (
-            memoryEntries.map(([field, value]) => (
-              <p key={field}><strong>{field}</strong> {String(value)}</p>
-            ))
-          ) : (
-            <p className="muted">No continuity memory captured yet.</p>
-          )}
-          {(selectedCharacter.memorySnapshots ?? []).slice(0, 3).map((snapshot) => (
-            <p key={`${snapshot.sceneExecutionId}-${snapshot.sceneId}-${snapshot.clipOrder}`}>
-              <strong>{snapshot.continuityConfidence ? `${Math.round(snapshot.continuityConfidence * 100)}%` : 'Memory'}</strong> {snapshot.summary}
-            </p>
-          ))}
-        </div>
-
-        <div className="character-memory-viewer character-section-card">
-          <span className="eyebrow">style preferences</span>
-          {styleEntries.length ? (
-            styleEntries.map(([label, value]) => (
-              <p key={label}><strong>{label}</strong> {value}</p>
-            ))
-          ) : (
-            <p className="muted">No style preferences saved yet.</p>
-          )}
-        </div>
-
-        <div className="character-memory-viewer character-section-card">
-          <span className="eyebrow">orchestration memory</span>
-          {orchestrationEntries.length ? (
-            orchestrationEntries.map(([label, value]) => (
-              <p key={label}><strong>{label}</strong> {value}</p>
-            ))
-          ) : (
-            <p className="muted">No orchestration memory saved yet.</p>
-          )}
-        </div>
-
-        <div className="character-memory-viewer character-section-card">
-          <span className="eyebrow">style and voice</span>
-          {metadataLine('Soundtrack', selectedCharacter.soundtrackTendencies)}
-          {metadataLine('Voice sample', selectedCharacter.voiceSampleName || selectedCharacter.voiceSampleNumbers || selectedCharacter.voiceSampleUrl)}
-          {metadataLine('Source capture', selectedCharacter.sourceCaptureVideo2Name || selectedCharacter.sourceCaptureVideoUrl)}
-          {!selectedCharacter.soundtrackTendencies && !selectedCharacter.voiceSampleUrl && !selectedCharacter.sourceCaptureVideoUrl ? (
-            <p className="muted">No voice or style media saved yet.</p>
           ) : null}
-        </div>
         </div>
 
         {actionsOpen ? (
