@@ -122,6 +122,8 @@ export async function createSeedanceGeneration(input: {
   const result = await generateSeedanceVideo(input.prompt, {
     quality: input.quality,
     referenceImages: input.referenceImages,
+    userId: input.userId,
+    characterId: input.characterId,
   });
   const createdAt = new Date().toISOString();
   const referenceThumbnailUrl = input.referenceImages?.map((reference) => reference.url).find(Boolean) ?? input.characterAvatar ?? null;

@@ -1,6 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import Replicate, { type Prediction } from 'replicate';
 import { env } from '../../lib/env';
+import {
+  createModerationOrchestrationPlan,
+  detectModerationCategories,
+  logModerationOrchestration,
+  moderationProviderProfiles,
+  moderationRetryStages,
+  providerSensitivityProfile,
+  recordModerationOrchestrationResult,
+  rewritePromptForEscalationLevel,
+  type ModerationCategory,
+  type ModerationOrchestrationAttempt,
+  type ModerationRenderingMode,
+  type ModerationProviderSensitivityProfile,
+} from '../moderationOrchestrator';
 
 export const SEEDANCE_FAST_MODEL = 'bytedance/seedance-2.0-fast';
 export const SEEDANCE_QUALITY_MODEL = 'bytedance/seedance-2.0';
@@ -49,13 +63,36 @@ export type SeedanceModerationDiagnostics = {
   model: string;
   retryAttempted: boolean;
   retrySucceeded: boolean;
-  retryMode: 'safe-cinematic-rewrite' | null;
+  retryMode: string | null;
   providerJobId: string | null;
   providerStatus: string | null;
   providerMessage: string;
   sanitizedPrompt: string;
   suggestedPrompt: string;
   referenceImageCount: number;
+  category?: ModerationCategory | null;
+  categories?: ModerationCategory[];
+  escalationLevel?: number | null;
+  rewriteStrategy?: string | null;
+  renderingMode?: ModerationRenderingMode | null;
+  realismModeSelected?: ModerationRenderingMode | null;
+  providerProfile?: string | null;
+  providerSensitivityProfile?: ModerationProviderSensitivityProfile | null;
+  orchestrationPath?: Array<{
+    escalationLevel: number;
+    rewriteStrategy: string;
+    renderingMode: ModerationRenderingMode;
+    realismModeSelected: ModerationRenderingMode;
+    stageMessage: string;
+    categories: ModerationCategory[];
+    providerProfile: string;
+    providerFallbackReady?: boolean;
+  }>;
+  retryStages?: string[];
+  finalSuccessfulOrchestrationPath?: string | null;
+  successfulFallbackPath?: string | null;
+  moderationMemoryApplied?: boolean;
+  providerFallbackReady?: boolean;
 };
 
 type GenerateSeedanceVideoOptions = {
@@ -63,6 +100,9 @@ type GenerateSeedanceVideoOptions = {
   timeoutMs?: number;
   pollIntervalMs?: number;
   referenceImages?: SeedanceReferenceImage[];
+  userId?: string | null;
+  characterId?: string | null;
+  projectId?: string | null;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -186,15 +226,19 @@ function normalizeReferenceImages(
   }));
 }
 
-function buildMultimodalSeedancePrompt(prompt: string, referenceImages: SeedanceReferenceImage[]) {
+function buildMultimodalSeedancePrompt(
+  prompt: string,
+  referenceImages: SeedanceReferenceImage[],
+  renderingMode: ModerationRenderingMode = 'cinematic realism',
+) {
   if (!referenceImages.length) return prompt;
 
   const tokens = referenceImages.map((reference, index) => reference.token ?? `[Image${index + 1}]`).join('');
   return [
-    `The woman from ${tokens}.`,
-    'Use all provided images as multimodal identity references for face, side angles, full body, expressions, and outfit details.',
+    `The cinematic character from ${tokens}.`,
+    'Use all provided images as visual continuity references for face, side angles, full body, expressions, and outfit details.',
     'Do not use any reference image as the first frame. Do not animate, copy, or recreate a single source photo.',
-    'Generate a fresh photorealistic cinematic scene with consistent identity across shots.',
+    `Generate a fresh ${renderingMode} scene with consistent visual continuity across shots.`,
     prompt,
   ].join(' ');
 }
@@ -222,12 +266,11 @@ export function stripRiskyPromptWording(prompt: string) {
 }
 
 export function safeCinematicRewrite(prompt: string) {
-  const sanitized = stripRiskyPromptWording(prompt);
-  return collapseWhitespace([
-    'Create a family-safe, fully clothed, photorealistic cinematic video.',
-    'Editorial fashion styling, confident neutral posing, natural movement, polished studio-safe composition.',
-    sanitized.prompt,
-  ].join(' '));
+  return rewritePromptForEscalationLevel({
+    prompt,
+    provider: 'seedance',
+    level: 4,
+  }).prompt;
 }
 
 function stringifyProviderResponse(value: unknown): string {
@@ -442,7 +485,14 @@ function moderationDiagnostics(input: {
   sanitizedPrompt: string;
   suggestedPrompt: string;
   referenceImageCount: number;
+  categories?: ModerationCategory[];
+  attempt?: ModerationOrchestrationAttempt | null;
+  orchestrationPath?: ModerationOrchestrationAttempt[];
+  moderationMemoryApplied?: boolean;
+  finalSuccessfulOrchestrationPath?: string | null;
 }): SeedanceModerationDiagnostics {
+  const categories = input.categories ?? input.attempt?.categories ?? [];
+  const orchestrationPath = input.orchestrationPath ?? [];
   return {
     detected: true,
     provider: 'replicate',
@@ -456,6 +506,29 @@ function moderationDiagnostics(input: {
     sanitizedPrompt: input.sanitizedPrompt,
     suggestedPrompt: input.suggestedPrompt,
     referenceImageCount: input.referenceImageCount,
+    category: categories[0] ?? null,
+    categories,
+    escalationLevel: input.attempt?.escalationLevel ?? null,
+    rewriteStrategy: input.attempt?.rewriteStrategy ?? null,
+    renderingMode: input.attempt?.renderingMode ?? null,
+    realismModeSelected: input.attempt?.realismModeSelected ?? null,
+    providerProfile: input.attempt?.providerProfile ?? moderationProviderProfiles.seedance.label,
+    providerSensitivityProfile: providerSensitivityProfile(moderationProviderProfiles.seedance),
+    orchestrationPath: orchestrationPath.map((attempt) => ({
+      escalationLevel: attempt.escalationLevel,
+      rewriteStrategy: attempt.rewriteStrategy,
+      renderingMode: attempt.renderingMode,
+      realismModeSelected: attempt.realismModeSelected,
+      stageMessage: attempt.stageMessage,
+      categories: attempt.categories,
+      providerProfile: attempt.providerProfile,
+      providerFallbackReady: attempt.providerFallbackReady,
+    })),
+    retryStages: moderationRetryStages(orchestrationPath),
+    finalSuccessfulOrchestrationPath: input.finalSuccessfulOrchestrationPath ?? null,
+    successfulFallbackPath: input.finalSuccessfulOrchestrationPath ?? null,
+    moderationMemoryApplied: Boolean(input.moderationMemoryApplied),
+    providerFallbackReady: Boolean(input.attempt?.providerFallbackReady),
   };
 }
 
@@ -467,7 +540,7 @@ async function runSeedanceAttempt(input: {
   referenceImages: SeedanceReferenceImage[];
   timeoutMs: number;
   pollIntervalMs: number;
-  attemptLabel: 'primary' | 'moderation_retry';
+  attemptLabel: string;
 }) {
   const requestInput = buildSeedanceRequestInput(input.prompt, input.referenceImages);
 
@@ -576,9 +649,17 @@ export async function generateSeedanceVideo(
   const quality = options.quality ?? 'fast';
   const model = modelForQuality(quality);
   const referenceImages = normalizeReferenceImages(options.referenceImages);
-  const sanitized = stripRiskyPromptWording(safePrompt);
-  const suggestedPrompt = safeCinematicRewrite(safePrompt);
-  const finalPrompt = buildMultimodalSeedancePrompt(sanitized.prompt, referenceImages);
+  const orchestrationPlan = await createModerationOrchestrationPlan({
+    prompt: safePrompt,
+    provider: 'seedance',
+    userId: options.userId,
+    characterId: options.characterId,
+    referenceImageCount: referenceImages.length,
+  });
+  const orchestrationPath: ModerationOrchestrationAttempt[] = [];
+  let lastProviderResponse: unknown = null;
+  let lastPrediction: Prediction | null = null;
+  let lastDiagnostics: SeedanceModerationDiagnostics | null = null;
 
   console.info('SEEDANCE MULTIMODAL REFERENCES:', {
     model,
@@ -591,168 +672,227 @@ export async function generateSeedanceVideo(
       url: reference.url,
     })),
   });
-  console.info('SEEDANCE FINAL PROMPT:', {
-    model,
-    prompt: finalPrompt,
-    sanitizedChanged: sanitized.changed,
-    replacements: sanitized.replacements,
-  });
 
-  try {
-    const attempt = await runSeedanceAttempt({
-      replicate,
+  for (const orchestrationAttempt of orchestrationPlan.attempts) {
+    const finalPrompt = buildMultimodalSeedancePrompt(
+      orchestrationAttempt.prompt,
+      referenceImages,
+      orchestrationAttempt.renderingMode,
+    );
+    orchestrationPath.push(orchestrationAttempt);
+
+    console.info('SEEDANCE FINAL PROMPT:', {
       model,
-      quality,
       prompt: finalPrompt,
-      referenceImages,
-      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      pollIntervalMs: options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
-      attemptLabel: 'primary',
+      sanitizedChanged: orchestrationAttempt.changed,
+      replacements: orchestrationAttempt.replacements,
+      escalationLevel: orchestrationAttempt.escalationLevel,
+      rewriteStrategy: orchestrationAttempt.rewriteStrategy,
+      renderingMode: orchestrationAttempt.renderingMode,
+      realismModeSelected: orchestrationAttempt.realismModeSelected,
+      providerProfile: orchestrationAttempt.providerProfile,
+      moderationMemoryApplied: orchestrationPlan.moderationMemoryApplied,
     });
-
-    return {
-      id: randomUUID(),
-      provider: 'replicate',
-      model,
-      status: 'completed',
-      providerJobId: attempt.completedPrediction.id,
-      videoUrl: attempt.videoUrl,
-      finalPrompt,
-      referenceImages,
-      referenceImageCount: referenceImages.length,
-      multimodalReferenceMode: referenceImages.length > 1,
-      warnings: [
-        ...(referenceImages.length === 1
-          ? ['Only one reference image was sent to Seedance. Add side, full-body, expression, or outfit references for stronger multimodal identity consistency.']
-          : []),
-        ...(sanitized.changed
-          ? ['Lumora automatically softened risky glamour/adult wording before sending this prompt to Seedance.']
-          : []),
-      ],
-      suggestedPrompt,
-      sanitizedPrompt: sanitized.prompt,
-      rawOutput: attempt.completedPrediction.output,
-      logs: attempt.completedPrediction.logs,
-      metrics: attempt.completedPrediction.metrics,
-      settings: DEFAULT_SEEDANCE_SETTINGS,
-    };
-  } catch (error) {
-    if (!isSeedanceModerationResponse(error)) {
-      throw error;
-    }
-
-    const moderationError = error as {
-      prediction?: Prediction;
-      providerResponse?: unknown;
-    };
-    const initialDiagnostics = moderationDiagnostics({
-      model,
-      prediction: moderationError.prediction ?? null,
-      providerResponse: moderationError.providerResponse ?? error,
-      retryAttempted: true,
-      retrySucceeded: false,
-      retryMode: 'safe-cinematic-rewrite',
-      sanitizedPrompt: sanitized.prompt,
-      suggestedPrompt,
-      referenceImageCount: referenceImages.length,
+    logModerationOrchestration({
+      event: 'attempt',
+      attempt: orchestrationAttempt,
+      providerProfile: orchestrationPlan.providerProfile,
+      orchestrationPath,
     });
-    console.warn('SEEDANCE MODERATION DIAGNOSTICS:', initialDiagnostics);
-    console.info('SEEDANCE MODERATION RETRY MODE:', {
-      model,
-      quality,
-      retryMode: 'safe-cinematic-rewrite',
-      referenceImageCount: referenceImages.length,
-      sanitizedPrompt: suggestedPrompt,
-      referencesPreserved: referenceImages.map((reference) => ({
-        token: reference.token,
-        url: reference.url,
-      })),
-    });
-
-    const retryFinalPrompt = buildMultimodalSeedancePrompt(suggestedPrompt, referenceImages);
 
     try {
-      const retryAttempt = await runSeedanceAttempt({
+      const attempt = await runSeedanceAttempt({
         replicate,
         model,
         quality,
-        prompt: retryFinalPrompt,
+        prompt: finalPrompt,
         referenceImages,
         timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         pollIntervalMs: options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
-        attemptLabel: 'moderation_retry',
+        attemptLabel: orchestrationAttempt.attemptLabel,
       });
-      const retryDiagnostics: SeedanceModerationDiagnostics = {
-        ...initialDiagnostics,
-        retrySucceeded: true,
-        providerJobId: retryAttempt.completedPrediction.id,
-        providerStatus: retryAttempt.completedPrediction.status,
-        providerMessage: providerResponseText({
-          status: retryAttempt.completedPrediction.status,
-          logs: retryAttempt.completedPrediction.logs,
-        }),
-        sanitizedPrompt: suggestedPrompt,
-      };
-      console.info('SEEDANCE MODERATION RETRY SUCCEEDED:', retryDiagnostics);
+      const finalSuccessfulOrchestrationPath = orchestrationPath
+        .map((pathAttempt) => `${pathAttempt.attemptLabel}:${pathAttempt.realismModeSelected}`)
+        .join(' -> ');
+      const retryAttempted = orchestrationPath.length > 1;
+      const successDiagnostics = (retryAttempted || orchestrationPlan.moderationMemoryApplied || orchestrationAttempt.escalationLevel > 1)
+        ? moderationDiagnostics({
+            model,
+            prediction: attempt.completedPrediction,
+            providerResponse: {
+              status: attempt.completedPrediction.status,
+              logs: attempt.completedPrediction.logs,
+            },
+            retryAttempted,
+            retrySucceeded: retryAttempted,
+            retryMode: orchestrationAttempt.rewriteStrategy,
+            sanitizedPrompt: orchestrationAttempt.prompt,
+            suggestedPrompt: orchestrationAttempt.prompt,
+            referenceImageCount: referenceImages.length,
+            categories: orchestrationAttempt.categories,
+            attempt: orchestrationAttempt,
+            orchestrationPath,
+            moderationMemoryApplied: orchestrationPlan.moderationMemoryApplied,
+            finalSuccessfulOrchestrationPath,
+          })
+        : undefined;
+      const moderationWarnings = [
+        ...(retryAttempted
+          ? ['Provider moderation blocked an earlier Seedance attempt, so Lumora escalated to safer cinematic orchestration automatically.']
+          : []),
+        ...(orchestrationPlan.moderationMemoryApplied
+          ? ['Lumora applied saved moderation-safe rendering preferences for this character/provider.']
+          : []),
+        ...(orchestrationAttempt.changed
+          ? ['Lumora softened provider-sensitive wording while preserving character continuity and storyboard intent.']
+          : []),
+      ];
+
+      logModerationOrchestration({
+        event: 'succeeded',
+        attempt: orchestrationAttempt,
+        providerProfile: orchestrationPlan.providerProfile,
+        orchestrationPath,
+      });
+      await recordModerationOrchestrationResult({
+        userId: options.userId,
+        characterId: options.characterId,
+        provider: 'seedance',
+        originalPrompt: safePrompt,
+        categories: orchestrationAttempt.categories,
+        attempt: orchestrationAttempt,
+        orchestrationPath,
+        success: true,
+        providerMessage: attempt.completedPrediction.logs ?? null,
+      });
 
       return {
         id: randomUUID(),
         provider: 'replicate',
         model,
         status: 'completed',
-        providerJobId: retryAttempt.completedPrediction.id,
-        videoUrl: retryAttempt.videoUrl,
-        finalPrompt: retryFinalPrompt,
+        providerJobId: attempt.completedPrediction.id,
+        videoUrl: attempt.videoUrl,
+        finalPrompt,
         referenceImages,
         referenceImageCount: referenceImages.length,
         multimodalReferenceMode: referenceImages.length > 1,
         warnings: [
-          'Provider moderation flagged the first Seedance attempt, so Lumora retried automatically with a safer cinematic rewrite.',
           ...(referenceImages.length === 1
-            ? ['Only one reference image was sent to Seedance. Add side, full-body, expression, or outfit references for stronger multimodal identity consistency.']
+            ? ['Only one reference image was sent to Seedance. Add side, full-body, expression, or outfit references for stronger multimodal visual continuity.']
             : []),
+          ...moderationWarnings,
         ],
-        moderationDiagnostics: retryDiagnostics,
-        suggestedPrompt,
-        sanitizedPrompt: suggestedPrompt,
-        rawOutput: retryAttempt.completedPrediction.output,
-        logs: retryAttempt.completedPrediction.logs,
-        metrics: retryAttempt.completedPrediction.metrics,
+        moderationDiagnostics: successDiagnostics,
+        suggestedPrompt: orchestrationAttempt.prompt,
+        sanitizedPrompt: orchestrationAttempt.prompt,
+        rawOutput: attempt.completedPrediction.output,
+        logs: attempt.completedPrediction.logs,
+        metrics: attempt.completedPrediction.metrics,
         settings: DEFAULT_SEEDANCE_SETTINGS,
       };
-    } catch (retryError) {
-      if (!isSeedanceModerationResponse(retryError)) {
-        throw retryError;
+    } catch (error) {
+      if (!isSeedanceModerationResponse(error)) {
+        throw error;
       }
 
-      const retryModerationError = retryError as {
+      const moderationError = error as {
         prediction?: Prediction;
         providerResponse?: unknown;
       };
-      const retryDiagnostics = moderationDiagnostics({
+      const providerResponse = moderationError.providerResponse ?? error;
+      const providerCategories = detectModerationCategories({
+        prompt: finalPrompt,
+        providerResponse,
+        referenceImageCount: referenceImages.length,
+        includeUnknownFallback: true,
+      });
+      const enrichedAttempt: ModerationOrchestrationAttempt = {
+        ...orchestrationAttempt,
+        categories: Array.from(new Set([
+          ...orchestrationAttempt.categories,
+          ...providerCategories,
+        ])),
+      };
+      orchestrationPath[orchestrationPath.length - 1] = enrichedAttempt;
+      lastProviderResponse = providerResponse;
+      lastPrediction = moderationError.prediction ?? null;
+      lastDiagnostics = moderationDiagnostics({
         model,
-        prediction: retryModerationError.prediction ?? null,
-        providerResponse: retryModerationError.providerResponse ?? retryError,
+        prediction: lastPrediction,
+        providerResponse,
         retryAttempted: true,
         retrySucceeded: false,
-        retryMode: 'safe-cinematic-rewrite',
-        sanitizedPrompt: suggestedPrompt,
-        suggestedPrompt,
+        retryMode: enrichedAttempt.rewriteStrategy,
+        sanitizedPrompt: enrichedAttempt.prompt,
+        suggestedPrompt: enrichedAttempt.prompt,
         referenceImageCount: referenceImages.length,
+        categories: enrichedAttempt.categories,
+        attempt: enrichedAttempt,
+        orchestrationPath,
+        moderationMemoryApplied: orchestrationPlan.moderationMemoryApplied,
       });
-
-      console.warn('SEEDANCE PROVIDER MODERATION RESPONSE EXACT:', {
-        diagnostics: retryDiagnostics,
-        providerResponse: retryModerationError.providerResponse ?? providerResponseText(retryError),
-      });
-
-      throw new SeedanceModerationError({
-        message: 'Seedance moderation paused this render after Lumora tried a safer cinematic rewrite.',
-        suggestedPrompt,
-        sanitizedPrompt: suggestedPrompt,
-        diagnostics: retryDiagnostics,
-        referenceImages,
+      console.warn('SEEDANCE MODERATION DIAGNOSTICS:', lastDiagnostics);
+      logModerationOrchestration({
+        event: 'blocked',
+        attempt: enrichedAttempt,
+        providerMessage: providerResponseText(providerResponse),
+        providerProfile: orchestrationPlan.providerProfile,
+        orchestrationPath,
       });
     }
   }
+
+  const failedAttempt = orchestrationPath[orchestrationPath.length - 1] ?? null;
+  const suggestedPrompt = failedAttempt?.prompt ?? safeCinematicRewrite(safePrompt);
+  const failedCategories = failedAttempt?.categories.length
+    ? failedAttempt.categories
+    : detectModerationCategories({
+        prompt: safePrompt,
+        providerResponse: lastProviderResponse,
+        referenceImageCount: referenceImages.length,
+        includeUnknownFallback: true,
+      });
+  const diagnostics = lastDiagnostics ?? moderationDiagnostics({
+    model,
+    prediction: lastPrediction,
+    providerResponse: lastProviderResponse,
+    retryAttempted: orchestrationPath.length > 1,
+    retrySucceeded: false,
+    retryMode: failedAttempt?.rewriteStrategy ?? 'provider fallback orchestration',
+    sanitizedPrompt: suggestedPrompt,
+    suggestedPrompt,
+    referenceImageCount: referenceImages.length,
+    categories: failedCategories,
+    attempt: failedAttempt,
+    orchestrationPath,
+    moderationMemoryApplied: orchestrationPlan.moderationMemoryApplied,
+  });
+
+  logModerationOrchestration({
+    event: 'failed',
+    attempt: failedAttempt,
+    providerMessage: providerResponseText(lastProviderResponse),
+    providerProfile: orchestrationPlan.providerProfile,
+    orchestrationPath,
+  });
+  await recordModerationOrchestrationResult({
+    userId: options.userId,
+    characterId: options.characterId,
+    provider: 'seedance',
+    originalPrompt: safePrompt,
+    categories: failedCategories,
+    attempt: failedAttempt,
+    orchestrationPath,
+    success: false,
+    providerMessage: providerResponseText(lastProviderResponse),
+  });
+
+  throw new SeedanceModerationError({
+    message: 'Seedance moderation paused this render after Lumora tried moderation-safe cinematic orchestration.',
+    suggestedPrompt,
+    sanitizedPrompt: suggestedPrompt,
+    diagnostics,
+    referenceImages,
+  });
 }

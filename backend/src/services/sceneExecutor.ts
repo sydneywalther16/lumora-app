@@ -28,6 +28,8 @@ import {
 } from './memoryEngine';
 import {
   generateSeedanceVideo,
+  isSeedanceModerationError,
+  type SeedanceModerationDiagnostics,
   type SeedanceQualityMode,
   type SeedanceReferenceImage,
 } from './providers/seedanceProvider';
@@ -52,6 +54,7 @@ export type SceneClipMetadata = {
   continuityDrift?: ContinuityDriftAlert[];
   memorySnapshot?: ContinuityMemoryState | null;
   sceneMemorySummary?: SceneMemorySummary | null;
+  moderationOrchestration?: SeedanceModerationDiagnostics | null;
 };
 
 export type SceneExecutorClip = {
@@ -70,6 +73,7 @@ export type SceneExecutorClip = {
   providerJobId?: string | null;
   error?: string | null;
   metadata: SceneClipMetadata;
+  moderationDiagnostics?: SeedanceModerationDiagnostics | null;
   createdAt: string;
 };
 
@@ -306,6 +310,7 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
       providerJobId: null,
       error: null,
       metadata,
+      moderationDiagnostics: null,
       createdAt: queuedJob.createdAt,
     };
 
@@ -339,6 +344,9 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
       const seedanceResult = await generateSeedanceVideo(prompt, {
         quality: input.quality,
         referenceImages: input.referenceImages,
+        userId: input.userId,
+        characterId: executionCharacterId,
+        projectId: input.projectId ?? null,
       });
       const completedJob = await updateGenerationJobStatus({
         jobId: clip.jobId ?? clip.id,
@@ -355,6 +363,11 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
       clip.model = seedanceResult.model;
       clip.providerJobId = seedanceResult.providerJobId;
       clip.error = null;
+      clip.moderationDiagnostics = seedanceResult.moderationDiagnostics ?? null;
+      clip.metadata = {
+        ...clip.metadata,
+        moderationOrchestration: seedanceResult.moderationDiagnostics ?? null,
+      };
       clip.createdAt = completedJob?.createdAt ?? clip.createdAt;
 
       let driftAlertCount = 0;
@@ -381,6 +394,7 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
           continuityDrift: memoryUpdate.driftAlerts,
           memorySnapshot: continuityMemory.state,
           sceneMemorySummary: memoryUpdate.sceneSummary,
+          moderationOrchestration: seedanceResult.moderationDiagnostics ?? null,
         };
         await updateGenerationJobSceneMetadata({
           jobId: clip.jobId ?? clip.id,
@@ -424,6 +438,7 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Scene clip generation failed.';
+      const moderationDiagnostics = isSeedanceModerationError(error) ? error.diagnostics : null;
       const failedJob = await updateGenerationJobStatus({
         jobId: clip.jobId ?? clip.id,
         status: 'failed',
@@ -438,7 +453,22 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
       clip.model = null;
       clip.providerJobId = null;
       clip.error = message;
+      clip.moderationDiagnostics = moderationDiagnostics;
+      clip.metadata = {
+        ...clip.metadata,
+        moderationOrchestration: moderationDiagnostics,
+      };
       clip.createdAt = failedJob?.createdAt ?? clip.createdAt;
+      await updateGenerationJobSceneMetadata({
+        jobId: clip.jobId ?? clip.id,
+        sceneMetadata: jobMetadata({
+          sceneExecutionId,
+          clipOrder,
+          scenePlan: parsedPlan,
+          shot,
+          metadata: clip.metadata,
+        }),
+      });
 
       console.error('SCENE EXECUTOR SHOT FAILED:', {
         sceneExecutionId,

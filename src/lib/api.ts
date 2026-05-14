@@ -216,6 +216,7 @@ export type SceneClipMetadata = {
   continuityDrift?: ContinuityDriftAlert[];
   memorySnapshot?: ContinuityMemoryState | null;
   sceneMemorySummary?: SceneMemorySummary | null;
+  moderationOrchestration?: ProviderModerationDiagnostics | null;
 };
 
 export type SceneExecutorClip = {
@@ -234,6 +235,7 @@ export type SceneExecutorClip = {
   providerJobId?: string | null;
   error?: string | null;
   metadata: SceneClipMetadata;
+  moderationDiagnostics?: ProviderModerationDiagnostics | null;
   createdAt: string;
 };
 
@@ -361,6 +363,42 @@ export type SeedanceReferenceImage = {
   token?: string;
 };
 
+export type ModerationCategory =
+  | 'identity_moderation'
+  | 'celebrity_public_figure_moderation'
+  | 'photorealistic_person_moderation'
+  | 'glamour_editorial_moderation'
+  | 'unsafe_wording'
+  | 'provider_unknown_moderation';
+
+export type ModerationRenderingMode =
+  | 'photorealistic'
+  | 'cinematic realism'
+  | 'stylized cinematic'
+  | 'painterly cinematic'
+  | 'dreamlike cinematic'
+  | 'animated cinematic';
+
+export type ModerationSensitivity = 'low' | 'medium' | 'high';
+
+export type ProviderSensitivityProfile = {
+  realismTolerance: ModerationSensitivity;
+  celebritySensitivity: ModerationSensitivity;
+  identitySensitivity: ModerationSensitivity;
+  stylizationFallbackPreference: ModerationRenderingMode;
+};
+
+export type ProviderModerationPathStep = {
+  escalationLevel: number;
+  rewriteStrategy: string;
+  renderingMode: ModerationRenderingMode;
+  realismModeSelected: ModerationRenderingMode;
+  stageMessage: string;
+  categories: ModerationCategory[];
+  providerProfile: string;
+  providerFallbackReady?: boolean;
+};
+
 export type ProviderModerationDiagnostics = {
   detected: boolean;
   provider: string;
@@ -374,6 +412,20 @@ export type ProviderModerationDiagnostics = {
   sanitizedPrompt: string;
   suggestedPrompt: string;
   referenceImageCount: number;
+  category?: ModerationCategory | null;
+  categories?: ModerationCategory[];
+  escalationLevel?: number | null;
+  rewriteStrategy?: string | null;
+  renderingMode?: ModerationRenderingMode | null;
+  realismModeSelected?: ModerationRenderingMode | null;
+  providerProfile?: string | null;
+  providerSensitivityProfile?: ProviderSensitivityProfile | null;
+  orchestrationPath?: ProviderModerationPathStep[];
+  retryStages?: string[];
+  finalSuccessfulOrchestrationPath?: string | null;
+  successfulFallbackPath?: string | null;
+  moderationMemoryApplied?: boolean;
+  providerFallbackReady?: boolean;
 };
 
 export type ApiHealthDiagnostics = {

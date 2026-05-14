@@ -15,6 +15,7 @@ import {
   type LumoraIdentityFeedbackChoice,
   type LumoraIdentityProfile,
   type GenerationResponse,
+  type ProviderModerationDiagnostics,
   type ReferenceImageUrls,
   type SceneExecutorResult,
   type SeedanceReferenceImage,
@@ -384,7 +385,7 @@ function formatUnknownDetail(value: unknown): string {
 const providerSafetyFilterMessage =
   'Provider safety filter blocked this render. Try a safer, fully clothed editorial prompt.';
 const providerModerationMessage =
-  'Seedance moderation paused this render. Lumora retried with a safer cinematic rewrite, but the provider still blocked it.';
+  'Seedance moderation paused this render. Lumora tried safer cinematic orchestration, but the provider still blocked it.';
 const providerQueueBusyMessage = 'Provider queue is busy. Retrying generation...';
 const replicateThrottledMessage =
   'Replicate is temporarily throttling this account. Wait a minute and try again.';
@@ -408,6 +409,36 @@ function isProviderModerationPayload(value: unknown): value is {
   moderationDiagnostics?: unknown;
 } {
   return Boolean(value) && typeof value === 'object' && Boolean((value as { moderation?: unknown }).moderation);
+}
+
+function isProviderModerationDiagnostics(value: unknown): value is ProviderModerationDiagnostics {
+  return Boolean(value) && typeof value === 'object' && (
+    Array.isArray((value as { retryStages?: unknown }).retryStages) ||
+    Array.isArray((value as { orchestrationPath?: unknown }).orchestrationPath) ||
+    typeof (value as { rewriteStrategy?: unknown }).rewriteStrategy === 'string'
+  );
+}
+
+function moderationRetryStageMessages(value: unknown): string[] {
+  if (!isProviderModerationDiagnostics(value)) return [];
+
+  const directStages = Array.isArray(value.retryStages)
+    ? value.retryStages.filter((stage): stage is string => typeof stage === 'string' && stage.trim().length > 0)
+    : [];
+  const pathStages = Array.isArray(value.orchestrationPath)
+    ? value.orchestrationPath
+        .map((step) => step.stageMessage)
+        .filter((stage): stage is string => typeof stage === 'string' && stage.trim().length > 0)
+    : [];
+
+  return Array.from(new Set([...directStages, ...pathStages]));
+}
+
+function moderationWarningMessages(value: unknown): string[] {
+  const stages = moderationRetryStageMessages(value);
+  if (!stages.length) return [];
+
+  return stages.map((stage) => `Moderation Orchestrator: ${stage}`);
 }
 
 function isProviderQueueBusyError(value: string): boolean {
@@ -536,6 +567,7 @@ export default function CreateVideo({
   const [generationError, setGenerationError] = useState('');
   const [generationSafeRewrite, setGenerationSafeRewrite] = useState('');
   const [generationModerationDetail, setGenerationModerationDetail] = useState('');
+  const [generationModerationStages, setGenerationModerationStages] = useState<string[]>([]);
   const [creativePlanLoading, setCreativePlanLoading] = useState(false);
   const [creativePlanError, setCreativePlanError] = useState('');
   const [creativePlanStatus, setCreativePlanStatus] = useState('');
@@ -1144,6 +1176,7 @@ export default function CreateVideo({
     setGenerationError('');
     setGenerationSafeRewrite('');
     setGenerationModerationDetail('');
+    setGenerationModerationStages([]);
     setGeneratedVideoUrl(null);
     setFinalGeneratedPrompt('');
     setGeneratedModel('');
@@ -1323,11 +1356,13 @@ export default function CreateVideo({
       });
       const nextWarnings = Array.from(new Set([
         ...formatWarnings(data.warnings),
+        ...moderationWarningMessages(data.moderationDiagnostics),
         ...(data.referenceImageNote ? [data.referenceImageNote] : []),
         ...(selectedIsSeedanceEngine && selectedSeedanceReferences.length === 1
           ? ['Only one image is uploaded. Add side, full-body, expression, or outfit references for stronger Seedance identity consistency.']
           : []),
       ]));
+      const nextModerationStages = moderationRetryStageMessages(data.moderationDiagnostics);
 
       if (!nextVideoUrl) {
         console.error('No video returned', data);
@@ -1346,6 +1381,7 @@ export default function CreateVideo({
       setGeneratedReferenceImageUrl(nextReferenceImageUrl);
       setGeneratedMode(nextGenerationMode);
       setGenerationWarnings(nextWarnings);
+      setGenerationModerationStages(nextModerationStages);
 
       const profile = authUser ? await loadSupabaseProfile(authUser.id) : loadLumoraProfile();
       const now = new Date().toISOString();
@@ -1365,6 +1401,9 @@ export default function CreateVideo({
         posterUrl: nextPosterUrl,
         previewImageUrl: typeof data.previewImageUrl === 'string' ? data.previewImageUrl : null,
         generationMode: nextGenerationMode,
+        moderationDiagnostics: isProviderModerationDiagnostics(data.moderationDiagnostics)
+          ? data.moderationDiagnostics
+          : null,
         finalPrompt: nextFinalPrompt,
         model: data.model || null,
         displayEngine: nextDisplayEngine,
@@ -1485,6 +1524,7 @@ export default function CreateVideo({
         moderationPayload?.suggestedPrompt ||
         moderationPayload?.sanitizedPrompt ||
         '';
+      const retryStages = moderationRetryStageMessages(moderationPayload?.moderationDiagnostics);
       const displayMessage = moderationPayload
         ? providerModerationMessage
         : isProviderSafetyFilterError(message)
@@ -1498,9 +1538,10 @@ export default function CreateVideo({
       setGenerationModerationDetail(
         moderationPayload?.suggestion ||
         (moderationPayload
-          ? 'Lumora preserved your references and prepared a safer cinematic prompt you can try next.'
+          ? 'Lumora preserved your references, continuity memory, and storyboard intent while trying safer cinematic orchestration.'
           : ''),
       );
+      setGenerationModerationStages(retryStages);
       setGenerationError(
         isSoraEngine && !isProviderSafetyFilterError(displayMessage) && !moderationPayload
           ? `${displayMessage} Self-character likeness is currently routed through Replicate.`
@@ -1796,17 +1837,26 @@ export default function CreateVideo({
                   </div>
                   <ol className="scene-progress-list">
                     {sceneExecutionResult
-                      ? sceneExecutionResult.clips.map((clip) => (
-                          <li key={clip.id} className={`scene-progress-item ${clip.status}`}>
-                            <span className="scene-progress-index">{clip.clipOrder}</span>
-                            <span>
-                              <strong>{clip.title}</strong>
-                              <small>{clip.metadata.cameraFraming} / {clip.metadata.cameraMovement}</small>
-                              {clip.error ? <small className="creative-plan-error">{clip.error}</small> : null}
-                            </span>
-                            <span className="tiny-pill">{clip.status}</span>
-                          </li>
-                        ))
+                      ? sceneExecutionResult.clips.map((clip) => {
+                          const clipModerationStages = moderationRetryStageMessages(
+                            clip.moderationDiagnostics ?? clip.metadata.moderationOrchestration,
+                          );
+
+                          return (
+                            <li key={clip.id} className={`scene-progress-item ${clip.status}`}>
+                              <span className="scene-progress-index">{clip.clipOrder}</span>
+                              <span>
+                                <strong>{clip.title}</strong>
+                                <small>{clip.metadata.cameraFraming} / {clip.metadata.cameraMovement}</small>
+                                {clipModerationStages.map((stage) => (
+                                  <small key={stage}>{stage}</small>
+                                ))}
+                                {clip.error ? <small className="creative-plan-error">{clip.error}</small> : null}
+                              </span>
+                              <span className="tiny-pill">{clip.status}</span>
+                            </li>
+                          );
+                        })
                       : sceneExecutionPlan?.shotList.map((shot, index) => (
                           <li
                             key={shot.id}
@@ -2071,6 +2121,13 @@ export default function CreateVideo({
           <div className="generation-error-card">
             <p>{generationError}</p>
             {generationModerationDetail ? <p>{generationModerationDetail}</p> : null}
+            {generationModerationStages.length ? (
+              <div className="generation-warning-list">
+                {generationModerationStages.map((stage) => (
+                  <p key={stage}>{stage}</p>
+                ))}
+              </div>
+            ) : null}
             {generationSafeRewrite ? (
               <div className="safe-rewrite-card">
                 <span className="eyebrow">safe cinematic rewrite</span>
@@ -2082,6 +2139,7 @@ export default function CreateVideo({
                     setActivePrompt(generationSafeRewrite);
                     setGenerationError('');
                     setGenerationModerationDetail('');
+                    setGenerationModerationStages([]);
                     setGenerationSafeRewrite('');
                     setStatus('Safe rewrite loaded. References are unchanged.');
                   }}

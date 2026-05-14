@@ -22,6 +22,7 @@ const requiredTables = [
   'follows',
   'character_profiles',
   'continuity_memory_states',
+  'moderation_orchestration_memory',
 ] as const;
 
 const requiredGenerationJobColumns = [
@@ -66,6 +67,14 @@ const characterProfileColumns = [
   'is_self',
   'created_at',
   'updated_at',
+] as const;
+
+const moderationMemoryColumns = [
+  'preferred_rendering_mode',
+  'preferred_escalation_level',
+  'provider_sensitivity_profile',
+  'successful_fallback_path',
+  'orchestration_path',
 ] as const;
 
 export function serializeDiagnosticError(error: unknown) {
@@ -423,7 +432,7 @@ async function checkRlsPolicies() {
       `select tablename, policyname, cmd, roles, qual, with_check
        from pg_policies
        where schemaname = 'public'
-         and tablename in ('profiles', 'projects', 'posts', 'follows', 'generation_jobs', 'character_profiles', 'continuity_memory_states')
+         and tablename in ('profiles', 'projects', 'posts', 'follows', 'generation_jobs', 'character_profiles', 'continuity_memory_states', 'moderation_orchestration_memory')
        order by tablename, policyname`,
     );
 
@@ -456,6 +465,9 @@ export async function buildDatabaseDiagnostics() {
   const characterProfileColumnChecks = await Promise.all(
     characterProfileColumns.map((column) => checkColumnExists('character_profiles', column)),
   );
+  const moderationMemoryColumnChecks = await Promise.all(
+    moderationMemoryColumns.map((column) => checkColumnExists('moderation_orchestration_memory', column)),
+  );
   const mediaFallbackChecks = await Promise.all([
     checkAnyColumnExists(
       'character_profiles',
@@ -482,6 +494,8 @@ export async function buildDatabaseDiagnostics() {
     checkIndexExists('character_profiles_owner_character_id_idx'),
     checkIndexExists('continuity_memory_states_user_updated_idx'),
     checkIndexExists('continuity_memory_states_character_idx'),
+    checkIndexExists('moderation_orchestration_memory_user_provider_idx'),
+    checkIndexExists('moderation_orchestration_memory_character_idx'),
     checkIndexExists('projects_user_drafts_idx'),
     checkIndexExists('posts_public_published_idx'),
     checkIndexExists('follows_follower_idx'),
@@ -497,6 +511,7 @@ export async function buildDatabaseDiagnostics() {
     ...feedProjectColumnChecks,
     ...feedPostColumnChecks,
     ...characterProfileColumnChecks,
+    ...moderationMemoryColumnChecks,
     ...mediaFallbackChecks,
     publishedPostsQuery,
     profileStatsQuery,
