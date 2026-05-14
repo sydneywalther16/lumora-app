@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import AuthCard from '../components/auth/AuthCard';
+import CharacterHub from '../components/CharacterHub';
 import {
   CREATOR_SELF_CHARACTER_ID,
   cleanupCreatorSelfMetadata,
@@ -26,10 +27,12 @@ import {
   loadSupabaseProfile,
   loadSupabaseProfilePosts,
   loadSupabaseProjects,
+  getProfileStats,
   saveSupabaseCreatorSelfCharacter,
   saveSupabaseProfile,
   uploadCharacterReferencePhoto,
   uploadLumoraMedia,
+  type ProfileStats,
 } from '../lib/supabaseAppData';
 import {
   loadLocalProfileAvatarFile,
@@ -227,6 +230,10 @@ function formatPostedDate(iso: string) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return 'Just now';
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatCompactNumber(value: number) {
+  return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value);
 }
 
 function friendlyProfileLoadError(error: unknown) {
@@ -996,10 +1003,10 @@ function ProfilePostTile({
       style={{
         position: 'relative',
         width: '100%',
-        aspectRatio: '1',
+        aspectRatio: '4 / 5',
         overflow: 'hidden',
         padding: 0,
-        borderRadius: '18px',
+        borderRadius: '16px',
         color: '#fff',
         textAlign: 'left',
         background: 'var(--card-media-background)',
@@ -1659,11 +1666,18 @@ export default function ProfilePage() {
   const [posts, setPosts] = useState<LumoraPost[]>([]);
   const [castIn, setCastIn] = useState<StudioProject[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [profileStats, setProfileStats] = useState<ProfileStats>({
+    totalLikesReceived: 0,
+    followersCount: 0,
+    characterCount: 0,
+    followsTableAvailable: false,
+  });
   const [selectedPost, setSelectedPost] = useState<LumoraPost | null>(null);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [activeProfileMenuItem, setActiveProfileMenuItem] = useState<ProfileMenuItem | null>(null);
   const [editingProfile, setEditingProfile] = useState(false);
   const [editingSelfCharacter, setEditingSelfCharacter] = useState(false);
+  const [characterHubOpen, setCharacterHubOpen] = useState(false);
   const [selfForm, setSelfForm] = useState<SelfCharacterForm>(() => buildSelfCharacterForm(loadLumoraProfile(), null));
   const [captureChecklist, setCaptureChecklist] = useState({
     readNumbers: false,
@@ -1725,12 +1739,26 @@ export default function ProfilePage() {
     saveSelfCharacterEditorDraft(selfForm);
   }, [editingSelfCharacter, selfForm]);
 
+  useEffect(() => {
+    if (!isHydrated || typeof window === 'undefined') return;
+    if (localStorage.getItem('lumora_open_characters_hub') !== '1') return;
+    localStorage.removeItem('lumora_open_characters_hub');
+    setCharacterHubOpen(true);
+    void openSelfCharacterEditor();
+  }, [isHydrated]);
+
   async function refreshProfileData() {
     setIsHydrated(false);
     setCharacters([]);
     setPosts([]);
     setCastIn([]);
     setDrafts([]);
+    setProfileStats({
+      totalLikesReceived: 0,
+      followersCount: 0,
+      characterCount: 0,
+      followsTableAvailable: false,
+    });
 
     if (supabaseConfigured && (!authReady || sessionLoading)) {
       setDebugInfo((current) => ({
@@ -1754,11 +1782,13 @@ export default function ProfilePage() {
           loadedProjects,
           loadedDrafts,
           supabaseProfileExists,
+          loadedProfileStats,
         ] = await Promise.all([
           loadSupabaseProfilePosts(authUserId),
           loadSupabaseProjects(authUserId),
           loadSupabaseDrafts(authUserId),
           hasSupabaseProfile(authUserId),
+          getProfileStats(authUserId),
         ]);
         const normalizedProfile: LumoraProfile = loadedCreatorSelf
           ? {
@@ -1780,6 +1810,10 @@ export default function ProfilePage() {
         setPosts(loadedPosts);
         setCastIn(loadedProjects.filter((item) => Boolean(item.isDefaultSelfCharacter || item.characterName)));
         setDrafts(loadedDrafts);
+        setProfileStats({
+          ...loadedProfileStats,
+          characterCount: Math.max(loadedProfileStats.characterCount, Math.min(25, loadedCharacters.length)),
+        });
         const localRecovery = getLocalRecoveryAvailability({
           supabaseProfileExists,
           loadedCreatorSelf,
@@ -1811,6 +1845,12 @@ export default function ProfilePage() {
           source: 'supabase',
         }));
         setCharacters([]);
+        setProfileStats({
+          totalLikesReceived: 0,
+          followersCount: 0,
+          characterCount: 0,
+          followsTableAvailable: false,
+        });
         setIsHydrated(true);
         return;
       }
@@ -1827,10 +1867,17 @@ export default function ProfilePage() {
     console.log('SELF CHARACTER SOURCE:', loadedCreatorSelf ? 'local' : 'default');
     setProfile(loadedProfile);
     setProfileDraft(loadedProfile);
+    const localPosts = loadProfilePosts();
     setCharacters(loadedCharacters);
-    setPosts(loadProfilePosts());
+    setPosts(localPosts);
     setCastIn(loadCastInProjects());
     setDrafts(loadDrafts());
+    setProfileStats({
+      totalLikesReceived: localPosts.reduce((total, post) => total + Number(post.likeCount ?? 0), 0),
+      followersCount: 0,
+      characterCount: Math.min(25, loadedCharacters.length),
+      followsTableAvailable: false,
+    });
     setDebugInfo({
       authUserId: null,
       loadedProfileId: loadedProfile.userId || loadedProfile.id || null,
@@ -1843,9 +1890,7 @@ export default function ProfilePage() {
   }
 
   const creatorSelfCharacter = isHydrated ? findCreatorSelfCharacter(characters) : null;
-  const fictionalCharacterCount = characters.filter(
-    (character) => character.id !== CREATOR_SELF_CHARACTER_ID && character.isCreatorSelf !== true
-  ).length;
+  const displayedCharacterCount = Math.max(profileStats.characterCount, Math.min(25, characters.length));
   const selfCharacterFormTitle = creatorSelfCharacter ? 'Edit self character' : 'Create self character';
   const selfCharacterActionLabel = creatorSelfCharacter ? 'Save self character' : 'Create self character';
   const creatorIdentityProfile = creatorSelfCharacter
@@ -1878,6 +1923,24 @@ export default function ProfilePage() {
     setEditingProfile(true);
   }
 
+  async function handleCharacterHubRefresh(nextCharacters?: CharacterProfile[]) {
+    if (nextCharacters) {
+      setCharacters(nextCharacters);
+      setProfileStats((current) => ({
+        ...current,
+        characterCount: Math.min(25, nextCharacters.length),
+      }));
+      return;
+    }
+
+    await refreshProfileData();
+  }
+
+  function closeCharactersHub() {
+    setCharacterHubOpen(false);
+    setEditingSelfCharacter(false);
+  }
+
   async function handleProfileMenuSignOut() {
     await supabase?.auth.signOut();
     setProfileMenuOpen(false);
@@ -1900,6 +1963,7 @@ export default function ProfilePage() {
   }
 
   async function openSelfCharacterEditor() {
+    setCharacterHubOpen(true);
     let latestProfile = profile;
     let latestCharacters = characters;
 
@@ -2858,9 +2922,9 @@ export default function ProfilePage() {
           </div>
 
           <div className="stats-row" style={{ width: '100%', justifyContent: 'center', gap: '14px' }}>
-            <span>{posts.length} posts</span>
-            <span>{fictionalCharacterCount} characters</span>
-            <span>{drafts.length} drafts</span>
+            <span>{formatCompactNumber(profileStats.totalLikesReceived)} Likes</span>
+            <span>{formatCompactNumber(profileStats.followersCount)} Followers</span>
+            <span>{formatCompactNumber(displayedCharacterCount)} Characters</span>
           </div>
 
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
@@ -2868,7 +2932,7 @@ export default function ProfilePage() {
               Edit profile
             </button>
             <button type="button" className="ghost-btn" onClick={() => void openSelfCharacterEditor()}>
-              {creatorSelfCharacter ? 'Edit self character' : 'Create self character'}
+              Characters
             </button>
           </div>
 
@@ -2921,56 +2985,6 @@ export default function ProfilePage() {
           </div>
         </section>
       ) : null}
-
-      <section className="headline-card compact" style={{ borderRadius: '24px', padding: '14px' }}>
-        <div className="row-between" style={{ gap: '12px' }}>
-          <div>
-            <span className="eyebrow">diagnostics</span>
-            <p className="muted" style={{ margin: '6px 0 0' }}>
-              Session tools are hidden unless you need them.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="ghost-btn"
-            style={{ flex: 'unset', padding: '8px 12px' }}
-            onClick={() => setShowDebugInfo((current) => !current)}
-          >
-            {showDebugInfo ? 'Hide debug' : 'Show debug'}
-          </button>
-          <button
-            type="button"
-            className="ghost-btn"
-            style={{ flex: 'unset', padding: '8px 12px' }}
-            onClick={() => {
-              window.location.href = '/diagnostics';
-            }}
-          >
-            API diagnostics
-          </button>
-        </div>
-        {showDebugInfo ? (
-          <>
-            <div className="stats-row" style={{ marginTop: '10px', flexWrap: 'wrap' }}>
-              <span>authUserId: {authUserId || 'none'}</span>
-              <span>loadedProfileId: {debugInfo.loadedProfileId || 'none'}</span>
-              <span>profileAvatarUrl: {debugInfo.profileAvatarUrlExists ? 'yes' : 'no'}</span>
-              <span>selfCharacterLoaded: {debugInfo.selfCharacterLoaded ? 'yes' : 'no'}</span>
-              <span>selfCharacterUserId: {debugInfo.selfCharacterUserId || 'none'}</span>
-              <span>sessionSource: {sessionSource}</span>
-              <span>source: {debugSource}</span>
-            </div>
-            <button
-              type="button"
-              className="ghost-btn"
-              style={{ marginTop: '12px', padding: '8px 12px', flex: 'unset' }}
-              onClick={() => void refreshSession()}
-            >
-              Refresh session
-            </button>
-          </>
-        ) : null}
-      </section>
 
       {editingProfile ? (
         <section className="headline-card compact" style={{ marginTop: '18px', padding: '22px', borderRadius: '30px' }}>
@@ -3033,7 +3047,14 @@ export default function ProfilePage() {
         </section>
       ) : null}
 
-      {editingSelfCharacter && isHydrated ? (
+      <CharacterHub
+        open={characterHubOpen}
+        characters={characters}
+        onClose={closeCharactersHub}
+        onEditSelf={() => void openSelfCharacterEditor()}
+        onRefresh={(nextCharacters) => void handleCharacterHubRefresh(nextCharacters)}
+      >
+        {editingSelfCharacter && isHydrated ? (
         <section
           ref={selfCharacterEditorRef}
           className="headline-card compact"
@@ -3351,59 +3372,15 @@ export default function ProfilePage() {
             {selfCharacterStatus ? <p className="muted">{selfCharacterStatus}</p> : null}
           </div>
         </section>
-      ) : null}
-
-      {creatorSelfCharacter ? (
-        <section className="list-card" style={{ marginTop: '18px', borderRadius: '28px', padding: '18px', background: 'var(--surface-strong)' }}>
-          <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
-            <div
-              style={{
-                width: '72px',
-                height: '72px',
-                borderRadius: '22px',
-                overflow: 'hidden',
-                background: 'var(--control-background)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flex: '0 0 auto',
-              }}
-            >
-              <SelfReferencePreview
-                label="Self character front reference"
-                reference={normalizeReference(
-                  creatorSelfCharacter.referenceImageUrls,
-                  'frontFaceUrl',
-                  'frontFacePath',
-                )}
-                required
-              />
-            </div>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <strong style={{ display: 'block' }}>{creatorSelfCharacter.name}</strong>
-              <p className="muted" style={{ margin: '6px 0 0' }}>
-                Lumora Identity Character
-              </p>
-              <p className="muted" style={{ margin: '6px 0 0' }}>
-                Build a reusable photorealistic character from your reference photos and videos.
-              </p>
-              <p className="muted" style={{ margin: '6px 0 0' }}>
-                Identity confidence: {identityConfidence}%
-              </p>
-            </div>
-            <span className="tiny-pill" style={{ background: 'var(--pill-background)' }}>
-              {identityLifecycleLabel}
-            </span>
-          </div>
-        </section>
-      ) : null}
+        ) : null}
+      </CharacterHub>
 
       <SectionCard title="Published videos">
         {posts.length ? (
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(104px, 1fr))',
               gap: '8px',
             }}
           >
@@ -3415,39 +3392,6 @@ export default function ProfilePage() {
           <article className="list-card" style={{ borderRadius: '28px', padding: '18px' }}>
             <h3>No posts yet</h3>
             <p className="muted">Create and post a video from Drafts to see it appear here.</p>
-          </article>
-        )}
-      </SectionCard>
-
-      <SectionCard title="Cast In">
-        {castIn.length ? (
-          <div className="list-stack">
-            {castIn.map((project) => (
-              <ProjectCard key={project.id} project={project} onOpen={() => openCompletedProject(project)} />
-            ))}
-          </div>
-        ) : (
-          <article className="list-card" style={{ borderRadius: '28px', padding: '18px' }}>
-            <h3>No cast videos yet</h3>
-            <p className="muted">Any completed project with a character selected will show up here.</p>
-          </article>
-        )}
-      </SectionCard>
-
-      <SectionCard title="Drafts">
-        <p className="muted" style={{ marginBottom: '14px' }}>
-          Only you can see drafts.
-        </p>
-        {drafts.length ? (
-          <div className="list-stack">
-            {drafts.map((draft) => (
-              <DraftCard key={draft.id} draft={draft} onOpen={() => openDraftInCreate(draft)} />
-            ))}
-          </div>
-        ) : (
-          <article className="list-card" style={{ borderRadius: '28px', padding: '18px' }}>
-            <h3>No drafts yet</h3>
-            <p className="muted">Save a concept in Create or Drafts and it will be available here.</p>
           </article>
         )}
       </SectionCard>

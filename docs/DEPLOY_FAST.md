@@ -75,6 +75,29 @@ It is idempotent and safe to run again. It creates or repairs:
 - `follows` table for v1 recommendation boosts
 - explicit RLS so users can read public posts and their own drafts
 
+## Profile and Characters hub rollout
+Apply the profile/Characters hub schema polish after Feed, Drafts, and thumbnails:
+
+```powershell
+.\scripts\copy-migration-to-clipboard.ps1 profile-characters
+```
+
+Paste into Supabase SQL Editor and click **Run**.
+
+The migration is:
+- `backend/supabase/migrations/20260512_profile_characters_ui.sql`
+
+It is idempotent and safe to run again. It creates or repairs:
+- `profiles.bio`
+- `profiles.avatar_url`
+- `profiles.followers_count`
+- `character_profiles.thumbnail_url`
+- `character_profiles.is_self`
+- `character_profiles.created_at`
+- `character_profiles.updated_at`
+- profile-published post indexes used by the creator grid
+- character profile RLS for own read/update flows
+
 ## 2) Frontend env vars (Vercel)
 Set these on Vercel:
 - `VITE_SUPABASE_URL`
@@ -161,6 +184,10 @@ Expected database success state:
 - `posts.status exists` is `OK`
 - `posts.published_at exists` is `OK`
 - `posts.thumbnail_url exists` is `OK`
+- `character_profiles.thumbnail_url exists` is `OK`
+- `character_profiles.is_self exists` is `OK`
+- `published profile posts query works` is `OK`
+- `profile stats query works` is `OK`
 - `follows table exists` is `OK`
 - service role read/write checks are `OK`
 - RLS policies are available
@@ -174,3 +201,7 @@ Expected app success state:
 - `/studio` redirects to `/drafts`.
 - Publishing a draft removes it from Drafts and makes it eligible for Profile, Home, and For You.
 - `/for-you` shows the discovery search bar and thumbnail grid.
+- `/profile` shows a clean creator profile with Likes, Followers, Characters stats.
+- `/profile` shows published video thumbnails only, newest first.
+- The `Characters` button opens the Characters hub with self pinned first and other characters underneath.
+- `/create` keeps the selector but no longer shows the standalone create-other-character form.

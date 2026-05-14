@@ -29,6 +29,13 @@ export type LumoraDraft = {
   createdAt: string;
 };
 
+export type ProfileStats = {
+  totalLikesReceived: number;
+  followersCount: number;
+  characterCount: number;
+  followsTableAvailable: boolean;
+};
+
 export type LumoraStorageBucket =
   | 'avatars'
   | 'character-reference-images'
@@ -844,6 +851,32 @@ function mapCharacterRow(row: DbRow): CharacterProfile {
   };
 }
 
+function mapCharacterProfileRow(row: DbRow): CharacterProfile {
+  const mapped = mapCharacterRow(row);
+  const isSelfProfile =
+    booleanValue(row.is_self) ||
+    stringValue(row.character_id) === CREATOR_SELF_CHARACTER_ID ||
+    mapped.characterId === CREATOR_SELF_CHARACTER_ID;
+
+  return isSelfProfile
+    ? {
+        ...mapped,
+        id: CREATOR_SELF_CHARACTER_ID,
+        characterId: CREATOR_SELF_CHARACTER_ID,
+        isSelf: true,
+        isCreatorSelf: true,
+      }
+    : mapped;
+}
+
+function characterProfileMergeKey(character: CharacterProfile) {
+  if (character.id === CREATOR_SELF_CHARACTER_ID || character.characterId === CREATOR_SELF_CHARACTER_ID || character.isCreatorSelf) {
+    return CREATOR_SELF_CHARACTER_ID;
+  }
+
+  return character.characterId || character.id;
+}
+
 function mapSelfCharacterRow(row: DbRow): CharacterProfile {
   const identityProfile = mapIdentityProfile(row.identity_profile ?? jsonRecord(row.style_preferences).identityProfile);
   const stylePreferences: Record<string, unknown> = {
@@ -898,7 +931,7 @@ function mapSelfCharacterRow(row: DbRow): CharacterProfile {
 
 export async function loadSupabaseCharacters(userId: string): Promise<CharacterProfile[]> {
   const client = getClient();
-  const [charactersResult, selfResult] = await Promise.all([
+  const [charactersResult, selfResult, profileResult] = await Promise.all([
     client
       .from('characters')
       .select('*')
@@ -909,10 +942,19 @@ export async function loadSupabaseCharacters(userId: string): Promise<CharacterP
       .select('*')
       .eq('user_id', userId)
       .maybeSingle(),
+    client
+      .from('character_profiles')
+      .select('*')
+      .eq('owner_user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(25),
   ]);
 
   if (charactersResult.error) throw charactersResult.error;
   if (selfResult.error) throw selfResult.error;
+  if (profileResult.error) {
+    console.warn('Unable to load character_profiles; falling back to legacy character tables.', profileResult.error);
+  }
 
   console.log('LOADED SUPABASE SELF CHARACTER', {
     authUserId: userId,
@@ -925,8 +967,23 @@ export async function loadSupabaseCharacters(userId: string): Promise<CharacterP
   });
 
   const fictionalCharacters = (charactersResult.data ?? []).map(mapCharacterRow);
-  const selfCharacter = selfResult.data ? [mapSelfCharacterRow(selfResult.data)] : [];
-  return [...selfCharacter, ...fictionalCharacters];
+  const profileCharacters = profileResult.error ? [] : (profileResult.data ?? []).map(mapCharacterProfileRow);
+  const profileSelf = profileCharacters.find((character) => characterProfileMergeKey(character) === CREATOR_SELF_CHARACTER_ID) ?? null;
+  const selfCharacter = selfResult.data ? [mapSelfCharacterRow(selfResult.data)] : profileSelf ? [profileSelf] : [];
+  const mergedOtherCharacters = new Map<string, CharacterProfile>();
+
+  for (const character of [...profileCharacters, ...fictionalCharacters]) {
+    const key = characterProfileMergeKey(character);
+    if (key === CREATOR_SELF_CHARACTER_ID || mergedOtherCharacters.has(key)) continue;
+    mergedOtherCharacters.set(key, character);
+  }
+
+  return [
+    ...selfCharacter,
+    ...Array.from(mergedOtherCharacters.values()).sort((a, b) => (
+      new Date(b.createdAt || b.updatedAt).getTime() - new Date(a.createdAt || a.updatedAt).getTime()
+    )),
+  ];
 }
 
 export async function saveSupabaseCharacter(input: {
@@ -1564,10 +1621,107 @@ export async function loadSupabaseProfilePosts(userId: string): Promise<LumoraPo
     .select('*')
     .eq('user_id', userId)
     .eq('status', 'published')
+    .order('published_at', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false });
 
   if (error) throw error;
   return (data ?? []).map(mapPostRow);
+}
+
+async function getPublishedLikeSum(userId: string): Promise<number | null> {
+  const client = getClient();
+  const { data, error } = await client
+    .from('posts')
+    .select('like_count')
+    .eq('user_id', userId)
+    .eq('status', 'published');
+
+  if (error) return null;
+
+  return (data ?? []).reduce((total, row) => total + Number(row.like_count ?? 0), 0);
+}
+
+async function getFollowerCount(userId: string): Promise<{ count: number | null; followsTableAvailable: boolean }> {
+  const client = getClient();
+  const { count, error } = await client
+    .from('follows')
+    .select('follower_user_id', { count: 'exact', head: true })
+    .eq('following_user_id', userId);
+
+  if (!error) {
+    return { count: count ?? 0, followsTableAvailable: true };
+  }
+
+  let profileResult = await client
+    .from('profiles')
+    .select('followers_count')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (
+    profileResult.error &&
+    (isMissingColumnError(profileResult.error, 'user_id') ||
+      (isObject(profileResult.error) && profileResult.error.code === '42P10'))
+  ) {
+    profileResult = await client
+      .from('profiles')
+      .select('followers_count')
+      .eq('id', userId)
+      .maybeSingle();
+  }
+
+  if (profileResult.error || !profileResult.data) {
+    return { count: null, followsTableAvailable: false };
+  }
+
+  return {
+    count: Number(profileResult.data.followers_count ?? 0),
+    followsTableAvailable: false,
+  };
+}
+
+async function getCharacterProfileCount(userId: string): Promise<number | null> {
+  const client = getClient();
+  const { count, error } = await client
+    .from('character_profiles')
+    .select('id', { count: 'exact', head: true })
+    .eq('owner_user_id', userId);
+
+  if (error) return null;
+  return count ?? 0;
+}
+
+async function getLegacyCharacterCount(userId: string): Promise<number | null> {
+  const client = getClient();
+  const [charactersResult, selfResult] = await Promise.all([
+    client
+      .from('characters')
+      .select('id', { count: 'exact', head: true })
+      .eq('owner_user_id', userId),
+    client
+      .from('self_characters')
+      .select('user_id', { count: 'exact', head: true })
+      .eq('user_id', userId),
+  ]);
+
+  if (charactersResult.error && selfResult.error) return null;
+  return (charactersResult.error ? 0 : charactersResult.count ?? 0) + (selfResult.error ? 0 : selfResult.count ?? 0);
+}
+
+export async function getProfileStats(userId: string): Promise<ProfileStats> {
+  const [totalLikesReceived, followers, characterProfilesCount, legacyCharacterCount] = await Promise.all([
+    getPublishedLikeSum(userId),
+    getFollowerCount(userId),
+    getCharacterProfileCount(userId),
+    getLegacyCharacterCount(userId),
+  ]);
+
+  return {
+    totalLikesReceived: totalLikesReceived ?? 0,
+    followersCount: followers.count ?? 0,
+    characterCount: Math.min(25, Math.max(characterProfilesCount ?? 0, legacyCharacterCount ?? 0)),
+    followsTableAvailable: followers.followsTableAvailable,
+  };
 }
 
 export async function loadSupabasePublicPosts(): Promise<LumoraPost[]> {

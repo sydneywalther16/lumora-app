@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import CharacterCapture from '../components/CharacterCapture';
 import CharacterLibrary from '../components/CharacterLibrary';
 import CreateVideo from '../components/CreateVideo';
 import {
@@ -298,6 +297,11 @@ export default function CreatePage() {
     setDefaultSelfCharacter(nextCharacters.find(isCreatorSelfCharacter) ?? defaultSelfCharacter);
   }
 
+  function openCharactersHub() {
+    localStorage.setItem('lumora_open_characters_hub', '1');
+    window.location.href = '/profile';
+  }
+
   if (pageLoading) {
     return (
       <div className="page">
@@ -317,6 +321,21 @@ export default function CreatePage() {
         onSelect={setSelectedCharacter}
       />
 
+      <section className="editor-card" style={{ display: 'grid', gap: '10px' }}>
+        <div className="row-between" style={{ gap: '12px', flexWrap: 'wrap' }}>
+          <div>
+            <span className="eyebrow">cast</span>
+            <h3>Characters</h3>
+          </div>
+          <button type="button" className="ghost-btn" style={{ flex: 'unset' }} onClick={openCharactersHub}>
+            Open Characters
+          </button>
+        </div>
+        <p className="muted" style={{ margin: 0 }}>
+          Manage self and reusable cast members from your profile.
+        </p>
+      </section>
+
       <CreateVideo
         refreshKey={characterRefreshKey}
         characterId={effectiveCharacterId}
@@ -335,13 +354,9 @@ export default function CreatePage() {
         identityProfile={effectiveIsDefaultSelfCharacter ? identityProfile : null}
         onLikenessFeedback={(feedback) => void handleLikenessFeedback(feedback)}
         onResaveReferencePhoto={() => {
-          window.location.hash = 'character-capture';
+          openCharactersHub();
         }}
       />
-
-      <div id="character-capture">
-        <CharacterCapture onCreated={() => setCharacterRefreshKey(v => v + 1)} />
-      </div>
 
     </div>
   );

@@ -271,6 +271,11 @@ export function loadProfilePosts(): LumoraPost[] {
         const status = (post.status || 'published').toLowerCase();
         const visibility = (post.visibility || post.privacy || 'public').toLowerCase();
         return status === 'published' && visibility !== 'private';
+      })
+      .sort((a, b) => {
+        const aDate = new Date(a.publishedAt ?? a.createdAt).getTime();
+        const bDate = new Date(b.publishedAt ?? b.createdAt).getTime();
+        return bDate - aDate;
       });
   } catch {
     return [];
