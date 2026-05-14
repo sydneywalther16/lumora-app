@@ -22,7 +22,7 @@ type CharacterHubProps = {
 type DetailSectionKey = 'identity' | 'appearance' | 'style' | 'voice' | 'memory' | 'references';
 
 const characterLimit = 25;
-const characterProfilesMigrationWarning = 'Character Profiles need the latest database migration.';
+const characterProfilesMigrationWarning = 'Cast needs the latest database update.';
 
 function characterInitial(name: string) {
   return name.trim().charAt(0).toUpperCase() || 'C';
@@ -49,7 +49,7 @@ function characterProfileEditorError(error: unknown) {
     return characterProfilesMigrationWarning;
   }
 
-  return error instanceof Error ? error.message : 'Unable to save character profile.';
+  return error instanceof Error ? error.message : 'Unable to save cast member.';
 }
 
 function displayName(character: CharacterProfile | null | undefined) {
@@ -152,9 +152,9 @@ function orchestrationMemoryEntries(character: CharacterProfile): Array<readonly
   const entries: Array<[string, unknown]> = [
     ['Rendering mode', preferences.renderingMode ?? preferences.realismMode ?? preferences.preferredRenderingMode],
     ['Successful fallback', preferences.successfulFallbackPath ?? preferences.lastSuccessfulFallbackPath],
-    ['Provider preference', preferences.providerFallbackPreference ?? preferences.stylizationFallbackPreference],
-    ['Moderation memory', preferences.moderationMemory ?? preferences.moderationRewritePreferences ?? preferences.moderationSafeRewritePreferences],
-    ['Continuity inheritance', preferences.continuityInheritance ?? preferences.inheritedContinuity],
+    ['Creative style preference', preferences.providerFallbackPreference ?? preferences.stylizationFallbackPreference],
+    ['Creative safety notes', preferences.moderationMemory ?? preferences.moderationRewritePreferences ?? preferences.moderationSafeRewritePreferences],
+    ['Story inheritance', preferences.continuityInheritance ?? preferences.inheritedContinuity],
   ];
 
   return entries
@@ -407,7 +407,7 @@ export default function CharacterHub({
     if (!selectedCharacter || selectedIsSelf) return;
 
     setSavingProfile(true);
-    setEditorStatus('Saving character profile...');
+    setEditorStatus('Saving cast member...');
 
     const relationshipMemory: Record<string, CharacterRelationshipMemory> = relationshipNotes.trim()
       ? {
@@ -443,13 +443,13 @@ export default function CharacterHub({
             relationshipMemory,
           });
 
-      if (!updated) throw new Error('Character profile not found.');
+      if (!updated) throw new Error('Cast member not found.');
 
       await onRefresh(
         characters.map((character) => character.id === updated.id ? updated : character),
       );
       setSelectedCharacterId(updated.id);
-      setEditorStatus('Character profile saved.');
+      setEditorStatus('Cast member saved.');
     } catch (error) {
       setEditorStatus(characterProfileEditorError(error));
     } finally {
@@ -473,7 +473,7 @@ export default function CharacterHub({
         await onRefresh(latestCharacters);
       } else {
         const deleted = deleteLocalCharacterProfile(selectedCharacter.id);
-        if (!deleted) throw new Error('Character profile not found.');
+        if (!deleted) throw new Error('Cast member not found.');
         await onRefresh();
       }
 
@@ -530,7 +530,7 @@ export default function CharacterHub({
                 Build the pinned identity Lumora can reuse across your cinematic scenes.
               </p>
               <div className="character-quick-stats" aria-label="Self character setup stats">
-                <span><strong>New</strong> continuity</span>
+                <span><strong>New</strong> story</span>
                 <span><strong>0</strong> scenes</span>
                 <span><strong>0</strong> memories</span>
                 <span><strong>Self</strong> pinned</span>
@@ -602,10 +602,10 @@ export default function CharacterHub({
               <h2 style={{ margin: '8px 0 0' }}>{displayName(selectedCharacter)}</h2>
               <p className="character-hero-summary">{appearanceHero}</p>
               <div className="character-quick-stats" aria-label="Character quick stats">
-                <span><strong>{formatPercent(continuityConfidence)}</strong> continuity</span>
+                <span><strong>{formatPercent(continuityConfidence)}</strong> story</span>
                 <span><strong>{sceneAppearances}</strong> scenes</span>
                 <span><strong>{memorySnapshotCount}</strong> memories</span>
-                <span><strong>{orchestrationEntries.length}</strong> orchestration</span>
+                <span><strong>{orchestrationEntries.length}</strong> adaptations</span>
               </div>
             </div>
           </div>
@@ -721,15 +721,15 @@ export default function CharacterHub({
 
           <CharacterDetailSection
             id="memory"
-            title="Memory / Continuity"
-            summary={`${formatPercent(continuityConfidence)} continuity / ${memorySnapshotCount} memories`}
+            title="Story Memory"
+            summary={`${formatPercent(continuityConfidence)} story hold / ${memorySnapshotCount} memories`}
             expanded={detailSectionIsOpen('memory')}
             onToggle={toggleDetailSection}
           >
             <div className="character-compact-form">
               {!selectedIsSelf ? (
                 <label className="field-block">
-                  <span>Relationship memory</span>
+                  <span>Relationship notes</span>
                   <textarea value={relationshipNotes} onChange={(event) => setRelationshipNotes(event.target.value)} rows={2} />
                 </label>
               ) : null}
@@ -739,7 +739,7 @@ export default function CharacterHub({
                     <p key={field}><strong>{field}</strong> {String(value)}</p>
                   ))
                 ) : (
-                  <p className="muted">No continuity memory captured yet.</p>
+                  <p className="muted">No Story Memory captured yet.</p>
                 )}
                 {(selectedCharacter.memorySnapshots ?? []).slice(0, 3).map((snapshot) => (
                   <p key={`${snapshot.sceneExecutionId}-${snapshot.sceneId}-${snapshot.clipOrder}`}>
@@ -748,13 +748,13 @@ export default function CharacterHub({
                 ))}
               </div>
               <div className="character-memory-viewer character-section-card">
-                <span className="eyebrow">orchestration</span>
+                <span className="eyebrow">creative adaptation</span>
                 {orchestrationEntries.length ? (
                   orchestrationEntries.map(([label, value]) => (
                     <p key={label}><strong>{label}</strong> {value}</p>
                   ))
                 ) : (
-                  <p className="muted">No orchestration memory saved yet.</p>
+                  <p className="muted">No creative adaptation notes saved yet.</p>
                 )}
               </div>
             </div>
@@ -784,7 +784,7 @@ export default function CharacterHub({
           {!selectedIsSelf ? (
             <div className="character-detail-save-row">
               <button type="button" className="ghost-btn" onClick={() => void handleSaveProfile()} disabled={savingProfile}>
-                {savingProfile ? 'Saving...' : 'Save character profile'}
+                {savingProfile ? 'Saving...' : 'Save cast member'}
               </button>
               {editorStatus ? <p className="muted">{editorStatus}</p> : null}
             </div>
@@ -827,7 +827,7 @@ export default function CharacterHub({
             <div style={{ display: 'grid', gap: '12px' }}>
               <h3 style={{ margin: 0 }}>Delete character?</h3>
               <p className="muted" style={{ margin: 0 }}>
-                This permanently removes the reusable cast profile and continuity memory from Lumora.
+                This permanently removes the reusable cast profile and Story Memory from Lumora.
               </p>
               {deleteStatus ? <p className="muted">{deleteStatus}</p> : null}
               <div className="button-row">

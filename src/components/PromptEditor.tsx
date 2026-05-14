@@ -36,7 +36,7 @@ export default function PromptEditor() {
 
   async function handleGenerate() {
     setBusy(true);
-    setStatus('Submitting generation job...');
+    setStatus('Sending your scene to the render studio...');
     try {
       const stylePreset = selectedStylePrompt(selectedStyles, activePrompt);
       const result = await api.createGeneration({
@@ -45,9 +45,9 @@ export default function PromptEditor() {
         ...(stylePreset ? { stylePreset } : {}),
         outputType: 'video',
       });
-      setStatus(`Queued: ${result.jobId}`);
+      setStatus('Scene queued for rendering.');
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Unable to queue generation');
+      setStatus(error instanceof Error ? error.message : 'Unable to start the render.');
     } finally {
       setBusy(false);
     }
@@ -102,7 +102,7 @@ export default function PromptEditor() {
 
       <div className="button-row">
         <button type="button" className="primary-btn" onClick={handleGenerate} disabled={busy}>
-          {busy ? 'Submitting...' : 'Generate concept'}
+          {busy ? 'Sending...' : 'Generate concept'}
         </button>
         <button type="button" className="ghost-btn" onClick={handleSaveDraft}>
           Save draft

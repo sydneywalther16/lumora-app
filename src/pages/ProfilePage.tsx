@@ -241,7 +241,7 @@ function friendlyProfileLoadError(error: unknown) {
   const lower = message.toLowerCase();
 
   if (lower.includes('character_id')) {
-    return 'Character Profiles need the latest database migration.';
+    return 'Cast needs the latest database update.';
   }
 
   if (lower.includes('status') || lower.includes('published_at') || lower.includes('thumbnail_url')) {

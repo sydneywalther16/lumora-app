@@ -15,7 +15,7 @@ function characterInitial(name: string) {
   return name.trim().charAt(0).toUpperCase() || 'C';
 }
 
-const characterProfilesMigrationWarning = 'Character Profiles need the latest database migration.';
+const characterProfilesMigrationWarning = 'Cast needs the latest database update.';
 
 function characterProfileEditorError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
@@ -30,7 +30,7 @@ function characterProfileEditorError(error: unknown) {
     return characterProfilesMigrationWarning;
   }
 
-  return error instanceof Error ? error.message : 'Unable to save character profile.';
+  return error instanceof Error ? error.message : 'Unable to save cast member.';
 }
 
 export default function CharacterLibrary({
@@ -58,7 +58,7 @@ export default function CharacterLibrary({
 
     async function loadCharacters() {
       if (configured && loading && !authUser) {
-        setStatus('Loading characters...');
+        setStatus('Loading cast...');
         return;
       }
 
@@ -70,7 +70,7 @@ export default function CharacterLibrary({
 
         if (!active) return;
         setCharacters(fictionalCharacters);
-        setStatus(fictionalCharacters.length ? '' : 'No fictional characters saved yet');
+        setStatus(fictionalCharacters.length ? '' : 'No cast members saved yet');
       } catch (error) {
         if (!active) return;
         setCharacters([]);
@@ -117,7 +117,7 @@ export default function CharacterLibrary({
     if (!selectedCharacter) return;
 
     setSavingProfile(true);
-    setEditorStatus('Saving character profile...');
+    setEditorStatus('Saving cast member...');
 
     const relationshipMemory: Record<string, CharacterRelationshipMemory> = relationshipNotes.trim()
       ? {
@@ -153,13 +153,13 @@ export default function CharacterLibrary({
             relationshipMemory,
           });
 
-      if (!updated) throw new Error('Character profile not found.');
+      if (!updated) throw new Error('Cast member not found.');
 
       setCharacters((current) => current.map((character) => (
         character.id === updated.id ? updated : character
       )));
       onSelect?.(updated);
-      setEditorStatus('Character profile saved.');
+      setEditorStatus('Cast member saved.');
     } catch (error) {
       setEditorStatus(characterProfileEditorError(error));
     } finally {
@@ -171,8 +171,8 @@ export default function CharacterLibrary({
     <section className="editor-card character-library">
       <div className="row-between">
         <div>
-          <span className="eyebrow">characters</span>
-          <h3>Saved character profiles</h3>
+          <span className="eyebrow">cast</span>
+          <h3>Saved cast members</h3>
         </div>
         {onSelect ? (
           <button type="button" className="text-btn" onClick={() => onSelect(null)}>
@@ -230,7 +230,7 @@ export default function CharacterLibrary({
           <div className="row-between">
             <div>
               <span className="eyebrow">profile</span>
-              <strong>Character memory</strong>
+              <strong>Cast memory</strong>
             </div>
             <span className="tiny-pill">Cast member</span>
           </div>
@@ -270,7 +270,7 @@ export default function CharacterLibrary({
           </label>
 
           <label className="field-block">
-            <span>Relationship memory</span>
+            <span>Relationship notes</span>
             <textarea
               value={relationshipNotes}
               onChange={(event) => setRelationshipNotes(event.target.value)}
@@ -279,7 +279,7 @@ export default function CharacterLibrary({
           </label>
 
           <div className="character-memory-viewer">
-            <span className="eyebrow">continuity</span>
+            <span className="eyebrow">Story Memory</span>
             {Object.entries(selectedCharacter.continuityState ?? {}).filter(([, value]) => Boolean(value)).length ? (
               Object.entries(selectedCharacter.continuityState ?? {})
                 .filter(([, value]) => Boolean(value))
@@ -288,7 +288,7 @@ export default function CharacterLibrary({
                   <p key={field}><strong>{field}</strong> {String(value)}</p>
                 ))
             ) : (
-              <p className="muted">No continuity memory captured yet.</p>
+              <p className="muted">No Story Memory captured yet.</p>
             )}
             {(selectedCharacter.memorySnapshots ?? []).slice(0, 3).map((snapshot) => (
               <p key={`${snapshot.sceneExecutionId}-${snapshot.sceneId}-${snapshot.clipOrder}`}>
@@ -303,7 +303,7 @@ export default function CharacterLibrary({
           </div>
 
           <button type="button" className="ghost-btn" onClick={() => void handleSaveProfile()} disabled={savingProfile}>
-            {savingProfile ? 'Saving...' : 'Save character profile'}
+            {savingProfile ? 'Saving...' : 'Save cast member'}
           </button>
           {editorStatus ? <p className="muted">{editorStatus}</p> : null}
         </div>

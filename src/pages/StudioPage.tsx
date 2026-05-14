@@ -6,7 +6,7 @@ import { useSession } from '../hooks/useSession';
 import { listDrafts } from '../lib/supabaseAppData';
 import { getBestPoster, getBestThumbnail } from '../lib/mediaThumbnail';
 
-const characterProfilesMigrationWarning = 'Character Profiles need the latest database migration.';
+const characterProfilesMigrationWarning = 'Cast needs the latest database update.';
 
 function studioLoadErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);

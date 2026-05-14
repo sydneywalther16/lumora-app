@@ -71,35 +71,35 @@ const providerOptions: Array<{
     label: 'Seedance Fast',
     speed: '~1-3 min',
     quality: 'High',
-    description: 'Fast Replicate multimodal reference generation.',
+    description: 'Quick cinematic renders with cast references.',
   },
   {
     engine: SEEDANCE_QUALITY_ENGINE_ID,
     label: 'Seedance Quality',
     speed: '~3-6 min',
     quality: 'Higher',
-    description: 'Slower Seedance pass for stronger identity and motion detail.',
+    description: 'Slower pass for stronger identity and motion detail.',
   },
   {
     engine: 'veo',
     label: 'Veo Experimental',
     speed: 'Variable',
     quality: 'Experimental',
-    description: 'Placeholder-safe Veo path for future Google video support.',
+    description: 'Experimental cinematic video route.',
   },
   {
     engine: 'mock',
     label: 'Demo Mode',
     speed: 'Instant',
     quality: 'Demo',
-    description: 'Always-available local preview without provider usage.',
+    description: 'Instant preview without spending render credits.',
   },
   {
     engine: 'replicate',
     label: 'Kling Reference',
     speed: '~1-3 min',
     quality: 'Reference',
-    description: 'Existing image-to-video route for self-character reference animation.',
+    description: 'Reference-led motion for your self character.',
   },
 ];
 const engineLabels: Record<VideoEngine, string> = {
@@ -206,6 +206,45 @@ type ToastState = {
   type: 'success' | 'error';
   message: string;
 } | null;
+
+const generationStatusLabels: Record<Exclude<GenerationStatusState, 'idle'>, string> = {
+  queued: 'Queued',
+  processing: 'Rendering',
+  completed: 'Saved',
+  failed: 'Paused',
+};
+
+function creatorRenderModeLabel(mode: string) {
+  switch (mode) {
+    case 'seedance-multimodal-reference':
+      return 'Cast reference scene';
+    case 'seedance-text-to-video':
+      return 'Cinematic text scene';
+    case 'self-reference-video':
+      return 'Self reference scene';
+    case 'image-to-video':
+      return 'Reference-led scene';
+    case 'text-to-video-fallback':
+      return 'Cinematic text scene';
+    default:
+      return mode.replace(/-/g, ' ');
+  }
+}
+
+function creatorSceneStatusLabel(status: string) {
+  switch (status) {
+    case 'completed':
+      return 'Saved';
+    case 'failed':
+      return 'Paused';
+    case 'processing':
+      return 'Rendering';
+    case 'queued':
+      return 'Queued';
+    default:
+      return status;
+  }
+}
 
 const likenessFeedbackOptions: Array<{ value: LumoraIdentityFeedbackChoice; label: string }> = [
   { value: 'looks_like_me', label: 'looks like me' },
@@ -383,12 +422,12 @@ function formatUnknownDetail(value: unknown): string {
 }
 
 const providerSafetyFilterMessage =
-  'Provider safety filter blocked this render. Try a safer, fully clothed editorial prompt.';
+  'Creative safety paused this render. Try gentler cinematic wording with styled wardrobe and fictional framing.';
 const providerModerationMessage =
-  'Seedance moderation paused this render. Lumora tried safer cinematic orchestration, but the provider still blocked it.';
-const providerQueueBusyMessage = 'Provider queue is busy. Retrying generation...';
+  'Creative safety paused this render after Lumora tried safer cinematic styling.';
+const providerQueueBusyMessage = 'The render line is busy. Lumora will try again in a moment...';
 const replicateThrottledMessage =
-  'Replicate is temporarily throttling this account. Wait a minute and try again.';
+  'The render studio is cooling down for a moment. Wait a minute and try again.';
 
 function isProviderSafetyFilterError(value: string): boolean {
   const lower = value.toLowerCase();
@@ -431,14 +470,53 @@ function moderationRetryStageMessages(value: unknown): string[] {
         .filter((stage): stage is string => typeof stage === 'string' && stage.trim().length > 0)
     : [];
 
-  return Array.from(new Set([...directStages, ...pathStages]));
+  return Array.from(new Set([...directStages, ...pathStages].map(creatorModerationStageMessage)));
+}
+
+function creatorModerationStageMessage(stage: string): string {
+  const lower = stage.toLowerCase();
+
+  if (lower.includes('level 1') || lower.includes('minor') || lower.includes('wording') || lower.includes('rewrite')) {
+    return 'Trying safer cinematic wording...';
+  }
+
+  if (lower.includes('level 2') || lower.includes('celebrity') || lower.includes('influencer') || lower.includes('public figure')) {
+    return 'Removing celebrity-style framing...';
+  }
+
+  if (
+    lower.includes('level 3') ||
+    lower.includes('cinematic realism') ||
+    lower.includes('reduced realism') ||
+    lower.includes('downgrade from photorealistic')
+  ) {
+    return 'Trying cinematic realism...';
+  }
+
+  if (lower.includes('level 4') || lower.includes('stylized')) {
+    return 'Trying stylized cinematic mode...';
+  }
+
+  if (lower.includes('level 5') || lower.includes('painterly') || lower.includes('dreamlike') || lower.includes('animated')) {
+    return 'Trying painterly/dreamlike cinematic mode...';
+  }
+
+  if (lower.includes('alternate') || lower.includes('provider fallback') || lower.includes('fallback')) {
+    return 'Trying another safe creative path...';
+  }
+
+  return stage
+    .replace(/moderation orchestrator/gi, 'Creative adaptation')
+    .replace(/moderation orchestration/gi, 'creative adaptation')
+    .replace(/orchestration/gi, 'creative flow')
+    .replace(/moderation/gi, 'creative safety');
 }
 
 function moderationWarningMessages(value: unknown): string[] {
   const stages = moderationRetryStageMessages(value);
   if (!stages.length) return [];
 
-  return stages.map((stage) => `Moderation Orchestrator: ${stage}`);
+  return stages.map((stage) => `Creative adaptation: ${stage}`);
 }
 
 function isProviderQueueBusyError(value: string): boolean {
@@ -464,7 +542,7 @@ function parseGenerateResponse(text: string): {
   if (!text.trim()) {
     return {
       data: {},
-      parseError: 'Generator returned an empty response.',
+      parseError: 'The render studio returned an empty response.',
     };
   }
 
@@ -503,7 +581,7 @@ function parseCreativePlanDraft(value: string): CreativeBrainScenePlan | null {
   return null;
 }
 
-const characterProfilesMigrationWarning = 'Character Profiles need the latest database migration.';
+const characterProfilesMigrationWarning = 'Cast needs the latest database update.';
 
 function characterProfileSchemaWarning(diagnostics: ApiHealthDiagnostics) {
   const missingCharacterId = diagnostics.database?.schemaChecks?.some((check) => (
@@ -717,25 +795,25 @@ export default function CreateVideo({
   const generateBusy = !canGenerate || busy || generationLoading || referenceLoading;
   const saveBusy = busy || generationLoading;
   const sceneExecuteDisabledReason = !creativePlan
-    ? 'Build a Creative Brain plan first'
+    ? 'Build a storyboard first'
     : !sceneExecutorUserId
-      ? 'Sign in to save clip jobs'
+      ? 'Sign in to save each shot'
       : !isSeedanceEngine
         ? 'Select Seedance Fast or Seedance Quality'
         : sceneExecutionLoading
-          ? 'Rendering shot clips...'
+          ? 'Rendering scene flow...'
           : '';
   const sceneExecuteBusy = Boolean(sceneExecuteDisabledReason) || generationLoading || busy;
   const engineRoutingMessage =
     isSeedanceEngine
-      ? `${selectedProviderOption.label} sends ${seedanceReferenceCount} reference image${seedanceReferenceCount === 1 ? '' : 's'} to Seedance without forcing a first frame.`
+      ? `${selectedProviderOption.label} uses ${seedanceReferenceCount} cast reference${seedanceReferenceCount === 1 ? '' : 's'} while keeping the scene fresh.`
     : engine === 'veo'
-      ? 'Veo Experimental keeps the placeholder-safe architecture while provider credentials evolve.'
+      ? 'Veo Experimental is ready for the next cinematic video route.'
     : engine === 'mock'
-      ? 'Demo Mode returns an instant preview and never spends provider credits.'
-      : isSoraEngine
-      ? 'Lumora Identity Character currently routes through Replicate image-to-video. Sora remains optional elsewhere.'
-      : 'Kling runs through Replicate and uses your self-character reference image first.';
+      ? 'Demo Mode returns an instant preview and never spends render credits.'
+    : isSoraEngine
+      ? 'Self-character likeness currently uses the reference-led video path.'
+      : 'Kling uses your self-character reference image first.';
   const continuityMemoryDirty = continuityMemory
     ? continuityMemoryChanged(
         continuityMemoryDraft,
@@ -802,13 +880,13 @@ export default function CreateVideo({
       setContinuityMemory(memory);
       setContinuityMemoryDraft(normalizeContinuityMemoryState(memory.state));
       setContinuityMemoryLocks(memory.lockedFields);
-      setContinuityMemoryStatus(memory.id ? 'Continuity memory loaded.' : 'Continuity memory ready.');
+      setContinuityMemoryStatus(memory.id ? 'Story Memory is synced.' : 'Story Memory is ready.');
     }).catch((error) => {
       if (!active) return;
       setContinuityMemory(null);
       setContinuityMemoryDraft(emptyContinuityMemoryState);
       setContinuityMemoryLocks({});
-      setContinuityMemoryError(error instanceof Error ? error.message : 'Continuity Memory could not load.');
+      setContinuityMemoryError(error instanceof Error ? error.message : 'Story Memory could not load.');
       setContinuityMemoryStatus('');
     }).finally(() => {
       if (active) setContinuityMemoryLoading(false);
@@ -837,11 +915,11 @@ export default function CreateVideo({
 
   function beginGenerationProgress() {
     setGenerationStatusState('queued');
-    setStatus('Queued with provider...');
+    setStatus('Warming up the render studio...');
     if (progressTimerRef.current) window.clearTimeout(progressTimerRef.current);
     progressTimerRef.current = window.setTimeout(() => {
       setGenerationStatusState('processing');
-      setStatus('Provider is processing your render...');
+      setStatus('Rendering your cinematic take...');
       progressTimerRef.current = null;
     }, 1400);
   }
@@ -859,7 +937,7 @@ export default function CreateVideo({
       ...current,
       [field]: value,
     }));
-    setContinuityMemoryStatus('Continuity memory edited.');
+    setContinuityMemoryStatus('Story Memory updated.');
     setContinuityMemoryError('');
   }
 
@@ -868,19 +946,19 @@ export default function CreateVideo({
       ...current,
       [field]: locked,
     }));
-    setContinuityMemoryStatus(locked ? `${continuityMemoryLabels[field]} locked.` : `${continuityMemoryLabels[field]} unlocked.`);
+    setContinuityMemoryStatus(locked ? `${continuityMemoryLabels[field]} held steady.` : `${continuityMemoryLabels[field]} free to evolve.`);
     setContinuityMemoryError('');
   }
 
   async function saveContinuityMemory(options: { silent?: boolean } = {}) {
     if (!sceneExecutorUserId) {
-      if (!options.silent) setContinuityMemoryError('Sign in before saving continuity memory.');
+      if (!options.silent) setContinuityMemoryError('Sign in before saving Story Memory.');
       return null;
     }
 
     setContinuityMemorySaving(true);
     if (!options.silent) {
-      setContinuityMemoryStatus('Saving continuity memory...');
+      setContinuityMemoryStatus('Saving Story Memory...');
       setContinuityMemoryError('');
     }
 
@@ -895,12 +973,12 @@ export default function CreateVideo({
       setContinuityMemoryDraft(normalizeContinuityMemoryState(memory.state));
       setContinuityMemoryLocks(memory.lockedFields);
       if (!options.silent) {
-        setContinuityMemoryStatus('Continuity memory saved.');
-        showToast({ type: 'success', message: 'Continuity memory saved.' });
+        setContinuityMemoryStatus('Story Memory saved.');
+        showToast({ type: 'success', message: 'Story Memory saved.' });
       }
       return memory;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Continuity Memory could not save.';
+      const message = error instanceof Error ? error.message : 'Story Memory could not save.';
       setContinuityMemoryError(message);
       if (!options.silent) showToast({ type: 'error', message });
       return null;
@@ -911,13 +989,13 @@ export default function CreateVideo({
 
   async function handleBuildCreativePlan() {
     if (!activePrompt.trim()) {
-      setCreativePlanError('Add a prompt before asking Creative Brain for a plan.');
+      setCreativePlanError('Add a prompt before Lumora builds your storyboard.');
       return;
     }
 
     setCreativePlanLoading(true);
     setCreativePlanError('');
-    setCreativePlanStatus('Creative Brain is planning the scene...');
+    setCreativePlanStatus('Creative Brain is building your storyboard...');
 
     try {
       const styleTheme = selectedStylePrompt(selectedStyles, activePrompt);
@@ -964,9 +1042,9 @@ export default function CreateVideo({
       setSceneExecutionResult(null);
       setSceneExecutionPlan(null);
       setSceneExecutionError('');
-      setCreativePlanStatus(`Creative Brain plan ready (${response.provider}, ${response.model}). Review or edit before rendering.`);
+      setCreativePlanStatus('Storyboard ready. Review the beats before rendering.');
     } catch (error) {
-      setCreativePlanError(error instanceof Error ? friendlyCharacterProfileError(error) : 'Creative Brain could not create a scene plan.');
+      setCreativePlanError(error instanceof Error ? friendlyCharacterProfileError(error) : 'Creative Brain could not build your storyboard.');
       setCreativePlanStatus('');
     } finally {
       setCreativePlanLoading(false);
@@ -979,12 +1057,12 @@ export default function CreateVideo({
     if (nextPlan) {
       setCreativePlan(nextPlan);
       setCreativePlanError('');
-      setCreativePlanStatus('Creative Brain plan edited.');
+      setCreativePlanStatus('Storyboard beats updated.');
       setSceneExecutionResult(null);
       setSceneExecutionPlan(null);
       setSceneExecutionError('');
     } else {
-      setCreativePlanError('Scene plan JSON is editable, but it needs valid JSON before Lumora can treat it as the active plan.');
+      setCreativePlanError('Advanced storyboard edits need valid structure before Lumora can use them.');
     }
   }
 
@@ -993,31 +1071,31 @@ export default function CreateVideo({
 
     const activePlan = parseCreativePlanDraft(creativePlanDraft) ?? creativePlan;
     if (!activePlan) {
-      setSceneExecutionError('Build or fix a Creative Brain plan before rendering shot clips.');
+      setSceneExecutionError('Build or fix your storyboard before starting Scene Flow.');
       return;
     }
 
     if (!sceneExecutorUserId) {
-      setSceneExecutionError('Sign in before rendering a storyboard so Lumora can save each clip job.');
+      setSceneExecutionError('Sign in before Scene Flow so Lumora can save each shot.');
       return;
     }
 
     if (!isSeedanceEngine) {
-      setSceneExecutionError('Scene Executor renders Seedance clips. Select Seedance Fast or Seedance Quality first.');
+      setSceneExecutionError('Scene Flow renders Seedance shots. Select Seedance Fast or Seedance Quality first.');
       return;
     }
 
     if (continuityMemoryDirty) {
       const savedMemory = await saveContinuityMemory({ silent: true });
       if (!savedMemory) {
-        setSceneExecutionError('Save continuity memory before rendering storyboard clips.');
+        setSceneExecutionError('Save Story Memory before rendering your scene flow.');
         return;
       }
     }
 
     setSceneExecutionLoading(true);
     setSceneExecutionError('');
-    setSceneExecutionStatus('Scene Executor queued each storyboard shot and is rendering clips sequentially...');
+    setSceneExecutionStatus('Scene Flow is lining up each shot and rendering your sequence...');
     setSceneExecutionPlan(activePlan);
     setSceneExecutionResult(null);
 
@@ -1068,22 +1146,22 @@ export default function CreateVideo({
         setContinuityMemory(result.continuityMemory);
         setContinuityMemoryDraft(normalizeContinuityMemoryState(result.continuityMemory.state));
         setContinuityMemoryLocks(result.continuityMemory.lockedFields);
-        setContinuityMemoryStatus('Continuity memory updated from completed clips.');
+        setContinuityMemoryStatus('Story Memory updated from completed shots.');
       }
       setSceneExecutionStatus(
         result.status === 'completed'
-          ? `Scene Executor completed ${result.clips.length} Seedance clip${result.clips.length === 1 ? '' : 's'}.`
-          : 'Scene Executor stopped after a clip failed. Completed clips remain saved in generation jobs.',
+          ? `Scene Flow completed ${result.clips.length} cinematic shot${result.clips.length === 1 ? '' : 's'}.`
+          : 'Scene Flow paused after one shot failed. Completed shots stay saved in Drafts.',
       );
       if (result.status === 'completed') {
-        showToast({ type: 'success', message: 'Storyboard clips generated and saved.' });
+        showToast({ type: 'success', message: 'Storyboard shots generated and saved.' });
       } else {
         showToast({ type: 'error', message: result.failedClip?.error || 'A storyboard clip failed to render.' });
       }
     } catch (error) {
       const message = error instanceof ApiRequestError || error instanceof Error
         ? friendlyCharacterProfileError(error)
-        : 'Scene Executor could not render the storyboard.';
+        : 'Scene Flow could not render the storyboard.';
       setSceneExecutionError(message);
       setSceneExecutionStatus('');
       showToast({ type: 'error', message });
@@ -1359,7 +1437,7 @@ export default function CreateVideo({
         ...moderationWarningMessages(data.moderationDiagnostics),
         ...(data.referenceImageNote ? [data.referenceImageNote] : []),
         ...(selectedIsSeedanceEngine && selectedSeedanceReferences.length === 1
-          ? ['Only one image is uploaded. Add side, full-body, expression, or outfit references for stronger Seedance identity consistency.']
+          ? ['Only one image is uploaded. Add side, full-body, expression, or outfit references for stronger cast consistency.']
           : []),
       ]));
       const nextModerationStages = moderationRetryStageMessages(data.moderationDiagnostics);
@@ -1418,9 +1496,9 @@ export default function CreateVideo({
           ? selectedSeedanceReferences.length > 1
           : null,
         message: nextGenerationMode === 'seedance-multimodal-reference'
-          ? 'Seedance multimodal reference render created.'
+          ? 'Cast reference render created.'
           : nextGenerationMode === 'seedance-text-to-video'
-          ? 'Seedance 2.0 Fast video render created.'
+          ? 'Cinematic video render created.'
           : nextGenerationMode === 'text-to-video-fallback'
           ? 'Text-only fallback render created. Likeness is not guaranteed.'
           : 'Kling self-reference video render created.',
@@ -1538,20 +1616,20 @@ export default function CreateVideo({
       setGenerationModerationDetail(
         moderationPayload?.suggestion ||
         (moderationPayload
-          ? 'Lumora preserved your references, continuity memory, and storyboard intent while trying safer cinematic orchestration.'
+          ? 'Lumora preserved your cast, Story Memory, and storyboard while adapting the style for cinematic safety.'
           : ''),
       );
       setGenerationModerationStages(retryStages);
       setGenerationError(
         isSoraEngine && !isProviderSafetyFilterError(displayMessage) && !moderationPayload
-          ? `${displayMessage} Self-character likeness is currently routed through Replicate.`
+          ? `${displayMessage} Self-character likeness is currently using the reference-led video path.`
           : displayMessage,
       );
       finishGenerationProgress('failed');
       showToast({
         type: 'error',
         message: moderationPayload
-          ? 'Seedance moderation paused this render. A safer rewrite is ready.'
+          ? 'Creative safety paused this render. A safer cinematic rewrite is ready.'
           : 'Generation failed. You can retry when ready.',
       });
     } finally {
@@ -1690,12 +1768,12 @@ export default function CreateVideo({
         <div className="continuity-memory-panel">
           <div className="row-between">
             <div>
-              <span className="eyebrow">Continuity Memory</span>
-              <strong>Cinematic state</strong>
+              <span className="eyebrow">Story Memory</span>
+              <strong>Your cinematic world remembers this character.</strong>
             </div>
             <span className="tiny-pill">{continuityConfidencePercent}%</span>
           </div>
-          {continuityMemoryLoading ? <p className="muted">Loading continuity memory...</p> : null}
+          {continuityMemoryLoading ? <p className="muted">Syncing Story Memory...</p> : null}
           {continuityMemoryStatus ? <p className="muted">{continuityMemoryStatus}</p> : null}
           {continuityMemoryError ? <p className="creative-plan-error">{continuityMemoryError}</p> : null}
           <div className="continuity-memory-grid">
@@ -1722,7 +1800,7 @@ export default function CreateVideo({
           </div>
           {recentDriftAlerts.length ? (
             <div className="continuity-drift-list">
-              <span className="eyebrow">Drift</span>
+              <span className="eyebrow">Continuity notes</span>
               {recentDriftAlerts.map((alert) => (
                 <p key={`${alert.field}-${alert.detectedAt}-${alert.clipOrder}`}>
                   <strong>{continuityMemoryLabels[alert.field]}</strong> {alert.reason}
@@ -1732,7 +1810,7 @@ export default function CreateVideo({
           ) : null}
           {recentSceneMemorySummaries.length ? (
             <div className="scene-memory-summary-list">
-              <span className="eyebrow">Scene Memory</span>
+              <span className="eyebrow">Scene memories</span>
               {recentSceneMemorySummaries.map((summary) => (
                 <p key={`${summary.sceneExecutionId}-${summary.sceneId}-${summary.clipOrder}`}>
                   <strong>{summary.title}</strong> {summary.summary}
@@ -1747,10 +1825,10 @@ export default function CreateVideo({
               onClick={() => void saveContinuityMemory()}
               disabled={!sceneExecutorUserId || continuityMemorySaving || !continuityMemoryDirty}
             >
-              {continuityMemorySaving ? 'Saving...' : continuityMemoryDirty ? 'Save memory' : 'Memory saved'}
+              {continuityMemorySaving ? 'Saving...' : continuityMemoryDirty ? 'Save Story Memory' : 'Story Memory saved'}
             </button>
             <small className="muted">
-              {sceneExecutorUserId ? (continuityMemoryDirty ? 'Unsaved changes' : 'Ready') : 'Sign in to persist memory'}
+              {sceneExecutorUserId ? (continuityMemoryDirty ? 'Unsaved changes' : 'Scene continuity preserved.') : 'Sign in to save Story Memory'}
             </small>
           </div>
         </div>
@@ -1758,7 +1836,7 @@ export default function CreateVideo({
         <div className="creative-brain-panel">
           <div className="row-between">
             <div>
-              <span className="eyebrow">Creative Brain Plan</span>
+              <span className="eyebrow">Storyboard</span>
               <strong>Storyboard before rendering</strong>
             </div>
             <button
@@ -1771,7 +1849,7 @@ export default function CreateVideo({
             </button>
           </div>
           <p className="muted">
-            Generate an editable cinematic orchestration plan. This does not start video rendering.
+            Shape the scene into cinematic beats before anything starts rendering.
           </p>
           {creativePlanStatus ? <p className="muted">{creativePlanStatus}</p> : null}
           {creativePlanError ? <p className="creative-plan-error">{creativePlanError}</p> : null}
@@ -1793,14 +1871,17 @@ export default function CreateVideo({
                   </li>
                 ))}
               </ol>
-              <label className="field-block creative-plan-editor">
-                <span>Edit scene plan JSON</span>
-                <textarea
-                  value={creativePlanDraft}
-                  onChange={(event) => handleCreativePlanDraftChange(event.target.value)}
-                  rows={12}
-                />
-              </label>
+              <details className="creative-plan-editor-shell">
+                <summary>Advanced storyboard structure</summary>
+                <label className="field-block creative-plan-editor">
+                  <span>Structured scene notes</span>
+                  <textarea
+                    value={creativePlanDraft}
+                    onChange={(event) => handleCreativePlanDraftChange(event.target.value)}
+                    rows={12}
+                  />
+                </label>
+              </details>
               <div className="scene-executor-actions">
                 <button
                   type="button"
@@ -1810,10 +1891,10 @@ export default function CreateVideo({
                   aria-busy={sceneExecutionLoading}
                   title={sceneExecuteDisabledReason || undefined}
                 >
-                  {sceneExecutionLoading ? 'Rendering shot clips...' : 'Render storyboard clips'}
+                  {sceneExecutionLoading ? 'Rendering scene flow...' : 'Render storyboard'}
                 </button>
                 <small className="muted">
-                  {sceneExecuteDisabledReason || 'Creates one Seedance clip per shot, saves clip jobs, and keeps clips separate.'}
+                  {sceneExecuteDisabledReason || 'Creates one cinematic shot per beat and keeps the sequence easy to review.'}
                 </small>
               </div>
               {sceneExecutionStatus ? <p className="muted">{sceneExecutionStatus}</p> : null}
@@ -1822,16 +1903,16 @@ export default function CreateVideo({
                 <div className="scene-progress-panel" aria-live="polite">
                   <div className="row-between">
                     <div>
-                      <span className="eyebrow">Scene Progress</span>
-                      <strong>Sequential clip render</strong>
+                      <span className="eyebrow">Scene Flow</span>
+                      <strong>Rendering the sequence</strong>
                     </div>
                     <span className="tiny-pill">
                       {sceneExecutionLoading
-                        ? 'Processing'
+                        ? 'Rendering'
                         : sceneExecutionResult?.status === 'completed'
                           ? 'Completed'
                           : sceneExecutionResult?.status === 'failed'
-                            ? 'Failed'
+                            ? 'Paused'
                             : 'Queued'}
                     </span>
                   </div>
@@ -1853,7 +1934,7 @@ export default function CreateVideo({
                                 ))}
                                 {clip.error ? <small className="creative-plan-error">{clip.error}</small> : null}
                               </span>
-                              <span className="tiny-pill">{clip.status}</span>
+                              <span className="tiny-pill">{creatorSceneStatusLabel(clip.status)}</span>
                             </li>
                           );
                         })
@@ -1868,7 +1949,7 @@ export default function CreateVideo({
                               <small>{shot.cameraFraming} / {shot.cameraMovement}</small>
                             </span>
                             <span className="tiny-pill">
-                              {sceneExecutionLoading && index === 0 ? 'processing' : 'queued'}
+                              {sceneExecutionLoading && index === 0 ? 'Rendering' : 'Queued'}
                             </span>
                           </li>
                         ))}
@@ -1880,7 +1961,7 @@ export default function CreateVideo({
                         .map((clip) => (
                           <article key={`${clip.id}-video`} className="scene-clip-card">
                             <div className="row-between">
-                              <span className="eyebrow">Clip {clip.clipOrder}</span>
+                              <span className="eyebrow">Shot {clip.clipOrder}</span>
                               <span className="tiny-pill">{clip.model || sceneExecutionResult.engine}</span>
                             </div>
                             <strong>{clip.title}</strong>
@@ -1930,8 +2011,8 @@ export default function CreateVideo({
         </div>
 
         <div className="field-block">
-          <span>Provider</span>
-          <div className="provider-grid" role="radiogroup" aria-label="Generation provider">
+          <span>Render studio</span>
+          <div className="provider-grid" role="radiogroup" aria-label="Render studio">
             {providerOptions.map((option) => (
               <button
                 key={option.engine}
@@ -1961,55 +2042,55 @@ export default function CreateVideo({
               {isSeedanceEngine
                 ? 'Seedance 2.0'
                 : engine === 'replicate' && selfReferenceMode
-                  ? 'Lumora Identity Character'
+                  ? 'Lumora Cast'
                 : referenceLoading
                   ? 'Checking self reference'
                 : isTextFallbackMode
                     ? 'Reference required'
-                    : 'Image-to-video'}
+                    : 'Reference scene'}
             </span>
             <strong>
               {isSeedanceEngine
-                ? 'Generate a new Seedance scene from all reference images'
+                ? 'Generate a fresh scene from your cast references'
                 : engine === 'replicate' && selfReferenceMode
                   ? 'Generate new scenes from your reusable identity'
                 : engine === 'veo'
-                  ? 'Generate through the Veo placeholder path'
+                  ? 'Try the experimental cinematic route'
                 : engine === 'mock'
                   ? 'Preview instantly with demo output'
                 : referenceLoading
                   ? 'Looking for saved self-character photos'
                 : isTextFallbackMode
                   ? 'Save a reference image first'
-                  : 'Using a reference image'}
+                  : 'Use a reference-led scene'}
             </strong>
             <span className="muted">
               {referenceLoading
-                ? 'Lumora is checking front, full-body, angle, avatar, and media URL fields.'
+                ? 'Lumora is finding your saved self references.'
                 : isSeedanceEngine
-                ? 'Seedance receives every saved reference as identity guidance and does not force any image as the first frame.'
+                ? 'Lumora sends your saved cast references as guidance without forcing any image as the first frame.'
                 : engine === 'veo'
-                ? 'Veo Experimental currently fails over safely when production credentials are not available.'
+                ? 'If Veo is unavailable, Lumora keeps the scene safe and lets you keep creating.'
                 : engine === 'mock'
                 ? 'Demo Mode returns a known video so you can test Drafts save and playback.'
                 : selfReferenceMode
                 ? primaryReferenceImage.url
-                  ? 'Build a reusable photorealistic character from your reference photos and videos.'
-                  : 'Lumora Identity Character references will be sent when available.'
+                  ? 'Build a reusable cinematic character from your reference photos and videos.'
+                  : 'Lumora cast references will be sent when available.'
                 : isTextFallbackMode
-                  ? 'Create needs a public saved reference image for the current generation path.'
-                  : 'Kling will condition the video on the selected image.'}
+                  ? 'Save a reference image before this route can render.'
+                  : 'Lumora will guide motion from the selected image.'}
             </span>
             {seedanceMultimodalActive ? (
-              <span className="tiny-pill multimodal-reference-badge">Multimodal Reference Mode</span>
+              <span className="tiny-pill multimodal-reference-badge">Cast reference mode</span>
             ) : null}
             {seedanceSingleReferenceWarning ? (
               <span className="seedance-reference-warning">
-                Only one image uploaded. Add side, full-body, expression, or outfit references for stronger identity consistency.
+                Only one image uploaded. Add side, full-body, expression, or outfit references for stronger cast consistency.
               </span>
             ) : null}
             {isSeedanceEngine && seedanceReferenceCount > 0 ? (
-              <div className="seedance-reference-list" aria-label="Seedance references">
+              <div className="seedance-reference-list" aria-label="Cast references">
                 {seedanceReferenceImages.map((reference) => (
                   <span key={`${reference.token}-${reference.url}`}>
                     {reference.token} {reference.label || 'Reference image'}
@@ -2021,7 +2102,7 @@ export default function CreateVideo({
               <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }}>
                 <span className="tiny-pill" style={{ width: 'fit-content' }}>{identityStatusLabel}</span>
                 <span className="muted">
-                  Lumora will use your feedback to improve future prompts and character consistency.
+                  Lumora will use your feedback to improve future scenes and cast consistency.
                 </span>
               </div>
             ) : null}
@@ -2047,7 +2128,7 @@ export default function CreateVideo({
           {primaryReferenceImage.label || selfReferenceMode || isSeedanceEngine ? (
             <span className="tiny-pill reference-mode-pill">
               {isSeedanceEngine
-                ? `${seedanceReferenceCount} Seedance reference${seedanceReferenceCount === 1 ? '' : 's'}`
+                ? `${seedanceReferenceCount} cast reference${seedanceReferenceCount === 1 ? '' : 's'}`
                 : referenceLabel || primaryReferenceImage.label || 'Saved self character'}
             </span>
           ) : null}
@@ -2067,7 +2148,7 @@ export default function CreateVideo({
 
         {selfReferenceMode && engine === 'replicate' && isHydrated ? (
           <div className="field-block">
-            <span>Lumora Identity Character</span>
+            <span>Lumora Cast Reference</span>
             <div className="reference-grid" style={{ gap: '8px' }}>
               {identityReferenceCards.map((item) => (
                   <div key={item.label} className="reference-upload" style={{ padding: '8px', minHeight: 'unset' }}>
@@ -2111,12 +2192,12 @@ export default function CreateVideo({
           <div className="generation-progress" aria-live="polite">
             {(['queued', 'processing', 'completed', 'failed'] as const).map((phase) => (
               <span key={phase} className={generationStatusState === phase ? 'active' : ''}>
-                {phase}
+                {generationStatusLabels[phase]}
               </span>
             ))}
           </div>
         ) : null}
-        {generationLoading ? <p className="muted">Rendering your concept...</p> : null}
+        {generationLoading ? <p className="muted">Rendering your cinematic take...</p> : null}
         {generationError ? (
           <div className="generation-error-card">
             <p>{generationError}</p>
@@ -2141,10 +2222,10 @@ export default function CreateVideo({
                     setGenerationModerationDetail('');
                     setGenerationModerationStages([]);
                     setGenerationSafeRewrite('');
-                    setStatus('Safe rewrite loaded. References are unchanged.');
+                    setStatus('Safer cinematic rewrite loaded. Your references stayed intact.');
                   }}
                 >
-                  Use safe rewrite
+                  Use cinematic rewrite
                 </button>
               </div>
             ) : null}
@@ -2212,16 +2293,16 @@ export default function CreateVideo({
           {generationResult.message ? <p>{generationResult.message}</p> : null}
           <p>Prompt: {generationResult.prompt}</p>
           {finalGeneratedPrompt ? (
-            <p className="muted">Final prompt: {finalGeneratedPrompt}</p>
+            <p className="muted">Rendered prompt: {finalGeneratedPrompt}</p>
           ) : null}
           {generatedMode ? (
-            <p className="muted">Generation mode: {generatedMode}</p>
+            <p className="muted">Render style: {creatorRenderModeLabel(generatedMode)}</p>
           ) : null}
           {generatedMode === 'seedance-multimodal-reference' ? (
             <div className="reference-result-row">
-              <span className="tiny-pill multimodal-reference-badge">Multimodal Reference Mode</span>
+              <span className="tiny-pill multimodal-reference-badge">Cast reference mode</span>
               <span className="muted">
-                Seedance used {generationResult.referenceImageCount ?? seedanceReferenceCount} identity references for a fresh cinematic scene.
+                Lumora used {generationResult.referenceImageCount ?? seedanceReferenceCount} cast references for a fresh cinematic scene.
               </span>
             </div>
           ) : null}
@@ -2257,7 +2338,7 @@ export default function CreateVideo({
             <div style={{ display: 'grid', gap: '10px', marginTop: '12px' }}>
               <strong>Improve likeness</strong>
               <p className="muted" style={{ margin: 0 }}>
-                Lumora will use your feedback to improve future prompts and character consistency.
+                Lumora will use your feedback to improve future scenes and cast consistency.
               </p>
               <div className="chip-row wrap">
                 {likenessFeedbackOptions.map((option) => (

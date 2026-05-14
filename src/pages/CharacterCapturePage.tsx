@@ -10,9 +10,9 @@ export default function CharacterCapturePage() {
       <section className="headline-card">
         <div>
           <span className="eyebrow">capture</span>
-          <h2>Character capture</h2>
+          <h2>Cast capture</h2>
         </div>
-        <p>Upload consented reference images, optional media, and keep your character profiles private by default.</p>
+        <p>Upload consented reference images and optional media for reusable cinematic cast members.</p>
       </section>
 
       <CharacterCapture onCreated={() => setRefreshKey((current) => current + 1)} />

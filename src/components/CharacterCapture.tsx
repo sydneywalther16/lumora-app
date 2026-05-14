@@ -36,7 +36,7 @@ function compactPreferences(preferences: Record<string, string>) {
   );
 }
 
-const characterProfilesMigrationWarning = 'Character Profiles need the latest database migration.';
+const characterProfilesMigrationWarning = 'Cast needs the latest database update.';
 
 function characterCaptureErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
