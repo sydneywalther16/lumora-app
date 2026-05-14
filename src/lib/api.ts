@@ -434,7 +434,16 @@ export type ApiHealthDiagnostics = {
   ok: boolean;
   mode: string;
   configured: Record<string, boolean>;
+  missingRequired?: string[];
   missingRecommended: string[];
+  billing?: {
+    enabled: boolean;
+    required: boolean;
+    ready: boolean;
+    status: 'ready' | 'not_configured' | 'missing_required';
+    missing: string[];
+    blocking: boolean;
+  };
   generationProviders: Array<{
     id: string;
     ready: boolean;

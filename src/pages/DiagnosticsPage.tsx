@@ -65,6 +65,22 @@ export default function DiagnosticsPage() {
                 </p>
               ))}
             </div>
+            {diagnostics.billing ? (
+              <div>
+                <span className="eyebrow">billing</span>
+                <p className="diagnostic-row">
+                  <span>Stripe</span>
+                  <strong>{diagnostics.billing.status}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>blocking health</span>
+                  <strong>{diagnostics.billing.blocking ? 'Yes' : 'No'}</strong>
+                </p>
+                {diagnostics.billing.missing.length ? (
+                  <p className="muted">{diagnostics.billing.missing.join(' + ')}</p>
+                ) : null}
+              </div>
+            ) : null}
             {diagnostics.database ? (
               <div>
                 <span className="eyebrow">database</span>

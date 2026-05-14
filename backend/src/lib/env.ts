@@ -1,10 +1,24 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
+const booleanEnv = z.preprocess((value) => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'n', 'off', ''].includes(normalized)) return false;
+  }
+  return value;
+}, z.boolean());
+
 const envSchema = z.object({
   API_PORT: z.coerce.number().default(8787),
   APP_URL: z.string().url().default('http://localhost:4173'),
   WEB_ORIGIN: z.string().optional(),
+  DEMO_MODE: booleanEnv.default(false),
+  BILLING_ENABLED: booleanEnv.default(false),
+  REQUIRE_STRIPE: booleanEnv.default(false),
   SUPABASE_URL: z.string().url().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   SUPABASE_JWT_SECRET: z.string().min(1).optional(),
