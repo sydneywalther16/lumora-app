@@ -109,42 +109,44 @@ alter table follows enable row level security;
 
 drop policy if exists "projects_own_all" on projects;
 drop policy if exists "projects_select_own" on projects;
-drop policy if exists "projects_insert_own" on projects;
-drop policy if exists "projects_update_own" on projects;
-drop policy if exists "projects_delete_own" on projects;
 create policy "projects_select_own" on projects
   for select using (auth.uid() = user_id);
+drop policy if exists "projects_insert_own" on projects;
 create policy "projects_insert_own" on projects
   for insert with check (auth.uid() = user_id);
+drop policy if exists "projects_update_own" on projects;
 create policy "projects_update_own" on projects
   for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "projects_delete_own" on projects;
 create policy "projects_delete_own" on projects
   for delete using (auth.uid() = user_id);
 
 drop policy if exists "posts_owner_all" on posts;
 drop policy if exists "posts_public_read" on posts;
 drop policy if exists "posts_select_visible" on posts;
-drop policy if exists "posts_insert_own" on posts;
-drop policy if exists "posts_update_own" on posts;
-drop policy if exists "posts_delete_own" on posts;
+drop policy if exists "posts_public_published_read" on posts;
 create policy "posts_public_published_read" on posts
   for select using (status = 'published' and privacy = 'public');
+drop policy if exists "posts_select_own" on posts;
 create policy "posts_select_own" on posts
   for select using (auth.uid() = user_id);
+drop policy if exists "posts_insert_own" on posts;
 create policy "posts_insert_own" on posts
   for insert with check (auth.uid() = user_id);
+drop policy if exists "posts_update_own" on posts;
 create policy "posts_update_own" on posts
   for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "posts_delete_own" on posts;
 create policy "posts_delete_own" on posts
   for delete using (auth.uid() = user_id);
 
 drop policy if exists "follows_select_public" on follows;
-drop policy if exists "follows_insert_own" on follows;
-drop policy if exists "follows_delete_own" on follows;
 create policy "follows_select_public" on follows
   for select using (true);
+drop policy if exists "follows_insert_own" on follows;
 create policy "follows_insert_own" on follows
   for insert with check (auth.uid() = follower_user_id);
+drop policy if exists "follows_delete_own" on follows;
 create policy "follows_delete_own" on follows
   for delete using (auth.uid() = follower_user_id);
 
