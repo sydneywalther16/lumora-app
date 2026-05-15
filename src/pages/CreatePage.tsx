@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import CharacterLibrary from '../components/CharacterLibrary';
+import CreatorOnboarding from '../components/CreatorOnboarding';
 import CreateVideo from '../components/CreateVideo';
 import {
   getCreatorSelfCharacter,
@@ -305,20 +306,26 @@ export default function CreatePage() {
   if (pageLoading) {
     return (
       <div className="page">
-        <h2>Hydrating Lumora identity...</h2>
+        <h2>Waking up your creator identity...</h2>
       </div>
     );
   }
 
   return (
     <div className="page">
+      <CreatorOnboarding embedded />
 
-      <h2>Create</h2>
+      <section className="headline-card creator-create-hero">
+        <span className="eyebrow">create</span>
+        <h2>Start a cinematic scene</h2>
+        <p>Your cast, style, and Story Memory stay with the scene while Lumora shapes the next moment.</p>
+      </section>
 
       <CharacterLibrary
         refreshKey={characterRefreshKey}
         selectedCharacterId={selectedCharacter?.id ?? null}
         onSelect={setSelectedCharacter}
+        compact
       />
 
       <section className="editor-card" style={{ display: 'grid', gap: '10px' }}>
@@ -332,7 +339,7 @@ export default function CreatePage() {
           </button>
         </div>
         <p className="muted" style={{ margin: 0 }}>
-          Manage self and reusable cast members from your profile.
+          Build and edit the cinematic cast members you can reuse across stories.
         </p>
       </section>
 

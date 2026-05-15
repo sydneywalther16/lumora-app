@@ -9,6 +9,7 @@ import InboxPage from './pages/InboxPage';
 import ProfilePage from './pages/ProfilePage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
 import DiagnosticsPage from './pages/DiagnosticsPage';
+import CreatorOnboarding from './components/CreatorOnboarding';
 import { useSession } from './hooks/useSession';
 
 export default function App() {
@@ -32,6 +33,7 @@ export default function App() {
         <Route path="/home" element={<HomePage />} />
         <Route path="/for-you" element={<TrendsPage />} />
         <Route path="/trends" element={<Navigate to="/for-you" replace />} />
+        <Route path="/onboarding" element={<CreatorOnboarding />} />
         <Route path="/create" element={<CreatePage />} />
         <Route path="/capture" element={<CharacterCapturePage />} />
         <Route path="/drafts" element={<StudioPage />} />

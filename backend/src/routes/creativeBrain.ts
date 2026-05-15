@@ -16,6 +16,7 @@ import {
   publicCharacterProfile,
 } from '../services/characterProfiles';
 import { executeScenePlan } from '../services/sceneExecutor';
+import { isAssetPersistenceError } from '../services/assetPersistence';
 
 const creativeBrainPlanRequestSchema = z.object({
   prompt: z.string().min(1),
@@ -193,9 +194,18 @@ creativeBrainRouter.post('/execute', sceneExecutorRateLimit, async (req, res) =>
       error,
     });
 
-    res.status(500).json({
+    res.status(isAssetPersistenceError(error) ? error.statusCode : 500).json({
       error: message,
+      message,
       status: 'failed',
+      assetPersistence: isAssetPersistenceError(error),
+      assetPersistenceDiagnostics: isAssetPersistenceError(error)
+        ? {
+            code: error.code,
+            sourceUrl: error.sourceUrl ?? null,
+            host: error.host ?? null,
+          }
+        : null,
       clips: [],
       createdAt: new Date().toISOString(),
     });

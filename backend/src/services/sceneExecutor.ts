@@ -33,6 +33,10 @@ import {
   type SeedanceQualityMode,
   type SeedanceReferenceImage,
 } from './providers/seedanceProvider';
+import {
+  persistSeedanceReferenceImages,
+  type AssetPersistenceSummary,
+} from './assetPersistence';
 
 export type SceneExecutorClipStatus = 'queued' | 'processing' | 'completed' | 'failed';
 
@@ -55,6 +59,7 @@ export type SceneClipMetadata = {
   memorySnapshot?: ContinuityMemoryState | null;
   sceneMemorySummary?: SceneMemorySummary | null;
   moderationOrchestration?: SeedanceModerationDiagnostics | null;
+  assetPersistence?: AssetPersistenceSummary | null;
 };
 
 export type SceneExecutorClip = {
@@ -86,6 +91,7 @@ export type SceneExecutorResult = {
   failedClip?: SceneExecutorClip | null;
   scenePlan: CreativeBrainScenePlan;
   continuityMemory: ContinuityMemoryRecord | null;
+  assetPersistence: AssetPersistenceSummary;
   createdAt: string;
   completedAt: string;
 };
@@ -211,6 +217,15 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
   const createdAt = new Date().toISOString();
   const clips: SceneExecutorClip[] = [];
   const engine = input.quality === 'quality' ? 'seedance-quality' : 'seedance-2.0';
+  const persistedReferences = await persistSeedanceReferenceImages({
+    userId: input.userId,
+    characterId: input.characterId ?? null,
+    projectId: input.projectId ?? null,
+    sceneExecutionId,
+    referenceImages: input.referenceImages,
+    usage: 'scene_reference_image',
+  });
+  const safeReferenceImages = persistedReferences.referenceImages;
   const storedCharacterProfile = input.characterId
     ? await getCinematicCharacterProfileForUser(input.userId, input.characterId).catch((error) => {
         console.warn('SCENE EXECUTOR CHARACTER PROFILE LOAD FAILED:', {
@@ -240,7 +255,9 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
   console.info('SCENE EXECUTOR START:', {
     sceneExecutionId,
     shotCount: parsedPlan.shotList.length,
-    referenceImageCount: input.referenceImages?.length ?? 0,
+    referenceImageCount: safeReferenceImages.length,
+    persistedReferenceCount: persistedReferences.summary.persisted,
+    controlledReferenceCount: persistedReferences.summary.alreadyControlled,
     engine,
     memoryScope: continuityMemory.memoryScope,
     continuityConfidence: continuityMemory.continuityConfidence,
@@ -254,11 +271,12 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
       scenePlan: parsedPlan,
       shot,
       previousScene,
-      referenceImageCount: input.referenceImages?.length ?? 0,
+      referenceImageCount: safeReferenceImages.length,
       characterMetadata: input.characterMetadata,
       continuityMemory,
       characterProfile,
     });
+    metadata.assetPersistence = persistedReferences.summary;
     const prompt = shotPrompt({
       scenePlan: parsedPlan,
       shot,
@@ -343,7 +361,7 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
     try {
       const seedanceResult = await generateSeedanceVideo(prompt, {
         quality: input.quality,
-        referenceImages: input.referenceImages,
+        referenceImages: safeReferenceImages,
         userId: input.userId,
         characterId: executionCharacterId,
         projectId: input.projectId ?? null,
@@ -487,6 +505,7 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
         failedClip: clip,
         scenePlan: parsedPlan,
         continuityMemory,
+        assetPersistence: persistedReferences.summary,
         createdAt,
         completedAt: new Date().toISOString(),
       };
@@ -502,6 +521,7 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
     failedClip: null,
     scenePlan: parsedPlan,
     continuityMemory,
+    assetPersistence: persistedReferences.summary,
     createdAt,
     completedAt: new Date().toISOString(),
   };

@@ -9,6 +9,7 @@ type CharacterLibraryProps = {
   selectedCharacterId?: string | null;
   onSelect?: (character: CharacterProfile | null) => void;
   refreshKey?: number;
+  compact?: boolean;
 };
 
 function characterInitial(name: string) {
@@ -37,6 +38,7 @@ export default function CharacterLibrary({
   selectedCharacterId,
   onSelect,
   refreshKey = 0,
+  compact = false,
 }: CharacterLibraryProps) {
   const { user, session, loading, configured } = useSession();
   const authUser = session?.user ?? user;
@@ -70,7 +72,7 @@ export default function CharacterLibrary({
 
         if (!active) return;
         setCharacters(fictionalCharacters);
-        setStatus(fictionalCharacters.length ? '' : 'No cast members saved yet');
+        setStatus(fictionalCharacters.length ? '' : 'Build your reusable cinematic cast from Characters.');
       } catch (error) {
         if (!active) return;
         setCharacters([]);
@@ -172,7 +174,7 @@ export default function CharacterLibrary({
       <div className="row-between">
         <div>
           <span className="eyebrow">cast</span>
-          <h3>Saved cast members</h3>
+          <h3>{compact ? 'Cast for this scene' : 'Saved cast members'}</h3>
         </div>
         {onSelect ? (
           <button type="button" className="text-btn" onClick={() => onSelect(null)}>
@@ -225,7 +227,7 @@ export default function CharacterLibrary({
         })}
       </div>
 
-      {selectedCharacter ? (
+      {selectedCharacter && !compact ? (
         <div className="character-profile-editor">
           <div className="row-between">
             <div>

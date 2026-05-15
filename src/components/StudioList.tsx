@@ -358,17 +358,17 @@ export default function StudioList({ jobs, onPublished }: Props) {
         <section className="list-stack">
           <article className="list-card">
             <div className="row-between">
-              <h3>{jobs.length ? 'Posting draft...' : 'No drafts yet'}</h3>
+              <h3>{jobs.length ? 'Posting your scene...' : 'Your cinematic scenes will appear here.'}</h3>
               <span className="tiny-pill status-drafting">Ready</span>
             </div>
             <p>
               {jobs.length
-                ? 'This draft is being published. It will leave Drafts once the save finishes.'
-                : 'Your unpublished renders will appear here once you generate one from Create.'}
+                ? 'The scene will leave Drafts once it joins your profile.'
+                : 'Create your first scene and Lumora will autosave the draft before you decide to post.'}
             </p>
             {!jobs.length ? (
               <Link className="primary-btn" to="/create" style={{ display: 'inline-flex', width: 'fit-content', flex: 'unset' }}>
-                Create a video
+                Create first scene
               </Link>
             ) : null}
           </article>
@@ -531,7 +531,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
 
               <div className="stats-row" style={{ marginTop: '14px', gap: '14px' }}>
                 <span>{getJobCharacterLabel(job)}</span>
-                <span>{job.resultAssetUrl ? 'Preview ready' : 'Processing...'}</span>
+                <span>{job.resultAssetUrl ? 'Scene ready' : 'Lumora is still shaping this scene...'}</span>
               </div>
 
               <div className="row-between muted-line" style={{ marginTop: '14px' }}>

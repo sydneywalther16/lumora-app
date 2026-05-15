@@ -81,6 +81,30 @@ export default function DiagnosticsPage() {
                 ) : null}
               </div>
             ) : null}
+            {diagnostics.assetPersistence ? (
+              <div>
+                <span className="eyebrow">assets</span>
+                <p className="diagnostic-row">
+                  <span>persisted assets</span>
+                  <strong>{diagnostics.assetPersistence.persistedAssetCount}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>failed downloads</span>
+                  <strong>{diagnostics.assetPersistence.failedAssetDownloads}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>unsupported hosts</span>
+                  <strong>{diagnostics.assetPersistence.unsupportedHostEvents}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>orphaned references</span>
+                  <strong>{diagnostics.assetPersistence.orphanedAssetReferences}</strong>
+                </p>
+                {diagnostics.assetPersistence.remediation ? (
+                  <p className="muted">{diagnostics.assetPersistence.remediation}</p>
+                ) : null}
+              </div>
+            ) : null}
             {diagnostics.database ? (
               <div>
                 <span className="eyebrow">database</span>

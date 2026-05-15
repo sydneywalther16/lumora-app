@@ -1,6 +1,10 @@
 import { query } from './db';
 import { persistCompletedGeneration } from './generationPersistence';
 import {
+  persistSeedanceReferenceImages,
+  type AssetPersistenceSummary,
+} from './assetPersistence';
+import {
   generateSeedanceVideo,
   type SeedanceModerationDiagnostics,
   type SeedanceQualityMode,
@@ -102,6 +106,7 @@ export type SeedanceGenerationRecord = {
   referenceImages: SeedanceReferenceImage[];
   referenceImageCount: number;
   multimodalReferenceMode: boolean;
+  assetPersistence?: AssetPersistenceSummary;
   moderationDiagnostics?: SeedanceModerationDiagnostics;
   suggestedPrompt?: string;
   sanitizedPrompt?: string;
@@ -119,14 +124,20 @@ export async function createSeedanceGeneration(input: {
   isDefaultSelfCharacter?: boolean | null;
   referenceImages?: SeedanceReferenceImage[];
 }): Promise<SeedanceGenerationRecord> {
+  const persistedReferences = await persistSeedanceReferenceImages({
+    userId: input.userId ?? null,
+    characterId: input.characterId ?? null,
+    referenceImages: input.referenceImages,
+    usage: 'character_reference_image',
+  });
   const result = await generateSeedanceVideo(input.prompt, {
     quality: input.quality,
-    referenceImages: input.referenceImages,
+    referenceImages: persistedReferences.referenceImages,
     userId: input.userId,
     characterId: input.characterId,
   });
   const createdAt = new Date().toISOString();
-  const referenceThumbnailUrl = input.referenceImages?.map((reference) => reference.url).find(Boolean) ?? input.characterAvatar ?? null;
+  const referenceThumbnailUrl = persistedReferences.referenceImages.map((reference) => reference.url).find(Boolean) ?? input.characterAvatar ?? null;
   const persistence = await persistCompletedGeneration({
     userId: input.userId ?? null,
     id: result.id,
@@ -172,6 +183,7 @@ export async function createSeedanceGeneration(input: {
     referenceImages: result.referenceImages,
     referenceImageCount: result.referenceImageCount,
     multimodalReferenceMode: result.multimodalReferenceMode,
+    assetPersistence: persistedReferences.summary,
     moderationDiagnostics: result.moderationDiagnostics,
     suggestedPrompt: result.suggestedPrompt,
     sanitizedPrompt: result.sanitizedPrompt,

@@ -89,6 +89,13 @@ function scoreFallbackPost(post: FeedPost, index: number) {
   return viralScore + recencyScore - index * 0.02;
 }
 
+function recommendationReason(post: FeedPost, index: number) {
+  if (post.characterName) return `Recurring cast: ${post.characterName}`;
+  if ((post.likeCount ?? 0) + (post.shareCount ?? 0) > 50) return 'Trending cinematic story';
+  if (index < 3) return 'Because you watched cinematic worlds';
+  return 'Fresh creator scene';
+}
+
 function localForYouFeed(query: string) {
   const localPosts = loadPostedPublications() as FeedPost[];
   const demoFeed = demoPosts.map(demoToFeedPost);
@@ -141,8 +148,17 @@ function ForYouSkeletonGrid() {
   );
 }
 
-function ForYouCard({ post, onSelect }: { post: FeedPost; onSelect: (post: FeedPost) => void }) {
+function ForYouCard({
+  post,
+  preview,
+  onSelect,
+}: {
+  post: FeedPost;
+  preview?: boolean;
+  onSelect: (post: FeedPost) => void;
+}) {
   const thumbnailUrl = getBestThumbnail(post);
+  const posterUrl = getBestPoster(post);
   const title = post.title || post.caption || 'Lumora video';
   const caption = post.caption || post.prompt || 'Cinematic Lumora post';
   const creatorName = post.creatorName || post.displayName || post.username || 'Lumora Creator';
@@ -152,6 +168,7 @@ function ForYouCard({ post, onSelect }: { post: FeedPost; onSelect: (post: FeedP
   return (
     <button
       type="button"
+      className="for-you-card"
       onClick={() => onSelect(post)}
       title={title}
       style={{
@@ -169,7 +186,18 @@ function ForYouCard({ post, onSelect }: { post: FeedPost; onSelect: (post: FeedP
         boxShadow: 'var(--surface-shadow)',
       }}
     >
-      {thumbnailUrl ? (
+      {preview && post.videoUrl ? (
+        <video
+          src={post.videoUrl}
+          muted
+          loop
+          autoPlay
+          playsInline
+          preload="metadata"
+          poster={posterUrl ?? thumbnailUrl ?? undefined}
+          style={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover' }}
+        />
+      ) : thumbnailUrl ? (
         <img
           src={thumbnailUrl}
           alt={title}
@@ -326,6 +354,12 @@ function ForYouPreviewModal({ post, onClose }: { post: FeedPost; onClose: () => 
             <span>{formatCompactCount(post.likeCount)} likes</span>
             <span>{formatCompactCount(post.shareCount)} shares</span>
           </div>
+          <div className="social-action-row" aria-label="Social actions">
+            <button type="button" className="ghost-btn">React</button>
+            <button type="button" className="ghost-btn">Comment</button>
+            <button type="button" className="ghost-btn">Save</button>
+            <button type="button" className="ghost-btn">Continue story</button>
+          </div>
         </div>
       </div>
     </div>
@@ -385,6 +419,29 @@ export default function TrendsPage() {
     if (debouncedQuery) return feed.length ? `${feed.length} result${feed.length === 1 ? '' : 's'}` : 'No matching videos yet';
     return feed.length ? 'Recommended for you' : 'No public posts yet';
   }, [debouncedQuery, feed.length, loading]);
+  const discoveryHighlights = useMemo(() => feed.slice(0, 3), [feed]);
+  const trendingStories = useMemo(
+    () =>
+      [...feed]
+        .sort(
+          (left, right) =>
+            ((right.likeCount ?? 0) + (right.shareCount ?? 0) + (right.viewCount ?? 0) / 10) -
+            ((left.likeCount ?? 0) + (left.shareCount ?? 0) + (left.viewCount ?? 0) / 10),
+        )
+        .slice(0, 6),
+    [feed],
+  );
+  const popularCast = useMemo(() => {
+    const counts = new Map<string, number>();
+    feed.forEach((post) => {
+      const name = post.characterName?.trim();
+      if (!name) return;
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    });
+    return [...counts.entries()]
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 5);
+  }, [feed]);
 
   return (
     <div className="page">
@@ -401,7 +458,7 @@ export default function TrendsPage() {
       >
         <div>
           <span className="eyebrow">for you</span>
-          <h2 style={{ margin: '6px 0 0' }}>Discover</h2>
+          <h2 style={{ margin: '6px 0 0' }}>Discover cinematic worlds</h2>
         </div>
         <label className="field-block" style={{ margin: 0 }}>
           <span className="eyebrow">Search</span>
@@ -423,22 +480,52 @@ export default function TrendsPage() {
         </article>
       ) : null}
 
+      {!loading && !debouncedQuery && feed.length ? (
+        <section className="discovery-magic-stack" aria-label="Recommendation highlights">
+          <div className="discovery-reason-rail">
+            {discoveryHighlights.map((post, index) => (
+              <button key={post.id} type="button" className="discovery-reason-chip" onClick={() => setSelectedPost(post)}>
+                <strong>{recommendationReason(post, index)}</strong>
+                <span>{post.caption || post.title || 'Cinematic scene'}</span>
+              </button>
+            ))}
+          </div>
+          {popularCast.length ? (
+            <div className="chip-row wrap" aria-label="Popular cast members">
+              <span className="tiny-pill">Popular cast members</span>
+              {popularCast.map(([name, count]) => (
+                <span key={name} className="chip">{name} - {count}</span>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       {loading ? (
         <ForYouSkeletonGrid />
       ) : feed.length ? (
-        <section
-          aria-label="For You recommendations"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(132px, 1fr))',
-            gap: '10px',
-            alignItems: 'start',
-          }}
-        >
-          {feed.map((post) => (
-            <ForYouCard key={post.id} post={post} onSelect={setSelectedPost} />
-          ))}
-        </section>
+        <>
+          {!debouncedQuery && trendingStories.length ? (
+            <div className="row-between" style={{ marginTop: '2px' }}>
+              <span className="eyebrow">Trending cinematic stories</span>
+              <span className="tiny-pill">Live</span>
+            </div>
+          ) : null}
+          <section
+            aria-label="For You recommendations"
+            className="for-you-grid"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(132px, 1fr))',
+              gap: '10px',
+              alignItems: 'start',
+            }}
+          >
+            {feed.map((post, index) => (
+              <ForYouCard key={post.id} post={post} preview={index < 4} onSelect={setSelectedPost} />
+            ))}
+          </section>
+        </>
       ) : (
         <article className="list-card" style={{ borderRadius: '24px' }}>
           <div className="row-between">
@@ -448,7 +535,7 @@ export default function TrendsPage() {
           <p>
             {debouncedQuery
               ? 'Try a creator, character, title, prompt, or tag.'
-              : 'Post a public draft and it will become eligible for discovery.'}
+              : 'Discover cinematic creators and evolving story worlds as soon as public scenes arrive.'}
           </p>
         </article>
       )}

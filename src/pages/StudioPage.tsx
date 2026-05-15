@@ -49,7 +49,7 @@ export default function StudioPage() {
         if (!active) return;
         const mappedJobs = mapProjectsToJobs(projects);
         setJobs(mappedJobs);
-        setStatus(mappedJobs.length ? '' : 'No drafts yet');
+        setStatus(mappedJobs.length ? '' : 'Your cinematic scenes will appear here.');
       } catch (error) {
         if (!active) return;
         const fallbackJobs = mapProjectsToJobs(loadStudioProjects().filter(isUnpublishedDraftProject));
@@ -126,9 +126,9 @@ export default function StudioPage() {
       <section className="headline-card">
         <div>
           <span className="eyebrow">drafts</span>
-          <h2>Unpublished drafts</h2>
+          <h2>Your private scene shelf</h2>
         </div>
-        <p>Review unpublished renders, post them to your profile, or remix before they go live.</p>
+        <p>Every finished scene lands here first, ready to preview, remix, or post when the story feels right.</p>
       </section>
       {status ? <p className="muted">{status}</p> : null}
       <StudioList
@@ -136,7 +136,7 @@ export default function StudioPage() {
         onPublished={(jobId) => {
           setJobs((current) => {
             const nextJobs = current.filter((job) => job.id !== jobId && job.projectId !== jobId);
-            setStatus(nextJobs.length ? '' : 'No drafts yet');
+            setStatus(nextJobs.length ? '' : 'Your cinematic scenes will appear here.');
             return nextJobs;
           });
         }}

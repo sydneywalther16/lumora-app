@@ -217,6 +217,7 @@ export type SceneClipMetadata = {
   memorySnapshot?: ContinuityMemoryState | null;
   sceneMemorySummary?: SceneMemorySummary | null;
   moderationOrchestration?: ProviderModerationDiagnostics | null;
+  assetPersistence?: AssetPersistenceSummary | null;
 };
 
 export type SceneExecutorClip = {
@@ -248,6 +249,7 @@ export type SceneExecutorResult = {
   failedClip?: SceneExecutorClip | null;
   scenePlan: CreativeBrainScenePlan;
   continuityMemory?: ContinuityMemoryRecord | null;
+  assetPersistence?: AssetPersistenceSummary | null;
   createdAt: string;
   completedAt: string;
 };
@@ -285,6 +287,8 @@ export type GenerationResponse = {
   suggestedPrompt?: string | null;
   sanitizedPrompt?: string | null;
   moderationDiagnostics?: ProviderModerationDiagnostics | null;
+  assetPersistence?: boolean | AssetPersistenceSummary | null;
+  assetPersistenceDiagnostics?: Record<string, unknown> | null;
   generationMode?: GenerationMode | null;
   finalPrompt?: string | null;
   durationSeconds?: number | null;
@@ -361,6 +365,28 @@ export type SeedanceReferenceImage = {
   label?: string;
   role?: string;
   token?: string;
+};
+
+export type AssetPersistenceSummary = {
+  attempted: number;
+  persisted: number;
+  alreadyControlled: number;
+  failed: number;
+  unsupportedHosts: string[];
+  assets?: Array<{
+    originalUrl: string;
+    sourceUrl: string;
+    publicUrl: string;
+    objectPath: string | null;
+    bucket: string;
+    contentType: string | null;
+    sizeBytes: number | null;
+    width: number | null;
+    height: number | null;
+    aspectRatio: number | null;
+    persisted: boolean;
+    alreadyControlled: boolean;
+  }>;
 };
 
 export type ModerationCategory =
@@ -443,6 +469,17 @@ export type ApiHealthDiagnostics = {
     status: 'ready' | 'not_configured' | 'missing_required';
     missing: string[];
     blocking: boolean;
+  };
+  assetPersistence?: {
+    ok: boolean;
+    bucket: string;
+    persistedAssetCount: number;
+    failedAssetDownloads: number;
+    unsupportedHostEvents: number;
+    unsupportedHosts: Array<{ host: string; count: number }>;
+    orphanedAssetReferences: number;
+    error?: unknown;
+    remediation?: string;
   };
   generationProviders: Array<{
     id: string;

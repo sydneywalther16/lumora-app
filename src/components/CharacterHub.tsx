@@ -461,7 +461,7 @@ export default function CharacterHub({
     if (!selectedCharacter || selectedIsSelf) return;
 
     setDeletingCharacter(true);
-    setDeleteStatus('Deleting character...');
+    setDeleteStatus('Removing cast member...');
 
     try {
       if (authUser) {
@@ -494,7 +494,7 @@ export default function CharacterHub({
       <section className="character-hub-view">
         <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <div>
-            <span className="eyebrow">characters</span>
+            <span className="eyebrow">cast</span>
             <h2 style={{ marginTop: '8px' }}>Create Cast Member</h2>
             <p className="muted" style={{ margin: '8px 0 0' }}>
               Add a reusable cinematic identity to your cast.
@@ -795,7 +795,7 @@ export default function CharacterHub({
           <ModalShell>
             <div style={{ display: 'grid', gap: '12px' }}>
               <div className="row-between">
-                <strong>Character actions</strong>
+                <strong>Cast actions</strong>
                 <button type="button" className="text-btn" onClick={() => setActionsOpen(false)}>
                   Cancel
                 </button>
@@ -857,10 +857,10 @@ export default function CharacterHub({
     <section className="character-hub-view character-list-view">
       <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div>
-          <span className="eyebrow">characters</span>
+          <span className="eyebrow">cast</span>
           <h2 style={{ marginTop: '8px' }}>Characters</h2>
           <p className="muted" style={{ margin: '8px 0 0' }}>
-            Manage your reusable cinematic cast.
+            Build your reusable cinematic cast.
           </p>
         </div>
       </div>
@@ -916,8 +916,8 @@ export default function CharacterHub({
 
         {!visibleCharacters.length ? (
           <article className="list-card" style={{ borderRadius: '22px', padding: '16px' }}>
-            <h3>No characters yet</h3>
-            <p className="muted">Create reusable cast members and bring them back across scenes.</p>
+            <h3>Build your reusable cinematic cast.</h3>
+            <p className="muted">Create self and cast members you can bring back across scenes.</p>
           </article>
         ) : null}
       </div>

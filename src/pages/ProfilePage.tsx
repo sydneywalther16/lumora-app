@@ -2866,7 +2866,7 @@ export default function ProfilePage() {
       <div className="page" style={{ minHeight: '70vh', display: 'grid', placeItems: 'center' }}>
         <section className="headline-card" style={{ width: 'min(420px, 100%)', textAlign: 'center' }}>
           <span className="eyebrow">identity</span>
-          <h1 style={{ marginTop: '8px' }}>Hydrating Lumora identity...</h1>
+          <h1 style={{ marginTop: '8px' }}>Waking up your creator identity...</h1>
         </section>
       </div>
     );
@@ -2874,7 +2874,7 @@ export default function ProfilePage() {
 
   return (
     <div className="page" style={{ paddingBottom: '40px' }}>
-      <section className="list-card" style={{ borderRadius: '30px', padding: '22px', background: 'var(--surface-strong)' }}>
+      <section className="profile-hero cinematic-profile-hero" style={{ borderRadius: '30px', padding: '22px' }}>
         <div style={{ display: 'grid', gap: '18px', justifyItems: 'center', textAlign: 'center' }}>
           <div className="row-between" style={{ width: '100%', alignItems: 'center' }}>
             <span className="eyebrow">creator profile</span>
@@ -2926,10 +2926,19 @@ export default function ProfilePage() {
             ) : null}
           </div>
 
-          <div className="stats-row" style={{ width: '100%', justifyContent: 'center', gap: '14px' }}>
-            <span>{formatCompactNumber(profileStats.totalLikesReceived)} Likes</span>
-            <span>{formatCompactNumber(profileStats.followersCount)} Followers</span>
-            <span>{formatCompactNumber(displayedCharacterCount)} Characters</span>
+          <div className="profile-magic-stats" aria-label="Creator stats">
+            <span><strong>{formatCompactNumber(profileStats.totalLikesReceived)}</strong> Likes</span>
+            <span><strong>{formatCompactNumber(profileStats.followersCount)}</strong> Followers</span>
+            <span><strong>{formatCompactNumber(displayedCharacterCount)}</strong> Characters</span>
+          </div>
+
+          <p className="profile-creator-signal">
+            Your profile carries your cast, published moments, and the cinematic identity your audience can follow.
+          </p>
+
+          <div className="profile-memory-pulse" aria-label="Profile story signal">
+            <span className="tiny-dot" />
+            <span>Lumora remembered your creator style.</span>
           </div>
 
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
@@ -3353,7 +3362,7 @@ export default function ProfilePage() {
                 {buildingIdentity ? 'Building identity' : selfCharacterReferencesReady ? 'Identity ready' : 'Needs references'}
               </strong>
               <p className="muted" style={{ margin: 0 }}>
-                Build a reusable photorealistic character from your reference photos and videos.
+                Build a reusable cinematic character from your reference photos and videos.
               </p>
               <p className="muted" style={{ margin: 0 }}>
                 Lumora will use your feedback to improve future prompts and character consistency.
@@ -3380,7 +3389,7 @@ export default function ProfilePage() {
         ) : null}
       </CharacterHub>
 
-      <SectionCard title="Published videos">
+      <SectionCard title="Published moments">
         {posts.length ? (
           <div
             style={{
@@ -3395,8 +3404,8 @@ export default function ProfilePage() {
           </div>
         ) : (
           <article className="list-card" style={{ borderRadius: '28px', padding: '18px' }}>
-            <h3>No posts yet</h3>
-            <p className="muted">Create and post a video from Drafts to see it appear here.</p>
+            <h3>Your published cinematic moments will appear here.</h3>
+            <p className="muted">Create a draft, post it when it feels right, and your profile becomes a living story grid.</p>
           </article>
         )}
       </SectionCard>

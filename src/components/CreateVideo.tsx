@@ -826,6 +826,26 @@ export default function CreateVideo({
   const continuityConfidencePercent = Math.round((continuityMemory?.continuityConfidence ?? 0.5) * 100);
   const recentDriftAlerts = continuityMemory?.driftAlerts.slice(0, 3) ?? [];
   const recentSceneMemorySummaries = continuityMemory?.sceneMemorySummaries.slice(0, 3) ?? [];
+  const creatorInsightCards = [
+    {
+      label: 'Style',
+      copy: selectedStyles.length
+        ? `Lumora remembered your ${selectedStyles.slice(0, 2).join(' + ')} direction.`
+        : 'Choose a style and Lumora will remember the feeling.',
+    },
+    {
+      label: 'Memory',
+      copy: continuityMemory?.id
+        ? 'Your story memory shaped this transition.'
+        : 'This scene can become the first memory in your world.',
+    },
+    {
+      label: 'Flow',
+      copy: creativePlan
+        ? 'Your storyboard is ready to move shot by shot.'
+        : 'Lumora can shape your idea into cinematic beats.',
+    },
+  ];
 
   useEffect(() => {
     const savedPrompt = localStorage.getItem('remixPrompt');
@@ -915,7 +935,7 @@ export default function CreateVideo({
 
   function beginGenerationProgress() {
     setGenerationStatusState('queued');
-    setStatus('Warming up the render studio...');
+    setStatus('Saving scene references...');
     if (progressTimerRef.current) window.clearTimeout(progressTimerRef.current);
     progressTimerRef.current = window.setTimeout(() => {
       setGenerationStatusState('processing');
@@ -1095,7 +1115,7 @@ export default function CreateVideo({
 
     setSceneExecutionLoading(true);
     setSceneExecutionError('');
-    setSceneExecutionStatus('Scene Flow is lining up each shot and rendering your sequence...');
+    setSceneExecutionStatus('Saving scene references...');
     setSceneExecutionPlan(activePlan);
     setSceneExecutionResult(null);
 
@@ -1150,18 +1170,18 @@ export default function CreateVideo({
       }
       setSceneExecutionStatus(
         result.status === 'completed'
-          ? `Scene Flow completed ${result.clips.length} cinematic shot${result.clips.length === 1 ? '' : 's'}.`
-          : 'Scene Flow paused after one shot failed. Completed shots stay saved in Drafts.',
+          ? `Scene continuity preserved across ${result.clips.length} cinematic shot${result.clips.length === 1 ? '' : 's'}.`
+          : 'Lumora saved the completed shots and paused the scene for another take.',
       );
       if (result.status === 'completed') {
-        showToast({ type: 'success', message: 'Storyboard shots generated and saved.' });
+        showToast({ type: 'success', message: 'Scene continuity preserved and saved to Drafts.' });
       } else {
-        showToast({ type: 'error', message: result.failedClip?.error || 'A storyboard clip failed to render.' });
+        showToast({ type: 'error', message: result.failedClip?.error || 'That shot needs another take. Finished shots stayed saved.' });
       }
     } catch (error) {
       const message = error instanceof ApiRequestError || error instanceof Error
         ? friendlyCharacterProfileError(error)
-        : 'Scene Flow could not render the storyboard.';
+        : 'Lumora could not finish the storyboard yet.';
       setSceneExecutionError(message);
       setSceneExecutionStatus('');
       showToast({ type: 'error', message });
@@ -1322,7 +1342,7 @@ export default function CreateVideo({
         });
 
         if (providerResult.status === 'failed') {
-          throw new Error(providerResult.error || providerResult.message || 'Generation failed.');
+          throw new Error(providerResult.error || providerResult.message || 'Lumora paused this scene.');
         }
 
         data = {
@@ -1369,7 +1389,7 @@ export default function CreateVideo({
 
         if (!res.ok) {
           const detail = formatUnknownDetail(parsedData.details);
-          const apiMessage = parsedData.error || parseError || 'Generation failed.';
+          const apiMessage = parsedData.error || parseError || 'Lumora paused this scene.';
           if (isProviderSafetyFilterError([apiMessage, parsedData.suggestion || '', detail].join(' '))) {
             throw new Error(providerSafetyFilterMessage);
           }
@@ -1446,7 +1466,7 @@ export default function CreateVideo({
         console.error('No video returned', data);
         setGenerationError('No usable video URL was returned from the generator.');
         finishGenerationProgress('failed');
-        showToast({ type: 'error', message: 'Generation failed. No video URL was returned.' });
+        showToast({ type: 'error', message: 'Lumora paused this scene before a video was returned.' });
         return;
       }
 
@@ -1630,7 +1650,7 @@ export default function CreateVideo({
         type: 'error',
         message: moderationPayload
           ? 'Creative safety paused this render. A safer cinematic rewrite is ready.'
-          : 'Generation failed. You can retry when ready.',
+          : 'Lumora paused this scene. You can retry when ready.',
       });
     } finally {
       releaseGenerateLock();
@@ -1738,6 +1758,15 @@ export default function CreateVideo({
           </div>
         ) : null}
 
+        <div className="creator-intelligence-strip" aria-label="Lumora creator signals">
+          {creatorInsightCards.map((item) => (
+            <span key={item.label}>
+              <strong>{item.label}</strong>
+              {item.copy}
+            </span>
+          ))}
+        </div>
+
         <label className="field-block">
           <span>Project title</span>
           <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Title" />
@@ -1771,7 +1800,7 @@ export default function CreateVideo({
               <span className="eyebrow">Story Memory</span>
               <strong>Your cinematic world remembers this character.</strong>
             </div>
-            <span className="tiny-pill">{continuityConfidencePercent}%</span>
+            <span className="tiny-pill continuity-confidence-pill">{continuityConfidencePercent}%</span>
           </div>
           {continuityMemoryLoading ? <p className="muted">Syncing Story Memory...</p> : null}
           {continuityMemoryStatus ? <p className="muted">{continuityMemoryStatus}</p> : null}
@@ -1845,11 +1874,11 @@ export default function CreateVideo({
               onClick={() => void handleBuildCreativePlan()}
               disabled={creativePlanLoading || !hasPrompt}
             >
-              {creativePlanLoading ? 'Planning...' : creativePlan ? 'Refresh plan' : 'Build plan'}
+              {creativePlanLoading ? 'Building...' : creativePlan ? 'Refresh storyboard' : 'Build storyboard'}
             </button>
           </div>
           <p className="muted">
-            Shape the scene into cinematic beats before anything starts rendering.
+            Lumora shapes your idea into cinematic beats before anything starts rendering.
           </p>
           {creativePlanStatus ? <p className="muted">{creativePlanStatus}</p> : null}
           {creativePlanError ? <p className="creative-plan-error">{creativePlanError}</p> : null}
@@ -1891,7 +1920,7 @@ export default function CreateVideo({
                   aria-busy={sceneExecutionLoading}
                   title={sceneExecuteDisabledReason || undefined}
                 >
-                  {sceneExecutionLoading ? 'Rendering scene flow...' : 'Render storyboard'}
+                  {sceneExecutionLoading ? 'Preserving story flow...' : 'Render storyboard'}
                 </button>
                 <small className="muted">
                   {sceneExecuteDisabledReason || 'Creates one cinematic shot per beat and keeps the sequence easy to review.'}
@@ -2197,7 +2226,7 @@ export default function CreateVideo({
             ))}
           </div>
         ) : null}
-        {generationLoading ? <p className="muted">Rendering your cinematic take...</p> : null}
+        {generationLoading ? <p className="muted">Lumora is rendering your cinematic take and saving the draft as it goes...</p> : null}
         {generationError ? (
           <div className="generation-error-card">
             <p>{generationError}</p>
@@ -2279,7 +2308,7 @@ export default function CreateVideo({
           <div className="row-between">
             <div>
               <span className="eyebrow">result</span>
-              <h3>Video generated</h3>
+              <h3>Cinematic draft ready</h3>
             </div>
             <span className="tiny-pill">
               {(generatedDisplayEngine || generatedModel || generationResult.engine).toUpperCase()}
@@ -2291,9 +2320,9 @@ export default function CreateVideo({
             <p>Character: <strong>{generationResult.characterName}</strong></p>
           ) : null}
           {generationResult.message ? <p>{generationResult.message}</p> : null}
-          <p>Prompt: {generationResult.prompt}</p>
+          <p>Original idea: {generationResult.prompt}</p>
           {finalGeneratedPrompt ? (
-            <p className="muted">Rendered prompt: {finalGeneratedPrompt}</p>
+            <p className="muted">Final scene direction: {finalGeneratedPrompt}</p>
           ) : null}
           {generatedMode ? (
             <p className="muted">Render style: {creatorRenderModeLabel(generatedMode)}</p>

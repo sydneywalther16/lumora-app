@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createRateLimit } from '../middleware/rateLimit';
 import { persistCompletedGeneration } from '../services/generationPersistence';
 import { createSeedanceGeneration } from '../services/generationService';
+import { isAssetPersistenceError } from '../services/assetPersistence';
 import { isSeedanceModerationError } from '../services/providers/seedanceProvider';
 import { createVideoGeneration } from '../video';
 
@@ -127,9 +128,32 @@ generationsRouter.post('/seedance', generationRateLimit, async (req, res) => {
       isDefaultSelfCharacter: payload.isDefaultSelfCharacter ?? null,
       displayEngine: quality === 'quality' ? 'Seedance Quality' : 'Seedance Fast',
       generationMode: publicResult.multimodalReferenceMode ? 'seedance-multimodal-reference' : 'seedance-text-to-video',
+      assetPersistence: publicResult.assetPersistence ?? null,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Seedance generation failed.';
+    if (isAssetPersistenceError(error)) {
+      res.status(error.statusCode).json({
+        id: null,
+        jobId: null,
+        status: 'failed',
+        engine: quality === 'quality' ? 'seedance-quality' : 'seedance-2.0',
+        provider: 'replicate',
+        prompt,
+        outputUrl: '',
+        videoUrl: '',
+        error: message,
+        message,
+        assetPersistence: true,
+        assetPersistenceDiagnostics: {
+          code: error.code,
+          sourceUrl: error.sourceUrl ?? null,
+          host: error.host ?? null,
+        },
+        createdAt: new Date().toISOString(),
+      });
+      return;
+    }
     if (isSeedanceModerationError(error)) {
       console.warn('SEEDANCE GENERATION MODERATION RESPONSE:', {
         engine: payload.engine ?? 'seedance-2.0',
@@ -212,6 +236,7 @@ generationsRouter.post('/', generationRateLimit, async (req, res) => {
         isDefaultSelfCharacter: payload.isDefaultSelfCharacter ?? null,
         displayEngine: payload.engine === 'seedance-quality' ? 'Seedance Quality' : 'Seedance Fast',
         generationMode: publicResult.multimodalReferenceMode ? 'seedance-multimodal-reference' : 'seedance-text-to-video',
+        assetPersistence: publicResult.assetPersistence ?? null,
       });
       return;
     }
@@ -286,6 +311,28 @@ generationsRouter.post('/', generationRateLimit, async (req, res) => {
       engine: payload.engine,
       error,
     });
+    if (isAssetPersistenceError(error)) {
+      res.status(error.statusCode).json({
+        id: null,
+        jobId: null,
+        status: 'failed',
+        engine: payload.engine,
+        provider: 'replicate',
+        prompt,
+        outputUrl: '',
+        videoUrl: '',
+        error: message,
+        message,
+        assetPersistence: true,
+        assetPersistenceDiagnostics: {
+          code: error.code,
+          sourceUrl: error.sourceUrl ?? null,
+          host: error.host ?? null,
+        },
+        createdAt: new Date().toISOString(),
+      });
+      return;
+    }
     if (isSeedanceModerationError(error)) {
       console.warn('GENERATION PROVIDER MODERATION RESPONSE:', {
         engine: payload.engine,

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { getEnvironmentDiagnostics } from '../lib/envDiagnostics';
+import { buildAssetPersistenceDiagnostics } from '../services/assetPersistence';
 import { buildDatabaseDiagnostics } from '../services/schemaDiagnostics';
 
 export const healthRouter = Router();
@@ -14,5 +15,6 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
     checkedAt: new Date().toISOString(),
     ...getEnvironmentDiagnostics(),
     database: await buildDatabaseDiagnostics(),
+    assetPersistence: await buildAssetPersistenceDiagnostics(),
   });
 });

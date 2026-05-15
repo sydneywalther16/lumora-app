@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '../lib/supabaseAdmin';
+import { persistOptionalAssetUrl } from './assetPersistence';
 
 const GENERATED_VIDEO_BUCKET = 'generated-videos';
 
@@ -14,6 +15,7 @@ export type CompletedGenerationPersistenceInput = {
   displayEngine?: string | null;
   videoUrl: string;
   thumbnailUrl?: string | null;
+  posterUrl?: string | null;
   characterId?: string | null;
   characterName?: string | null;
   characterAvatar?: string | null;
@@ -88,6 +90,7 @@ async function insertCompletedProject(input: CompletedGenerationPersistenceInput
       video_url: input.videoUrl,
       cover_asset_url: input.videoUrl,
       thumbnail_url: input.thumbnailUrl ?? input.characterAvatar ?? null,
+      poster_url: input.posterUrl ?? input.thumbnailUrl ?? input.characterAvatar ?? null,
       character_id: input.characterId ?? null,
       character_name: input.characterName ?? null,
       character_avatar: input.characterAvatar ?? null,
@@ -128,6 +131,8 @@ export async function persistCompletedGeneration(
 
   let videoUrl = input.videoUrl;
   let storagePath: string | null = null;
+  let thumbnailUrl = input.thumbnailUrl ?? input.characterAvatar ?? null;
+  let posterUrl = input.posterUrl ?? input.thumbnailUrl ?? input.characterAvatar ?? null;
 
   if (/^https?:\/\//i.test(input.videoUrl)) {
     try {
@@ -150,9 +155,35 @@ export async function persistCompletedGeneration(
     }
   }
 
+  if (thumbnailUrl && /^https?:\/\//i.test(thumbnailUrl)) {
+    const persistedThumbnail = await persistOptionalAssetUrl({
+      userId: input.userId,
+      url: thumbnailUrl,
+      usage: 'thumbnail',
+      expectedKind: 'image',
+      entityType: 'generation',
+      entityId: input.id,
+      fileNameHint: `${input.id}-thumbnail`,
+    });
+    thumbnailUrl = persistedThumbnail?.publicUrl ?? thumbnailUrl;
+  }
+
+  if (posterUrl && /^https?:\/\//i.test(posterUrl)) {
+    const persistedPoster = await persistOptionalAssetUrl({
+      userId: input.userId,
+      url: posterUrl,
+      usage: 'poster',
+      expectedKind: 'image',
+      entityType: 'generation',
+      entityId: input.id,
+      fileNameHint: `${input.id}-poster`,
+    });
+    posterUrl = persistedPoster?.publicUrl ?? posterUrl;
+  }
+
   let projectId: string | null = null;
   try {
-    projectId = await insertCompletedProject({ ...input, videoUrl });
+    projectId = await insertCompletedProject({ ...input, videoUrl, thumbnailUrl, posterUrl });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown database error';
     warnings.push(`Supabase project save failed: ${message}`);

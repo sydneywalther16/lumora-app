@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '../lib/supabaseAdmin';
+import { persistAssetUrl } from './assetPersistence';
 
 const bucket = 'lumora-assets';
 
@@ -63,7 +64,15 @@ export async function persistMediaUpload(input: {
   fallbackFileName: string;
 }) {
   if (input.media.url) {
-    return input.media.url;
+    const asset = await persistAssetUrl({
+      userId: input.userId,
+      url: input.media.url,
+      usage: 'uploaded_image',
+      expectedKind: 'image',
+      entityType: 'character_profile',
+      fileNameHint: input.media.fileName ?? input.fallbackFileName,
+    });
+    return asset.publicUrl;
   }
 
   if (!input.media.dataUrl) {
