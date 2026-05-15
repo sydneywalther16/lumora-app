@@ -6,7 +6,7 @@ export const SEEDANCE_QUALITY_ENGINE_ID = 'seedance-quality' as const;
 export const SEEDANCE_MODEL = 'bytedance/seedance-2.0-fast';
 export const SEEDANCE_QUALITY_MODEL = 'bytedance/seedance-2.0';
 export const SEEDANCE_IDENTITY_PROMPT =
-  'Use the provided reference images only as identity references. Do not animate or copy any single source image. Generate a new photorealistic person matching the same identity in the requested scene.';
+  'Use the provided reference images only as identity references. Do not animate or copy any single source image. Generate a new cinematic character matching the same identity in the requested scene.';
 
 export type SeedanceReferenceSet = {
   frontFaceUrl: string | null;

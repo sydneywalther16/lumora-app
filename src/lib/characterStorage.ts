@@ -365,6 +365,7 @@ export function saveLocalCharacter(payload: {
 export function updateLocalCharacterProfile(input: {
   characterId: string;
   name?: string;
+  referenceImageUrls?: ReferenceImageUrls;
   appearanceSummary?: string;
   wardrobeTendencies?: string;
   emotionalTendencies?: string;
@@ -380,6 +381,7 @@ export function updateLocalCharacterProfile(input: {
     ...current,
     name: input.name ?? current.name,
     displayName: input.name ?? current.displayName ?? current.name,
+    referenceImageUrls: input.referenceImageUrls ?? current.referenceImageUrls,
     stylePreferences: {
       ...current.stylePreferences,
       appearanceSummary: input.appearanceSummary ?? current.appearanceSummary ?? '',

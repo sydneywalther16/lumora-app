@@ -45,18 +45,50 @@ export type AssetPersistenceSummary = {
   assets: PersistedAsset[];
 };
 
+export type AssetPersistenceFailureReason =
+  | 'protected_external_url'
+  | 'expired_signed_url'
+  | 'invalid_url'
+  | 'download_failed'
+  | 'asset_too_large'
+  | 'unsupported_content_type'
+  | 'storage_not_configured'
+  | 'storage_upload_failed';
+
+export type AssetPersistenceFailureDiagnostics = {
+  code: string;
+  reason: AssetPersistenceFailureReason;
+  sourceUrl: string | null;
+  host: string | null;
+  failedReferenceIndex: number | null;
+  failedReferenceLabel: string | null;
+  failedReferenceRole: string | null;
+  originalUrlHost: string | null;
+  canContinueWithoutReference: boolean;
+};
+
 export class AssetPersistenceError extends Error {
   readonly code: string;
   readonly statusCode: number;
   readonly sourceUrl?: string;
   readonly host?: string;
+  readonly reason: AssetPersistenceFailureReason;
+  readonly failedReferenceIndex?: number;
+  readonly failedReferenceLabel?: string;
+  readonly failedReferenceRole?: string;
+  readonly canContinueWithoutReference: boolean;
 
   constructor(input: {
     message: string;
     code: string;
+    reason?: AssetPersistenceFailureReason;
     statusCode?: number;
     sourceUrl?: string;
     host?: string;
+    failedReferenceIndex?: number;
+    failedReferenceLabel?: string;
+    failedReferenceRole?: string;
+    canContinueWithoutReference?: boolean;
   }) {
     super(input.message);
     this.name = 'AssetPersistenceError';
@@ -64,12 +96,33 @@ export class AssetPersistenceError extends Error {
     this.statusCode = input.statusCode ?? 424;
     this.sourceUrl = input.sourceUrl;
     this.host = input.host;
+    this.reason = input.reason ?? failureReasonForCode(input.code);
+    this.failedReferenceIndex = input.failedReferenceIndex;
+    this.failedReferenceLabel = input.failedReferenceLabel;
+    this.failedReferenceRole = input.failedReferenceRole;
+    this.canContinueWithoutReference = Boolean(input.canContinueWithoutReference);
+  }
+
+  toDiagnostics(): AssetPersistenceFailureDiagnostics {
+    return {
+      code: this.code,
+      reason: this.reason,
+      sourceUrl: this.sourceUrl ?? null,
+      host: this.host ?? null,
+      failedReferenceIndex: typeof this.failedReferenceIndex === 'number' ? this.failedReferenceIndex : null,
+      failedReferenceLabel: this.failedReferenceLabel ?? null,
+      failedReferenceRole: this.failedReferenceRole ?? null,
+      originalUrlHost: this.host ?? (this.sourceUrl ? sourceHost(this.sourceUrl) : null),
+      canContinueWithoutReference: this.canContinueWithoutReference,
+    };
   }
 }
 
 const runtimeStats = {
   failedDownloads: 0,
   unsupportedHostCounts: new Map<string, number>(),
+  failedReferenceLabelCounts: new Map<string, number>(),
+  repairableFailures: 0,
 };
 
 export function isAssetPersistenceError(error: unknown): error is AssetPersistenceError {
@@ -123,6 +176,17 @@ function sourceHost(url: string) {
   } catch {
     return '';
   }
+}
+
+function failureReasonForCode(code: string): AssetPersistenceFailureReason {
+  if (code === 'unsupported_host' || code === 'protected_external_url') return 'protected_external_url';
+  if (code === 'expired_signed_url') return 'expired_signed_url';
+  if (code === 'invalid_url') return 'invalid_url';
+  if (code === 'asset_too_large') return 'asset_too_large';
+  if (code === 'unsupported_content_type') return 'unsupported_content_type';
+  if (code === 'storage_not_configured') return 'storage_not_configured';
+  if (code === 'storage_upload_failed') return 'storage_upload_failed';
+  return 'download_failed';
 }
 
 function lumoraStorageHosts() {
@@ -391,9 +455,13 @@ async function downloadAsset(input: { url: string; expectedKind: 'image' | 'vide
     });
 
     if (!response.ok) {
+      const protectedStatus = response.status === 401 || response.status === 403;
       throw new AssetPersistenceError({
-        message: `Saving scene references failed because Lumora could not download an external asset (${response.status}). Re-upload the image directly to Lumora and try again.`,
-        code: 'download_failed',
+        message: protectedStatus
+          ? 'One reference image needs to be re-uploaded before Lumora can use it.'
+          : `One reference image could not be saved before Lumora used it (${response.status}).`,
+        code: protectedStatus ? 'protected_external_url' : 'download_failed',
+        reason: protectedStatus ? 'protected_external_url' : 'download_failed',
         sourceUrl: input.url,
         host: sourceHost(input.url),
       });
@@ -433,8 +501,9 @@ async function downloadAsset(input: { url: string; expectedKind: 'image' | 'vide
   } catch (error) {
     if (isAssetPersistenceError(error)) throw error;
     throw new AssetPersistenceError({
-      message: 'Saving scene references failed because Lumora could not download an external asset. Re-upload the image directly to Lumora and try again.',
+      message: 'One reference image could not be saved before Lumora used it.',
       code: 'download_failed',
+      reason: 'download_failed',
       sourceUrl: input.url,
       host: sourceHost(input.url),
     });
@@ -456,8 +525,9 @@ export async function persistAssetUrl(input: {
   const originalUrl = input.url.trim();
   if (!/^https?:\/\//i.test(originalUrl)) {
     throw new AssetPersistenceError({
-      message: 'Saving scene references failed because a reference image URL is invalid. Re-upload the image directly to Lumora and try again.',
+      message: 'One reference image needs to be re-uploaded before Lumora can use it.',
       code: 'invalid_url',
+      reason: 'invalid_url',
       sourceUrl: originalUrl,
     });
   }
@@ -493,8 +563,9 @@ export async function persistAssetUrl(input: {
       entityId: input.entityId,
     });
     throw new AssetPersistenceError({
-      message: 'Saving scene references failed because this image is hosted on a protected social/CDN link. Re-upload the image directly to Lumora and try again.',
+      message: 'One reference image needs to be re-uploaded before Lumora can use it.',
       code: 'unsupported_host',
+      reason: 'protected_external_url',
       sourceUrl,
       host,
     });
@@ -510,8 +581,9 @@ export async function persistAssetUrl(input: {
       entityId: input.entityId,
     });
     throw new AssetPersistenceError({
-      message: 'Saving scene references failed because an external asset link has expired. Re-upload the image directly to Lumora and try again.',
+      message: 'One reference image needs to be re-uploaded before Lumora can use it.',
       code: 'expired_signed_url',
+      reason: 'expired_signed_url',
       sourceUrl,
       host,
     });
@@ -637,18 +709,45 @@ export async function persistSeedanceReferenceImages(input: {
   const assets: PersistedAsset[] = [];
   const unsupportedHosts = new Set<string>();
   const persistedReferences: SeedanceReferenceImage[] = [];
+  const allReferences = input.referenceImages ?? [];
 
-  for (const [index, reference] of (input.referenceImages ?? []).entries()) {
-    const asset = await persistAssetUrl({
-      userId: input.userId,
-      url: reference.url,
-      usage: input.usage ?? 'scene_reference_image',
-      expectedKind: 'image',
-      entityType: input.sceneExecutionId ? 'scene_execution' : input.characterId ? 'character_profile' : 'generation',
-      entityId: input.sceneExecutionId ?? input.characterId ?? input.projectId ?? null,
-      fileNameHint: `${reference.role ?? 'reference'}-${index + 1}`,
-      required: true,
-    });
+  for (const [index, reference] of allReferences.entries()) {
+    let asset: PersistedAsset;
+    try {
+      asset = await persistAssetUrl({
+        userId: input.userId,
+        url: reference.url,
+        usage: input.usage ?? 'scene_reference_image',
+        expectedKind: 'image',
+        entityType: input.sceneExecutionId ? 'scene_execution' : input.characterId ? 'character_profile' : 'generation',
+        entityId: input.sceneExecutionId ?? input.characterId ?? input.projectId ?? null,
+        fileNameHint: `${reference.role ?? 'reference'}-${index + 1}`,
+        required: true,
+      });
+    } catch (error) {
+      if (!isAssetPersistenceError(error)) throw error;
+
+      const canContinueWithoutReference = referenceCanBeSkipped(allReferences, index);
+      const label = reference.label || reference.token || `Reference ${index + 1}`;
+      runtimeStats.failedReferenceLabelCounts.set(
+        label,
+        (runtimeStats.failedReferenceLabelCounts.get(label) ?? 0) + 1,
+      );
+      if (canContinueWithoutReference) runtimeStats.repairableFailures += 1;
+
+      throw new AssetPersistenceError({
+        message: 'One reference image needs to be re-uploaded before Lumora can use it.',
+        code: error.code,
+        reason: error.reason,
+        statusCode: error.statusCode,
+        sourceUrl: error.sourceUrl,
+        host: error.host,
+        failedReferenceIndex: index,
+        failedReferenceLabel: label,
+        failedReferenceRole: reference.role,
+        canContinueWithoutReference,
+      });
+    }
     assets.push(asset);
     if (asset.alreadyControlled) {
       persistedReferences.push(reference);
@@ -673,6 +772,13 @@ export async function persistSeedanceReferenceImages(input: {
   };
 }
 
+function referenceCanBeSkipped(references: SeedanceReferenceImage[], failedIndex: number) {
+  const failed = references[failedIndex];
+  if (!failed) return false;
+  if (failed.role === 'front_angle' || failed.role === 'side_angle') return false;
+  return references.length > 1;
+}
+
 export async function persistOptionalAssetUrl(input: Parameters<typeof persistAssetUrl>[0]) {
   try {
     return await persistAssetUrl(input);
@@ -686,22 +792,33 @@ export async function persistOptionalAssetUrl(input: Parameters<typeof persistAs
   }
 }
 
+async function lumoraAssetBucketCheck() {
+  if (!supabaseAdmin) return 'not_configured';
+  const { error } = await supabaseAdmin.storage.getBucket(LUMORA_ASSET_BUCKET);
+  return error ? 'missing_or_unreadable' : 'ready';
+}
+
 export async function buildAssetPersistenceDiagnostics() {
   const unsupportedHosts = Array.from(runtimeStats.unsupportedHostCounts.entries())
     .map(([host, count]) => ({ host, count }))
     .sort((a, b) => b.count - a.count);
 
   try {
+    const bucketCheck = await lumoraAssetBucketCheck();
     const result = await query<{
       persistedAssetCount: number;
       failedAssetDownloads: number;
       unsupportedHostEvents: number;
       orphanedAssetReferences: number;
+      blockedHosts: number;
+      repairableFailures: number;
     }>(
       `select
          coalesce(count(*) filter (where usage not in ('failed_asset_download', 'unsupported_asset_host')), 0)::int as "persistedAssetCount",
          coalesce(count(*) filter (where usage = 'failed_asset_download'), 0)::int as "failedAssetDownloads",
          coalesce(count(*) filter (where usage = 'unsupported_asset_host'), 0)::int as "unsupportedHostEvents",
+         coalesce(count(*) filter (where usage = 'unsupported_asset_host'), 0)::int as "blockedHosts",
+         0::int as "repairableFailures",
          coalesce(count(*) filter (
            where entity_type = 'character_profile'
              and entity_id is not null
@@ -719,7 +836,12 @@ export async function buildAssetPersistenceDiagnostics() {
       failedAssetDownloads: 0,
       unsupportedHostEvents: 0,
       orphanedAssetReferences: 0,
+      blockedHosts: 0,
+      repairableFailures: 0,
     };
+    const runtimeFailureLabels = Array.from(runtimeStats.failedReferenceLabelCounts.entries())
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count);
 
     return {
       ok: row.orphanedAssetReferences === 0,
@@ -727,17 +849,31 @@ export async function buildAssetPersistenceDiagnostics() {
       persistedAssetCount: row.persistedAssetCount,
       failedAssetDownloads: row.failedAssetDownloads + runtimeStats.failedDownloads,
       unsupportedHostEvents: row.unsupportedHostEvents + unsupportedHosts.reduce((sum, entry) => sum + entry.count, 0),
+      blockedHosts: row.blockedHosts + unsupportedHosts.reduce((sum, entry) => sum + entry.count, 0),
       unsupportedHosts,
+      failedReferenceLabels: runtimeFailureLabels,
+      repairableFailures: row.repairableFailures + runtimeStats.repairableFailures,
+      mediaAssetsReadWrite: supabaseAdmin ? 'service_role_configured' : 'read_check_only',
+      bucketCheck,
       orphanedAssetReferences: row.orphanedAssetReferences,
     };
   } catch (error) {
+    const bucketCheck = await lumoraAssetBucketCheck();
+    const runtimeFailureLabels = Array.from(runtimeStats.failedReferenceLabelCounts.entries())
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count);
     return {
       ok: false,
       bucket: LUMORA_ASSET_BUCKET,
       persistedAssetCount: 0,
       failedAssetDownloads: runtimeStats.failedDownloads,
       unsupportedHostEvents: unsupportedHosts.reduce((sum, entry) => sum + entry.count, 0),
+      blockedHosts: unsupportedHosts.reduce((sum, entry) => sum + entry.count, 0),
       unsupportedHosts,
+      failedReferenceLabels: runtimeFailureLabels,
+      repairableFailures: runtimeStats.repairableFailures,
+      mediaAssetsReadWrite: 'unavailable',
+      bucketCheck,
       orphanedAssetReferences: 0,
       error: serializeDiagnosticError(error),
       remediation: 'Apply the creator app persistence migration so media_assets exists.',

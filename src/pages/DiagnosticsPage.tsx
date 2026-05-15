@@ -97,9 +97,32 @@ export default function DiagnosticsPage() {
                   <strong>{diagnostics.assetPersistence.unsupportedHostEvents}</strong>
                 </p>
                 <p className="diagnostic-row">
+                  <span>blocked hosts</span>
+                  <strong>{diagnostics.assetPersistence.blockedHosts ?? diagnostics.assetPersistence.unsupportedHostEvents}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>repairable failures</span>
+                  <strong>{diagnostics.assetPersistence.repairableFailures ?? 0}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>media assets read/write</span>
+                  <strong>{diagnostics.assetPersistence.mediaAssetsReadWrite ?? 'unknown'}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>lumora-assets bucket</span>
+                  <strong>{diagnostics.assetPersistence.bucketCheck ?? diagnostics.assetPersistence.bucket}</strong>
+                </p>
+                <p className="diagnostic-row">
                   <span>orphaned references</span>
                   <strong>{diagnostics.assetPersistence.orphanedAssetReferences}</strong>
                 </p>
+                {diagnostics.assetPersistence.failedReferenceLabels?.length ? (
+                  <p className="muted">
+                    Failed references: {diagnostics.assetPersistence.failedReferenceLabels
+                      .map((item) => `${item.label} (${item.count})`)
+                      .join(', ')}
+                  </p>
+                ) : null}
                 {diagnostics.assetPersistence.remediation ? (
                   <p className="muted">{diagnostics.assetPersistence.remediation}</p>
                 ) : null}

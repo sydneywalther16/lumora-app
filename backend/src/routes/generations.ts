@@ -145,11 +145,7 @@ generationsRouter.post('/seedance', generationRateLimit, async (req, res) => {
         error: message,
         message,
         assetPersistence: true,
-        assetPersistenceDiagnostics: {
-          code: error.code,
-          sourceUrl: error.sourceUrl ?? null,
-          host: error.host ?? null,
-        },
+        assetPersistenceDiagnostics: error.toDiagnostics(),
         createdAt: new Date().toISOString(),
       });
       return;
@@ -324,11 +320,7 @@ generationsRouter.post('/', generationRateLimit, async (req, res) => {
         error: message,
         message,
         assetPersistence: true,
-        assetPersistenceDiagnostics: {
-          code: error.code,
-          sourceUrl: error.sourceUrl ?? null,
-          host: error.host ?? null,
-        },
+        assetPersistenceDiagnostics: error.toDiagnostics(),
         createdAt: new Date().toISOString(),
       });
       return;

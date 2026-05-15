@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import CharacterLibrary from '../components/CharacterLibrary';
 import CreatorIdentityCard from '../components/CreatorIdentityCard';
 import CreatorOnboarding from '../components/CreatorOnboarding';
@@ -79,6 +79,8 @@ export default function CreatePage() {
   const [resolvedReference, setResolvedReference] = useState<SelfCharacterReferenceImage | null>(null);
   const [referenceLoading, setReferenceLoading] = useState(false);
   const [remixProject, setRemixProject] = useState<RemixProjectPayload | null>(null);
+  const [castConfirmation, setCastConfirmation] = useState('');
+  const castSectionRef = useRef<HTMLElement | null>(null);
 
   const [profile, setProfile] = useState<LumoraProfile>({
     displayName: 'Creator',
@@ -94,6 +96,28 @@ export default function CreatePage() {
       localStorage.removeItem('lumora_remix_project');
     }
   }, []);
+
+  useEffect(() => {
+    if (!isHydrated || typeof window === 'undefined') return;
+    const raw = localStorage.getItem('lumora_create_cast_character');
+    if (!raw) return;
+
+    try {
+      const character = JSON.parse(raw) as CharacterProfile;
+      if (character && typeof character === 'object' && typeof character.id === 'string') {
+        setSelectedCharacter(character);
+        setCastConfirmation(`${character.displayName || character.name} is cast for this scene`);
+        window.setTimeout(() => {
+          castSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          castSectionRef.current?.focus();
+        }, 120);
+      }
+    } catch {
+      // Ignore malformed local return payloads.
+    } finally {
+      localStorage.removeItem('lumora_create_cast_character');
+    }
+  }, [isHydrated]);
 
   useEffect(() => {
     setSelectedCharacter(null);
@@ -316,7 +340,28 @@ export default function CreatePage() {
   function openCharactersHub() {
     void trackCreatorEvent('character_opened', { source: 'create' }, authUserId);
     localStorage.setItem('lumora_open_characters_hub', '1');
+    localStorage.setItem('lumora_characters_hub_context', 'create');
     window.location.href = '/profile';
+  }
+
+  function handleCastSelection(character: CharacterProfile | null) {
+    setSelectedCharacter(character);
+    setCastConfirmation(character ? `${character.displayName || character.name} is cast for this scene` : '');
+    if (character) {
+      window.setTimeout(() => {
+        castSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 80);
+    }
+  }
+
+  function handleCharacterUpdated(character: CharacterProfile) {
+    if (selectedCharacter?.id === character.id) {
+      setSelectedCharacter(character);
+    }
+    if (defaultSelfCharacter?.id === character.id) {
+      setDefaultSelfCharacter(character);
+    }
+    setCharacterRefreshKey((current) => current + 1);
   }
 
   if (pageLoading) {
@@ -341,12 +386,25 @@ export default function CreatePage() {
 
       <CreatorIdentityCard card={creatorIdentityCard} compact />
 
-      <CharacterLibrary
-        refreshKey={characterRefreshKey}
-        selectedCharacterId={selectedCharacter?.id ?? null}
-        onSelect={setSelectedCharacter}
-        compact
-      />
+      <section
+        ref={castSectionRef}
+        className="cast-selection-anchor"
+        tabIndex={-1}
+        aria-label="Cast for this scene"
+      >
+        {castConfirmation ? (
+          <div className="story-memory-moment cast-confirmation">
+            <span className="tiny-dot" />
+            <p>Character casted: {selectedCharacter?.displayName || selectedCharacter?.name || castConfirmation.replace(' is cast for this scene', '')}</p>
+          </div>
+        ) : null}
+        <CharacterLibrary
+          refreshKey={characterRefreshKey}
+          selectedCharacterId={selectedCharacter?.id ?? null}
+          onSelect={handleCastSelection}
+          compact
+        />
+      </section>
 
       <section className="editor-card" style={{ display: 'grid', gap: '10px' }}>
         <div className="row-between" style={{ gap: '12px', flexWrap: 'wrap' }}>
@@ -383,6 +441,7 @@ export default function CreatePage() {
         isHydrated={isHydrated}
         identityProfile={effectiveIsDefaultSelfCharacter ? identityProfile : null}
         onLikenessFeedback={(feedback) => void handleLikenessFeedback(feedback)}
+        onCharacterUpdated={handleCharacterUpdated}
         onResaveReferencePhoto={() => {
           openCharactersHub();
         }}

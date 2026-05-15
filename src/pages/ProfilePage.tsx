@@ -1697,6 +1697,7 @@ export default function ProfilePage() {
   const [editingProfile, setEditingProfile] = useState(false);
   const [editingSelfCharacter, setEditingSelfCharacter] = useState(false);
   const [characterHubOpen, setCharacterHubOpen] = useState(false);
+  const [characterHubSource, setCharacterHubSource] = useState<'profile' | 'create'>('profile');
   const [selfForm, setSelfForm] = useState<SelfCharacterForm>(() => buildSelfCharacterForm(loadLumoraProfile(), null));
   const [captureChecklist, setCaptureChecklist] = useState({
     readNumbers: false,
@@ -1762,6 +1763,8 @@ export default function ProfilePage() {
     if (!isHydrated || typeof window === 'undefined') return;
     if (localStorage.getItem('lumora_open_characters_hub') !== '1') return;
     localStorage.removeItem('lumora_open_characters_hub');
+    setCharacterHubSource(localStorage.getItem('lumora_characters_hub_context') === 'create' ? 'create' : 'profile');
+    localStorage.removeItem('lumora_characters_hub_context');
     setCharacterHubOpen(true);
     setEditingSelfCharacter(false);
   }, [isHydrated]);
@@ -1971,8 +1974,15 @@ export default function ProfilePage() {
 
   function openCharactersHub() {
     void trackCreatorEvent('character_opened', { source: 'profile' }, authUserId);
+    setCharacterHubSource('profile');
     setCharacterHubOpen(true);
     setEditingSelfCharacter(false);
+  }
+
+  function handleCastCharacterFromHub(character: CharacterProfile) {
+    localStorage.setItem('lumora_create_cast_character', JSON.stringify(character));
+    void trackCreatorEvent('character_opened', { source: 'create-cast', characterId: character.id }, authUserId);
+    window.location.href = '/create';
   }
 
   function handleContinueProfileStory(post: LumoraPost) {
@@ -3117,6 +3127,8 @@ export default function ProfilePage() {
         onClose={closeCharactersHub}
         onEditSelf={() => void openSelfCharacterEditor()}
         onRefresh={(nextCharacters) => void handleCharacterHubRefresh(nextCharacters)}
+        castMode={characterHubSource === 'create'}
+        onCast={handleCastCharacterFromHub}
       >
         {editingSelfCharacter && isHydrated ? (
         <section

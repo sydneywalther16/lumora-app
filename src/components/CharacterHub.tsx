@@ -1,17 +1,24 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { type CharacterProfile, type CharacterRelationshipMemory, type ReferenceImageUrls } from '../lib/api';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { type CharacterProfile, type CharacterRelationshipMemory } from '../lib/api';
 import { deleteLocalCharacterProfile, updateLocalCharacterProfile } from '../lib/characterStorage';
 import { getBestThumbnail } from '../lib/mediaThumbnail';
 import {
   deleteSupabaseCharacterProfile,
   loadSupabaseCharacters,
   updateSupabaseCharacterProfile,
+  uploadLumoraMedia,
 } from '../lib/supabaseAppData';
 import { useSession } from '../hooks/useSession';
 import { trackCreatorEvent } from '../lib/creatorEvents';
 import { buildCreatorIdentityCard } from '../lib/storyWorld';
 import CreatorIdentityCard from './CreatorIdentityCard';
 import CharacterCapture from './CharacterCapture';
+import {
+  characterReferenceEntries,
+  patchReferenceImageUrls,
+  type CharacterReferenceEntry,
+  type ReferenceRepairSlot,
+} from '../lib/referenceRepair';
 
 type CharacterHubProps = {
   open: boolean;
@@ -19,6 +26,8 @@ type CharacterHubProps = {
   onClose: () => void;
   onEditSelf: () => void | Promise<void>;
   onRefresh: (characters?: CharacterProfile[]) => void | Promise<void>;
+  castMode?: boolean;
+  onCast?: (character: CharacterProfile) => void;
   children?: ReactNode;
 };
 
@@ -72,17 +81,6 @@ function CharacterThumbnail({ character, size = 56 }: { character: CharacterProf
       )}
     </span>
   );
-}
-
-function referenceEntries(character: CharacterProfile) {
-  const references = character.referenceImageUrls ?? {} as ReferenceImageUrls;
-  return [
-    ['Front', references.frontFaceUrl || references.frontFace],
-    ['Left', references.leftAngleUrl || references.leftAngle],
-    ['Right', references.rightAngleUrl || references.rightAngle],
-    ['Full body', references.fullBodyUrl || references.fullBody],
-    ['Expression', references.expressiveUrl || references.expressive],
-  ].filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].trim().length > 0);
 }
 
 function metadataLine(label: string, value: unknown) {
@@ -262,6 +260,8 @@ export default function CharacterHub({
   onClose,
   onEditSelf,
   onRefresh,
+  castMode = false,
+  onCast,
   children,
 }: CharacterHubProps) {
   const { user, session } = useSession();
@@ -297,6 +297,10 @@ export default function CharacterHub({
   const [deleteStatus, setDeleteStatus] = useState('');
   const [deletingCharacter, setDeletingCharacter] = useState(false);
   const [expandedSections, setExpandedSections] = useState<DetailSectionKey[]>(['appearance', 'memory']);
+  const [referenceRepairSlot, setReferenceRepairSlot] = useState<ReferenceRepairSlot | null>(null);
+  const [referenceRepairStatus, setReferenceRepairStatus] = useState('');
+  const [referenceRepairSaving, setReferenceRepairSaving] = useState(false);
+  const referenceRepairInputRef = useRef<HTMLInputElement | null>(null);
   const atCharacterLimit = characters.length >= characterLimit;
 
   useEffect(() => {
@@ -463,6 +467,57 @@ export default function CharacterHub({
     }
   }
 
+  function startReferenceRepair(entry: CharacterReferenceEntry) {
+    if (selectedIsSelf) {
+      void onEditSelf();
+      return;
+    }
+    setReferenceRepairSlot(entry.slot);
+    setReferenceRepairStatus('');
+    referenceRepairInputRef.current?.click();
+  }
+
+  async function handleReferenceRepairFile(file: File | null | undefined) {
+    if (!file || !selectedCharacter || !referenceRepairSlot) return;
+    if (!authUser) {
+      setReferenceRepairStatus('Sign in to save repaired references to Lumora.');
+      return;
+    }
+
+    setReferenceRepairSaving(true);
+    setReferenceRepairStatus('Saving reference to Lumora...');
+    try {
+      const upload = await uploadLumoraMedia({
+        userId: authUser.id,
+        bucket: 'lumora-assets',
+        file,
+        folder: `reference-repairs/${selectedCharacter.id}`,
+        usage: 'character_reference_image',
+        entityType: 'character_profile',
+        entityId: selectedCharacter.id,
+      });
+      const nextReferenceImageUrls = patchReferenceImageUrls(
+        selectedCharacter.referenceImageUrls,
+        referenceRepairSlot,
+        upload.url,
+      );
+      const updated = await updateSupabaseCharacterProfile({
+        userId: authUser.id,
+        characterId: selectedCharacter.id,
+        referenceImageUrls: nextReferenceImageUrls,
+      });
+      setSelectedCharacterId(updated.id);
+      setReferenceRepairStatus('Reference saved to Lumora.');
+      await onRefresh(characters.map((character) => (character.id === updated.id ? updated : character)));
+    } catch (error) {
+      setReferenceRepairStatus(error instanceof Error ? characterProfileEditorError(error) : 'Unable to save this reference yet.');
+    } finally {
+      setReferenceRepairSaving(false);
+      setReferenceRepairSlot(null);
+      if (referenceRepairInputRef.current) referenceRepairInputRef.current.value = '';
+    }
+  }
+
   async function handleConfirmDelete() {
     if (!selectedCharacter || selectedIsSelf) return;
 
@@ -567,7 +622,8 @@ export default function CharacterHub({
   }
 
   if (selectedCharacter) {
-    const refs = referenceEntries(selectedCharacter);
+    const refs = characterReferenceEntries(selectedCharacter);
+    const savedRefs = refs.filter((entry) => entry.url);
     const memoryEntries = Object.entries(selectedCharacter.continuityState ?? {})
       .filter(([, value]) => Boolean(value))
       .slice(0, 8);
@@ -598,6 +654,15 @@ export default function CharacterHub({
             Back
           </button>
           <div className="character-detail-actions">
+            {castMode ? (
+              <button
+                type="button"
+                className="primary-btn cast-character-btn"
+                onClick={() => onCast?.(selectedCharacter)}
+              >
+                Cast
+              </button>
+            ) : null}
             <button
               type="button"
               className="character-actions-button"
@@ -782,22 +847,44 @@ export default function CharacterHub({
           <CharacterDetailSection
             id="references"
             title="References"
-            summary={refs.length ? `${refs.length} saved references` : 'No references saved yet.'}
+            summary={savedRefs.length ? `${savedRefs.length} saved references` : 'No references saved yet.'}
             expanded={detailSectionIsOpen('references')}
             onToggle={toggleDetailSection}
           >
             {refs.length ? (
               <div className="character-reference-grid">
-                {refs.map(([label, url]) => (
-                  <div key={`${label}-${url}`} className="character-reference-item">
-                    <img src={url} alt={`${displayName(selectedCharacter)} ${label}`} />
-                    <span>{label}</span>
+                {refs.map((entry) => (
+                  <div key={entry.slot} className={`character-reference-item ${entry.status.kind}`}>
+                    {entry.url ? (
+                      <img src={entry.url} alt={`${displayName(selectedCharacter)} ${entry.label}`} />
+                    ) : (
+                      <div className="reference-placeholder">{entry.optional ? 'Optional' : 'Missing'}</div>
+                    )}
+                    <span>{entry.label}</span>
+                    <span className={`reference-status-badge ${entry.status.kind}`}>{entry.status.label}</span>
+                    <small>{entry.status.detail}</small>
+                    <button
+                      type="button"
+                      className="text-btn"
+                      disabled={referenceRepairSaving}
+                      onClick={() => startReferenceRepair(entry)}
+                    >
+                      {selectedIsSelf ? 'Edit references' : 'Replace'}
+                    </button>
                   </div>
                 ))}
               </div>
             ) : (
               <p className="muted">No reference photos saved yet.</p>
             )}
+            <input
+              ref={referenceRepairInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={(event) => void handleReferenceRepairFile(event.target.files?.[0])}
+            />
+            {referenceRepairStatus ? <p className="muted">{referenceRepairStatus}</p> : null}
           </CharacterDetailSection>
 
           {!selectedIsSelf ? (

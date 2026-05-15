@@ -22,9 +22,16 @@ import {
   type VideoAspectRatio,
   type VideoEngine,
 } from '../lib/api';
+import { updateLocalCharacterProfile } from '../lib/characterStorage';
 import { saveStudioProject, type StudioProject } from '../lib/projectStorage';
 import { loadLumoraProfile } from '../lib/profileStorage';
-import { loadSupabaseProfile, saveSupabaseDraft, saveSupabaseProject } from '../lib/supabaseAppData';
+import {
+  loadSupabaseProfile,
+  saveSupabaseDraft,
+  saveSupabaseProject,
+  updateSupabaseCharacterProfile,
+  uploadLumoraMedia,
+} from '../lib/supabaseAppData';
 import { resolveRenderableReferenceUrl } from '../lib/selfCharacterReference';
 import {
   buildSeedanceReferenceImages,
@@ -37,6 +44,14 @@ import { useAppStore } from '../store/useAppStore';
 import SelfReferencePreview, { normalizeReference } from './SelfReferencePreview';
 import { STYLE_PRESETS, selectedStylePrompt } from '../lib/stylePresets';
 import { trackCreatorEvent } from '../lib/creatorEvents';
+import {
+  normalizeReferenceRepairIssue,
+  patchReferenceImageUrls,
+  referenceSlotForSeedanceReference,
+  referenceStatus,
+  type ReferenceRepairIssue,
+  type ReferenceRepairSlot,
+} from '../lib/referenceRepair';
 
 type CreateVideoProps = {
   refreshKey?: number;
@@ -56,6 +71,7 @@ type CreateVideoProps = {
   identityProfile?: LumoraIdentityProfile | null;
   onLikenessFeedback?: (feedback: LumoraIdentityFeedback) => void | Promise<void>;
   onResaveReferencePhoto?: () => void;
+  onCharacterUpdated?: (character: CharacterProfile) => void;
 };
 
 const durations = [4, 8, 12, 16];
@@ -483,7 +499,7 @@ function creatorModerationStageMessage(stage: string): string {
   }
 
   if (lower.includes('level 2') || lower.includes('celebrity') || lower.includes('influencer') || lower.includes('public figure')) {
-    return 'Removing celebrity-style framing...';
+    return 'Removing fame-style framing...';
   }
 
   if (
@@ -525,6 +541,16 @@ function persistedAssetCount(summary: unknown) {
   if (!summary || typeof summary === 'boolean' || typeof summary !== 'object') return 0;
   const persisted = (summary as { persisted?: unknown }).persisted;
   return typeof persisted === 'number' ? persisted : 0;
+}
+
+function assetRepairCopy(issue: ReferenceRepairIssue) {
+  if (issue.reason === 'protected_external_url') {
+    return 'Some social image links expire or block studio tools. Upload the image directly so Lumora can save it safely.';
+  }
+  if (issue.reason === 'expired_signed_url') {
+    return 'This image link has expired. Upload the image directly so Lumora can save it safely.';
+  }
+  return 'Upload the image directly so Lumora can save it safely.';
 }
 
 function isProviderQueueBusyError(value: string): boolean {
@@ -631,6 +657,7 @@ export default function CreateVideo({
   identityProfile,
   onLikenessFeedback,
   onResaveReferencePhoto,
+  onCharacterUpdated,
 }: CreateVideoProps) {
   const { user, session, loading: sessionLoading, configured } = useSession();
   const authUser = session?.user ?? user;
@@ -671,6 +698,10 @@ export default function CreateVideo({
   const [sceneExecutionStatus, setSceneExecutionStatus] = useState('');
   const [sceneExecutionPlan, setSceneExecutionPlan] = useState<CreativeBrainScenePlan | null>(null);
   const [sceneExecutionResult, setSceneExecutionResult] = useState<SceneExecutorResult | null>(null);
+  const [referenceRepair, setReferenceRepair] = useState<ReferenceRepairIssue | null>(null);
+  const [repairUploading, setRepairUploading] = useState(false);
+  const [repairStatus, setRepairStatus] = useState('');
+  const [skippedReferenceUrls, setSkippedReferenceUrls] = useState<string[]>([]);
   const [schemaWarning, setSchemaWarning] = useState('');
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
   const [finalGeneratedPrompt, setFinalGeneratedPrompt] = useState('');
@@ -687,6 +718,7 @@ export default function CreateVideo({
   const generationInFlightRef = useRef(false);
   const progressTimerRef = useRef<number | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const repairFileInputRef = useRef<HTMLInputElement | null>(null);
   const primaryReferenceImage = pickReferenceImage({ referenceImageUrl, referenceImageUrls });
   const hasSelfCharacter = forceSelfMode || isDefaultSelfCharacter;
   const selectedSelfReferenceImageUrl = hasSelfCharacter
@@ -700,13 +732,33 @@ export default function CreateVideo({
   const requiresReferenceImage = engine === 'replicate';
   const selectedProviderOption = providerOptions.find((option) => option.engine === engine) ?? providerOptions[0];
   const hasPrompt = activePrompt.trim().length > 0;
-  const seedanceReferenceImages = buildSeedanceReferenceImages({
+  const allSeedanceReferenceImages = buildSeedanceReferenceImages({
     referenceImageUrl,
     referenceImageUrls,
     additionalReferenceImageUrls,
     identityProfile,
     characterAvatar,
   });
+  const seedanceReferenceImages = allSeedanceReferenceImages.filter((reference) => (
+    !skippedReferenceUrls.includes(reference.url)
+  ));
+  const preflightReferenceRepair = seedanceReferenceImages
+    .map<ReferenceRepairIssue | null>((reference) => {
+      const optional = !(reference.role === 'front_angle' || reference.role === 'side_angle');
+      const status = referenceStatus(reference.url, optional);
+      if (status.kind !== 'needs_reupload') return null;
+      return {
+        sourceUrl: reference.url,
+        label: reference.label || 'Reference image',
+        role: reference.role ?? null,
+        slot: referenceSlotForSeedanceReference(reference),
+        host: null,
+        reason: 'protected_external_url',
+        canContinueWithoutReference: optional,
+      } satisfies ReferenceRepairIssue;
+    })
+    .find((issue): issue is ReferenceRepairIssue => Boolean(issue)) ?? null;
+  const activeReferenceRepair = referenceRepair ?? preflightReferenceRepair;
   const seedanceReferenceCount = seedanceReferenceImages.length;
   const sceneExecutorUserId = authUser?.id ?? identityProfile?.userId ?? null;
   const seedanceMultimodalActive = isSeedanceEngine && seedanceReferenceCount > 1;
@@ -799,6 +851,7 @@ export default function CreateVideo({
     isHydrated &&
     !referenceLoading &&
     hasPrompt &&
+    !(activeReferenceRepair && !activeReferenceRepair.canContinueWithoutReference) &&
     (!requiresReferenceImage || hasGenerationReference);
   const generateBusy = !canGenerate || busy || generationLoading || referenceLoading;
   const saveBusy = busy || generationLoading;
@@ -876,6 +929,12 @@ export default function CreateVideo({
       localStorage.removeItem('remixTitle');
     }
   }, [setActivePrompt, setDraftTitle]);
+
+  useEffect(() => {
+    setReferenceRepair(null);
+    setRepairStatus('');
+    setSkippedReferenceUrls([]);
+  }, [characterId, referenceImageUrl]);
 
   useEffect(() => {
     let active = true;
@@ -1203,14 +1262,105 @@ export default function CreateVideo({
         showToast({ type: 'error', message: result.failedClip?.error || 'That shot needs another take. Finished shots stayed saved.' });
       }
     } catch (error) {
+      const repairIssue = error instanceof ApiRequestError
+        ? normalizeReferenceRepairIssue(error.payload)
+        : null;
+      if (repairIssue) {
+        setReferenceRepair(repairIssue);
+        setRepairStatus('');
+      }
       const message = error instanceof ApiRequestError || error instanceof Error
-        ? friendlyCharacterProfileError(error)
+        ? repairIssue
+          ? 'One reference image needs to be re-uploaded before Lumora can use it.'
+          : friendlyCharacterProfileError(error)
         : 'Lumora could not finish the storyboard yet.';
       setSceneExecutionError(message);
       setSceneExecutionStatus('');
       showToast({ type: 'error', message });
     } finally {
       setSceneExecutionLoading(false);
+    }
+  }
+
+  function handleContinueWithoutReference() {
+    if (!activeReferenceRepair?.sourceUrl || !activeReferenceRepair.canContinueWithoutReference) return;
+    setSkippedReferenceUrls((current) => Array.from(new Set([...current, activeReferenceRepair.sourceUrl as string])));
+    setGenerationError('');
+    setSceneExecutionError('');
+    setReferenceRepair(null);
+    setRepairStatus('');
+    setStatus(`${activeReferenceRepair.label} skipped for this scene. Your saved cast profile stayed unchanged.`);
+  }
+
+  async function handleRepairUpload(file: File | null | undefined) {
+    if (!file || !activeReferenceRepair) return;
+
+    const slot = activeReferenceRepair.slot;
+    if (!slot) {
+      setRepairStatus('Open Characters to replace this reference in the right cast slot.');
+      return;
+    }
+
+    if (!authUser) {
+      setRepairStatus('Sign in to save repaired references to Lumora.');
+      return;
+    }
+
+    if (!characterProfile) {
+      setRepairStatus('Open Characters to choose the cast member before replacing this reference.');
+      return;
+    }
+
+    setRepairUploading(true);
+    setRepairStatus('Saving reference to Lumora...');
+    let uploadedUrl = '';
+    try {
+      const upload = await uploadLumoraMedia({
+        userId: authUser.id,
+        bucket: 'lumora-assets',
+        file,
+        folder: `reference-repairs/${characterProfile.id}`,
+        usage: 'character_reference_image',
+        entityType: 'character_profile',
+        entityId: characterProfile.id,
+      });
+      uploadedUrl = upload.url;
+      const nextReferenceImageUrls = patchReferenceImageUrls(characterProfile.referenceImageUrls, slot, uploadedUrl);
+      const updated = await updateSupabaseCharacterProfile({
+        userId: authUser.id,
+        characterId: characterProfile.id,
+        referenceImageUrls: nextReferenceImageUrls,
+      });
+      onCharacterUpdated?.(updated);
+      setSkippedReferenceUrls((current) => current.filter((url) => url !== activeReferenceRepair.sourceUrl));
+      setReferenceRepair(null);
+      setGenerationError('');
+      setSceneExecutionError('');
+      setRepairStatus('Reference saved to Lumora.');
+      setStatus('Reference saved to Lumora. You can retry the scene now.');
+      showToast({ type: 'success', message: 'Reference saved to Lumora.' });
+    } catch (error) {
+      if (uploadedUrl) {
+        const nextReferenceImageUrls = patchReferenceImageUrls(characterProfile.referenceImageUrls, slot, uploadedUrl);
+        const updated = updateLocalCharacterProfile({
+          characterId: characterProfile.id,
+          referenceImageUrls: nextReferenceImageUrls,
+        });
+        if (updated) {
+          onCharacterUpdated?.(updated);
+          setSkippedReferenceUrls((current) => current.filter((url) => url !== activeReferenceRepair.sourceUrl));
+          setReferenceRepair(null);
+          setGenerationError('');
+          setSceneExecutionError('');
+          setRepairStatus('Reference saved to Lumora.');
+          setStatus('Reference saved to Lumora. You can retry the scene now.');
+          return;
+        }
+      }
+      setRepairStatus(error instanceof Error ? error.message : 'Unable to save this reference yet.');
+    } finally {
+      setRepairUploading(false);
+      if (repairFileInputRef.current) repairFileInputRef.current.value = '';
     }
   }
 
@@ -1650,6 +1800,11 @@ export default function CreateVideo({
       console.error('Generation failed', error);
       const message = error instanceof Error ? error.message : 'Unable to create draft render';
       const apiPayload = error instanceof ApiRequestError ? error.payload : null;
+      const repairIssue = normalizeReferenceRepairIssue(apiPayload);
+      if (repairIssue) {
+        setReferenceRepair(repairIssue);
+        setRepairStatus('');
+      }
       const moderationPayload = isProviderModerationPayload(apiPayload) ? apiPayload : null;
       const suggestedRewrite =
         moderationPayload?.suggestedPrompt ||
@@ -1658,6 +1813,8 @@ export default function CreateVideo({
       const retryStages = moderationRetryStageMessages(moderationPayload?.moderationDiagnostics);
       const displayMessage = moderationPayload
         ? providerModerationMessage
+        : repairIssue
+        ? 'One reference image needs to be re-uploaded before Lumora can use it.'
         : isProviderSafetyFilterError(message)
         ? providerSafetyFilterMessage
         : isReplicateThrottledError(message)
@@ -1667,7 +1824,9 @@ export default function CreateVideo({
         : message;
       setGenerationSafeRewrite(suggestedRewrite);
       setGenerationModerationDetail(
-        moderationPayload?.suggestion ||
+        repairIssue
+          ? assetRepairCopy(repairIssue)
+          : moderationPayload?.suggestion ||
         (moderationPayload
           ? 'Lumora preserved your cast, Story Memory, and storyboard while adapting the style for cinematic safety.'
           : ''),
@@ -1813,7 +1972,12 @@ export default function CreateVideo({
 
         <label className="field-block">
           <span>Core prompt</span>
-          <textarea value={activePrompt} onChange={(event) => setActivePrompt(event.target.value)} rows={6} />
+          <textarea
+            value={activePrompt}
+            onChange={(event) => setActivePrompt(event.target.value)}
+            rows={6}
+            placeholder="Describe the scene you want to create..."
+          />
         </label>
 
         <div className="field-block">
@@ -1971,6 +2135,37 @@ export default function CreateVideo({
               </div>
               {sceneExecutionStatus ? <p className="muted">{sceneExecutionStatus}</p> : null}
               {sceneExecutionError ? <p className="creative-plan-error">{sceneExecutionError}</p> : null}
+              {sceneExecutionError && activeReferenceRepair ? (
+                <div className="reference-repair-panel">
+                  <div>
+                    <span className="eyebrow">reference repair</span>
+                    <h3>This reference image needs to be re-uploaded</h3>
+                    <p>{activeReferenceRepair.label}</p>
+                    <p className="muted">{assetRepairCopy(activeReferenceRepair)}</p>
+                  </div>
+                  <div className="button-row">
+                    <button
+                      type="button"
+                      className="primary-btn"
+                      disabled={repairUploading}
+                      onClick={() => repairFileInputRef.current?.click()}
+                    >
+                      {repairUploading ? 'Saving...' : 'Replace this reference'}
+                    </button>
+                    {activeReferenceRepair.canContinueWithoutReference ? (
+                      <button type="button" className="ghost-btn" onClick={handleContinueWithoutReference}>
+                        Continue without this reference
+                      </button>
+                    ) : null}
+                    {onResaveReferencePhoto ? (
+                      <button type="button" className="ghost-btn" onClick={onResaveReferencePhoto}>
+                        Open Characters
+                      </button>
+                    ) : null}
+                  </div>
+                  {repairStatus ? <p className="muted">{repairStatus}</p> : null}
+                </div>
+              ) : null}
               {sceneExecutionPlan || sceneExecutionResult ? (
                 <div className="scene-progress-panel" aria-live="polite">
                   <div className="row-between">
@@ -2163,11 +2358,18 @@ export default function CreateVideo({
             ) : null}
             {isSeedanceEngine && seedanceReferenceCount > 0 ? (
               <div className="seedance-reference-list" aria-label="Cast references">
-                {seedanceReferenceImages.map((reference) => (
-                  <span key={`${reference.token}-${reference.url}`}>
-                    {reference.token} {reference.label || 'Reference image'}
-                  </span>
-                ))}
+                {seedanceReferenceImages.map((reference) => {
+                  const slot = referenceSlotForSeedanceReference(reference);
+                  const optional = !(reference.role === 'front_angle' || reference.role === 'side_angle');
+                  const status = referenceStatus(reference.url, optional);
+                  return (
+                    <span key={`${reference.token}-${reference.url}`} className={`reference-status-chip ${status.kind}`}>
+                      {reference.token} {reference.label || 'Reference image'}
+                      <small>{status.label}</small>
+                      {slot ? null : <small>Optional</small>}
+                    </span>
+                  );
+                })}
               </div>
             ) : null}
             {selfReferenceMode && engine === 'replicate' ? (
@@ -2230,9 +2432,57 @@ export default function CreateVideo({
                       reference={item.reference}
                       required={item.required}
                     />
+                    <span className={`reference-status-badge ${referenceStatus(item.reference.url ?? item.reference.path, !item.required).kind}`}>
+                      {referenceStatus(item.reference.url ?? item.reference.path, !item.required).label}
+                    </span>
                   </div>
                 ))}
             </div>
+          </div>
+        ) : null}
+
+        <input
+          ref={repairFileInputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: 'none' }}
+          onChange={(event) => void handleRepairUpload(event.target.files?.[0])}
+        />
+
+        {activeReferenceRepair && !generationError && !sceneExecutionError ? (
+          <div className="reference-repair-panel">
+            <div>
+              <span className="eyebrow">reference repair</span>
+              <h3>This reference image needs to be re-uploaded</h3>
+              <p>{activeReferenceRepair.label}</p>
+              <p className="muted">{assetRepairCopy(activeReferenceRepair)}</p>
+            </div>
+            {activeReferenceRepair.sourceUrl ? (
+              <div className="reference-repair-preview">
+                <img src={activeReferenceRepair.sourceUrl} alt={`${activeReferenceRepair.label} preview`} />
+              </div>
+            ) : null}
+            <div className="button-row">
+              <button
+                type="button"
+                className="primary-btn"
+                disabled={repairUploading}
+                onClick={() => repairFileInputRef.current?.click()}
+              >
+                {repairUploading ? 'Saving...' : 'Replace this reference'}
+              </button>
+              {activeReferenceRepair.canContinueWithoutReference ? (
+                <button type="button" className="ghost-btn" onClick={handleContinueWithoutReference}>
+                  Continue without this reference
+                </button>
+              ) : null}
+              {onResaveReferencePhoto ? (
+                <button type="button" className="ghost-btn" onClick={onResaveReferencePhoto}>
+                  Open Characters
+                </button>
+              ) : null}
+            </div>
+            {repairStatus ? <p className="muted">{repairStatus}</p> : null}
           </div>
         ) : null}
 
@@ -2274,6 +2524,42 @@ export default function CreateVideo({
           <div className="generation-error-card">
             <p>{generationError}</p>
             {generationModerationDetail ? <p>{generationModerationDetail}</p> : null}
+            {activeReferenceRepair ? (
+              <div className="reference-repair-panel">
+                <div>
+                  <span className="eyebrow">reference repair</span>
+                  <h3>This reference image needs to be re-uploaded</h3>
+                  <p>{activeReferenceRepair.label}</p>
+                  {activeReferenceRepair.host ? <p className="muted">This image link is protected.</p> : null}
+                </div>
+                {activeReferenceRepair.sourceUrl ? (
+                  <div className="reference-repair-preview">
+                    <img src={activeReferenceRepair.sourceUrl} alt={`${activeReferenceRepair.label} preview`} />
+                  </div>
+                ) : null}
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className="primary-btn"
+                    disabled={repairUploading}
+                    onClick={() => repairFileInputRef.current?.click()}
+                  >
+                    {repairUploading ? 'Saving...' : 'Replace this reference'}
+                  </button>
+                  {activeReferenceRepair.canContinueWithoutReference ? (
+                    <button type="button" className="ghost-btn" onClick={handleContinueWithoutReference}>
+                      Continue without this reference
+                    </button>
+                  ) : null}
+                  {onResaveReferencePhoto ? (
+                    <button type="button" className="ghost-btn" onClick={onResaveReferencePhoto}>
+                      Open Characters
+                    </button>
+                  ) : null}
+                </div>
+                {repairStatus ? <p className="muted">{repairStatus}</p> : null}
+              </div>
+            ) : null}
             {generationModerationStages.length ? (
               <div className="generation-warning-list">
                 {generationModerationStages.map((stage) => (

@@ -200,11 +200,7 @@ creativeBrainRouter.post('/execute', sceneExecutorRateLimit, async (req, res) =>
       status: 'failed',
       assetPersistence: isAssetPersistenceError(error),
       assetPersistenceDiagnostics: isAssetPersistenceError(error)
-        ? {
-            code: error.code,
-            sourceUrl: error.sourceUrl ?? null,
-            host: error.host ?? null,
-          }
+        ? error.toDiagnostics()
         : null,
       clips: [],
       createdAt: new Date().toISOString(),

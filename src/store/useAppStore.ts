@@ -18,10 +18,9 @@ type AppState = {
 };
 
 export const useAppStore = create<AppState>((set) => ({
-  activePrompt:
-    'Build a glossy AI influencer reveal with paparazzi flash frames, ultra-smooth motion, and a final hook that feels instantly repostable.',
+  activePrompt: '',
   selectedStyles: [],
-  selectedTrend: 't1',
+  selectedTrend: null,
   draftTitle: 'Untitled concept',
   posts,
   projects,

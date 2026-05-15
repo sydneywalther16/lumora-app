@@ -25,13 +25,13 @@ export type Project = {
 
 export const user = {
   handle: 'lumora.creator',
-  bio: 'AI influencer studio for trend-native creators, soft chaos, and cinematic loops.',
+  bio: 'Cinematic creator studio for recurring cast, soft chaos, and story-world loops.',
   stats: {
     followers: '228K',
     following: '412',
     likes: '8.9M',
   },
-  signatureDNA: ['glossy realism', 'pop chaos', 'micro-viral hooks', 'swipe-first storytelling'],
+  signatureDNA: ['cinematic realism', 'pop chaos', 'story hooks', 'swipe-first storytelling'],
 };
 
 export const topChips = ['For You', 'Cinematic', 'Chaos', 'Beauty', 'Luxury', 'Funny', 'NPC Core'] as const;
@@ -52,10 +52,10 @@ export const posts: Post[] = [
     id: 'p2',
     userHandle: '@pixelpriestess',
     caption: 'POV: your soft-launch avatar got a manager.',
-    tags: ['story', 'ai model', 'comedy'],
+    tags: ['story', 'cast', 'comedy'],
     stats: { likes: '28.7K', remix: '1.9K', saves: '9.4K' },
-    stylePreset: 'Influencer Sitcom',
-    prompt: 'A faux reality-show confessional where an AI influencer negotiates a brand deal with deadpan comedic timing.',
+    stylePreset: 'Cast Sitcom',
+    prompt: 'A fictional character confessional with deadpan comedic timing, soft studio light, and playful story tension.',
   },
   {
     id: 'p3',
@@ -71,10 +71,10 @@ export const posts: Post[] = [
 export const trends: Trend[] = [
   {
     id: 't1',
-    title: 'Fake paparazzi exit',
+    title: 'Flashbulb story exit',
     uses: '1.8M uses',
     category: 'Fashion',
-    prompt: 'A celebrity-style exit with flashbulbs, sunglasses, and a smirk right before the car door closes.',
+    prompt: 'A cinematic character exits through flashbulbs, sunglasses, and a knowing smirk before the car door closes.',
   },
   {
     id: 't2',

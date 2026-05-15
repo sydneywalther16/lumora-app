@@ -684,6 +684,10 @@ button {
 }
 
 .seedance-reference-list span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
   padding: 5px 8px;
   border: 1px solid var(--control-border);
   border-radius: 999px;
@@ -691,6 +695,10 @@ button {
   color: var(--pill-text);
   font-size: 0.72rem;
   font-weight: 700;
+}
+
+.seedance-reference-list small {
+  opacity: 0.72;
 }
 
 .provider-grid {
@@ -1516,6 +1524,105 @@ button {
   line-height: 1.38;
 }
 
+.cast-selection-anchor {
+  outline: none;
+}
+
+.cast-confirmation {
+  margin-bottom: 12px;
+}
+
+.reference-status-chip,
+.reference-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(248, 250, 252, 0.84);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.reference-status-chip.saved,
+.reference-status-badge.saved {
+  border-color: rgba(91, 244, 190, 0.32);
+  color: #bbf7d0;
+}
+
+.reference-status-chip.needs_reupload,
+.reference-status-badge.needs_reupload {
+  border-color: rgba(251, 191, 36, 0.42);
+  color: #fde68a;
+}
+
+.reference-status-chip.external,
+.reference-status-badge.external,
+.reference-status-chip.optional,
+.reference-status-badge.optional {
+  border-color: rgba(125, 211, 252, 0.28);
+  color: #bae6fd;
+}
+
+.reference-status-chip.missing,
+.reference-status-badge.missing {
+  border-color: rgba(248, 113, 113, 0.32);
+  color: #fecaca;
+}
+
+.reference-repair-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(251, 191, 36, 0.32);
+  border-radius: 22px;
+  background:
+    linear-gradient(135deg, rgba(251, 191, 36, 0.12), rgba(236, 72, 153, 0.08)),
+    rgba(255, 255, 255, 0.05);
+}
+
+.reference-repair-panel h3 {
+  margin: 4px 0;
+  font-size: 1rem;
+}
+
+.reference-repair-panel p {
+  margin: 0;
+}
+
+.reference-repair-preview {
+  width: min(180px, 100%);
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.reference-repair-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.reference-placeholder {
+  display: grid;
+  min-height: 118px;
+  place-items: center;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(116, 80, 255, 0.18), rgba(15, 23, 42, 0.72));
+  color: rgba(248, 250, 252, 0.62);
+  font-size: 0.78rem;
+}
+
+.cast-character-btn {
+  flex: unset;
+  padding: 9px 14px;
+}
+
 .social-tap {
   transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
@@ -2071,6 +2178,12 @@ button {
 .character-reference-item span {
   color: var(--muted-text);
   font-size: 0.78rem;
+}
+
+.character-reference-item small {
+  color: var(--soft-text);
+  font-size: 0.72rem;
+  line-height: 1.25;
 }
 
 .character-detail-save-row {

@@ -313,7 +313,7 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
         <span className="eyebrow">capture</span>
         <h3>Character capture</h3>
         <p className="muted" style={{ margin: '8px 0 0' }}>
-          Build a reusable photorealistic character from your reference photos and videos.
+          Build a reusable cinematic character from your reference photos and videos.
         </p>
       </div>
 

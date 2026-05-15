@@ -288,7 +288,7 @@ export type GenerationResponse = {
   sanitizedPrompt?: string | null;
   moderationDiagnostics?: ProviderModerationDiagnostics | null;
   assetPersistence?: boolean | AssetPersistenceSummary | null;
-  assetPersistenceDiagnostics?: Record<string, unknown> | null;
+  assetPersistenceDiagnostics?: AssetPersistenceFailureDiagnostics | Record<string, unknown> | null;
   generationMode?: GenerationMode | null;
   finalPrompt?: string | null;
   durationSeconds?: number | null;
@@ -389,6 +389,28 @@ export type AssetPersistenceSummary = {
   }>;
 };
 
+export type AssetPersistenceFailureReason =
+  | 'protected_external_url'
+  | 'expired_signed_url'
+  | 'invalid_url'
+  | 'download_failed'
+  | 'asset_too_large'
+  | 'unsupported_content_type'
+  | 'storage_not_configured'
+  | 'storage_upload_failed';
+
+export type AssetPersistenceFailureDiagnostics = {
+  code: string;
+  reason: AssetPersistenceFailureReason;
+  sourceUrl: string | null;
+  host: string | null;
+  failedReferenceIndex: number | null;
+  failedReferenceLabel: string | null;
+  failedReferenceRole: string | null;
+  originalUrlHost: string | null;
+  canContinueWithoutReference: boolean;
+};
+
 export type ModerationCategory =
   | 'identity_moderation'
   | 'celebrity_public_figure_moderation'
@@ -476,7 +498,12 @@ export type ApiHealthDiagnostics = {
     persistedAssetCount: number;
     failedAssetDownloads: number;
     unsupportedHostEvents: number;
+    blockedHosts?: number;
     unsupportedHosts: Array<{ host: string; count: number }>;
+    failedReferenceLabels?: Array<{ label: string; count: number }>;
+    repairableFailures?: number;
+    mediaAssetsReadWrite?: string;
+    bucketCheck?: string;
     orphanedAssetReferences: number;
     error?: unknown;
     remediation?: string;

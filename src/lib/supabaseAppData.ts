@@ -41,6 +41,7 @@ export type LumoraStorageBucket =
   | 'character-reference-images'
   | 'self-capture-videos'
   | 'voice-samples'
+  | 'lumora-assets'
   | 'generated-videos'
   | 'post-thumbnails';
 
@@ -51,6 +52,7 @@ const CREATOR_SELF_CHARACTER_ID = 'creator-self';
 const publicBuckets: LumoraStorageBucket[] = [
   'avatars',
   'character-reference-images',
+  'lumora-assets',
   'generated-videos',
   'post-thumbnails',
 ];
@@ -1061,6 +1063,7 @@ export async function updateSupabaseCharacterProfile(input: {
   characterId: string;
   name?: string;
   displayName?: string | null;
+  referenceImageUrls?: ReferenceImageUrls;
   stylePreferences?: Record<string, unknown>;
   appearanceSummary?: string | null;
   wardrobeTendencies?: string | null;
@@ -1105,6 +1108,9 @@ export async function updateSupabaseCharacterProfile(input: {
       .update({
         name: input.name ?? existingProfile.name,
         display_name: input.displayName ?? input.name ?? existingProfile.displayName ?? existingProfile.name,
+        reference_image_urls: input.referenceImageUrls
+          ? cleanJsonRecord(cleanReferenceImageUrls(input.referenceImageUrls))
+          : cleanJsonRecord(cleanReferenceImageUrls(existingProfile.referenceImageUrls)),
         style_preferences: stylePreferences,
         appearance_summary: input.appearanceSummary ?? existingProfile.appearanceSummary ?? '',
         wardrobe_tendencies: input.wardrobeTendencies ?? existingProfile.wardrobeTendencies ?? '',
@@ -1148,6 +1154,9 @@ export async function updateSupabaseCharacterProfile(input: {
     .update({
       name: input.name ?? existing.name,
       display_name: input.displayName ?? input.name ?? existing.displayName ?? existing.name,
+      reference_image_urls: input.referenceImageUrls
+        ? cleanJsonRecord(cleanReferenceImageUrls(input.referenceImageUrls))
+        : cleanJsonRecord(cleanReferenceImageUrls(existing.referenceImageUrls)),
       style_preferences: stylePreferences,
       appearance_summary: input.appearanceSummary ?? existing.appearanceSummary ?? '',
       wardrobe_tendencies: input.wardrobeTendencies ?? existing.wardrobeTendencies ?? '',
