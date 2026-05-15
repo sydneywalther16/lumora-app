@@ -5,6 +5,8 @@ import { getBestPoster, getBestThumbnail } from '../lib/mediaThumbnail';
 import { loadPostedPublications } from '../lib/postStorage';
 import { listForYouFeed } from '../lib/supabaseAppData';
 import { useSession } from '../hooks/useSession';
+import { openContinueStory } from '../lib/continueStory';
+import { trackCreatorEvent } from '../lib/creatorEvents';
 
 type FeedPost = LumoraPost & {
   tags?: string[] | string | null;
@@ -96,6 +98,13 @@ function recommendationReason(post: FeedPost, index: number) {
   return 'Fresh creator scene';
 }
 
+function whyThisPost(post: FeedPost, index = 0) {
+  if ((post.likeCount ?? 0) > 100) return 'Popular this week';
+  if (post.characterName) return 'Popular cast moment';
+  if (index < 3) return 'Similar cinematic mood';
+  return 'New story world';
+}
+
 function localForYouFeed(query: string) {
   const localPosts = loadPostedPublications() as FeedPost[];
   const demoFeed = demoPosts.map(demoToFeedPost);
@@ -117,7 +126,7 @@ function friendlyFeedError(error: unknown) {
     lower.includes('thumbnail_url') ||
     lower.includes('character_id')
   ) {
-    return 'Feed and Drafts need the latest database migration.';
+    return 'Feed and Drafts need the latest Lumora update.';
   }
   return 'Unable to load recommendations right now. Showing local discovery picks.';
 }
@@ -273,7 +282,19 @@ function ForYouCard({
   );
 }
 
-function ForYouPreviewModal({ post, onClose }: { post: FeedPost; onClose: () => void }) {
+function ForYouPreviewModal({
+  post,
+  onClose,
+  onContinueStory,
+  onSocialAction,
+  socialState,
+}: {
+  post: FeedPost;
+  onClose: () => void;
+  onContinueStory: (post: FeedPost) => void;
+  onSocialAction: (action: 'like' | 'save' | 'follow', post: FeedPost) => void;
+  socialState: Record<string, boolean>;
+}) {
   const title = post.title || post.caption || 'Lumora video';
   const bodyText = post.caption || post.prompt || '';
   const posterUrl = getBestPoster(post);
@@ -348,6 +369,7 @@ function ForYouPreviewModal({ post, onClose }: { post: FeedPost; onClose: () => 
 
         <div style={{ padding: '18px', display: 'grid', gap: '10px' }}>
           <h3 style={{ margin: 0 }}>{title}</h3>
+          <span className="tiny-pill" style={{ width: 'fit-content' }}>Why this? {whyThisPost(post)}</span>
           <p className="muted" style={{ margin: 0 }}>{bodyText}</p>
           <div className="stats-row" style={{ gap: '12px' }}>
             <span>{formatCompactCount(post.viewCount)} views</span>
@@ -355,10 +377,16 @@ function ForYouPreviewModal({ post, onClose }: { post: FeedPost; onClose: () => 
             <span>{formatCompactCount(post.shareCount)} shares</span>
           </div>
           <div className="social-action-row" aria-label="Social actions">
-            <button type="button" className="ghost-btn">React</button>
-            <button type="button" className="ghost-btn">Comment</button>
-            <button type="button" className="ghost-btn">Save</button>
-            <button type="button" className="ghost-btn">Continue story</button>
+            <button type="button" className="ghost-btn social-tap" onClick={() => onSocialAction('like', post)}>
+              {socialState[`like:${post.id}`] ? 'Reacted' : 'React'}
+            </button>
+            <button type="button" className="ghost-btn social-tap" onClick={() => onSocialAction('save', post)}>
+              {socialState[`save:${post.id}`] ? 'Saved' : 'Save'}
+            </button>
+            <button type="button" className="ghost-btn social-tap" onClick={() => onSocialAction('follow', post)}>
+              {socialState[`follow:${post.creatorUsername || post.username || post.creatorName}`] ? 'Following' : 'Follow creator'}
+            </button>
+            <button type="button" className="primary-btn" onClick={() => onContinueStory(post)}>Continue story</button>
           </div>
         </div>
       </div>
@@ -375,6 +403,7 @@ export default function TrendsPage() {
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const [selectedPost, setSelectedPost] = useState<FeedPost | null>(null);
+  const [socialState, setSocialState] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     const timeout = window.setTimeout(() => setDebouncedQuery(query.trim()), 260);
@@ -443,6 +472,25 @@ export default function TrendsPage() {
       .slice(0, 5);
   }, [feed]);
 
+  function openPost(post: FeedPost) {
+    void trackCreatorEvent('for_you_item_opened', { postId: post.id, characterName: post.characterName ?? null }, authUser?.id ?? null);
+    setSelectedPost(post);
+  }
+
+  function handleContinueStory(post: FeedPost) {
+    void trackCreatorEvent('continue_story_clicked', { source: 'for-you', postId: post.id }, authUser?.id ?? null);
+    openContinueStory(post, 'for-you');
+  }
+
+  function handleSocialAction(action: 'like' | 'save' | 'follow', post: FeedPost) {
+    const key = action === 'follow'
+      ? `follow:${post.creatorUsername || post.username || post.creatorName}`
+      : `${action}:${post.id}`;
+    setSocialState((current) => ({ ...current, [key]: true }));
+    const eventName = action === 'like' ? 'like_clicked' : action === 'save' ? 'save_clicked' : 'follow_clicked';
+    void trackCreatorEvent(eventName, { source: 'for-you', postId: post.id }, authUser?.id ?? null);
+  }
+
   return (
     <div className="page">
       <section
@@ -484,7 +532,7 @@ export default function TrendsPage() {
         <section className="discovery-magic-stack" aria-label="Recommendation highlights">
           <div className="discovery-reason-rail">
             {discoveryHighlights.map((post, index) => (
-              <button key={post.id} type="button" className="discovery-reason-chip" onClick={() => setSelectedPost(post)}>
+              <button key={post.id} type="button" className="discovery-reason-chip" onClick={() => openPost(post)}>
                 <strong>{recommendationReason(post, index)}</strong>
                 <span>{post.caption || post.title || 'Cinematic scene'}</span>
               </button>
@@ -511,6 +559,14 @@ export default function TrendsPage() {
               <span className="tiny-pill">Live</span>
             </div>
           ) : null}
+          {!debouncedQuery ? (
+            <div className="chip-row wrap" aria-label="For You story sections">
+              <span className="tiny-pill">Because you follow creators like this</span>
+              <span className="tiny-pill">Recently published</span>
+              <span className="tiny-pill">Popular cast moments</span>
+              <span className="tiny-pill">Continue watching</span>
+            </div>
+          ) : null}
           <section
             aria-label="For You recommendations"
             className="for-you-grid"
@@ -522,7 +578,7 @@ export default function TrendsPage() {
             }}
           >
             {feed.map((post, index) => (
-              <ForYouCard key={post.id} post={post} preview={index < 4} onSelect={setSelectedPost} />
+              <ForYouCard key={post.id} post={post} preview={index < 4} onSelect={openPost} />
             ))}
           </section>
         </>
@@ -537,11 +593,22 @@ export default function TrendsPage() {
               ? 'Try a creator, character, title, prompt, or tag.'
               : 'Discover cinematic creators and evolving story worlds as soon as public scenes arrive.'}
           </p>
+          {!debouncedQuery ? (
+            <button type="button" className="primary-btn" onClick={() => setQuery('cinematic')} style={{ width: 'fit-content', flex: 'unset' }}>
+              Explore trending stories
+            </button>
+          ) : null}
         </article>
       )}
 
       {selectedPost ? (
-        <ForYouPreviewModal post={selectedPost} onClose={() => setSelectedPost(null)} />
+        <ForYouPreviewModal
+          post={selectedPost}
+          onClose={() => setSelectedPost(null)}
+          onContinueStory={handleContinueStory}
+          onSocialAction={handleSocialAction}
+          socialState={socialState}
+        />
       ) : null}
     </div>
   );

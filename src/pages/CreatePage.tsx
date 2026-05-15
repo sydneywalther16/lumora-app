@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import CharacterLibrary from '../components/CharacterLibrary';
+import CreatorIdentityCard from '../components/CreatorIdentityCard';
 import CreatorOnboarding from '../components/CreatorOnboarding';
 import CreateVideo from '../components/CreateVideo';
+import StoryWorldProgress from '../components/StoryWorldProgress';
 import {
   getCreatorSelfCharacter,
   getStoredCharacters,
@@ -9,7 +11,10 @@ import {
   saveStoredCharacters,
 } from '../lib/characterStorage';
 import { loadLumoraProfile, type LumoraProfile } from '../lib/profileStorage';
+import { loadPostedPublications } from '../lib/postStorage';
+import { loadStudioProjects } from '../lib/projectStorage';
 import { type CharacterProfile, type GenerationMode, type ReferenceImageUrls } from '../lib/api';
+import { trackCreatorEvent } from '../lib/creatorEvents';
 import { useSession } from '../hooks/useSession';
 import {
   loadSupabaseCharacters,
@@ -27,6 +32,7 @@ import {
   mergeIdentityFeedback,
 } from '../lib/identityCharacter';
 import type { LumoraIdentityFeedback } from '../lib/api';
+import { buildCreatorIdentityCard, buildStoryWorldProgress } from '../lib/storyWorld';
 
 function manualHttpsReferenceUrl(...values: Array<string | null | undefined>): string | null {
   const value = values.find((item) => typeof item === 'string' && item.trim().startsWith('https://'));
@@ -266,6 +272,15 @@ export default function CreatePage() {
     : null;
 
   const pageLoading = creatorDataLoading || !isHydrated;
+  const storyWorldProgress = buildStoryWorldProgress({
+    drafts: loadStudioProjects(),
+    posts: loadPostedPublications(),
+    characters: authUserId ? [defaultSelfCharacter, selectedCharacter].filter((item): item is CharacterProfile => Boolean(item)) : getStoredCharacters(),
+  });
+  const creatorIdentityCard = buildCreatorIdentityCard({
+    profile,
+    characters: authUserId ? [defaultSelfCharacter, selectedCharacter].filter((item): item is CharacterProfile => Boolean(item)) : getStoredCharacters(),
+  });
 
   useEffect(() => {
     console.log("FINAL referenceImageUrl:", referenceImageUrl);
@@ -299,6 +314,7 @@ export default function CreatePage() {
   }
 
   function openCharactersHub() {
+    void trackCreatorEvent('character_opened', { source: 'create' }, authUserId);
     localStorage.setItem('lumora_open_characters_hub', '1');
     window.location.href = '/profile';
   }
@@ -321,6 +337,10 @@ export default function CreatePage() {
         <p>Your cast, style, and Story Memory stay with the scene while Lumora shapes the next moment.</p>
       </section>
 
+      <StoryWorldProgress progress={storyWorldProgress} compact />
+
+      <CreatorIdentityCard card={creatorIdentityCard} compact />
+
       <CharacterLibrary
         refreshKey={characterRefreshKey}
         selectedCharacterId={selectedCharacter?.id ?? null}
@@ -340,6 +360,9 @@ export default function CreatePage() {
         </div>
         <p className="muted" style={{ margin: 0 }}>
           Build and edit the cinematic cast members you can reuse across stories.
+        </p>
+        <p className="muted" style={{ margin: 0 }}>
+          Drafts stay private until published. You control your cast and can update references any time.
         </p>
       </section>
 

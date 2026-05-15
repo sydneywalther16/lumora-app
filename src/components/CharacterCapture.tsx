@@ -36,7 +36,7 @@ function compactPreferences(preferences: Record<string, string>) {
   );
 }
 
-const characterProfilesMigrationWarning = 'Cast needs the latest database update.';
+const characterProfilesMigrationWarning = 'Cast needs the latest Lumora update.';
 
 function characterCaptureErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);

@@ -8,6 +8,9 @@ import {
   updateSupabaseCharacterProfile,
 } from '../lib/supabaseAppData';
 import { useSession } from '../hooks/useSession';
+import { trackCreatorEvent } from '../lib/creatorEvents';
+import { buildCreatorIdentityCard } from '../lib/storyWorld';
+import CreatorIdentityCard from './CreatorIdentityCard';
 import CharacterCapture from './CharacterCapture';
 
 type CharacterHubProps = {
@@ -22,7 +25,7 @@ type CharacterHubProps = {
 type DetailSectionKey = 'identity' | 'appearance' | 'style' | 'voice' | 'memory' | 'references';
 
 const characterLimit = 25;
-const characterProfilesMigrationWarning = 'Cast needs the latest database update.';
+const characterProfilesMigrationWarning = 'Cast needs the latest Lumora update.';
 
 function characterInitial(name: string) {
   return name.trim().charAt(0).toUpperCase() || 'C';
@@ -360,6 +363,7 @@ export default function CharacterHub({
   }
 
   function openCharacterDetail(character: CharacterProfile) {
+    void trackCreatorEvent('character_opened', { characterId: character.id, isSelf: characterIsSelf(character) }, authUser?.id ?? null);
     setSelectedCharacterId(character.id);
     setCreatingCharacter(false);
     setSelfSetupOpen(false);
@@ -398,9 +402,11 @@ export default function CharacterHub({
     if (authUser) {
       const latestCharacters = await loadSupabaseCharacters(authUser.id);
       await onRefresh(latestCharacters);
+      void trackCreatorEvent('self_character_created', { source: 'characters', characterCount: latestCharacters.length }, authUser.id);
       return;
     }
     await onRefresh();
+    void trackCreatorEvent('self_character_created', { source: 'characters' }, null);
   }
 
   async function handleSaveProfile() {
@@ -481,6 +487,7 @@ export default function CharacterHub({
       setActionsOpen(false);
       setSelectedCharacterId(null);
       setDeleteStatus('');
+      void trackCreatorEvent('character_deleted', { characterId: selectedCharacter.id }, authUser?.id ?? null);
     } catch (error) {
       setDeleteStatus(error instanceof Error ? error.message : 'Unable to delete character.');
     } finally {
@@ -574,6 +581,14 @@ export default function CharacterHub({
     ) || 'No appearance summary saved yet.';
     const sceneAppearances = uniqueSceneCount(selectedCharacter);
     const memorySnapshotCount = selectedCharacter.memorySnapshots?.length ?? 0;
+    const selectedIdentityCard = buildCreatorIdentityCard({
+      profile: {
+        displayName: displayName(selectedCharacter),
+        username: 'lumora.creator',
+        bio: selectedCharacter.appearanceSummary ?? '',
+      },
+      characters: [selectedCharacter],
+    });
 
     return (
       <CharacterHubFrame onClose={onClose}>
@@ -610,6 +625,10 @@ export default function CharacterHub({
             </div>
           </div>
         </article>
+
+        {selectedIsSelf ? (
+          <CreatorIdentityCard card={selectedIdentityCard} compact />
+        ) : null}
 
         <div className="character-detail-sections">
           <CharacterDetailSection
@@ -748,13 +767,13 @@ export default function CharacterHub({
                 ))}
               </div>
               <div className="character-memory-viewer character-section-card">
-                <span className="eyebrow">creative adaptation</span>
+                <span className="eyebrow">cinematic safety</span>
                 {orchestrationEntries.length ? (
                   orchestrationEntries.map(([label, value]) => (
                     <p key={label}><strong>{label}</strong> {value}</p>
                   ))
                 ) : (
-                  <p className="muted">No creative adaptation notes saved yet.</p>
+                  <p className="muted">No cinematic safety notes saved yet.</p>
                 )}
               </div>
             </div>
@@ -860,7 +879,7 @@ export default function CharacterHub({
           <span className="eyebrow">cast</span>
           <h2 style={{ marginTop: '8px' }}>Characters</h2>
           <p className="muted" style={{ margin: '8px 0 0' }}>
-            Build your reusable cinematic cast.
+            Your reusable cinematic cast. Cast members can return across scenes, and Story Memory helps keep them consistent.
           </p>
         </div>
       </div>

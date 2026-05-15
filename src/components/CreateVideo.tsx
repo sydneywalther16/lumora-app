@@ -36,6 +36,7 @@ import { useSession } from '../hooks/useSession';
 import { useAppStore } from '../store/useAppStore';
 import SelfReferencePreview, { normalizeReference } from './SelfReferencePreview';
 import { STYLE_PRESETS, selectedStylePrompt } from '../lib/stylePresets';
+import { trackCreatorEvent } from '../lib/creatorEvents';
 
 type CreateVideoProps = {
   refreshKey?: number;
@@ -191,6 +192,7 @@ type GenerateVideoApiResponse = {
   referenceImages?: unknown;
   referenceImageCount?: unknown;
   multimodalReferenceMode?: unknown;
+  assetPersistence?: unknown;
   moderation?: unknown;
   suggestedPrompt?: unknown;
   sanitizedPrompt?: unknown;
@@ -427,7 +429,7 @@ const providerModerationMessage =
   'Creative safety paused this render after Lumora tried safer cinematic styling.';
 const providerQueueBusyMessage = 'The render line is busy. Lumora will try again in a moment...';
 const replicateThrottledMessage =
-  'The render studio is cooling down for a moment. Wait a minute and try again.';
+  'The cinematic renderer is cooling down for a moment. Wait a minute and try again.';
 
 function isProviderSafetyFilterError(value: string): boolean {
   const lower = value.toLowerCase();
@@ -519,6 +521,12 @@ function moderationWarningMessages(value: unknown): string[] {
   return stages.map((stage) => `Creative adaptation: ${stage}`);
 }
 
+function persistedAssetCount(summary: unknown) {
+  if (!summary || typeof summary === 'boolean' || typeof summary !== 'object') return 0;
+  const persisted = (summary as { persisted?: unknown }).persisted;
+  return typeof persisted === 'number' ? persisted : 0;
+}
+
 function isProviderQueueBusyError(value: string): boolean {
   const lower = value.toLowerCase();
   return (
@@ -542,7 +550,7 @@ function parseGenerateResponse(text: string): {
   if (!text.trim()) {
     return {
       data: {},
-      parseError: 'The render studio returned an empty response.',
+      parseError: 'Lumora did not receive a scene response.',
     };
   }
 
@@ -581,7 +589,7 @@ function parseCreativePlanDraft(value: string): CreativeBrainScenePlan | null {
   return null;
 }
 
-const characterProfilesMigrationWarning = 'Cast needs the latest database update.';
+const characterProfilesMigrationWarning = 'Cast needs the latest Lumora update.';
 
 function characterProfileSchemaWarning(diagnostics: ApiHealthDiagnostics) {
   const missingCharacterId = diagnostics.database?.schemaChecks?.some((check) => (
@@ -846,6 +854,13 @@ export default function CreateVideo({
         : 'Lumora can shape your idea into cinematic beats.',
     },
   ];
+  const storyMemoryMoment = continuityMemoryDraft.environment
+    ? `Lumora remembered this setting: ${continuityMemoryDraft.environment}.`
+    : continuityMemoryDraft.wardrobe
+      ? 'Lumora adapted wardrobe continuity for this scene.'
+      : continuityMemoryDraft.emotionalTone
+        ? 'Emotional pacing matched your prior scene.'
+        : 'Lumora will remember your world as you create.';
 
   useEffect(() => {
     const savedPrompt = localStorage.getItem('remixPrompt');
@@ -939,7 +954,7 @@ export default function CreateVideo({
     if (progressTimerRef.current) window.clearTimeout(progressTimerRef.current);
     progressTimerRef.current = window.setTimeout(() => {
       setGenerationStatusState('processing');
-      setStatus('Rendering your cinematic take...');
+      setStatus('Preserving Story Memory and shaping emotional pacing...');
       progressTimerRef.current = null;
     }, 1400);
   }
@@ -1063,8 +1078,9 @@ export default function CreateVideo({
       setSceneExecutionPlan(null);
       setSceneExecutionError('');
       setCreativePlanStatus('Storyboard ready. Review the beats before rendering.');
+      void trackCreatorEvent('first_storyboard_built', { source: 'create', characterId }, authUser?.id ?? null);
     } catch (error) {
-      setCreativePlanError(error instanceof Error ? friendlyCharacterProfileError(error) : 'Creative Brain could not build your storyboard.');
+      setCreativePlanError(error instanceof Error ? friendlyCharacterProfileError(error) : 'Lumora could not build your storyboard yet.');
       setCreativePlanStatus('');
     } finally {
       setCreativePlanLoading(false);
@@ -1162,6 +1178,14 @@ export default function CreateVideo({
       });
 
       setSceneExecutionResult(result);
+      const scenePersistedAssetCount = persistedAssetCount(result.assetPersistence);
+      if (scenePersistedAssetCount > 0) {
+        void trackCreatorEvent(
+          'asset_persisted',
+          { source: 'scene-flow', persisted: scenePersistedAssetCount },
+          sceneExecutorUserId,
+        );
+      }
       if (result.continuityMemory) {
         setContinuityMemory(result.continuityMemory);
         setContinuityMemoryDraft(normalizeContinuityMemoryState(result.continuityMemory.state));
@@ -1464,7 +1488,7 @@ export default function CreateVideo({
 
       if (!nextVideoUrl) {
         console.error('No video returned', data);
-        setGenerationError('No usable video URL was returned from the generator.');
+        setGenerationError('Lumora did not receive a playable scene yet.');
         finishGenerationProgress('failed');
         showToast({ type: 'error', message: 'Lumora paused this scene before a video was returned.' });
         return;
@@ -1480,6 +1504,14 @@ export default function CreateVideo({
       setGeneratedMode(nextGenerationMode);
       setGenerationWarnings(nextWarnings);
       setGenerationModerationStages(nextModerationStages);
+      const generatedPersistedAssetCount = persistedAssetCount(data.assetPersistence);
+      if (generatedPersistedAssetCount > 0) {
+        void trackCreatorEvent(
+          'asset_persisted',
+          { source: 'generation', persisted: generatedPersistedAssetCount },
+          authUser?.id ?? null,
+        );
+      }
 
       const profile = authUser ? await loadSupabaseProfile(authUser.id) : loadLumoraProfile();
       const now = new Date().toISOString();
@@ -1612,7 +1644,8 @@ export default function CreateVideo({
 
       finishGenerationProgress('completed');
       setStatus(studioSaveStatus);
-      showToast({ type: 'success', message: 'Generation completed and saved to Drafts.' });
+      void trackCreatorEvent('first_draft_created', { source: 'generation', engine }, authUser?.id ?? null);
+      showToast({ type: 'success', message: 'Your cinematic draft is saved. Continue the story from Drafts when ready.' });
     } catch (error) {
       console.error('Generation failed', error);
       const message = error instanceof Error ? error.message : 'Unable to create draft render';
@@ -1640,6 +1673,11 @@ export default function CreateVideo({
           : ''),
       );
       setGenerationModerationStages(retryStages);
+      if (moderationPayload) {
+        void trackCreatorEvent('moderation_adapted', { source: 'create', engine }, authUser?.id ?? null);
+      } else {
+        void trackCreatorEvent('generation_failed', { source: 'create', engine }, authUser?.id ?? null);
+      }
       setGenerationError(
         isSoraEngine && !isProviderSafetyFilterError(displayMessage) && !moderationPayload
           ? `${displayMessage} Self-character likeness is currently using the reference-led video path.`
@@ -1698,6 +1736,7 @@ export default function CreateVideo({
       } else {
         saveLocalDraft(draftTitle, activePrompt);
         setStatus('Draft saved locally.');
+        void trackCreatorEvent('first_draft_created', { source: 'manual-save' }, null);
       }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Unable to save draft.');
@@ -1805,6 +1844,10 @@ export default function CreateVideo({
           {continuityMemoryLoading ? <p className="muted">Syncing Story Memory...</p> : null}
           {continuityMemoryStatus ? <p className="muted">{continuityMemoryStatus}</p> : null}
           {continuityMemoryError ? <p className="creative-plan-error">{continuityMemoryError}</p> : null}
+          <div className="story-memory-moment">
+            <span className="tiny-dot" />
+            <p>{storyMemoryMoment}</p>
+          </div>
           <div className="continuity-memory-grid">
             {continuityMemoryFields.map((field) => (
               <label key={field} className="continuity-memory-field">
@@ -2040,8 +2083,8 @@ export default function CreateVideo({
         </div>
 
         <div className="field-block">
-          <span>Render studio</span>
-          <div className="provider-grid" role="radiogroup" aria-label="Render studio">
+          <span>Cinematic renderer</span>
+          <div className="provider-grid" role="radiogroup" aria-label="Cinematic renderer">
             {providerOptions.map((option) => (
               <button
                 key={option.engine}

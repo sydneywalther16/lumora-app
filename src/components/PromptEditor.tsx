@@ -36,7 +36,7 @@ export default function PromptEditor() {
 
   async function handleGenerate() {
     setBusy(true);
-    setStatus('Sending your scene to the render studio...');
+    setStatus('Sending your scene to the cinematic renderer...');
     try {
       const stylePreset = selectedStylePrompt(selectedStyles, activePrompt);
       const result = await api.createGeneration({

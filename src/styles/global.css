@@ -1425,6 +1425,105 @@ button {
   font-weight: 700;
 }
 
+.creator-identity-card,
+.story-world-progress,
+.story-memory-moment {
+  border: 1px solid var(--surface-border);
+  background:
+    linear-gradient(145deg, rgba(126, 231, 216, 0.07), rgba(255, 105, 212, 0.06)),
+    var(--surface-background);
+  box-shadow: var(--surface-shadow);
+}
+
+.creator-identity-card,
+.story-world-progress {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 22px;
+  animation: cinematicPanelIn 200ms ease both;
+}
+
+.creator-identity-card h3,
+.story-world-progress h3 {
+  margin: 6px 0 0;
+  line-height: 1.15;
+}
+
+.creator-identity-card.compact .creator-identity-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.creator-identity-grid,
+.story-world-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.creator-identity-grid span,
+.story-world-stats span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--control-border);
+  border-radius: 16px;
+  background: var(--control-background);
+  color: var(--muted-text);
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+
+.creator-identity-grid strong,
+.story-world-stats strong {
+  color: var(--text-primary);
+  font-size: 0.82rem;
+}
+
+.story-world-milestones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.story-world-milestones span {
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: var(--control-background);
+  color: var(--muted-text);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.story-world-milestones span.done {
+  color: var(--active-text);
+  background: var(--active-gradient);
+}
+
+.story-memory-moment {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border-radius: 16px;
+}
+
+.story-memory-moment p {
+  margin: 0;
+  color: var(--soft-text);
+  font-size: 0.84rem;
+  line-height: 1.38;
+}
+
+.social-tap {
+  transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+
+.social-tap:active {
+  transform: scale(0.98);
+}
+
 @keyframes continuityPulse {
   0%,
   100% {
@@ -1432,6 +1531,17 @@ button {
   }
   50% {
     box-shadow: 0 0 0 7px rgba(126, 231, 216, 0.03);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
   }
 }
 
@@ -2176,6 +2286,12 @@ button:disabled,
 
   .creator-intelligence-strip,
   .social-action-row {
+    grid-template-columns: 1fr;
+  }
+
+  .creator-identity-card.compact .creator-identity-grid,
+  .creator-identity-grid,
+  .story-world-stats {
     grid-template-columns: 1fr;
   }
 

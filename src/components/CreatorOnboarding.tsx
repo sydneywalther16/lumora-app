@@ -1,5 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getStoredCharacters } from '../lib/characterStorage';
+import { trackCreatorEvent } from '../lib/creatorEvents';
+import { loadPostedPublications } from '../lib/postStorage';
+import { loadLumoraProfile } from '../lib/profileStorage';
+import { loadStudioProjects } from '../lib/projectStorage';
+import { buildCreatorIdentityCard, buildStoryWorldProgress } from '../lib/storyWorld';
+import CreatorIdentityCard from './CreatorIdentityCard';
+import StoryWorldProgress from './StoryWorldProgress';
 
 export const CREATOR_ONBOARDING_STORAGE_KEY = 'lumora_creator_onboarding_seen_v1';
 
@@ -10,39 +18,51 @@ type CreatorOnboardingProps = {
 const onboardingSteps = [
   {
     eyebrow: 'welcome',
-    title: 'Make your world cinematic',
-    body: 'Lumora helps turn your ideas, cast, and style into cinematic scenes that remember what came before.',
+    title: "Let's build your cinematic identity.",
+    body: 'Start with one scene. Your story world can grow from there.',
     beats: ['Your cinematic identity', 'Your cast', 'Your story memory', 'Your scene flow'],
   },
   {
     eyebrow: 'identity',
-    title: 'Create your cinematic identity',
-    body: 'Start with your self character so Lumora can keep your look, presence, and creator style consistent.',
-    beats: ['Add reference photos', 'Choose your style', 'Save your creator look'],
+    title: 'Your first cast member is you.',
+    body: 'Create your self character so Lumora can keep your look, presence, and creator style consistent.',
+    beats: ['Create Self Character', 'You control your cast', 'Self stays pinned first'],
   },
   {
-    eyebrow: 'cast',
-    title: 'Build a reusable cast',
-    body: 'Bring characters back across scenes with familiar faces, wardrobe tendencies, emotional tone, and memory.',
-    beats: ['Self pinned first', 'Cast members underneath', 'Up to 25 cinematic identities'],
+    eyebrow: 'references',
+    title: 'Add one to five reference photos.',
+    body: 'A few strong references help Lumora preserve your cinematic identity without forcing every scene to look the same.',
+    beats: ['Front photo', 'Angles', 'Optional full-body'],
   },
   {
-    eyebrow: 'story memory',
-    title: 'Let your world remember',
-    body: 'Story Memory keeps track of tone, settings, props, weather, camera feel, and the last scene so each moment belongs to the same world.',
-    beats: ['Continuity preserved', 'Style remembered', 'Emotional pacing carried forward'],
+    eyebrow: 'vibe',
+    title: 'Choose the feeling of your world.',
+    body: 'Pick a cinematic vibe now. You can refine the mood, style, and visual tone later.',
+    beats: ['Mood', 'Wardrobe', 'Visual tone'],
+  },
+  {
+    eyebrow: 'reveal',
+    title: 'Lumora starts to understand your universe.',
+    body: 'This Creator Identity Card is a first draft of your cinematic signal.',
+    beats: ['Style seed', 'Story Memory seed', 'First scene idea'],
+  },
+  {
+    eyebrow: 'storyboard',
+    title: 'Build your first storyboard.',
+    body: 'Lumora shapes your idea into cinematic beats before the scene begins rendering.',
+    beats: ['Emotional pacing', 'Camera feeling', 'Scene rhythm'],
   },
   {
     eyebrow: 'scene flow',
-    title: 'Generate your first scene',
-    body: 'Lumora shapes your prompt into cinematic beats, saves each finished shot, and keeps successful scenes safe if a later shot needs another take.',
-    beats: ['Storyboard', 'Scene progress', 'Draft autosave'],
+    title: 'Render the first Scene Flow.',
+    body: 'Finished shots stay safe in Drafts, and Story Memory carries the feeling forward.',
+    beats: ['Saving scene references', 'Preserving Story Memory', 'Draft autosave'],
   },
   {
     eyebrow: 'publish',
-    title: 'Post when it feels right',
-    body: 'Drafts stay private until you publish. Once posted, your cinematic moment joins your profile and discovery feed.',
-    beats: ['Preview in Drafts', 'Post to profile', 'Discover on For You'],
+    title: 'Reveal your first cinematic moment.',
+    body: 'Drafts stay private until published. Once posted, your moment joins your profile and can appear in For You.',
+    beats: ['Your scene is live', 'Profile reveal', 'Welcome to For You'],
   },
 ];
 
@@ -59,11 +79,21 @@ export default function CreatorOnboarding({ embedded = false }: CreatorOnboardin
   const navigate = useNavigate();
   const [visible, setVisible] = useState(!embedded);
   const [stepIndex, setStepIndex] = useState(0);
+  const identityCard = useMemo(() => buildCreatorIdentityCard({
+    profile: loadLumoraProfile(),
+    characters: getStoredCharacters(),
+  }), []);
+  const storyWorldProgress = useMemo(() => buildStoryWorldProgress({
+    drafts: loadStudioProjects(),
+    posts: loadPostedPublications(),
+    characters: getStoredCharacters(),
+  }), []);
   const step = onboardingSteps[stepIndex];
   const progressPercent = Math.round(((stepIndex + 1) / onboardingSteps.length) * 100);
   const isLastStep = stepIndex === onboardingSteps.length - 1;
 
   useEffect(() => {
+    void trackCreatorEvent('onboarding_started', { embedded });
     if (!embedded || typeof window === 'undefined') return;
     try {
       setVisible(localStorage.getItem(CREATOR_ONBOARDING_STORAGE_KEY) !== 'seen');
@@ -103,6 +133,14 @@ export default function CreatorOnboarding({ embedded = false }: CreatorOnboardin
         </div>
       </div>
 
+      {step.eyebrow === 'reveal' ? (
+        <CreatorIdentityCard card={identityCard} compact={embedded} />
+      ) : null}
+
+      {step.eyebrow === 'publish' ? (
+        <StoryWorldProgress progress={storyWorldProgress} compact={embedded} />
+      ) : null}
+
       <div className="creator-onboarding-progress" aria-label={`Onboarding progress ${progressPercent}%`}>
         <div style={{ width: `${progressPercent}%` }} />
       </div>
@@ -127,8 +165,8 @@ export default function CreatorOnboarding({ embedded = false }: CreatorOnboardin
         >
           {isLastStep ? 'Start first scene' : 'Continue'}
         </button>
-        <button type="button" className="ghost-btn" onClick={() => close('/for-you')}>
-          {embedded ? 'Hide for now' : 'Explore For You'}
+        <button type="button" className="ghost-btn" onClick={() => close('/create')}>
+          Skip for now
         </button>
       </div>
     </section>

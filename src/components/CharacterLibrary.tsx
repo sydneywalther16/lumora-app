@@ -16,7 +16,7 @@ function characterInitial(name: string) {
   return name.trim().charAt(0).toUpperCase() || 'C';
 }
 
-const characterProfilesMigrationWarning = 'Cast needs the latest database update.';
+const characterProfilesMigrationWarning = 'Cast needs the latest Lumora update.';
 
 function characterProfileEditorError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);

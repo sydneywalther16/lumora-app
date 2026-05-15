@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import AuthCard from '../components/auth/AuthCard';
 import CharacterHub from '../components/CharacterHub';
+import CreatorIdentityCard from '../components/CreatorIdentityCard';
+import StoryWorldProgress from '../components/StoryWorldProgress';
 import {
   CREATOR_SELF_CHARACTER_ID,
   cleanupCreatorSelfMetadata,
@@ -46,6 +48,9 @@ import {
 import { getBestPoster, getBestThumbnail } from '../lib/mediaThumbnail';
 import { resolveRenderableReferenceUrl } from '../lib/selfCharacterReference';
 import SelfReferencePreview, { normalizeReference } from '../components/SelfReferencePreview';
+import { openContinueStory } from '../lib/continueStory';
+import { trackCreatorEvent } from '../lib/creatorEvents';
+import { buildCreatorIdentityCard, buildStoryWorldProgress } from '../lib/storyWorld';
 
 type Draft = { id: string; title: string; prompt: string; createdAt: string };
 type ProfileDebugInfo = {
@@ -241,11 +246,11 @@ function friendlyProfileLoadError(error: unknown) {
   const lower = message.toLowerCase();
 
   if (lower.includes('character_id')) {
-    return 'Cast needs the latest database update.';
+    return 'Cast needs the latest Lumora update.';
   }
 
   if (lower.includes('status') || lower.includes('published_at') || lower.includes('thumbnail_url')) {
-    return 'Drafts and Feed need the latest database migration.';
+    return 'Drafts and Feed need the latest Lumora update.';
   }
 
   return error instanceof Error ? error.message : 'Unable to load Supabase profile data.';
@@ -1079,10 +1084,14 @@ function ProfilePostPreviewModal({
   post,
   fallbackAvatar,
   onClose,
+  onContinueStory,
+  onSocialAction,
 }: {
   post: LumoraPost;
   fallbackAvatar?: string | null;
   onClose: () => void;
+  onContinueStory: (post: LumoraPost) => void;
+  onSocialAction: (action: 'like' | 'save' | 'follow') => void;
 }) {
   const title = post.title || post.caption || 'Untitled post';
   const bodyText = post.caption || post.prompt || 'No prompt available';
@@ -1192,6 +1201,16 @@ function ProfilePostPreviewModal({
           <p className="muted" style={{ margin: 0, fontSize: '0.95rem' }}>
             Posted {formatPostedDate(post.createdAt)}
           </p>
+          <div className="story-memory-moment">
+            <span className="tiny-dot" />
+            <p>{characterLabel ? `${characterLabel} can continue into the next scene.` : 'This moment can become the seed for your next scene.'}</p>
+          </div>
+          <div className="social-action-row">
+            <button type="button" className="ghost-btn" onClick={() => onSocialAction('like')}>React</button>
+            <button type="button" className="ghost-btn" onClick={() => onSocialAction('save')}>Save</button>
+            <button type="button" className="ghost-btn" onClick={() => onSocialAction('follow')}>Follow</button>
+            <button type="button" className="primary-btn" onClick={() => onContinueStory(post)}>Continue story</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1917,6 +1936,15 @@ export default function ProfilePage() {
           : creatorIdentityProfile.status === 'ready'
             ? 'Identity ready'
             : 'Needs references';
+  const storyWorldProgress = buildStoryWorldProgress({
+    drafts,
+    posts,
+    characters,
+  });
+  const creatorIdentityCard = buildCreatorIdentityCard({
+    profile,
+    characters,
+  });
   function openProfileEditor() {
     setProfileDraft(profile);
     setSaveMessage(null);
@@ -1942,8 +1970,26 @@ export default function ProfilePage() {
   }
 
   function openCharactersHub() {
+    void trackCreatorEvent('character_opened', { source: 'profile' }, authUserId);
     setCharacterHubOpen(true);
     setEditingSelfCharacter(false);
+  }
+
+  function handleContinueProfileStory(post: LumoraPost) {
+    void trackCreatorEvent('continue_story_clicked', { source: 'profile', postId: post.id }, authUserId);
+    openContinueStory(post, 'profile');
+  }
+
+  function handleProfileSocialAction(action: 'like' | 'save' | 'follow') {
+    const eventName = action === 'like' ? 'like_clicked' : action === 'save' ? 'save_clicked' : 'follow_clicked';
+    void trackCreatorEvent(eventName, { source: 'profile' }, authUserId);
+    setSaveMessage(
+      action === 'like'
+        ? 'Reaction saved.'
+        : action === 'save'
+          ? 'Saved for later.'
+          : 'Creator follow saved.',
+    );
   }
 
   async function handleProfileMenuSignOut() {
@@ -2954,6 +3000,10 @@ export default function ProfilePage() {
         </div>
       </section>
 
+      <StoryWorldProgress progress={storyWorldProgress} />
+
+      <CreatorIdentityCard card={creatorIdentityCard} compact onEdit={openCharactersHub} />
+
       {!signedIn ? (
         <div id="profile-auth-section">
           <AuthCard
@@ -3406,6 +3456,9 @@ export default function ProfilePage() {
           <article className="list-card" style={{ borderRadius: '28px', padding: '18px' }}>
             <h3>Your published cinematic moments will appear here.</h3>
             <p className="muted">Create a draft, post it when it feels right, and your profile becomes a living story grid.</p>
+            <button type="button" className="primary-btn" onClick={() => { window.location.href = '/create'; }} style={{ width: 'fit-content', flex: 'unset' }}>
+              Create your first scene
+            </button>
           </article>
         )}
       </SectionCard>
@@ -3415,6 +3468,8 @@ export default function ProfilePage() {
           post={selectedPost}
           fallbackAvatar={profile.avatar}
           onClose={() => setSelectedPost(null)}
+          onContinueStory={handleContinueProfileStory}
+          onSocialAction={handleProfileSocialAction}
         />
       ) : null}
 

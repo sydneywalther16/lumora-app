@@ -13,6 +13,8 @@ import {
 } from '../lib/supabaseAppData';
 import type { GenerationJob, LumoraPost, PrivacySetting } from '../lib/api';
 import { getBestPoster, getBestThumbnail } from '../lib/mediaThumbnail';
+import { openContinueStory } from '../lib/continueStory';
+import { trackCreatorEvent } from '../lib/creatorEvents';
 
 type Props = {
   jobs: GenerationJob[];
@@ -90,10 +92,10 @@ function friendlyPublishError(error: unknown) {
     lower.includes('character_id') ||
     lower.includes('visibility')
   ) {
-    return 'Draft publishing needs the latest database migration.';
+    return 'Lumora needs the latest publishing update before this scene can go live.';
   }
 
-  return error instanceof Error ? `Unable to post to Home feed: ${error.message}` : 'Unable to post to Home feed.';
+  return error instanceof Error ? `Lumora could not post this scene yet: ${error.message}` : 'Lumora could not post this scene yet.';
 }
 
 export default function StudioList({ jobs, onPublished }: Props) {
@@ -245,7 +247,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
     }
 
     if (isPosted(job.id)) {
-      setPublishMessage('Already posted to Home feed.');
+      setPublishMessage('This scene is already live on your cinematic profile.');
       return;
     }
 
@@ -268,7 +270,8 @@ export default function StudioList({ jobs, onPublished }: Props) {
       setPostedProjectIds((current) =>
         current.includes(job.id) ? current : [job.id, ...current]
       );
-      setPublishMessage('Posted to Home feed.');
+      void trackCreatorEvent('draft_published', { source: 'drafts', draftId: job.id, privacy: publishPrivacy }, authUser?.id ?? null);
+      setPublishMessage('Your scene is live. This moment joined your cinematic profile.');
       onPublished?.(job.id);
     } catch (error) {
       setHiddenJobIds((current) => {
@@ -325,6 +328,11 @@ export default function StudioList({ jobs, onPublished }: Props) {
       }),
     );
     window.location.href = '/create';
+  }
+
+  function continueStory(job: GenerationJob) {
+    void trackCreatorEvent('continue_story_clicked', { source: 'drafts', draftId: job.id }, authUser?.id ?? null);
+    openContinueStory(job, 'drafts');
   }
 
   const publishToast = publishMessage || publishError ? (
@@ -534,6 +542,15 @@ export default function StudioList({ jobs, onPublished }: Props) {
                 <span>{job.resultAssetUrl ? 'Scene ready' : 'Lumora is still shaping this scene...'}</span>
               </div>
 
+              <div className="story-memory-moment" style={{ marginTop: '12px' }}>
+                <span className="tiny-dot" />
+                <p>
+                  {job.characterName
+                    ? `${job.characterName}'s story details can carry into the next scene.`
+                    : 'Story Memory can carry this mood, setting, and visual tone forward.'}
+                </p>
+              </div>
+
               <div className="row-between muted-line" style={{ marginTop: '14px' }}>
                 <span>Updated {formatUpdated(job.updatedAt)}</span>
 
@@ -560,6 +577,16 @@ export default function StudioList({ jobs, onPublished }: Props) {
                         }}
                       >
                         Remix
+                      </button>
+                      <button
+                        type="button"
+                        className="text-btn"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          continueStory(job);
+                        }}
+                      >
+                        Continue story
                       </button>
                     </>
                   ) : (
@@ -685,6 +712,10 @@ export default function StudioList({ jobs, onPublished }: Props) {
 
               <button type="button" className="ghost-btn" onClick={() => remixJob(selectedJob)}>
                 Remix This
+              </button>
+
+              <button type="button" className="ghost-btn" onClick={() => continueStory(selectedJob)}>
+                Continue story
               </button>
 
               {selectedJob.resultAssetUrl ? (
