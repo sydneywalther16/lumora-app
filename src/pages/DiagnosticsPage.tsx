@@ -128,6 +128,28 @@ export default function DiagnosticsPage() {
                 ) : null}
               </div>
             ) : null}
+            {diagnostics.providerFallback ? (
+              <div>
+                <span className="eyebrow">provider fallback</span>
+                <p className="diagnostic-row">
+                  <span>cast-safe prompts</span>
+                  <strong>{diagnostics.providerFallback.castSafePromptApplied}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>display names masked</span>
+                  <strong>{diagnostics.providerFallback.displayNameMasked}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>safe route successes</span>
+                  <strong>{diagnostics.providerFallback.successfulFallbacks}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>paused scenes</span>
+                  <strong>{diagnostics.providerFallback.paused}</strong>
+                </p>
+                <p className="muted">{diagnostics.providerFallback.note}</p>
+              </div>
+            ) : null}
             {diagnostics.database ? (
               <div>
                 <span className="eyebrow">database</span>

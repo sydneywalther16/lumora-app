@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getEnvironmentDiagnostics } from '../lib/envDiagnostics';
 import { buildAssetPersistenceDiagnostics } from '../services/assetPersistence';
+import { buildProviderFallbackDiagnostics } from '../services/providerFallbackOrchestrator';
 import { buildDatabaseDiagnostics } from '../services/schemaDiagnostics';
 
 export const healthRouter = Router();
@@ -16,5 +17,6 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
     ...getEnvironmentDiagnostics(),
     database: await buildDatabaseDiagnostics(),
     assetPersistence: await buildAssetPersistenceDiagnostics(),
+    providerFallback: await buildProviderFallbackDiagnostics(),
   });
 });

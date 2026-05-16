@@ -16,6 +16,7 @@ import {
   type LumoraIdentityProfile,
   type GenerationResponse,
   type ProviderModerationDiagnostics,
+  type ProviderFallbackDiagnostics,
   type ReferenceImageUrls,
   type SceneExecutorResult,
   type SeedanceReferenceImage,
@@ -213,6 +214,7 @@ type GenerateVideoApiResponse = {
   suggestedPrompt?: unknown;
   sanitizedPrompt?: unknown;
   moderationDiagnostics?: unknown;
+  providerFallbackDiagnostics?: unknown;
   warnings?: unknown;
   error?: string;
   suggestion?: string;
@@ -464,6 +466,7 @@ function isProviderModerationPayload(value: unknown): value is {
   sanitizedPrompt?: string;
   suggestion?: string;
   moderationDiagnostics?: unknown;
+  providerFallbackDiagnostics?: unknown;
 } {
   return Boolean(value) && typeof value === 'object' && Boolean((value as { moderation?: unknown }).moderation);
 }
@@ -489,6 +492,34 @@ function moderationRetryStageMessages(value: unknown): string[] {
     : [];
 
   return Array.from(new Set([...directStages, ...pathStages].map(creatorModerationStageMessage)));
+}
+
+function isProviderFallbackDiagnostics(value: unknown): value is ProviderFallbackDiagnostics {
+  return Boolean(value) && typeof value === 'object' && Array.isArray((value as { stages?: unknown }).stages);
+}
+
+function providerFallbackStageMessages(value: unknown): string[] {
+  if (!isProviderFallbackDiagnostics(value)) return [];
+
+  return Array.from(new Set(
+    value.stages
+      .map((stage) => stage.message)
+      .filter((message): message is string => typeof message === 'string' && message.trim().length > 0),
+  ));
+}
+
+function providerFallbackWarningMessages(value: unknown): string[] {
+  if (!isProviderFallbackDiagnostics(value)) return [];
+
+  const messages = providerFallbackStageMessages(value).map((stage) => `Creative adaptation: ${stage}`);
+  if (value.displayNameMasked) {
+    messages.push('Lumora kept the cast name in your world and used saved references for the renderer.');
+  }
+  if (value.finalProviderStatus === 'succeeded' && value.stages.some((stage) => stage.status === 'blocked')) {
+    messages.push('Lumora found a safer cinematic route.');
+  }
+
+  return Array.from(new Set(messages));
 }
 
 function creatorModerationStageMessage(stage: string): string {
@@ -719,6 +750,7 @@ export default function CreateVideo({
   const progressTimerRef = useRef<number | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const repairFileInputRef = useRef<HTMLInputElement | null>(null);
+  const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const primaryReferenceImage = pickReferenceImage({ referenceImageUrl, referenceImageUrls });
   const hasSelfCharacter = forceSelfMode || isDefaultSelfCharacter;
   const selectedSelfReferenceImageUrl = hasSelfCharacter
@@ -1629,12 +1661,16 @@ export default function CreateVideo({
       const nextWarnings = Array.from(new Set([
         ...formatWarnings(data.warnings),
         ...moderationWarningMessages(data.moderationDiagnostics),
+        ...providerFallbackWarningMessages(data.providerFallbackDiagnostics),
         ...(data.referenceImageNote ? [data.referenceImageNote] : []),
         ...(selectedIsSeedanceEngine && selectedSeedanceReferences.length === 1
           ? ['Only one image is uploaded. Add side, full-body, expression, or outfit references for stronger cast consistency.']
           : []),
       ]));
-      const nextModerationStages = moderationRetryStageMessages(data.moderationDiagnostics);
+      const nextModerationStages = Array.from(new Set([
+        ...moderationRetryStageMessages(data.moderationDiagnostics),
+        ...providerFallbackStageMessages(data.providerFallbackDiagnostics),
+      ]));
 
       if (!nextVideoUrl) {
         console.error('No video returned', data);
@@ -1683,6 +1719,9 @@ export default function CreateVideo({
         generationMode: nextGenerationMode,
         moderationDiagnostics: isProviderModerationDiagnostics(data.moderationDiagnostics)
           ? data.moderationDiagnostics
+          : null,
+        providerFallbackDiagnostics: isProviderFallbackDiagnostics(data.providerFallbackDiagnostics)
+          ? data.providerFallbackDiagnostics
           : null,
         finalPrompt: nextFinalPrompt,
         model: data.model || null,
@@ -1795,7 +1834,13 @@ export default function CreateVideo({
       finishGenerationProgress('completed');
       setStatus(studioSaveStatus);
       void trackCreatorEvent('first_draft_created', { source: 'generation', engine }, authUser?.id ?? null);
-      showToast({ type: 'success', message: 'Your cinematic draft is saved. Continue the story from Drafts when ready.' });
+      showToast({
+        type: 'success',
+        message: isProviderFallbackDiagnostics(data.providerFallbackDiagnostics) &&
+          data.providerFallbackDiagnostics.stages.some((stage) => stage.status === 'blocked')
+          ? 'Lumora found a safer cinematic route.'
+          : 'Your cinematic draft is saved. Continue the story from Drafts when ready.',
+      });
     } catch (error) {
       console.error('Generation failed', error);
       const message = error instanceof Error ? error.message : 'Unable to create draft render';
@@ -1806,13 +1851,23 @@ export default function CreateVideo({
         setRepairStatus('');
       }
       const moderationPayload = isProviderModerationPayload(apiPayload) ? apiPayload : null;
+      const providerFallbackPayload = isProviderFallbackDiagnostics(moderationPayload?.providerFallbackDiagnostics)
+        ? moderationPayload.providerFallbackDiagnostics
+        : null;
       const suggestedRewrite =
+        providerFallbackPayload?.suggestedPrompt ||
+        providerFallbackPayload?.sanitizedPrompt ||
         moderationPayload?.suggestedPrompt ||
         moderationPayload?.sanitizedPrompt ||
         '';
-      const retryStages = moderationRetryStageMessages(moderationPayload?.moderationDiagnostics);
+      const retryStages = Array.from(new Set([
+        ...moderationRetryStageMessages(moderationPayload?.moderationDiagnostics),
+        ...providerFallbackStageMessages(providerFallbackPayload),
+      ]));
       const displayMessage = moderationPayload
-        ? providerModerationMessage
+        ? providerFallbackPayload
+          ? 'This scene needs a simpler direction before rendering.'
+          : providerModerationMessage
         : repairIssue
         ? 'One reference image needs to be re-uploaded before Lumora can use it.'
         : isProviderSafetyFilterError(message)
@@ -1826,6 +1881,8 @@ export default function CreateVideo({
       setGenerationModerationDetail(
         repairIssue
           ? assetRepairCopy(repairIssue)
+          : providerFallbackPayload
+          ? 'Lumora kept your cast and Story Memory intact. Try the safer rewrite, simplify the scene, or save the draft before another take.'
           : moderationPayload?.suggestion ||
         (moderationPayload
           ? 'Lumora preserved your cast, Story Memory, and storyboard while adapting the style for cinematic safety.'
@@ -1973,6 +2030,7 @@ export default function CreateVideo({
         <label className="field-block">
           <span>Core prompt</span>
           <textarea
+            ref={promptTextareaRef}
             value={activePrompt}
             onChange={(event) => setActivePrompt(event.target.value)}
             rows={6}
@@ -2189,6 +2247,9 @@ export default function CreateVideo({
                           const clipModerationStages = moderationRetryStageMessages(
                             clip.moderationDiagnostics ?? clip.metadata.moderationOrchestration,
                           );
+                          const clipProviderFallbackStages = providerFallbackStageMessages(
+                            clip.providerFallbackDiagnostics ?? clip.metadata.providerFallback,
+                          );
 
                           return (
                             <li key={clip.id} className={`scene-progress-item ${clip.status}`}>
@@ -2196,7 +2257,7 @@ export default function CreateVideo({
                               <span>
                                 <strong>{clip.title}</strong>
                                 <small>{clip.metadata.cameraFraming} / {clip.metadata.cameraMovement}</small>
-                                {clipModerationStages.map((stage) => (
+                                {[...clipModerationStages, ...clipProviderFallbackStages].map((stage) => (
                                   <small key={stage}>{stage}</small>
                                 ))}
                                 {clip.error ? <small className="creative-plan-error">{clip.error}</small> : null}
@@ -2587,9 +2648,25 @@ export default function CreateVideo({
                 </button>
               </div>
             ) : null}
-            <button type="button" className="ghost-btn" onClick={handleGenerate} disabled={generateBusy}>
-              Retry generation
-            </button>
+            <div className="button-row">
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={() => {
+                  setGenerationError('');
+                  setStatus('Adjust the scene direction, then Lumora can try another take.');
+                  promptTextareaRef.current?.focus();
+                }}
+              >
+                Edit prompt
+              </button>
+              <button type="button" className="ghost-btn" onClick={() => void handleSaveDraft()} disabled={saveBusy}>
+                Save draft
+              </button>
+              <button type="button" className="ghost-btn" onClick={handleGenerate} disabled={generateBusy}>
+                Retry generation
+              </button>
+            </div>
           </div>
         ) : null}
         {generationWarnings.length ? (

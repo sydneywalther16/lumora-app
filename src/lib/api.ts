@@ -217,6 +217,7 @@ export type SceneClipMetadata = {
   memorySnapshot?: ContinuityMemoryState | null;
   sceneMemorySummary?: SceneMemorySummary | null;
   moderationOrchestration?: ProviderModerationDiagnostics | null;
+  providerFallback?: ProviderFallbackDiagnostics | null;
   assetPersistence?: AssetPersistenceSummary | null;
 };
 
@@ -237,6 +238,7 @@ export type SceneExecutorClip = {
   error?: string | null;
   metadata: SceneClipMetadata;
   moderationDiagnostics?: ProviderModerationDiagnostics | null;
+  providerFallbackDiagnostics?: ProviderFallbackDiagnostics | null;
   createdAt: string;
 };
 
@@ -287,6 +289,7 @@ export type GenerationResponse = {
   suggestedPrompt?: string | null;
   sanitizedPrompt?: string | null;
   moderationDiagnostics?: ProviderModerationDiagnostics | null;
+  providerFallbackDiagnostics?: ProviderFallbackDiagnostics | null;
   assetPersistence?: boolean | AssetPersistenceSummary | null;
   assetPersistenceDiagnostics?: AssetPersistenceFailureDiagnostics | Record<string, unknown> | null;
   generationMode?: GenerationMode | null;
@@ -476,6 +479,40 @@ export type ProviderModerationDiagnostics = {
   providerFallbackReady?: boolean;
 };
 
+export type ProviderFallbackProvider =
+  | 'seedance-quality'
+  | 'seedance-fast'
+  | 'veo-experimental'
+  | 'kling'
+  | 'demo-mode';
+
+export type ProviderFallbackStage = {
+  stage: 'cast_safe_prompt' | 'seedance_fast' | 'stylized_cinematic' | 'paused';
+  provider: ProviderFallbackProvider;
+  message: string;
+  status: 'attempted' | 'blocked' | 'succeeded' | 'skipped' | 'paused';
+  blockedReasonCategory?: string | null;
+  promptChanged?: boolean;
+  quality?: 'fast' | 'quality';
+};
+
+export type ProviderFallbackDiagnostics = {
+  providerAttempted: ProviderFallbackProvider;
+  fallbackProviderAttempted: ProviderFallbackProvider | null;
+  providersAttempted: ProviderFallbackProvider[];
+  castSafePromptApplied: boolean;
+  displayNameMasked: boolean;
+  riskyTermsRemoved: string[];
+  finalProviderStatus: 'succeeded' | 'blocked' | 'paused';
+  blockedReasonCategory?: string | null;
+  finalProvider: ProviderFallbackProvider | null;
+  finalPrompt: string;
+  stages: ProviderFallbackStage[];
+  suggestedPrompt?: string | null;
+  sanitizedPrompt?: string | null;
+  moderationDiagnostics?: ProviderModerationDiagnostics | null;
+};
+
 export type ApiHealthDiagnostics = {
   service: string;
   checkedAt: string;
@@ -507,6 +544,23 @@ export type ApiHealthDiagnostics = {
     orphanedAssetReferences: number;
     error?: unknown;
     remediation?: string;
+  };
+  providerFallback?: {
+    ok: boolean;
+    configured: Record<string, boolean>;
+    attempts: number;
+    castSafePromptApplied: number;
+    displayNameMasked: number;
+    successfulFallbacks: number;
+    paused: number;
+    providersAttempted: Record<string, number>;
+    riskyTermsRemoved: Record<string, number>;
+    blockedCategories: Record<string, number>;
+    lastSuccessfulPath: string | null;
+    lastBlockedCategory: string | null;
+    safeTestPrompts: string[];
+    providerOrder: ProviderFallbackProvider[];
+    note: string;
   };
   generationProviders: Array<{
     id: string;

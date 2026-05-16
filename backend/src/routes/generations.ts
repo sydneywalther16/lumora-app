@@ -5,6 +5,7 @@ import { persistCompletedGeneration } from '../services/generationPersistence';
 import { createSeedanceGeneration } from '../services/generationService';
 import { isAssetPersistenceError } from '../services/assetPersistence';
 import { isSeedanceModerationError } from '../services/providers/seedanceProvider';
+import { providerFallbackDiagnosticsFromError } from '../services/providerFallbackOrchestrator';
 import { createVideoGeneration } from '../video';
 
 const generationEngines = ['seedance-2.0', 'seedance-quality', 'veo', 'runway', 'mock', 'openai'] as const;
@@ -151,10 +152,15 @@ generationsRouter.post('/seedance', generationRateLimit, async (req, res) => {
       return;
     }
     if (isSeedanceModerationError(error)) {
+      const providerFallbackDiagnostics = providerFallbackDiagnosticsFromError(error);
+      const creatorMessage = providerFallbackDiagnostics
+        ? 'This scene needs a simpler direction before rendering.'
+        : 'Seedance moderation paused this render after Lumora tried moderation-safe cinematic orchestration.';
       console.warn('SEEDANCE GENERATION MODERATION RESPONSE:', {
         engine: payload.engine ?? 'seedance-2.0',
         quality,
         diagnostics: error.diagnostics,
+        providerFallbackDiagnostics,
         exactProviderMessage: error.diagnostics.providerMessage,
       });
       res.status(error.statusCode).json({
@@ -166,13 +172,14 @@ generationsRouter.post('/seedance', generationRateLimit, async (req, res) => {
         prompt,
         outputUrl: '',
         videoUrl: '',
-        error: 'Seedance moderation paused this render after Lumora tried moderation-safe cinematic orchestration.',
-        message: 'Seedance moderation paused this render after Lumora tried moderation-safe cinematic orchestration.',
+        error: creatorMessage,
+        message: creatorMessage,
         moderation: true,
         suggestion: error.suggestion,
         suggestedPrompt: error.suggestedPrompt,
         sanitizedPrompt: error.sanitizedPrompt,
         moderationDiagnostics: error.diagnostics,
+        providerFallbackDiagnostics,
         referenceImages: error.referenceImages,
         referenceImageCount: error.referenceImages.length,
         multimodalReferenceMode: error.referenceImages.length > 1,
@@ -326,9 +333,14 @@ generationsRouter.post('/', generationRateLimit, async (req, res) => {
       return;
     }
     if (isSeedanceModerationError(error)) {
+      const providerFallbackDiagnostics = providerFallbackDiagnosticsFromError(error);
+      const creatorMessage = providerFallbackDiagnostics
+        ? 'This scene needs a simpler direction before rendering.'
+        : 'Seedance moderation paused this render after Lumora tried moderation-safe cinematic orchestration.';
       console.warn('GENERATION PROVIDER MODERATION RESPONSE:', {
         engine: payload.engine,
         diagnostics: error.diagnostics,
+        providerFallbackDiagnostics,
         exactProviderMessage: error.diagnostics.providerMessage,
       });
       res.status(error.statusCode).json({
@@ -340,13 +352,14 @@ generationsRouter.post('/', generationRateLimit, async (req, res) => {
         prompt,
         outputUrl: '',
         videoUrl: '',
-        error: 'Seedance moderation paused this render after Lumora tried moderation-safe cinematic orchestration.',
-        message: 'Seedance moderation paused this render after Lumora tried moderation-safe cinematic orchestration.',
+        error: creatorMessage,
+        message: creatorMessage,
         moderation: true,
         suggestion: error.suggestion,
         suggestedPrompt: error.suggestedPrompt,
         sanitizedPrompt: error.sanitizedPrompt,
         moderationDiagnostics: error.diagnostics,
+        providerFallbackDiagnostics,
         referenceImages: error.referenceImages,
         referenceImageCount: error.referenceImages.length,
         multimodalReferenceMode: error.referenceImages.length > 1,

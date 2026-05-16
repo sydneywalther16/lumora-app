@@ -27,12 +27,16 @@ import {
   type SceneMemorySummary,
 } from './memoryEngine';
 import {
-  generateSeedanceVideo,
   isSeedanceModerationError,
   type SeedanceModerationDiagnostics,
   type SeedanceQualityMode,
   type SeedanceReferenceImage,
 } from './providers/seedanceProvider';
+import {
+  generateSeedanceWithProviderFallback,
+  providerFallbackDiagnosticsFromError,
+  type ProviderFallbackDiagnostics,
+} from './providerFallbackOrchestrator';
 import {
   persistSeedanceReferenceImages,
   type AssetPersistenceSummary,
@@ -59,6 +63,7 @@ export type SceneClipMetadata = {
   memorySnapshot?: ContinuityMemoryState | null;
   sceneMemorySummary?: SceneMemorySummary | null;
   moderationOrchestration?: SeedanceModerationDiagnostics | null;
+  providerFallback?: ProviderFallbackDiagnostics | null;
   assetPersistence?: AssetPersistenceSummary | null;
 };
 
@@ -79,6 +84,7 @@ export type SceneExecutorClip = {
   error?: string | null;
   metadata: SceneClipMetadata;
   moderationDiagnostics?: SeedanceModerationDiagnostics | null;
+  providerFallbackDiagnostics?: ProviderFallbackDiagnostics | null;
   createdAt: string;
 };
 
@@ -329,6 +335,7 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
       error: null,
       metadata,
       moderationDiagnostics: null,
+      providerFallbackDiagnostics: null,
       createdAt: queuedJob.createdAt,
     };
 
@@ -359,11 +366,14 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
     clip.status = 'processing';
 
     try {
-      const seedanceResult = await generateSeedanceVideo(prompt, {
+      const seedanceResult = await generateSeedanceWithProviderFallback({
+        prompt,
         quality: input.quality,
         referenceImages: safeReferenceImages,
         userId: input.userId,
         characterId: executionCharacterId,
+        characterName: characterProfile?.displayName ?? null,
+        characterDisplayName: characterProfile?.displayName ?? null,
         projectId: input.projectId ?? null,
       });
       const completedJob = await updateGenerationJobStatus({
@@ -382,9 +392,11 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
       clip.providerJobId = seedanceResult.providerJobId;
       clip.error = null;
       clip.moderationDiagnostics = seedanceResult.moderationDiagnostics ?? null;
+      clip.providerFallbackDiagnostics = seedanceResult.providerFallbackDiagnostics ?? null;
       clip.metadata = {
         ...clip.metadata,
         moderationOrchestration: seedanceResult.moderationDiagnostics ?? null,
+        providerFallback: seedanceResult.providerFallbackDiagnostics ?? null,
       };
       clip.createdAt = completedJob?.createdAt ?? clip.createdAt;
 
@@ -413,6 +425,7 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
           memorySnapshot: continuityMemory.state,
           sceneMemorySummary: memoryUpdate.sceneSummary,
           moderationOrchestration: seedanceResult.moderationDiagnostics ?? null,
+          providerFallback: seedanceResult.providerFallbackDiagnostics ?? null,
         };
         await updateGenerationJobSceneMetadata({
           jobId: clip.jobId ?? clip.id,
@@ -455,8 +468,11 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
         driftAlertCount,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Scene clip generation failed.';
       const moderationDiagnostics = isSeedanceModerationError(error) ? error.diagnostics : null;
+      const providerFallbackDiagnostics = providerFallbackDiagnosticsFromError(error);
+      const message = providerFallbackDiagnostics
+        ? 'This renderer paused the scene. Your completed shots are saved in Drafts.'
+        : error instanceof Error ? error.message : 'Scene clip generation failed.';
       const failedJob = await updateGenerationJobStatus({
         jobId: clip.jobId ?? clip.id,
         status: 'failed',
@@ -472,9 +488,11 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
       clip.providerJobId = null;
       clip.error = message;
       clip.moderationDiagnostics = moderationDiagnostics;
+      clip.providerFallbackDiagnostics = providerFallbackDiagnostics;
       clip.metadata = {
         ...clip.metadata,
         moderationOrchestration: moderationDiagnostics,
+        providerFallback: providerFallbackDiagnostics,
       };
       clip.createdAt = failedJob?.createdAt ?? clip.createdAt;
       await updateGenerationJobSceneMetadata({

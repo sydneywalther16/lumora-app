@@ -5,11 +5,14 @@ import {
   type AssetPersistenceSummary,
 } from './assetPersistence';
 import {
-  generateSeedanceVideo,
   type SeedanceModerationDiagnostics,
   type SeedanceQualityMode,
   type SeedanceReferenceImage,
 } from './providers/seedanceProvider';
+import {
+  generateSeedanceWithProviderFallback,
+  type ProviderFallbackDiagnostics,
+} from './providerFallbackOrchestrator';
 
 const optionalGenerationJobColumns = [
   'character_id',
@@ -108,6 +111,7 @@ export type SeedanceGenerationRecord = {
   multimodalReferenceMode: boolean;
   assetPersistence?: AssetPersistenceSummary;
   moderationDiagnostics?: SeedanceModerationDiagnostics;
+  providerFallbackDiagnostics?: ProviderFallbackDiagnostics;
   suggestedPrompt?: string;
   sanitizedPrompt?: string;
   rawOutput: unknown;
@@ -130,11 +134,13 @@ export async function createSeedanceGeneration(input: {
     referenceImages: input.referenceImages,
     usage: 'character_reference_image',
   });
-  const result = await generateSeedanceVideo(input.prompt, {
+  const result = await generateSeedanceWithProviderFallback({
+    prompt: input.prompt,
     quality: input.quality,
     referenceImages: persistedReferences.referenceImages,
     userId: input.userId,
     characterId: input.characterId,
+    characterName: input.characterName,
   });
   const createdAt = new Date().toISOString();
   const referenceThumbnailUrl = persistedReferences.referenceImages.map((reference) => reference.url).find(Boolean) ?? input.characterAvatar ?? null;
@@ -185,6 +191,7 @@ export async function createSeedanceGeneration(input: {
     multimodalReferenceMode: result.multimodalReferenceMode,
     assetPersistence: persistedReferences.summary,
     moderationDiagnostics: result.moderationDiagnostics,
+    providerFallbackDiagnostics: result.providerFallbackDiagnostics,
     suggestedPrompt: result.suggestedPrompt,
     sanitizedPrompt: result.sanitizedPrompt,
     rawOutput: result.rawOutput,
