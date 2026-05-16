@@ -518,8 +518,29 @@ function providerFallbackWarningMessages(value: unknown): string[] {
   if (value.finalProviderStatus === 'succeeded' && value.stages.some((stage) => stage.status === 'blocked')) {
     messages.push('Lumora found a safer cinematic route.');
   }
+  if (value.renderedWithLighterCastGuidance) {
+    messages.push('Rendered with lighter cast guidance.');
+  }
 
   return Array.from(new Set(messages));
+}
+
+function creatorVisibleFinalPrompt(data: GenerateVideoApiResponse, fallbackPrompt: string) {
+  if (typeof data.suggestedPrompt === 'string' && data.suggestedPrompt.trim()) {
+    return data.suggestedPrompt.trim();
+  }
+
+  if (typeof data.finalPrompt === 'string' && data.finalPrompt.trim()) {
+    const finalPrompt = data.finalPrompt.trim();
+    const lower = finalPrompt.toLowerCase();
+    const looksProviderInternal = finalPrompt.includes('[Image') ||
+      lower.includes('reference_images') ||
+      lower.includes('use all provided images') ||
+      lower.includes('the cinematic character from [image');
+    if (!looksProviderInternal) return finalPrompt;
+  }
+
+  return fallbackPrompt;
 }
 
 function creatorModerationStageMessage(stage: string): string {
@@ -1634,11 +1655,24 @@ export default function CreateVideo({
         : nextGenerationMode === 'seedance-text-to-video'
           ? data.displayEngine || 'Seedance 2.0 Fast'
           : data.displayEngine || (nextGenerationMode === 'text-to-video-fallback' ? 'text fallback' : 'kling');
+      const providerFallbackDiagnostics = isProviderFallbackDiagnostics(data.providerFallbackDiagnostics)
+        ? data.providerFallbackDiagnostics
+        : null;
+      const renderedWithLighterCastGuidance = Boolean(providerFallbackDiagnostics?.renderedWithLighterCastGuidance);
       const responseSeedanceReferenceUrls = formatSeedanceReferenceUrls(data.referenceImages);
+      const effectiveSeedanceReferences = selectedIsSeedanceEngine
+        ? responseSeedanceReferenceUrls.length
+          ? selectedSeedanceReferences.filter((reference) => responseSeedanceReferenceUrls.includes(reference.url))
+          : renderedWithLighterCastGuidance
+            ? []
+            : selectedSeedanceReferences
+        : [];
       const nextAdditionalReferenceImageUrls = selectedIsSeedanceEngine
         ? (responseSeedanceReferenceUrls.length
             ? responseSeedanceReferenceUrls
-            : selectedSeedanceReferences.map((reference) => reference.url))
+            : renderedWithLighterCastGuidance
+              ? []
+              : selectedSeedanceReferences.map((reference) => reference.url))
         : formatUrlList(data.additionalReferenceImageUrls).length
           ? formatUrlList(data.additionalReferenceImageUrls)
           : additionalReferenceImageUrls;
@@ -1680,7 +1714,7 @@ export default function CreateVideo({
         return;
       }
 
-      const nextFinalPrompt = data.finalPrompt || currentPrompt;
+      const nextFinalPrompt = creatorVisibleFinalPrompt(data, currentPrompt);
       let studioSaveStatus = 'Video generated and saved to Drafts.';
       setGeneratedVideoUrl(nextVideoUrl);
       setFinalGeneratedPrompt(nextFinalPrompt);
@@ -1720,23 +1754,23 @@ export default function CreateVideo({
         moderationDiagnostics: isProviderModerationDiagnostics(data.moderationDiagnostics)
           ? data.moderationDiagnostics
           : null,
-        providerFallbackDiagnostics: isProviderFallbackDiagnostics(data.providerFallbackDiagnostics)
-          ? data.providerFallbackDiagnostics
-          : null,
+        providerFallbackDiagnostics,
         finalPrompt: nextFinalPrompt,
         model: data.model || null,
         displayEngine: nextDisplayEngine,
         referenceImageUrl: nextReferenceImageUrl,
         referenceImages: selectedIsSeedanceEngine
-          ? selectedSeedanceReferences
+          ? effectiveSeedanceReferences
           : null,
         referenceImageCount: selectedIsSeedanceEngine
-          ? selectedSeedanceReferences.length
+          ? effectiveSeedanceReferences.length
           : null,
         multimodalReferenceMode: selectedIsSeedanceEngine
-          ? selectedSeedanceReferences.length > 1
+          ? effectiveSeedanceReferences.length > 1
           : null,
-        message: nextGenerationMode === 'seedance-multimodal-reference'
+        message: renderedWithLighterCastGuidance
+          ? 'Rendered with lighter cast guidance.'
+          : nextGenerationMode === 'seedance-multimodal-reference'
           ? 'Cast reference render created.'
           : nextGenerationMode === 'seedance-text-to-video'
           ? 'Cinematic video render created.'
@@ -2644,7 +2678,9 @@ export default function CreateVideo({
                     setStatus('Safer cinematic rewrite loaded. Your references stayed intact.');
                   }}
                 >
-                  Use cinematic rewrite
+                  {generationSafeRewrite.toLowerCase().includes('storybook cinematic version')
+                    ? 'Use storybook garden version'
+                    : 'Use cinematic rewrite'}
                 </button>
               </div>
             ) : null}

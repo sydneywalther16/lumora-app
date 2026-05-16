@@ -487,13 +487,22 @@ export type ProviderFallbackProvider =
   | 'demo-mode';
 
 export type ProviderFallbackStage = {
-  stage: 'cast_safe_prompt' | 'seedance_fast' | 'stylized_cinematic' | 'paused';
+  stage:
+    | 'cast_safe_prompt'
+    | 'seedance_fast'
+    | 'stylized_cinematic'
+    | 'reduced_references'
+    | 'primary_reference'
+    | 'storybook_text_only'
+    | 'paused';
   provider: ProviderFallbackProvider;
   message: string;
   status: 'attempted' | 'blocked' | 'succeeded' | 'skipped' | 'paused';
   blockedReasonCategory?: string | null;
   promptChanged?: boolean;
   quality?: 'fast' | 'quality';
+  referenceStrategy?: 'all_saved_references' | 'reduced_cast_references' | 'primary_reference' | 'no_reference_storybook';
+  referenceCount?: number;
 };
 
 export type ProviderFallbackDiagnostics = {
@@ -507,6 +516,8 @@ export type ProviderFallbackDiagnostics = {
   blockedReasonCategory?: string | null;
   finalProvider: ProviderFallbackProvider | null;
   finalPrompt: string;
+  referenceStrategy: 'all_saved_references' | 'reduced_cast_references' | 'primary_reference' | 'no_reference_storybook' | null;
+  renderedWithLighterCastGuidance: boolean;
   stages: ProviderFallbackStage[];
   suggestedPrompt?: string | null;
   sanitizedPrompt?: string | null;

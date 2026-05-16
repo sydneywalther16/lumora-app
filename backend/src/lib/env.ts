@@ -31,6 +31,7 @@ const envSchema = z.object({
   OPENAI_CHAT_MODEL: z.string().min(1).optional(),
   OPENAI_IMAGE_MODEL: z.string().default('gpt-image-1'),
   OPENAI_VIDEO_MODEL: z.string().default('sora-2'),
+  DEBUG_PROVIDER_PROMPTS: booleanEnv.default(false),
   GOOGLE_API_KEY: z.string().min(1).optional(),
   RUNWAY_API_KEY: z.string().min(1).optional(),
   REPLICATE_API_TOKEN: z.string().min(1).optional(),

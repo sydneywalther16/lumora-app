@@ -15,6 +15,11 @@ import {
   type ModerationRenderingMode,
   type ModerationProviderSensitivityProfile,
 } from '../moderationOrchestrator';
+import {
+  logProviderPromptFinalization,
+  sanitizeProviderPrompt,
+  type ProviderPromptSanitizerResult,
+} from '../providerPromptSanitizer';
 
 export const SEEDANCE_FAST_MODEL = 'bytedance/seedance-2.0-fast';
 export const SEEDANCE_QUALITY_MODEL = 'bytedance/seedance-2.0';
@@ -102,7 +107,10 @@ type GenerateSeedanceVideoOptions = {
   referenceImages?: SeedanceReferenceImage[];
   userId?: string | null;
   characterId?: string | null;
+  characterName?: string | null;
+  characterDisplayName?: string | null;
   projectId?: string | null;
+  providerFallbackStage?: string | null;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -538,9 +546,11 @@ async function runSeedanceAttempt(input: {
   quality: SeedanceQualityMode;
   prompt: string;
   referenceImages: SeedanceReferenceImage[];
+  sanitizer: ProviderPromptSanitizerResult;
   timeoutMs: number;
   pollIntervalMs: number;
   attemptLabel: string;
+  renderingMode: ModerationRenderingMode;
 }) {
   const requestInput = buildSeedanceRequestInput(input.prompt, input.referenceImages);
 
@@ -550,7 +560,12 @@ async function runSeedanceAttempt(input: {
     attempt: input.attemptLabel,
     inputKeys: Object.keys(requestInput),
     referenceImageCount: input.referenceImages.length,
-    prompt: input.prompt,
+    promptLength: input.prompt.length,
+    displayNameMasked: input.sanitizer.displayNameMasked,
+    riskyTermsRemoved: input.sanitizer.riskyTermsRemoved,
+    socialPhrasesRemoved: input.sanitizer.socialPhrasesRemoved,
+    artifactsRemoved: input.sanitizer.artifactsRemoved,
+    renderingMode: input.renderingMode,
   });
 
   const prediction = await withReplicateRetry(
@@ -669,29 +684,47 @@ export async function generateSeedanceVideo(
       token: reference.token,
       label: reference.label ?? null,
       role: reference.role ?? null,
-      url: reference.url,
     })),
   });
 
   for (const orchestrationAttempt of orchestrationPlan.attempts) {
-    const finalPrompt = buildMultimodalSeedancePrompt(
+    const rawFinalPrompt = buildMultimodalSeedancePrompt(
       orchestrationAttempt.prompt,
       referenceImages,
       orchestrationAttempt.renderingMode,
     );
+    const finalSanitizer = sanitizeProviderPrompt({
+      prompt: rawFinalPrompt,
+      characterName: options.characterName,
+      characterDisplayName: options.characterDisplayName,
+    });
+    const finalPrompt = finalSanitizer.prompt;
     orchestrationPath.push(orchestrationAttempt);
 
     console.info('SEEDANCE FINAL PROMPT:', {
       model,
-      prompt: finalPrompt,
+      promptLength: finalPrompt.length,
       sanitizedChanged: orchestrationAttempt.changed,
       replacements: orchestrationAttempt.replacements,
+      finalSanitizerChanged: finalSanitizer.changed,
+      displayNameMasked: finalSanitizer.displayNameMasked,
+      riskyTermsRemoved: finalSanitizer.riskyTermsRemoved,
+      socialPhrasesRemoved: finalSanitizer.socialPhrasesRemoved,
+      artifactsRemoved: finalSanitizer.artifactsRemoved,
       escalationLevel: orchestrationAttempt.escalationLevel,
       rewriteStrategy: orchestrationAttempt.rewriteStrategy,
       renderingMode: orchestrationAttempt.renderingMode,
       realismModeSelected: orchestrationAttempt.realismModeSelected,
       providerProfile: orchestrationAttempt.providerProfile,
       moderationMemoryApplied: orchestrationPlan.moderationMemoryApplied,
+    });
+    logProviderPromptFinalization({
+      providerId: model,
+      originalPrompt: rawFinalPrompt,
+      sanitizer: finalSanitizer,
+      referenceCount: referenceImages.length,
+      renderingMode: orchestrationAttempt.renderingMode,
+      fallbackStage: options.providerFallbackStage ?? orchestrationAttempt.attemptLabel,
     });
     logModerationOrchestration({
       event: 'attempt',
@@ -707,9 +740,11 @@ export async function generateSeedanceVideo(
         quality,
         prompt: finalPrompt,
         referenceImages,
+        sanitizer: finalSanitizer,
         timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         pollIntervalMs: options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
         attemptLabel: orchestrationAttempt.attemptLabel,
+        renderingMode: orchestrationAttempt.renderingMode,
       });
       const finalSuccessfulOrchestrationPath = orchestrationPath
         .map((pathAttempt) => `${pathAttempt.attemptLabel}:${pathAttempt.realismModeSelected}`)
@@ -726,7 +761,7 @@ export async function generateSeedanceVideo(
             retryAttempted,
             retrySucceeded: retryAttempted,
             retryMode: orchestrationAttempt.rewriteStrategy,
-            sanitizedPrompt: orchestrationAttempt.prompt,
+            sanitizedPrompt: finalPrompt,
             suggestedPrompt: orchestrationAttempt.prompt,
             referenceImageCount: referenceImages.length,
             categories: orchestrationAttempt.categories,
@@ -785,7 +820,7 @@ export async function generateSeedanceVideo(
         ],
         moderationDiagnostics: successDiagnostics,
         suggestedPrompt: orchestrationAttempt.prompt,
-        sanitizedPrompt: orchestrationAttempt.prompt,
+        sanitizedPrompt: finalPrompt,
         rawOutput: attempt.completedPrediction.output,
         logs: attempt.completedPrediction.logs,
         metrics: attempt.completedPrediction.metrics,
@@ -824,7 +859,7 @@ export async function generateSeedanceVideo(
         retryAttempted: true,
         retrySucceeded: false,
         retryMode: enrichedAttempt.rewriteStrategy,
-        sanitizedPrompt: enrichedAttempt.prompt,
+        sanitizedPrompt: finalPrompt,
         suggestedPrompt: enrichedAttempt.prompt,
         referenceImageCount: referenceImages.length,
         categories: enrichedAttempt.categories,
@@ -844,7 +879,12 @@ export async function generateSeedanceVideo(
   }
 
   const failedAttempt = orchestrationPath[orchestrationPath.length - 1] ?? null;
-  const suggestedPrompt = failedAttempt?.prompt ?? safeCinematicRewrite(safePrompt);
+  const rawSuggestedPrompt = failedAttempt?.prompt ?? safeCinematicRewrite(safePrompt);
+  const suggestedPrompt = sanitizeProviderPrompt({
+    prompt: rawSuggestedPrompt,
+    characterName: options.characterName,
+    characterDisplayName: options.characterDisplayName,
+  }).prompt;
   const failedCategories = failedAttempt?.categories.length
     ? failedAttempt.categories
     : detectModerationCategories({
