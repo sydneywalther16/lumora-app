@@ -150,6 +150,30 @@ export default function DiagnosticsPage() {
                 <p className="muted">{diagnostics.providerFallback.note}</p>
               </div>
             ) : null}
+            {diagnostics.referenceCleanup ? (
+              <div>
+                <span className="eyebrow">reference cleanup</span>
+                <p className="diagnostic-row">
+                  <span>old external refs</span>
+                  <strong>{diagnostics.referenceCleanup.obsoleteExternalReferenceCount}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>manual overrides</span>
+                  <strong>{diagnostics.referenceCleanup.manualReferenceOverrideCount}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>protected refs</span>
+                  <strong>{diagnostics.referenceCleanup.protectedReferenceCount}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>saved Lumora refs</span>
+                  <strong>{diagnostics.referenceCleanup.savedLumoraReferenceCount}</strong>
+                </p>
+                {diagnostics.referenceCleanup.warning ? (
+                  <p className="muted">{diagnostics.referenceCleanup.warning}</p>
+                ) : null}
+              </div>
+            ) : null}
             {diagnostics.database ? (
               <div>
                 <span className="eyebrow">database</span>

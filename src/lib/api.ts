@@ -556,6 +556,18 @@ export type ApiHealthDiagnostics = {
     error?: unknown;
     remediation?: string;
   };
+  referenceCleanup?: {
+    ok: boolean;
+    obsoleteExternalReferenceCount: number;
+    manualReferenceOverrideCount: number;
+    protectedReferenceCount: number;
+    savedLumoraReferenceCount: number;
+    repairableFailures: number;
+    sourcesScanned: string[];
+    failedReferenceLabels?: Array<{ label: string; count: number }>;
+    warning?: string | null;
+    error?: unknown;
+  };
   providerFallback?: {
     ok: boolean;
     configured: Record<string, boolean>;
@@ -824,6 +836,12 @@ export type DeleteCharacterResponse = {
   };
 };
 
+export type ReferenceCleanupResponse = {
+  removedCount: number;
+  remainingReferences: ReferenceImageUrls;
+  character: CharacterProfile;
+};
+
 export type LumoraPost = {
   id: string;
   userId?: string | null;
@@ -936,6 +954,11 @@ export const api = {
   deleteCharacter: (id: string) =>
     request<DeleteCharacterResponse>(`/api/characters/${id}`, {
       method: 'DELETE',
+    }),
+
+  cleanupObsoleteCharacterReferences: (id: string) =>
+    request<ReferenceCleanupResponse>(`/api/characters/${id}/references/cleanup-obsolete`, {
+      method: 'POST',
     }),
 
   listProjects: () => request<{ projects: Array<Record<string, unknown>> }>('/api/projects'),

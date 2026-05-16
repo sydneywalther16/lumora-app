@@ -5,6 +5,7 @@ import { getBestThumbnail } from '../lib/mediaThumbnail';
 import {
   deleteSupabaseCharacterProfile,
   loadSupabaseCharacters,
+  updateSupabaseCharacterReferenceImageUrls,
   updateSupabaseCharacterProfile,
   uploadLumoraMedia,
 } from '../lib/supabaseAppData';
@@ -16,6 +17,7 @@ import CharacterCapture from './CharacterCapture';
 import {
   characterReferenceEntries,
   patchReferenceImageUrls,
+  removeReferenceImageUrl,
   type CharacterReferenceEntry,
   type ReferenceRepairSlot,
 } from '../lib/referenceRepair';
@@ -518,6 +520,36 @@ export default function CharacterHub({
     }
   }
 
+  async function handleRemoveReference(entry: CharacterReferenceEntry) {
+    if (!selectedCharacter || !entry.removable) return;
+
+    setReferenceRepairSaving(true);
+    setReferenceRepairStatus('Removing old reference...');
+    try {
+      const nextReferenceImageUrls = removeReferenceImageUrl(selectedCharacter.referenceImageUrls, entry.slot);
+      const updated = authUser
+        ? await updateSupabaseCharacterReferenceImageUrls({
+            userId: authUser.id,
+            character: selectedCharacter,
+            referenceImageUrls: nextReferenceImageUrls,
+          })
+        : updateLocalCharacterProfile({
+            characterId: selectedCharacter.id,
+            referenceImageUrls: nextReferenceImageUrls,
+          });
+
+      if (!updated) throw new Error('Cast member not found.');
+
+      setSelectedCharacterId(updated.id);
+      setReferenceRepairStatus('Old reference removed. Your saved Lumora references will still be used.');
+      await onRefresh(characters.map((character) => (character.id === updated.id ? updated : character)));
+    } catch (error) {
+      setReferenceRepairStatus(error instanceof Error ? characterProfileEditorError(error) : 'Unable to remove this reference yet.');
+    } finally {
+      setReferenceRepairSaving(false);
+    }
+  }
+
   async function handleConfirmDelete() {
     if (!selectedCharacter || selectedIsSelf) return;
 
@@ -871,6 +903,16 @@ export default function CharacterHub({
                     >
                       {selectedIsSelf ? 'Edit references' : 'Replace'}
                     </button>
+                    {entry.removable ? (
+                      <button
+                        type="button"
+                        className="text-btn"
+                        disabled={referenceRepairSaving}
+                        onClick={() => void handleRemoveReference(entry)}
+                      >
+                        Remove old reference
+                      </button>
+                    ) : null}
                   </div>
                 ))}
               </div>

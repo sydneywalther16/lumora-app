@@ -1183,6 +1183,71 @@ export async function updateSupabaseCharacterProfile(input: {
   return mapCharacterRow(data);
 }
 
+export async function updateSupabaseCharacterReferenceImageUrls(input: {
+  userId: string;
+  character: CharacterProfile;
+  referenceImageUrls: ReferenceImageUrls;
+}): Promise<CharacterProfile> {
+  const client = getClient();
+  const cleanedReferenceImageUrls = cleanJsonRecord(cleanReferenceImageUrls(input.referenceImageUrls));
+
+  if (
+    input.character.id === CREATOR_SELF_CHARACTER_ID ||
+    input.character.characterId === CREATOR_SELF_CHARACTER_ID ||
+    input.character.isCreatorSelf
+  ) {
+    const selfResult = await client
+      .from('self_characters')
+      .update({
+        reference_image_urls: cleanedReferenceImageUrls,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', input.userId)
+      .select('*')
+      .maybeSingle();
+
+    if (selfResult.error && !missingCleanupSchemaError(selfResult.error)) {
+      throw selfResult.error;
+    }
+
+    const profileByUserResult = await client
+      .from('profiles')
+      .update({
+        self_reference_image_urls: cleanedReferenceImageUrls,
+      })
+      .eq('user_id', input.userId);
+
+    if (profileByUserResult.error && !missingCleanupSchemaError(profileByUserResult.error)) {
+      throw profileByUserResult.error;
+    }
+
+    const profileByIdResult = await client
+      .from('profiles')
+      .update({
+        self_reference_image_urls: cleanedReferenceImageUrls,
+      })
+      .eq('id', input.userId);
+
+    if (profileByIdResult.error && !missingCleanupSchemaError(profileByIdResult.error)) {
+      throw profileByIdResult.error;
+    }
+
+    if (selfResult.data) return mapSelfCharacterRow(selfResult.data);
+
+    return {
+      ...input.character,
+      referenceImageUrls: input.referenceImageUrls,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  return updateSupabaseCharacterProfile({
+    userId: input.userId,
+    characterId: input.character.id,
+    referenceImageUrls: input.referenceImageUrls,
+  });
+}
+
 function missingCleanupSchemaError(error: unknown) {
   const message = error && typeof error === 'object'
     ? JSON.stringify(error)

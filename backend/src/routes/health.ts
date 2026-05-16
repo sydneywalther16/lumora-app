@@ -3,6 +3,7 @@ import { getEnvironmentDiagnostics } from '../lib/envDiagnostics';
 import { buildAssetPersistenceDiagnostics } from '../services/assetPersistence';
 import { buildProviderFallbackDiagnostics } from '../services/providerFallbackOrchestrator';
 import { buildDatabaseDiagnostics } from '../services/schemaDiagnostics';
+import { buildReferenceCleanupDiagnostics } from '../services/referenceCleanup';
 
 export const healthRouter = Router();
 
@@ -17,6 +18,7 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
     ...getEnvironmentDiagnostics(),
     database: await buildDatabaseDiagnostics(),
     assetPersistence: await buildAssetPersistenceDiagnostics(),
+    referenceCleanup: await buildReferenceCleanupDiagnostics(),
     providerFallback: await buildProviderFallbackDiagnostics(),
   });
 });

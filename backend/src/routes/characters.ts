@@ -10,6 +10,7 @@ import {
   type CharacterReferenceImageUrls,
   type CharacterRelationshipMemory,
 } from '../services/characterService';
+import { cleanupObsoleteCharacterReferencesForUser } from '../services/referenceCleanup';
 import { persistMediaUpload } from '../services/storageService';
 
 const visibilitySchema = z.enum(['private', 'approved_only', 'public']);
@@ -139,6 +140,30 @@ charactersRouter.delete('/:id', async (req: AuthedRequest, res) => {
       error: error instanceof Error ? error.message : 'Unable to delete character profile.',
     });
   }
+});
+
+charactersRouter.post('/:id/references/cleanup-obsolete', async (req: AuthedRequest, res) => {
+  const characterId = stringRouteParam(req.params.id);
+  if (!characterId) {
+    res.status(400).json({ error: 'Character id is required.' });
+    return;
+  }
+
+  const result = await cleanupObsoleteCharacterReferencesForUser({
+    ownerUserId: req.userId!,
+    characterId,
+  });
+
+  if (!result) {
+    res.status(404).json({ error: 'Character profile not found.' });
+    return;
+  }
+
+  res.json({
+    removedCount: result.removedCount,
+    remainingReferences: result.remainingReferences,
+    character: result.character,
+  });
 });
 
 charactersRouter.post('/', async (req: AuthedRequest, res) => {

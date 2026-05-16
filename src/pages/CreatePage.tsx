@@ -26,6 +26,7 @@ import {
   resolveRenderableReferenceUrl,
   type SelfCharacterReferenceImage,
 } from '../lib/selfCharacterReference';
+import { isLumoraSavedUrl } from '../lib/referenceRepair';
 import {
   buildLumoraIdentityProfile,
   identityProfileToStylePreferences,
@@ -36,7 +37,8 @@ import { buildCreatorIdentityCard, buildStoryWorldProgress } from '../lib/storyW
 
 function manualHttpsReferenceUrl(...values: Array<string | null | undefined>): string | null {
   const value = values.find((item) => typeof item === 'string' && item.trim().startsWith('https://'));
-  return value?.trim() ?? null;
+  const url = value?.trim() ?? null;
+  return url && isLumoraSavedUrl(url) ? url : null;
 }
 
 type RemixProjectPayload = {

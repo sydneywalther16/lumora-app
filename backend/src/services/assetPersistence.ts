@@ -287,6 +287,33 @@ function blockedHotlinkHost(host: string) {
   ].some((blocked) => host === blocked || host.endsWith(`.${blocked}`));
 }
 
+function referenceText(reference: Pick<SeedanceReferenceImage, 'label' | 'role'>) {
+  return `${reference.role ?? ''} ${reference.label ?? ''}`.toLowerCase();
+}
+
+function isManualReferenceOverride(reference: SeedanceReferenceImage) {
+  const text = referenceText(reference);
+  return text.includes('manual_reference_override') ||
+    text.includes('manual reference') ||
+    text.includes('manual override');
+}
+
+function isObsoleteManualReference(reference: SeedanceReferenceImage) {
+  if (!isManualReferenceOverride(reference)) return false;
+  if (!reference.url) return false;
+  return !isLumoraControlledPublicUrl(reference.url);
+}
+
+function removeObsoleteManualReferences(references: SeedanceReferenceImage[]) {
+  const savedLumoraReferenceCount = references.filter((reference) => (
+    !isObsoleteManualReference(reference) && isLumoraControlledPublicUrl(reference.url)
+  )).length;
+
+  if (!savedLumoraReferenceCount) return references;
+
+  return references.filter((reference) => !isObsoleteManualReference(reference));
+}
+
 function imageDimensions(buffer: Buffer, contentType: string | null) {
   const type = contentType?.toLowerCase() ?? '';
 
@@ -709,7 +736,7 @@ export async function persistSeedanceReferenceImages(input: {
   const assets: PersistedAsset[] = [];
   const unsupportedHosts = new Set<string>();
   const persistedReferences: SeedanceReferenceImage[] = [];
-  const allReferences = input.referenceImages ?? [];
+  const allReferences = removeObsoleteManualReferences(input.referenceImages ?? []);
 
   for (const [index, reference] of allReferences.entries()) {
     let asset: PersistedAsset;

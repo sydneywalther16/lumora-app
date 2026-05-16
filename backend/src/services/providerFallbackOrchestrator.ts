@@ -406,6 +406,7 @@ function reducedCastReferences(referenceImages: SeedanceReferenceImage[]) {
     return !(
       text.includes('full_body') ||
       text.includes('full body') ||
+      text.includes('manual_reference_override') ||
       text.includes('manual reference') ||
       text.includes('manual override') ||
       text.includes('identity_reference') ||

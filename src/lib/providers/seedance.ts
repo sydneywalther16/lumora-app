@@ -109,7 +109,7 @@ export function buildSeedanceReferenceImages(
   pushReference(references, {
     url: urls?.manualReferenceImageUrl ?? null,
     label: 'Manual reference override',
-    role: 'identity_reference',
+    role: 'manual_reference_override',
   });
   pushReference(references, {
     url: input.identityProfile?.leftAngleUrl ??

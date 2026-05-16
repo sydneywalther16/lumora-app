@@ -30,6 +30,7 @@ import {
   loadSupabaseProfile,
   saveSupabaseDraft,
   saveSupabaseProject,
+  updateSupabaseCharacterReferenceImageUrls,
   updateSupabaseCharacterProfile,
   uploadLumoraMedia,
 } from '../lib/supabaseAppData';
@@ -47,11 +48,13 @@ import { STYLE_PRESETS, selectedStylePrompt } from '../lib/stylePresets';
 import { trackCreatorEvent } from '../lib/creatorEvents';
 import {
   normalizeReferenceRepairIssue,
+  filterObsoleteSeedanceReferences,
+  isReferenceRepairIssueRemovable,
   patchReferenceImageUrls,
+  removeReferenceImageUrl,
   referenceSlotForSeedanceReference,
   referenceStatus,
   type ReferenceRepairIssue,
-  type ReferenceRepairSlot,
 } from '../lib/referenceRepair';
 
 type CreateVideoProps = {
@@ -596,6 +599,9 @@ function persistedAssetCount(summary: unknown) {
 }
 
 function assetRepairCopy(issue: ReferenceRepairIssue) {
+  if (isReferenceRepairIssueRemovable(issue) && issue.slot === 'manualReferenceImageUrl') {
+    return 'This temporary reference is no longer needed. Your saved Lumora references will still be used.';
+  }
   if (issue.reason === 'protected_external_url') {
     return 'Some social image links expire or block studio tools. Upload the image directly so Lumora can save it safely.';
   }
@@ -603,6 +609,12 @@ function assetRepairCopy(issue: ReferenceRepairIssue) {
     return 'This image link has expired. Upload the image directly so Lumora can save it safely.';
   }
   return 'Upload the image directly so Lumora can save it safely.';
+}
+
+function assetRepairTitle(issue: ReferenceRepairIssue) {
+  return isReferenceRepairIssueRemovable(issue) && issue.slot === 'manualReferenceImageUrl'
+    ? 'This temporary reference is no longer needed'
+    : 'This reference image needs to be re-uploaded';
 }
 
 function isProviderQueueBusyError(value: string): boolean {
@@ -792,7 +804,8 @@ export default function CreateVideo({
     identityProfile,
     characterAvatar,
   });
-  const seedanceReferenceImages = allSeedanceReferenceImages.filter((reference) => (
+  const runtimeSeedanceReferenceImages = filterObsoleteSeedanceReferences(allSeedanceReferenceImages);
+  const seedanceReferenceImages = runtimeSeedanceReferenceImages.filter((reference) => (
     !skippedReferenceUrls.includes(reference.url)
   ));
   const preflightReferenceRepair = seedanceReferenceImages
@@ -1345,6 +1358,62 @@ export default function CreateVideo({
     setStatus(`${activeReferenceRepair.label} skipped for this scene. Your saved cast profile stayed unchanged.`);
   }
 
+  async function handleRemoveReferencePermanently() {
+    if (!activeReferenceRepair?.sourceUrl || !activeReferenceRepair.slot) return;
+
+    if (!isReferenceRepairIssueRemovable(activeReferenceRepair)) {
+      setRepairStatus('Replace this required reference before removing it.');
+      return;
+    }
+
+    setRepairUploading(true);
+    setRepairStatus('Removing old reference...');
+    try {
+      if (!characterProfile) {
+        setSkippedReferenceUrls((current) => Array.from(new Set([...current, activeReferenceRepair.sourceUrl as string])));
+        setGenerationError('');
+        setSceneExecutionError('');
+        setReferenceRepair(null);
+        setRepairStatus('This old reference was skipped for this scene. Open Characters to remove it permanently.');
+        return;
+      }
+
+      const nextReferenceImageUrls = removeReferenceImageUrl(
+        characterProfile.referenceImageUrls,
+        activeReferenceRepair.slot,
+      );
+      let updated: CharacterProfile | null = null;
+
+      if (authUser) {
+        updated = await updateSupabaseCharacterReferenceImageUrls({
+          userId: authUser.id,
+          character: characterProfile,
+          referenceImageUrls: nextReferenceImageUrls,
+        });
+      } else {
+        updated = updateLocalCharacterProfile({
+          characterId: characterProfile.id,
+          referenceImageUrls: nextReferenceImageUrls,
+        });
+      }
+
+      if (!updated) throw new Error('Cast member not found.');
+
+      onCharacterUpdated?.(updated);
+      setSkippedReferenceUrls((current) => Array.from(new Set([...current, activeReferenceRepair.sourceUrl as string])));
+      setGenerationError('');
+      setSceneExecutionError('');
+      setReferenceRepair(null);
+      setRepairStatus('Old reference removed. Your saved Lumora references will still be used.');
+      setStatus('Old reference removed. You can continue with your saved Lumora references.');
+      showToast({ type: 'success', message: 'Old reference removed.' });
+    } catch (error) {
+      setRepairStatus(error instanceof Error ? error.message : 'Unable to remove this reference yet.');
+    } finally {
+      setRepairUploading(false);
+    }
+  }
+
   async function handleRepairUpload(file: File | null | undefined) {
     if (!file || !activeReferenceRepair) return;
 
@@ -1415,6 +1484,43 @@ export default function CreateVideo({
       setRepairUploading(false);
       if (repairFileInputRef.current) repairFileInputRef.current.value = '';
     }
+  }
+
+  function renderReferenceRepairActions() {
+    if (!activeReferenceRepair) return null;
+
+    return (
+      <div className="button-row">
+        <button
+          type="button"
+          className="primary-btn"
+          disabled={repairUploading}
+          onClick={() => repairFileInputRef.current?.click()}
+        >
+          {repairUploading ? 'Saving...' : 'Replace this reference'}
+        </button>
+        {isReferenceRepairIssueRemovable(activeReferenceRepair) ? (
+          <button
+            type="button"
+            className="ghost-btn"
+            disabled={repairUploading}
+            onClick={() => void handleRemoveReferencePermanently()}
+          >
+            Remove this reference
+          </button>
+        ) : null}
+        {activeReferenceRepair.canContinueWithoutReference ? (
+          <button type="button" className="ghost-btn" onClick={handleContinueWithoutReference}>
+            Continue without this reference
+          </button>
+        ) : null}
+        {onResaveReferencePhoto ? (
+          <button type="button" className="ghost-btn" onClick={onResaveReferencePhoto}>
+            Open Characters
+          </button>
+        ) : null}
+      </div>
+    );
   }
 
   async function handleGenerate() {
@@ -2231,30 +2337,11 @@ export default function CreateVideo({
                 <div className="reference-repair-panel">
                   <div>
                     <span className="eyebrow">reference repair</span>
-                    <h3>This reference image needs to be re-uploaded</h3>
+                    <h3>{assetRepairTitle(activeReferenceRepair)}</h3>
                     <p>{activeReferenceRepair.label}</p>
                     <p className="muted">{assetRepairCopy(activeReferenceRepair)}</p>
                   </div>
-                  <div className="button-row">
-                    <button
-                      type="button"
-                      className="primary-btn"
-                      disabled={repairUploading}
-                      onClick={() => repairFileInputRef.current?.click()}
-                    >
-                      {repairUploading ? 'Saving...' : 'Replace this reference'}
-                    </button>
-                    {activeReferenceRepair.canContinueWithoutReference ? (
-                      <button type="button" className="ghost-btn" onClick={handleContinueWithoutReference}>
-                        Continue without this reference
-                      </button>
-                    ) : null}
-                    {onResaveReferencePhoto ? (
-                      <button type="button" className="ghost-btn" onClick={onResaveReferencePhoto}>
-                        Open Characters
-                      </button>
-                    ) : null}
-                  </div>
+                  {renderReferenceRepairActions()}
                   {repairStatus ? <p className="muted">{repairStatus}</p> : null}
                 </div>
               ) : null}
@@ -2548,7 +2635,7 @@ export default function CreateVideo({
           <div className="reference-repair-panel">
             <div>
               <span className="eyebrow">reference repair</span>
-              <h3>This reference image needs to be re-uploaded</h3>
+              <h3>{assetRepairTitle(activeReferenceRepair)}</h3>
               <p>{activeReferenceRepair.label}</p>
               <p className="muted">{assetRepairCopy(activeReferenceRepair)}</p>
             </div>
@@ -2557,26 +2644,7 @@ export default function CreateVideo({
                 <img src={activeReferenceRepair.sourceUrl} alt={`${activeReferenceRepair.label} preview`} />
               </div>
             ) : null}
-            <div className="button-row">
-              <button
-                type="button"
-                className="primary-btn"
-                disabled={repairUploading}
-                onClick={() => repairFileInputRef.current?.click()}
-              >
-                {repairUploading ? 'Saving...' : 'Replace this reference'}
-              </button>
-              {activeReferenceRepair.canContinueWithoutReference ? (
-                <button type="button" className="ghost-btn" onClick={handleContinueWithoutReference}>
-                  Continue without this reference
-                </button>
-              ) : null}
-              {onResaveReferencePhoto ? (
-                <button type="button" className="ghost-btn" onClick={onResaveReferencePhoto}>
-                  Open Characters
-                </button>
-              ) : null}
-            </div>
+            {renderReferenceRepairActions()}
             {repairStatus ? <p className="muted">{repairStatus}</p> : null}
           </div>
         ) : null}
@@ -2623,7 +2691,7 @@ export default function CreateVideo({
               <div className="reference-repair-panel">
                 <div>
                   <span className="eyebrow">reference repair</span>
-                  <h3>This reference image needs to be re-uploaded</h3>
+                  <h3>{assetRepairTitle(activeReferenceRepair)}</h3>
                   <p>{activeReferenceRepair.label}</p>
                   {activeReferenceRepair.host ? <p className="muted">This image link is protected.</p> : null}
                 </div>
@@ -2632,26 +2700,7 @@ export default function CreateVideo({
                     <img src={activeReferenceRepair.sourceUrl} alt={`${activeReferenceRepair.label} preview`} />
                   </div>
                 ) : null}
-                <div className="button-row">
-                  <button
-                    type="button"
-                    className="primary-btn"
-                    disabled={repairUploading}
-                    onClick={() => repairFileInputRef.current?.click()}
-                  >
-                    {repairUploading ? 'Saving...' : 'Replace this reference'}
-                  </button>
-                  {activeReferenceRepair.canContinueWithoutReference ? (
-                    <button type="button" className="ghost-btn" onClick={handleContinueWithoutReference}>
-                      Continue without this reference
-                    </button>
-                  ) : null}
-                  {onResaveReferencePhoto ? (
-                    <button type="button" className="ghost-btn" onClick={onResaveReferencePhoto}>
-                      Open Characters
-                    </button>
-                  ) : null}
-                </div>
+                {renderReferenceRepairActions()}
                 {repairStatus ? <p className="muted">{repairStatus}</p> : null}
               </div>
             ) : null}
