@@ -37,6 +37,29 @@ function formatStatus(status: string) {
   return status;
 }
 
+function draftStateCopy(job: GenerationJob) {
+  const status = (job.status || '').toLowerCase();
+  if (status === 'rate_limited') return 'Render queue is cooling down. Your scene is saved here.';
+  if (status === 'queued') return 'Queued for rendering. Lumora will keep checking.';
+  if (status === 'rendering' || status === 'processing') return 'Rendering your cinematic moment.';
+  if (status === 'paused') return 'Completed shots are safely saved in Drafts.';
+  if (status === 'failed') return 'This scene is paused. Edit the direction and try again.';
+  if (job.resultAssetUrl) return 'Scene ready for its next move.';
+  return 'Lumora is still shaping this scene.';
+}
+
+function primaryDraftAction(job: GenerationJob) {
+  const status = (job.status || '').toLowerCase();
+  if (job.resultAssetUrl) return 'Open';
+  if (status === 'rate_limited') return 'Resume render';
+  if (status === 'queued' || status === 'rendering' || status === 'processing') return 'Continue checking';
+  return 'Edit scene';
+}
+
+function statusClass(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
+
 function formatUpdated(iso: string) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
@@ -368,7 +391,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
       <>
         {publishToast}
         <section className="list-stack">
-          <article className="list-card">
+          <article className="list-card luxury-empty-state">
             <div className="row-between">
               <h3>{jobs.length ? 'Posting your scene...' : 'Your cinematic scenes will appear here.'}</h3>
               <span className="tiny-pill status-drafting">Ready</span>
@@ -402,7 +425,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
 
           return (
             <article
-              className="list-card"
+              className={`list-card cinematic-draft-card status-${statusClass(statusLabel)}`}
               key={job.id}
               role="button"
               tabIndex={0}
@@ -424,6 +447,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
             >
               <button
                 type="button"
+                className="draft-card-media"
                 onClick={() => {
                   openJob(job);
                 }}
@@ -503,6 +527,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
                   />
                 ) : (
                   <div
+                    className="draft-render-placeholder cinematic-shimmer"
                     style={{
                       width: '100%',
                       height: '260px',
@@ -519,13 +544,17 @@ export default function StudioList({ jobs, onPublished }: Props) {
                     }}
                   >
                     <div>
-                      <strong>Processing</strong>
+                      <strong>{statusLabel}</strong>
                       <p style={{ margin: '10px 0 0', color: 'var(--muted-text)' }}>
-                        Your video is rendering. Check back momentarily.
+                        {draftStateCopy(job)}
                       </p>
                     </div>
                   </div>
                 )}
+                <span className="draft-media-overlay">
+                  <span className="tiny-pill">{statusLabel}</span>
+                  <span>{draftStateCopy(job)}</span>
+                </span>
               </button>
 
               <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start' }}>
@@ -536,14 +565,14 @@ export default function StudioList({ jobs, onPublished }: Props) {
                   </p>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                  <span className={`tiny-pill status-${statusLabel.toLowerCase()}`}>{statusLabel}</span>
+                  <span className={`tiny-pill status-${statusClass(statusLabel)}`}>{statusLabel}</span>
                   <span className="tiny-pill">{(job.displayEngine || job.provider).toUpperCase()}</span>
                 </div>
               </div>
 
               <div className="stats-row" style={{ marginTop: '14px', gap: '14px' }}>
                 <span>{getJobCharacterLabel(job)}</span>
-                <span>{job.resultAssetUrl ? 'Scene ready' : 'Lumora is still shaping this scene...'}</span>
+                <span>{draftStateCopy(job)}</span>
               </div>
 
               <div className="story-memory-moment" style={{ marginTop: '12px' }}>
@@ -569,7 +598,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
                           openJob(job);
                         }}
                       >
-                        Open
+                        {primaryDraftAction(job)}
                       </button>
 
                       <button
@@ -580,7 +609,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
                           remixJob(job);
                         }}
                       >
-                        Remix
+                        Edit scene
                       </button>
                       <button
                         type="button"
@@ -590,11 +619,32 @@ export default function StudioList({ jobs, onPublished }: Props) {
                           continueStory(job);
                         }}
                       >
-                        Continue story
+                        Continue Story
                       </button>
                     </>
                   ) : (
-                    <button type="button" className="text-btn" disabled>Processing</button>
+                    <>
+                      <button
+                        type="button"
+                        className="text-btn"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          remixJob(job);
+                        }}
+                      >
+                        {primaryDraftAction(job)}
+                      </button>
+                      <button
+                        type="button"
+                        className="text-btn"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openJob(job);
+                        }}
+                      >
+                        View state
+                      </button>
+                    </>
                   )}
                   {job.resultAssetUrl ? (
                     <button
@@ -605,7 +655,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
                         void postToFeed(job, job.caption || job.prompt || '');
                       }}
                     >
-                      Post
+                      Publish
                     </button>
                   ) : null}
                 </div>
@@ -617,6 +667,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
 
       {selectedJob ? (
         <div
+          className="luxury-modal-backdrop"
           role="dialog"
           aria-modal="true"
           onClick={() => setSelectedJob(null)}
@@ -632,6 +683,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
           }}
         >
           <div
+            className="luxury-preview-modal"
             onClick={(event) => event.stopPropagation()}
             style={{
               width: 'min(920px, 100%)',
@@ -646,7 +698,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
           >
             <div className="row-between" style={{ marginBottom: '14px' }}>
               <div>
-                <span className="eyebrow">concept preview</span>
+                <span className="eyebrow">draft preview</span>
                 <h2 style={{ margin: '4px 0 0' }}>{selectedJob.title}</h2>
               </div>
 
@@ -711,15 +763,15 @@ export default function StudioList({ jobs, onPublished }: Props) {
                 }}
                 disabled={isPosted(selectedJob.id) || !selectedJob.resultAssetUrl}
               >
-                {isPosted(selectedJob.id) ? 'Posted' : selectedJob.resultAssetUrl ? 'Post' : 'Video still processing'}
+                {isPosted(selectedJob.id) ? 'Posted' : selectedJob.resultAssetUrl ? 'Publish' : 'Video still rendering'}
               </button>
 
               <button type="button" className="ghost-btn" onClick={() => remixJob(selectedJob)}>
-                Remix This
+                Edit scene
               </button>
 
               <button type="button" className="ghost-btn" onClick={() => continueStory(selectedJob)}>
-                Continue story
+                Continue Story
               </button>
 
               {selectedJob.resultAssetUrl ? (

@@ -889,8 +889,8 @@ function buildSelfFormAppearanceSummary(form: SelfCharacterForm): string {
 
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="list-stack" style={{ marginTop: '22px' }}>
-      <div className="headline-card compact" style={{ padding: '22px', borderRadius: '30px' }}>
+    <section className="list-stack luxury-section-stack" style={{ marginTop: '22px' }}>
+      <div className="headline-card compact luxury-section-header" style={{ padding: '22px', borderRadius: '30px' }}>
         <span className="eyebrow">{title}</span>
       </div>
       {children}
@@ -1003,6 +1003,7 @@ function ProfilePostTile({
   return (
     <button
       type="button"
+      className="profile-post-tile luxury-post-tile"
       onClick={() => onSelect(post)}
       title={title}
       style={{
@@ -1111,6 +1112,7 @@ function ProfilePostPreviewModal({
     <div
       role="dialog"
       aria-modal="true"
+      className="luxury-modal-backdrop"
       onClick={onClose}
       style={{
         position: 'fixed',
@@ -1125,6 +1127,7 @@ function ProfilePostPreviewModal({
     >
       <div
         onClick={(event) => event.stopPropagation()}
+        className="luxury-preview-modal"
         style={{
           width: 'min(900px, 100%)',
           maxHeight: '92vh',
@@ -2930,7 +2933,7 @@ export default function ProfilePage() {
 
   return (
     <div className="page" style={{ paddingBottom: '40px' }}>
-      <section className="profile-hero cinematic-profile-hero" style={{ borderRadius: '30px', padding: '22px' }}>
+      <section className="profile-hero cinematic-profile-hero luxury-page-hero" style={{ borderRadius: '30px', padding: '22px' }}>
         <div style={{ display: 'grid', gap: '18px', justifyItems: 'center', textAlign: 'center' }}>
           <div className="row-between" style={{ width: '100%', alignItems: 'center' }}>
             <span className="eyebrow">creator profile</span>
@@ -2989,12 +2992,12 @@ export default function ProfilePage() {
           </div>
 
           <p className="profile-creator-signal">
-            Your profile carries your cast, published moments, and the cinematic identity your audience can follow.
+            Your profile is becoming a cinematic universe: cast, published moments, and the style your audience can follow.
           </p>
 
           <div className="profile-memory-pulse" aria-label="Profile story signal">
             <span className="tiny-dot" />
-            <span>Lumora remembered your creator style.</span>
+            <span>Lumora remembered your world.</span>
           </div>
 
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
@@ -3454,6 +3457,7 @@ export default function ProfilePage() {
       <SectionCard title="Published moments">
         {posts.length ? (
           <div
+            className="profile-published-grid"
             style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(auto-fit, minmax(104px, 1fr))',
@@ -3465,7 +3469,7 @@ export default function ProfilePage() {
             ))}
           </div>
         ) : (
-          <article className="list-card" style={{ borderRadius: '28px', padding: '18px' }}>
+          <article className="list-card luxury-empty-state" style={{ borderRadius: '28px', padding: '18px' }}>
             <h3>Your published cinematic moments will appear here.</h3>
             <p className="muted">Create a draft, post it when it feels right, and your profile becomes a living story grid.</p>
             <button type="button" className="primary-btn" onClick={() => { window.location.href = '/create'; }} style={{ width: 'fit-content', flex: 'unset' }}>

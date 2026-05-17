@@ -135,6 +135,7 @@ function ForYouSkeletonGrid() {
   return (
     <div
       aria-label="Loading recommendations"
+      className="for-you-skeleton-grid"
       style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fill, minmax(132px, 1fr))',
@@ -144,6 +145,7 @@ function ForYouSkeletonGrid() {
       {Array.from({ length: 8 }, (_, index) => (
         <div
           key={index}
+          className="cinematic-skeleton"
           style={{
             aspectRatio: index % 3 === 0 ? '1 / 1.28' : '1 / 1',
             borderRadius: '18px',
@@ -386,7 +388,7 @@ function ForYouPreviewModal({
             <button type="button" className="ghost-btn social-tap" onClick={() => onSocialAction('follow', post)}>
               {socialState[`follow:${post.creatorUsername || post.username || post.creatorName}`] ? 'Following' : 'Follow creator'}
             </button>
-            <button type="button" className="primary-btn" onClick={() => onContinueStory(post)}>Continue story</button>
+            <button type="button" className="primary-btn" onClick={() => onContinueStory(post)}>Continue Story</button>
           </div>
         </div>
       </div>
@@ -494,6 +496,7 @@ export default function TrendsPage() {
   return (
     <div className="page">
       <section
+        className="for-you-topbar luxury-page-hero"
         style={{
           position: 'sticky',
           top: 0,
@@ -555,7 +558,7 @@ export default function TrendsPage() {
         <>
           {!debouncedQuery && trendingStories.length ? (
             <div className="row-between" style={{ marginTop: '2px' }}>
-              <span className="eyebrow">Trending cinematic stories</span>
+              <span className="eyebrow">Trending story worlds</span>
               <span className="tiny-pill">Live</span>
             </div>
           ) : null}
@@ -583,7 +586,7 @@ export default function TrendsPage() {
           </section>
         </>
       ) : (
-        <article className="list-card" style={{ borderRadius: '24px' }}>
+        <article className="list-card luxury-empty-state" style={{ borderRadius: '24px' }}>
           <div className="row-between">
             <h3>{debouncedQuery ? 'No matches yet' : 'No public videos yet'}</h3>
             <span className="tiny-pill status-drafting">Explore</span>

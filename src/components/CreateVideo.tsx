@@ -1322,7 +1322,7 @@ export default function CreateVideo({
   function beginGenerationProgress() {
     clearRenderCooldown();
     setGenerationStatusState('queued');
-    setStatus('Saving scene references...');
+    setStatus('Preparing your cast and saving scene references...');
     if (progressTimerRef.current) window.clearTimeout(progressTimerRef.current);
     progressTimerRef.current = window.setTimeout(() => {
       setGenerationStatusState('processing');
@@ -2477,20 +2477,20 @@ export default function CreateVideo({
     const remixPrompt = finalGeneratedPrompt || generationResult?.prompt || activePrompt;
     setActivePrompt(remixPrompt);
     setDraftTitle(`Remix of ${draftTitle || 'Lumora result'}`);
-    setStatus('Result prompt loaded for remix.');
+    setStatus('Scene direction loaded for another take.');
   }
 
   async function handleSubmitLikenessFeedback() {
     if (!onLikenessFeedback || (!selectedFeedbackChoices.length && !feedbackNote.trim())) return;
 
-    setFeedbackStatus('Saving likeness feedback...');
+    setFeedbackStatus('Saving cast feedback...');
     try {
       await onLikenessFeedback({
         choices: selectedFeedbackChoices,
         customNote: feedbackNote.trim() || undefined,
         createdAt: new Date().toISOString(),
       });
-      setFeedbackStatus('Feedback saved for future Lumora Identity Character prompts.');
+      setFeedbackStatus('Feedback saved for future cast consistency.');
       setSelectedFeedbackChoices([]);
       setFeedbackNote('');
     } catch (error) {
@@ -2505,10 +2505,10 @@ export default function CreateVideo({
           {toast.message}
         </div>
       ) : null}
-      <section className="editor-card">
+      <section className="editor-card create-luxury-card">
         <div>
-          <span className="eyebrow">video</span>
-          <h3>Create video</h3>
+          <span className="eyebrow">director mode</span>
+          <h3>Shape your cinematic moment</h3>
         </div>
 
         {schemaWarning ? (
@@ -2556,13 +2556,13 @@ export default function CreateVideo({
             ref={promptTextareaRef}
             value={activePrompt}
             onChange={(event) => setActivePrompt(event.target.value)}
-            rows={6}
+            rows={5}
             placeholder="Describe the scene you want to create..."
           />
         </label>
 
         <div className="field-block">
-          <span>Style presets</span>
+          <span>Cinematic style</span>
           <div className="chip-row wrap">
             {STYLE_PRESETS.map((style) => (
               <button
@@ -2716,7 +2716,7 @@ export default function CreateVideo({
                   {sceneExecutionLoading ? 'Preserving story flow...' : 'Render storyboard'}
                 </button>
                 <small className="muted">
-                  {sceneExecuteDisabledReason || 'Creates one cinematic shot per beat and keeps the sequence easy to review.'}
+                  {sceneExecuteDisabledReason || 'Renders one beat at a time while keeping the story flow intact.'}
                 </small>
               </div>
               {sceneExecutionStatus ? <p className="muted">{sceneExecutionStatus}</p> : null}
@@ -2878,7 +2878,7 @@ export default function CreateVideo({
           <div className="reference-mode-copy">
             <span className="eyebrow">
               {isSeedanceEngine
-                ? 'Seedance 2.0'
+                ? 'Cast guidance'
                 : engine === 'replicate' && selfReferenceMode
                   ? 'Lumora Cast'
                 : referenceLoading
@@ -2910,7 +2910,7 @@ export default function CreateVideo({
                 : engine === 'veo'
                 ? 'If Veo is unavailable, Lumora keeps the scene safe and lets you keep creating.'
                 : engine === 'mock'
-                ? 'Demo Mode returns a known video so you can test Drafts save and playback.'
+                ? 'Demo preview uses a known sample so you can check Drafts save and playback.'
                 : selfReferenceMode
                 ? primaryReferenceImage.url
                   ? 'Build a reusable cinematic character from your reference photos and videos.'
@@ -3031,7 +3031,7 @@ export default function CreateVideo({
           </div>
         ) : null}
 
-        <div className="button-row">
+        <div className="button-row luxury-action-row">
           <button type="button" className="primary-btn" onClick={handleGenerate} disabled={generateBusy} aria-busy={generateBusy}>
             {renderCooldownActive
               ? `Resume in ${renderCooldownSeconds}s`
@@ -3070,7 +3070,12 @@ export default function CreateVideo({
             ))}
           </div>
         ) : null}
-        {generationLoading ? <p className="muted">Lumora is rendering your cinematic take and saving the draft as it goes...</p> : null}
+        {generationLoading ? (
+          <p className="muted cinematic-loading-line">
+            <span className="tiny-dot" />
+            Rendering your cinematic moment and saving the draft as it goes...
+          </p>
+        ) : null}
         {generationStatusState === 'rate_limited' ? (
           <div className="rate-limit-card" role="status" aria-live="polite">
             <span className="tiny-pill">Cooling down</span>
@@ -3117,7 +3122,7 @@ export default function CreateVideo({
             ) : null}
             {generationSafeRewrite ? (
               <div className="safe-rewrite-card">
-                <span className="eyebrow">safe cinematic rewrite</span>
+                <span className="eyebrow">cinematic direction</span>
                 <p>{generationSafeRewrite}</p>
                 <button
                   type="button"
@@ -3133,7 +3138,7 @@ export default function CreateVideo({
                 >
                   {generationSafeRewrite.toLowerCase().includes('storybook cinematic version')
                     ? 'Use storybook garden version'
-                    : 'Use cinematic rewrite'}
+                    : 'Use cinematic direction'}
                 </button>
               </div>
             ) : null}
@@ -3153,7 +3158,7 @@ export default function CreateVideo({
                 Save draft
               </button>
               <button type="button" className="ghost-btn" onClick={handleGenerate} disabled={generateBusy}>
-                {renderCooldownActive ? `Resume in ${renderCooldownSeconds}s` : 'Retry generation'}
+                {renderCooldownActive ? `Resume in ${renderCooldownSeconds}s` : 'Try another take'}
               </button>
             </div>
           </div>
@@ -3165,7 +3170,7 @@ export default function CreateVideo({
             ))}
           </div>
         ) : null}
-        {status ? <p className="muted">{status}</p> : null}
+        {status ? <p className="muted create-status-copy">{status}</p> : null}
         {generatedVideoUrl && !generationResult ? (
           <div style={{ display: 'grid', gap: '12px', marginTop: '14px' }}>
             <video
@@ -3192,7 +3197,7 @@ export default function CreateVideo({
               onClick={handleRemixResult}
               style={{ flex: 'unset', width: '100%' }}
             >
-              Remix result
+              Create another take
             </button>
           </div>
         ) : null}
@@ -3202,8 +3207,8 @@ export default function CreateVideo({
         <section className="editor-card video-result-card">
           <div className="row-between">
             <div>
-              <span className="eyebrow">result</span>
-              <h3>Cinematic draft ready</h3>
+              <span className="eyebrow">scene reveal</span>
+              <h3>Your cinematic draft is ready</h3>
             </div>
             <span className="tiny-pill">
               {(generatedDisplayEngine || generatedModel || generationResult.engine).toUpperCase()}
@@ -3255,7 +3260,7 @@ export default function CreateVideo({
               Open in Drafts
             </button>
             <button type="button" className="ghost-btn" onClick={handleRemixResult}>
-              Remix result
+              Create another take
             </button>
           </div>
           {selfReferenceMode && onLikenessFeedback ? (

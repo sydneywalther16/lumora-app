@@ -123,12 +123,12 @@ export default function StudioPage() {
 
   return (
     <div className="page">
-      <section className="headline-card">
+      <section className="headline-card luxury-page-hero drafts-workbench-hero">
         <div>
           <span className="eyebrow">drafts</span>
-          <h2>Your private scene shelf</h2>
+          <h2>Your cinematic workbench</h2>
         </div>
-        <p>Every finished scene lands here first, ready to preview, remix, or post when the story feels right.</p>
+        <p>Private scenes, active renders, and paused moments gather here until they are ready to join your profile.</p>
       </section>
       {status ? <p className="muted">{status}</p> : null}
       <StudioList
