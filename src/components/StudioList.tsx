@@ -30,6 +30,7 @@ function formatStatus(status: string) {
   if (status === 'rendering') return 'Rendering';
   if (status === 'processing') return 'Rendering';
   if (status === 'paused') return 'Paused';
+  if (status === 'rate_limited') return 'Cooling down';
   if (status === 'completed') return 'Completed';
   if (status === 'published') return 'Published';
   if (status === 'failed') return 'Failed';

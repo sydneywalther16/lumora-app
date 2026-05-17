@@ -52,6 +52,9 @@ const asyncRenderJobColumns = [
   'render_mode',
   'provider_fallback_stage',
   'reference_count',
+  'retry_after_seconds',
+  'retry_available_at',
+  'rate_limited_at',
 ] as const;
 
 const feedProjectColumns = [
@@ -653,6 +656,7 @@ export async function buildDatabaseDiagnostics() {
     checkIndexExists('generation_jobs_provider_prediction_id_idx'),
     checkIndexExists('generation_jobs_async_status_idx'),
     checkIndexExists('generation_jobs_stuck_render_idx'),
+    checkIndexExists('generation_jobs_rate_limited_idx'),
   ]);
   const serviceRoleAccess = await Promise.all(requiredTables.map(checkServiceRoleAccess));
   const rlsPolicies = await checkRlsPolicies();

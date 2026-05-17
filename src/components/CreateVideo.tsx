@@ -235,9 +235,11 @@ type GenerateVideoApiResponse = {
   providerFallbackStage?: string | null;
   renderMode?: string | null;
   duplicateOf?: string | null;
+  retryAfterSeconds?: number | null;
+  retryAvailableAt?: string | null;
 };
 
-type GenerationStatusState = 'idle' | 'queued' | 'processing' | 'completed' | 'failed';
+type GenerationStatusState = 'idle' | 'queued' | 'processing' | 'rate_limited' | 'completed' | 'failed';
 type ToastState = {
   type: 'success' | 'error';
   message: string;
@@ -246,11 +248,12 @@ type ToastState = {
 const generationStatusLabels: Record<Exclude<GenerationStatusState, 'idle'>, string> = {
   queued: 'Queued',
   processing: 'Rendering',
+  rate_limited: 'Cooling down',
   completed: 'Saved',
   failed: 'Paused',
 };
 
-const asyncRenderStatuses = new Set(['queued', 'rendering', 'processing', 'paused']);
+const asyncRenderStatuses = new Set(['queued', 'rendering', 'processing', 'paused', 'rate_limited']);
 
 function asyncRenderJobId(data: GenerateVideoApiResponse | GenerationResponse | null | undefined) {
   if (!data) return null;
@@ -265,7 +268,38 @@ function isAsyncRenderResponse(data: GenerateVideoApiResponse | GenerationRespon
   return Boolean(asyncRenderJobId(data) && asyncRenderStatuses.has(status) && !outputUrl);
 }
 
+function retrySecondsForRender(data: GenerateVideoApiResponse | GenerationResponse | null | undefined) {
+  if (!data) return 0;
+  if (typeof data.retryAvailableAt === 'string') {
+    const seconds = Math.ceil((Date.parse(data.retryAvailableAt) - Date.now()) / 1000);
+    return Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
+  }
+  return typeof data.retryAfterSeconds === 'number' && Number.isFinite(data.retryAfterSeconds)
+    ? Math.max(0, Math.ceil(data.retryAfterSeconds))
+    : 0;
+}
+
+function retrySecondsFromPayload(payload: unknown) {
+  if (!payload || typeof payload !== 'object') return null;
+  const record = payload as Record<string, unknown>;
+  const value = record.retryAfterSeconds ?? record.retry_after_seconds ?? record.retryAfter ?? record.retry_after;
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(1, Math.ceil(value));
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return Math.max(1, Math.ceil(parsed));
+    const secondsMatch = value.match(/(\d+(?:\.\d+)?)\s*s/i);
+    if (secondsMatch) return Math.max(1, Math.ceil(Number(secondsMatch[1])));
+  }
+  return null;
+}
+
 function asyncRenderStatusMessage(data: GenerateVideoApiResponse | GenerationResponse) {
+  if (data.status === 'rate_limited') {
+    const seconds = retrySecondsForRender(data);
+    return seconds > 0
+      ? `Render queue is cooling down. Try again in about ${seconds} seconds.`
+      : 'Render queue is ready. Resume render when you are ready.';
+  }
   if (typeof data.progressLabel === 'string' && data.progressLabel) return data.progressLabel;
   if (typeof data.message === 'string' && data.message) return data.message;
   const status = typeof data.status === 'string' ? data.status : '';
@@ -811,6 +845,8 @@ export default function CreateVideo({
   const [generatedMode, setGeneratedMode] = useState<GenerationMode | null>(null);
   const [generationWarnings, setGenerationWarnings] = useState<string[]>([]);
   const [activeRenderJobId, setActiveRenderJobId] = useState<string | null>(null);
+  const [renderCooldownUntil, setRenderCooldownUntil] = useState<string | null>(null);
+  const [renderCooldownSeconds, setRenderCooldownSeconds] = useState(0);
   const [selectedFeedbackChoices, setSelectedFeedbackChoices] = useState<LumoraIdentityFeedbackChoice[]>([]);
   const [feedbackNote, setFeedbackNote] = useState('');
   const [feedbackStatus, setFeedbackStatus] = useState('');
@@ -863,6 +899,9 @@ export default function CreateVideo({
     .find((issue): issue is ReferenceRepairIssue => Boolean(issue)) ?? null;
   const activeReferenceRepair = referenceRepair ?? preflightReferenceRepair;
   const seedanceReferenceCount = seedanceReferenceImages.length;
+  const savedSeedanceReferenceCount = seedanceReferenceImages.filter((reference) => (
+    referenceStatus(reference.url, true).kind === 'saved'
+  )).length;
   const sceneExecutorUserId = authUser?.id ?? identityProfile?.userId ?? null;
   const seedanceMultimodalActive = isSeedanceEngine && seedanceReferenceCount > 1;
   const seedanceSingleReferenceWarning = isSeedanceEngine && seedanceReferenceCount === 1;
@@ -956,7 +995,9 @@ export default function CreateVideo({
     hasPrompt &&
     !(activeReferenceRepair && !activeReferenceRepair.canContinueWithoutReference) &&
     (!requiresReferenceImage || hasGenerationReference);
-  const generateBusy = !canGenerate || busy || generationLoading || referenceLoading;
+  const renderCooldownActive = renderCooldownSeconds > 0;
+  const activeRenderBlocksGenerate = Boolean(activeRenderJobId) && generationStatusState !== 'rate_limited';
+  const generateBusy = !canGenerate || busy || generationLoading || referenceLoading || renderCooldownActive || activeRenderBlocksGenerate;
   const saveBusy = busy || generationLoading;
   const sceneExecuteDisabledReason = !creativePlan
     ? 'Build a storyboard first'
@@ -1072,6 +1113,7 @@ export default function CreateVideo({
         const progressLabel = asyncRenderStatusMessage(job);
 
         if (statusValue === 'completed' && outputUrl) {
+          clearRenderCooldown();
           const thumbnailUrl = getBestThumbnail({
             thumbnailUrl: job.thumbnailUrl,
             posterUrl: job.posterUrl,
@@ -1128,7 +1170,16 @@ export default function CreateVideo({
           return;
         }
 
+        if (statusValue === 'rate_limited') {
+          pauseGenerationProgressForCooldown(job);
+          setGenerationError('');
+          setStatus(progressLabel);
+          pollTimer = window.setTimeout(pollJob, 8000);
+          return;
+        }
+
         if (statusValue === 'failed' || statusValue === 'paused') {
+          clearRenderCooldown();
           setActiveRenderJobId(null);
           finishGenerationProgress('failed');
           setGenerationError(job.error || job.errorMessage || progressLabel);
@@ -1137,6 +1188,7 @@ export default function CreateVideo({
           return;
         }
 
+        clearRenderCooldown();
         setGenerationStatusState(statusValue === 'queued' ? 'queued' : 'processing');
         setStatus(progressLabel);
         pollTimer = window.setTimeout(pollJob, 4000);
@@ -1165,6 +1217,35 @@ export default function CreateVideo({
     isDefaultSelfCharacter,
     selectedGenerationMode,
   ]);
+
+  useEffect(() => {
+    if (!renderCooldownUntil) {
+      setRenderCooldownSeconds(0);
+      return undefined;
+    }
+
+    let active = true;
+    let timer: number | null = null;
+
+    const tick = () => {
+      const seconds = Math.ceil((Date.parse(renderCooldownUntil) - Date.now()) / 1000);
+      if (!active) return;
+      if (!Number.isFinite(seconds) || seconds <= 0) {
+        setRenderCooldownSeconds(0);
+        setRenderCooldownUntil(null);
+        return;
+      }
+      setRenderCooldownSeconds(seconds);
+      timer = window.setTimeout(tick, 1000);
+    };
+
+    tick();
+
+    return () => {
+      active = false;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [renderCooldownUntil]);
 
   useEffect(() => {
     if (!sceneExecutorUserId) {
@@ -1221,7 +1302,25 @@ export default function CreateVideo({
     }, 5200);
   }
 
+  function clearRenderCooldown() {
+    setRenderCooldownUntil(null);
+    setRenderCooldownSeconds(0);
+  }
+
+  function applyRenderCooldown(data: GenerateVideoApiResponse | GenerationResponse) {
+    const seconds = retrySecondsForRender(data);
+    const retryAvailableAt = typeof data.retryAvailableAt === 'string'
+      ? data.retryAvailableAt
+      : seconds > 0
+        ? new Date(Date.now() + seconds * 1000).toISOString()
+        : null;
+
+    setRenderCooldownUntil(retryAvailableAt);
+    setRenderCooldownSeconds(seconds);
+  }
+
   function beginGenerationProgress() {
+    clearRenderCooldown();
     setGenerationStatusState('queued');
     setStatus('Saving scene references...');
     if (progressTimerRef.current) window.clearTimeout(progressTimerRef.current);
@@ -1238,6 +1337,15 @@ export default function CreateVideo({
       progressTimerRef.current = null;
     }
     setGenerationStatusState(state);
+  }
+
+  function pauseGenerationProgressForCooldown(data: GenerateVideoApiResponse | GenerationResponse) {
+    if (progressTimerRef.current) {
+      window.clearTimeout(progressTimerRef.current);
+      progressTimerRef.current = null;
+    }
+    applyRenderCooldown(data);
+    setGenerationStatusState('rate_limited');
   }
 
   function handleContinuityMemoryFieldChange(field: ContinuityMemoryField, value: string) {
@@ -1674,6 +1782,16 @@ export default function CreateVideo({
   async function handleGenerate() {
     if (generationInFlightRef.current) return;
 
+    if (activeRenderJobId && generationStatusState !== 'rate_limited') {
+      setStatus('Lumora is already rendering this scene and will save it to Drafts.');
+      return;
+    }
+
+    if (generationStatusState === 'rate_limited' && renderCooldownSeconds > 0) {
+      setStatus(`Render queue is cooling down. Try again in about ${renderCooldownSeconds} seconds.`);
+      return;
+    }
+
     const releaseGenerateLock = () => {
       generationInFlightRef.current = false;
       setGenerationLoading(false);
@@ -1817,6 +1935,8 @@ export default function CreateVideo({
           providerFallbackStage: seedanceResult.providerFallbackStage,
           renderMode: seedanceResult.renderMode,
           duplicateOf: seedanceResult.duplicateOf,
+          retryAfterSeconds: seedanceResult.retryAfterSeconds ?? null,
+          retryAvailableAt: seedanceResult.retryAvailableAt ?? null,
         };
       } else if (selectedIsBackendProviderEngine) {
         const providerResult = await api.createGeneration({
@@ -1854,6 +1974,8 @@ export default function CreateVideo({
           message: providerResult.message,
           progressLabel: providerResult.progressLabel ?? undefined,
           providerStatus: providerResult.providerStatus,
+          retryAfterSeconds: providerResult.retryAfterSeconds ?? null,
+          retryAvailableAt: providerResult.retryAvailableAt ?? null,
         };
       } else {
         const res = await fetch('/api/lumora/generate-video', {
@@ -1921,7 +2043,13 @@ export default function CreateVideo({
         }
 
         setActiveRenderJobId(jobId);
-        setGenerationStatusState(data.status === 'queued' ? 'queued' : 'processing');
+        if (data.status === 'rate_limited') {
+          pauseGenerationProgressForCooldown(data);
+          setGenerationError('');
+        } else {
+          clearRenderCooldown();
+          setGenerationStatusState(data.status === 'queued' ? 'queued' : 'processing');
+        }
         setStatus(asyncRenderStatusMessage(data));
         setGenerationResult({
           id: typeof data.id === 'string' ? data.id : jobId,
@@ -1952,12 +2080,16 @@ export default function CreateVideo({
           providerPredictionUrl: data.providerPredictionUrl ?? null,
           providerFallbackStage: data.providerFallbackStage ?? null,
           renderMode: data.renderMode ?? null,
+          retryAfterSeconds: data.retryAfterSeconds ?? null,
+          retryAvailableAt: data.retryAvailableAt ?? null,
         });
         showToast({
-          type: 'success',
-          message: data.duplicateOf
-            ? 'Lumora found the current render and will keep checking it.'
-            : 'Lumora is rendering your scene and will save it to Drafts.',
+          type: data.status === 'rate_limited' ? 'error' : 'success',
+          message: data.status === 'rate_limited'
+            ? 'Render queue is cooling down. Lumora saved this render so you can resume in a moment.'
+            : data.duplicateOf
+              ? 'Lumora found the current render and will keep checking it.'
+              : 'Lumora is rendering your scene and will save it to Drafts.',
         });
         return;
       }
@@ -2198,6 +2330,25 @@ export default function CreateVideo({
       console.error('Generation failed', error);
       const message = error instanceof Error ? error.message : 'Unable to create draft render';
       const apiPayload = error instanceof ApiRequestError ? error.payload : null;
+      if (error instanceof ApiRequestError && error.status === 429) {
+        const retryAfterSeconds = retrySecondsFromPayload(apiPayload) ?? 10;
+        const rateLimitedData: GenerateVideoApiResponse = {
+          status: 'rate_limited',
+          retryAfterSeconds,
+          retryAvailableAt: new Date(Date.now() + retryAfterSeconds * 1000).toISOString(),
+        };
+        pauseGenerationProgressForCooldown(rateLimitedData);
+        setGenerationSafeRewrite('');
+        setGenerationModerationDetail('');
+        setGenerationModerationStages([]);
+        setGenerationError('');
+        setStatus('Lumora saved your scene direction. Resume render when the queue is ready.');
+        showToast({
+          type: 'error',
+          message: `Render queue is cooling down. Try again in about ${retryAfterSeconds} seconds.`,
+        });
+        return;
+      }
       const repairIssue = normalizeReferenceRepairIssue(apiPayload);
       if (repairIssue) {
         setReferenceRepair(repairIssue);
@@ -2375,13 +2526,32 @@ export default function CreateVideo({
           ))}
         </div>
 
+        <div className="cast-summary-card">
+          <div>
+            <span className="eyebrow">Cast</span>
+            <strong>{characterName ? (isDefaultSelfCharacter ? 'Created as self' : characterName) : 'Created as self'}</strong>
+            <p className="muted">
+              {isSeedanceEngine
+                ? `${savedSeedanceReferenceCount || seedanceReferenceCount} cast reference${(savedSeedanceReferenceCount || seedanceReferenceCount) === 1 ? '' : 's'} saved to Lumora`
+                : hasGenerationReference
+                  ? 'Self reference ready for this scene'
+                  : 'Choose or save a cast reference before rendering'}
+            </p>
+          </div>
+          {characterAvatar ? (
+            <img src={characterAvatar} alt="" />
+          ) : (
+            <span className="cast-summary-placeholder">Cast</span>
+          )}
+        </div>
+
         <label className="field-block">
-          <span>Project title</span>
+          <span>Scene title</span>
           <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Title" />
         </label>
 
         <label className="field-block">
-          <span>Core prompt</span>
+          <span>Scene idea</span>
           <textarea
             ref={promptTextareaRef}
             value={activePrompt}
@@ -2423,64 +2593,69 @@ export default function CreateVideo({
             <span className="tiny-dot" />
             <p>{storyMemoryMoment}</p>
           </div>
-          <div className="continuity-memory-grid">
-            {continuityMemoryFields.map((field) => (
-              <label key={field} className="continuity-memory-field">
-                <span className="continuity-memory-label">
-                  <strong>{continuityMemoryLabels[field]}</strong>
-                  <span className="continuity-lock-toggle">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(continuityMemoryLocks[field])}
-                      onChange={(event) => handleContinuityMemoryLockChange(field, event.target.checked)}
-                    />
-                    Lock
+          <details className="advanced-create-details continuity-memory-details">
+            <summary>Edit Story Memory</summary>
+            <div className="continuity-memory-grid">
+              {continuityMemoryFields.map((field) => (
+                <label key={field} className="continuity-memory-field">
+                  <span className="continuity-memory-label">
+                    <strong>{continuityMemoryLabels[field]}</strong>
+                    <span className="continuity-lock-toggle">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(continuityMemoryLocks[field])}
+                        onChange={(event) => handleContinuityMemoryLockChange(field, event.target.checked)}
+                      />
+                      Lock
+                    </span>
                   </span>
-                </span>
-                <textarea
-                  value={continuityMemoryDraft[field]}
-                  onChange={(event) => handleContinuityMemoryFieldChange(field, event.target.value)}
-                  rows={field === 'previousSceneSummary' ? 3 : 2}
-                />
-              </label>
-            ))}
-          </div>
-          {recentDriftAlerts.length ? (
-            <div className="continuity-drift-list">
-              <span className="eyebrow">Continuity notes</span>
-              {recentDriftAlerts.map((alert) => (
-                <p key={`${alert.field}-${alert.detectedAt}-${alert.clipOrder}`}>
-                  <strong>{continuityMemoryLabels[alert.field]}</strong> {alert.reason}
-                </p>
+                  <textarea
+                    value={continuityMemoryDraft[field]}
+                    onChange={(event) => handleContinuityMemoryFieldChange(field, event.target.value)}
+                    rows={field === 'previousSceneSummary' ? 3 : 2}
+                  />
+                </label>
               ))}
             </div>
-          ) : null}
-          {recentSceneMemorySummaries.length ? (
-            <div className="scene-memory-summary-list">
-              <span className="eyebrow">Scene memories</span>
-              {recentSceneMemorySummaries.map((summary) => (
-                <p key={`${summary.sceneExecutionId}-${summary.sceneId}-${summary.clipOrder}`}>
-                  <strong>{summary.title}</strong> {summary.summary}
-                </p>
-              ))}
+            {recentDriftAlerts.length ? (
+              <div className="continuity-drift-list">
+                <span className="eyebrow">Continuity notes</span>
+                {recentDriftAlerts.map((alert) => (
+                  <p key={`${alert.field}-${alert.detectedAt}-${alert.clipOrder}`}>
+                    <strong>{continuityMemoryLabels[alert.field]}</strong> {alert.reason}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+            {recentSceneMemorySummaries.length ? (
+              <div className="scene-memory-summary-list">
+                <span className="eyebrow">Scene memories</span>
+                {recentSceneMemorySummaries.map((summary) => (
+                  <p key={`${summary.sceneExecutionId}-${summary.sceneId}-${summary.clipOrder}`}>
+                    <strong>{summary.title}</strong> {summary.summary}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+            <div className="scene-executor-actions">
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={() => void saveContinuityMemory()}
+                disabled={!sceneExecutorUserId || continuityMemorySaving || !continuityMemoryDirty}
+              >
+                {continuityMemorySaving ? 'Saving...' : continuityMemoryDirty ? 'Save Story Memory' : 'Story Memory saved'}
+              </button>
+              <small className="muted">
+                {sceneExecutorUserId ? (continuityMemoryDirty ? 'Unsaved changes' : 'Scene continuity preserved.') : 'Sign in to save Story Memory'}
+              </small>
             </div>
-          ) : null}
-          <div className="scene-executor-actions">
-            <button
-              type="button"
-              className="ghost-btn"
-              onClick={() => void saveContinuityMemory()}
-              disabled={!sceneExecutorUserId || continuityMemorySaving || !continuityMemoryDirty}
-            >
-              {continuityMemorySaving ? 'Saving...' : continuityMemoryDirty ? 'Save Story Memory' : 'Story Memory saved'}
-            </button>
-            <small className="muted">
-              {sceneExecutorUserId ? (continuityMemoryDirty ? 'Unsaved changes' : 'Scene continuity preserved.') : 'Sign in to save Story Memory'}
-            </small>
-          </div>
+          </details>
         </div>
 
-        <div className="creative-brain-panel">
+        <details className="advanced-create-details cinematic-flow-details">
+          <summary>Storyboard and Scene Flow</summary>
+          <div className="creative-brain-panel">
           <div className="row-between">
             <div>
               <span className="eyebrow">Storyboard</span>
@@ -2638,7 +2813,8 @@ export default function CreateVideo({
               ) : null}
             </div>
           ) : null}
-        </div>
+          </div>
+        </details>
 
         <div className="field-block">
           <span>Duration</span>
@@ -2672,8 +2848,8 @@ export default function CreateVideo({
           </div>
         </div>
 
-        <div className="field-block">
-          <span>Cinematic renderer</span>
+        <details className="advanced-create-details renderer-details">
+          <summary>Cinematic renderer</summary>
           <div className="provider-grid" role="radiogroup" aria-label="Cinematic renderer">
             {providerOptions.map((option) => (
               <button
@@ -2696,7 +2872,7 @@ export default function CreateVideo({
             ))}
           </div>
           <small className="muted">{engineRoutingMessage}</small>
-        </div>
+        </details>
 
         <div className="reference-mode-card">
           <div className="reference-mode-copy">
@@ -2752,20 +2928,25 @@ export default function CreateVideo({
               </span>
             ) : null}
             {isSeedanceEngine && seedanceReferenceCount > 0 ? (
-              <div className="seedance-reference-list" aria-label="Cast references">
-                {seedanceReferenceImages.map((reference) => {
-                  const slot = referenceSlotForSeedanceReference(reference);
-                  const optional = !(reference.role === 'front_angle' || reference.role === 'side_angle');
-                  const status = referenceStatus(reference.url, optional);
-                  return (
-                    <span key={`${reference.token}-${reference.url}`} className={`reference-status-chip ${status.kind}`}>
-                      {reference.token} {reference.label || 'Reference image'}
-                      <small>{status.label}</small>
-                      {slot ? null : <small>Optional</small>}
-                    </span>
-                  );
-                })}
-              </div>
+              <details className="compact-reference-details">
+                <summary>
+                  {savedSeedanceReferenceCount || seedanceReferenceCount} cast reference{(savedSeedanceReferenceCount || seedanceReferenceCount) === 1 ? '' : 's'} saved to Lumora
+                </summary>
+                <div className="seedance-reference-list" aria-label="Cast references">
+                  {seedanceReferenceImages.map((reference) => {
+                    const slot = referenceSlotForSeedanceReference(reference);
+                    const optional = !(reference.role === 'front_angle' || reference.role === 'side_angle');
+                    const status = referenceStatus(reference.url, optional);
+                    return (
+                      <span key={`${reference.token}-${reference.url}`} className={`reference-status-chip ${status.kind}`}>
+                        {reference.token} {reference.label || 'Reference image'}
+                        <small>{status.label}</small>
+                        {slot ? null : <small>Optional</small>}
+                      </span>
+                    );
+                  })}
+                </div>
+              </details>
             ) : null}
             {selfReferenceMode && engine === 'replicate' ? (
               <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }}>
@@ -2803,21 +2984,9 @@ export default function CreateVideo({
           ) : null}
         </div>
 
-        {characterName ? (
-          <div className="selected-character">
-            <span className="eyebrow">selected</span>
-            <strong>{isDefaultSelfCharacter ? 'Created as self' : characterName}</strong>
-            {!isDefaultSelfCharacter ? null : (
-              <span className="muted" style={{ display: 'block', marginTop: '6px' }}>
-                Using your creator self by default.
-              </span>
-            )}
-          </div>
-        ) : null}
-
         {selfReferenceMode && engine === 'replicate' && isHydrated ? (
-          <div className="field-block">
-            <span>Lumora Cast Reference</span>
+          <details className="advanced-create-details reference-detail-shell">
+            <summary>Lumora Cast Reference</summary>
             <div className="reference-grid" style={{ gap: '8px' }}>
               {identityReferenceCards.map((item) => (
                   <div key={item.label} className="reference-upload" style={{ padding: '8px', minHeight: 'unset' }}>
@@ -2833,7 +3002,7 @@ export default function CreateVideo({
                   </div>
                 ))}
             </div>
-          </div>
+          </details>
         ) : null}
 
         <input
@@ -2864,7 +3033,13 @@ export default function CreateVideo({
 
         <div className="button-row">
           <button type="button" className="primary-btn" onClick={handleGenerate} disabled={generateBusy} aria-busy={generateBusy}>
-            {generationLoading
+            {renderCooldownActive
+              ? `Resume in ${renderCooldownSeconds}s`
+              : generationStatusState === 'rate_limited'
+                ? 'Resume render'
+              : activeRenderBlocksGenerate
+                ? 'Rendering in Drafts'
+              : generationLoading
               ? 'Rendering...'
               : referenceLoading
                   ? 'Checking self character...'
@@ -2888,7 +3063,7 @@ export default function CreateVideo({
         </div>
         {generationStatusState !== 'idle' ? (
           <div className="generation-progress" aria-live="polite">
-            {(['queued', 'processing', 'completed', 'failed'] as const).map((phase) => (
+            {(['queued', 'processing', 'rate_limited', 'completed', 'failed'] as const).map((phase) => (
               <span key={phase} className={generationStatusState === phase ? 'active' : ''}>
                 {generationStatusLabels[phase]}
               </span>
@@ -2896,6 +3071,22 @@ export default function CreateVideo({
           </div>
         ) : null}
         {generationLoading ? <p className="muted">Lumora is rendering your cinematic take and saving the draft as it goes...</p> : null}
+        {generationStatusState === 'rate_limited' ? (
+          <div className="rate-limit-card" role="status" aria-live="polite">
+            <span className="tiny-pill">Cooling down</span>
+            <div>
+              <strong>Render queue is cooling down.</strong>
+              <p>
+                {renderCooldownSeconds > 0
+                  ? `Try again in about ${renderCooldownSeconds} seconds.`
+                  : 'The queue is ready. Resume render when you are ready.'}
+              </p>
+            </div>
+            <button type="button" className="ghost-btn" onClick={handleGenerate} disabled={renderCooldownActive || generationLoading}>
+              {renderCooldownActive ? `Resume in ${renderCooldownSeconds}s` : 'Resume render'}
+            </button>
+          </div>
+        ) : null}
         {generationError ? (
           <div className="generation-error-card">
             <p>{generationError}</p>
@@ -2962,7 +3153,7 @@ export default function CreateVideo({
                 Save draft
               </button>
               <button type="button" className="ghost-btn" onClick={handleGenerate} disabled={generateBusy}>
-                Retry generation
+                {renderCooldownActive ? `Resume in ${renderCooldownSeconds}s` : 'Retry generation'}
               </button>
             </div>
           </div>

@@ -370,9 +370,52 @@ export function isSeedanceModerationError(error: unknown): error is SeedanceMode
   );
 }
 
+export class ReplicateRateLimitError extends Error {
+  readonly statusCode = 429;
+  readonly retryAfterMs: number | null;
+  readonly retryAfterSeconds: number | null;
+  readonly retryAvailableAt: string | null;
+  readonly providerMessage: string;
+
+  constructor(input: {
+    message?: string;
+    retryAfterMs?: number | null;
+    providerMessage?: string | null;
+  }) {
+    const retryAfterMs = input.retryAfterMs ?? null;
+    const retryAfterSeconds = typeof retryAfterMs === 'number'
+      ? Math.max(1, Math.ceil(retryAfterMs / 1000))
+      : null;
+    super(input.message ?? (
+      retryAfterSeconds
+        ? `Render queue is cooling down. Try again in about ${retryAfterSeconds} seconds.`
+        : 'Render queue is cooling down. Try again in a moment.'
+    ));
+    this.name = 'ReplicateRateLimitError';
+    this.retryAfterMs = retryAfterMs;
+    this.retryAfterSeconds = retryAfterSeconds;
+    this.retryAvailableAt = typeof retryAfterMs === 'number'
+      ? new Date(Date.now() + retryAfterMs).toISOString()
+      : null;
+    this.providerMessage = input.providerMessage ?? this.message;
+  }
+}
+
+export function isReplicateRateLimitError(error: unknown): error is ReplicateRateLimitError {
+  return error instanceof ReplicateRateLimitError || (
+    Boolean(error) &&
+    typeof error === 'object' &&
+    (error as { name?: unknown }).name === 'ReplicateRateLimitError'
+  );
+}
+
 function responseStatus(error: unknown): number | null {
   const response = (error as { response?: { status?: unknown } } | null)?.response;
   return typeof response?.status === 'number' ? response.status : null;
+}
+
+function errorMessageText(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function retryAfterMs(error: unknown): number | null {
@@ -387,6 +430,26 @@ function retryAfterMs(error: unknown): number | null {
 
   const dateMs = Date.parse(retryAfter);
   return Number.isFinite(dateMs) ? Math.max(0, dateMs - Date.now()) : null;
+}
+
+function retryAfterMsFromMessage(error: unknown): number | null {
+  const message = errorMessageText(error);
+  const secondsMatch = message.match(/(?:retry|reset)[^\d~]*(?:in\s*)?~?\s*(\d+(?:\.\d+)?)\s*s(?:ec(?:ond)?s?)?/i) ??
+    message.match(/~?\s*(\d+(?:\.\d+)?)\s*s(?:ec(?:ond)?s?)?/i);
+  if (secondsMatch) {
+    const seconds = Number(secondsMatch[1]);
+    if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  }
+  const minuteMatch = message.match(/~?\s*(\d+(?:\.\d+)?)\s*m(?:in(?:ute)?s?)?/i);
+  if (minuteMatch) {
+    const minutes = Number(minuteMatch[1]);
+    if (Number.isFinite(minutes)) return Math.max(0, minutes * 60_000);
+  }
+  return null;
+}
+
+function retryAfterMsForError(error: unknown) {
+  return retryAfterMs(error) ?? retryAfterMsFromMessage(error);
 }
 
 function replicateErrorDetails(error: unknown) {
@@ -404,7 +467,7 @@ function replicateErrorDetails(error: unknown) {
     message: error instanceof Error ? error.message : String(error),
     status: response?.status ?? null,
     statusText: response?.statusText ?? null,
-    retryAfterMs: retryAfterMs(error),
+    retryAfterMs: retryAfterMsForError(error),
     requestId: response?.headers?.get?.('x-request-id') ?? response?.headers?.get?.('x-replicate-request-id') ?? null,
   };
 }
@@ -425,12 +488,21 @@ async function withReplicateRetry<T>(
     return await action();
   } catch (error) {
     const status = responseStatus(error);
+    if (status === 429) {
+      logReplicateError('rate_limited', error, context);
+      const waitMs = retryAfterMsForError(error) ?? 10_000;
+      throw new ReplicateRateLimitError({
+        retryAfterMs: waitMs,
+        providerMessage: errorMessageText(error),
+      });
+    }
+
     if (status !== 429 && status !== 503 && status !== 504) {
       logReplicateError('request_failed', error, context);
       throw error;
     }
 
-    const waitMs = retryAfterMs(error) ?? 6_000;
+    const waitMs = retryAfterMsForError(error) ?? 6_000;
     logReplicateError('retryable_request_failed', error, { ...context, waitMs });
     await sleep(waitMs);
 

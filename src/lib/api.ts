@@ -318,6 +318,8 @@ export type GenerationResponse = {
   errorMessage?: string | null;
   errorCategory?: string | null;
   referenceCount?: number | null;
+  retryAfterSeconds?: number | null;
+  retryAvailableAt?: string | null;
 };
 
 export type GenerationJob = {
@@ -602,9 +604,13 @@ export type ApiHealthDiagnostics = {
     stuckJobCount: number;
     jobsMissingProviderPredictionId: number;
     jobsRenderingOverExpectedDuration: number;
+    replicateRateLimitedCount: number;
+    lastRetryAfterSeconds: number | null;
     webhookConfigured: boolean;
     pollerConfigured: boolean;
     activeInProcessJobs: number;
+    activeRenderLocks: number;
+    duplicateRenderPreventedCount: number;
     error?: unknown;
   };
   generationProviders: Array<{

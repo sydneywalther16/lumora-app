@@ -605,6 +605,47 @@ button {
   margin-bottom: 14px;
 }
 
+.cast-summary-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 56px;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--selected-outline) 24%, var(--surface-border));
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 20% 0%, color-mix(in srgb, var(--selected-outline) 14%, transparent), transparent 34%),
+    var(--panel-background);
+  box-shadow: var(--surface-shadow);
+}
+
+.cast-summary-card div {
+  min-width: 0;
+}
+
+.cast-summary-card p {
+  margin: 4px 0 0;
+}
+
+.cast-summary-card img,
+.cast-summary-placeholder {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  border: 1px solid var(--surface-border);
+  background: var(--control-background);
+  object-fit: cover;
+}
+
+.cast-summary-placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--muted-text);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .reference-mode-card {
   position: relative;
   display: grid;
@@ -699,6 +740,79 @@ button {
 
 .seedance-reference-list small {
   opacity: 0.72;
+}
+
+.advanced-create-details,
+.compact-reference-details {
+  overflow: hidden;
+  border: 1px solid var(--control-border);
+  border-radius: 16px;
+  background: var(--control-background);
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.advanced-create-details {
+  display: grid;
+  gap: 10px;
+  padding: 0;
+  margin-bottom: 14px;
+}
+
+.compact-reference-details {
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 4px;
+  background: var(--surface-soft);
+}
+
+.advanced-create-details:hover,
+.compact-reference-details:hover {
+  border-color: color-mix(in srgb, var(--selected-outline) 38%, var(--control-border));
+}
+
+.advanced-create-details summary,
+.compact-reference-details summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  color: var(--text-primary);
+  font-size: 0.84rem;
+  font-weight: 800;
+  list-style: none;
+}
+
+.advanced-create-details summary::-webkit-details-marker,
+.compact-reference-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-create-details summary::after,
+.compact-reference-details summary::after {
+  float: right;
+  margin-left: 14px;
+  color: var(--muted-text);
+  content: '+';
+}
+
+.advanced-create-details[open] summary::after,
+.compact-reference-details[open] summary::after {
+  content: '-';
+}
+
+.advanced-create-details > .continuity-memory-grid,
+.advanced-create-details > .provider-grid,
+.advanced-create-details > .reference-grid,
+.advanced-create-details > .creative-brain-panel,
+.advanced-create-details > .continuity-drift-list,
+.advanced-create-details > .scene-memory-summary-list,
+.advanced-create-details > .scene-executor-actions,
+.renderer-details > small,
+.compact-reference-details > .seedance-reference-list {
+  margin: 0 12px 12px;
+}
+
+.continuity-memory-details[open],
+.cinematic-flow-details[open] {
+  box-shadow: var(--selected-shadow);
 }
 
 .provider-grid {
@@ -813,6 +927,13 @@ button {
     linear-gradient(135deg, color-mix(in srgb, var(--surface-strong) 76%, transparent), var(--panel-background)),
     var(--panel-background);
   margin-bottom: 14px;
+}
+
+.cinematic-flow-details .creative-brain-panel {
+  margin-bottom: 0;
+  border: 0;
+  background: transparent;
+  padding: 0 12px 12px;
 }
 
 .creative-plan-preview {
@@ -1095,6 +1216,31 @@ button {
 .generation-error-card p {
   margin: 0;
   color: var(--warning-text);
+}
+
+.rate-limit-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--warning-border);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--warning-text) 12%, transparent), transparent 34%),
+    var(--warning-background);
+}
+
+.rate-limit-card strong,
+.rate-limit-card p {
+  margin: 0;
+  color: var(--warning-text);
+}
+
+.rate-limit-card p {
+  margin-top: 2px;
+  font-size: 0.82rem;
+  line-height: 1.35;
 }
 
 .safe-rewrite-card {

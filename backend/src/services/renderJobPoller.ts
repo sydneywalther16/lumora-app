@@ -8,6 +8,7 @@ import { providerFallbackDiagnosticsFromError } from './providerFallbackOrchestr
 import {
   extractVideoUrl,
   isSeedanceModerationError,
+  isReplicateRateLimitError,
   SEEDANCE_FAST_MODEL,
   SEEDANCE_QUALITY_MODEL,
   type SeedanceQualityMode,
@@ -16,7 +17,9 @@ import {
 import { serializeDiagnosticError } from './schemaDiagnostics';
 
 const activeProcessors = new Set<string>();
-const ACTIVE_STATUSES = ['queued', 'rendering', 'processing'] as const;
+const activeRenderLocks = new Set<string>();
+let duplicateRenderPreventedCount = 0;
+const ACTIVE_STATUSES = ['queued', 'rendering', 'processing', 'rate_limited'] as const;
 const RENDER_TIMEOUT_MS = 30 * 60 * 1000;
 
 export type AsyncRenderJobInput = {
@@ -67,6 +70,9 @@ export type AsyncRenderJobRecord = {
   lastPolledAt: string | null;
   retryCount: number;
   timeoutAt: string | null;
+  retryAfterSeconds: number | null;
+  retryAvailableAt: string | null;
+  rateLimitedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -182,6 +188,9 @@ function mapRow(row: Record<string, unknown>): AsyncRenderJobRecord {
     lastPolledAt: typeof row.lastPolledAt === 'string' ? row.lastPolledAt : null,
     retryCount: typeof row.retryCount === 'number' ? row.retryCount : 0,
     timeoutAt: typeof row.timeoutAt === 'string' ? row.timeoutAt : null,
+    retryAfterSeconds: typeof row.retryAfterSeconds === 'number' ? row.retryAfterSeconds : null,
+    retryAvailableAt: typeof row.retryAvailableAt === 'string' ? row.retryAvailableAt : null,
+    rateLimitedAt: typeof row.rateLimitedAt === 'string' ? row.rateLimitedAt : null,
     createdAt: String(row.createdAt ?? new Date().toISOString()),
     updatedAt: String(row.updatedAt ?? new Date().toISOString()),
   };
@@ -220,6 +229,9 @@ const asyncRenderJobSelect = `
   last_polled_at as "lastPolledAt",
   retry_count as "retryCount",
   timeout_at as "timeoutAt",
+  retry_after_seconds as "retryAfterSeconds",
+  retry_available_at as "retryAvailableAt",
+  rate_limited_at as "rateLimitedAt",
   created_at as "createdAt",
   updated_at as "updatedAt"
 `;
@@ -338,13 +350,11 @@ async function findActiveRenderJob(input: AsyncRenderJobInput) {
      from generation_jobs
      where user_id = $1
        and provider = $2
-       and prompt = $3
-       and coalesce(character_id, '') = coalesce($4, '')
-       and status = any($5::text[])
+       and status = any($3::text[])
        and created_at > now() - interval '30 minutes'
      order by created_at desc
      limit 1`,
-    [input.userId, input.engine, input.prompt, input.characterId ?? null, ACTIVE_STATUSES],
+    [input.userId, input.engine, ACTIVE_STATUSES],
   );
 
   return result.rows[0] ? mapRow(result.rows[0]) : null;
@@ -372,7 +382,9 @@ async function updateProviderState(input: {
        last_polled_at = now(),
        reference_count = $6,
        render_mode = coalesce($7, render_mode),
-       provider_fallback_stage = coalesce($8, provider_fallback_stage),
+      provider_fallback_stage = coalesce($8, provider_fallback_stage),
+       retry_after_seconds = null,
+       retry_available_at = null,
        updated_at = now()
      where id = $1`,
     [
@@ -463,7 +475,69 @@ async function markJobFailed(input: {
   await updateProjectStatus(input.projectId, input.status ?? 'failed', input.message);
 }
 
+async function markJobRateLimited(input: {
+  jobId: string;
+  projectId: string | null;
+  message: string;
+  retryAfterSeconds: number | null;
+  retryAvailableAt: string | null;
+}) {
+  await query(
+    `update generation_jobs
+     set
+       status = 'rate_limited',
+       provider_status = 'rate_limited',
+       error_message = $2,
+       error_category = 'rate_limited',
+       retry_after_seconds = $3,
+       retry_available_at = $4,
+       rate_limited_at = now(),
+       last_polled_at = now(),
+       updated_at = now()
+     where id = $1`,
+    [input.jobId, input.message, input.retryAfterSeconds, input.retryAvailableAt],
+  );
+  await updateProjectStatus(input.projectId, 'paused', input.message);
+}
+
+async function resumeRateLimitedJob(job: AsyncRenderJobRecord) {
+  await query(
+    `update generation_jobs
+     set
+       status = 'queued',
+       provider_status = 'queued',
+       error_message = null,
+       error_category = null,
+       retry_after_seconds = null,
+       retry_available_at = null,
+       updated_at = now()
+     where id = $1`,
+    [job.id],
+  );
+  await updateProjectStatus(job.projectId, 'rendering');
+  return await getAsyncRenderJob(job.id) ?? job;
+}
+
+function rateLimitDelaySeconds(error: unknown) {
+  if (!isReplicateRateLimitError(error)) return null;
+  return error.retryAfterSeconds ?? (
+    typeof error.retryAfterMs === 'number'
+      ? Math.max(1, Math.ceil(error.retryAfterMs / 1000))
+      : null
+  );
+}
+
+function rateLimitAvailableAt(error: unknown) {
+  if (!isReplicateRateLimitError(error)) return null;
+  if (error.retryAvailableAt) return error.retryAvailableAt;
+  if (typeof error.retryAfterMs === 'number') {
+    return new Date(Date.now() + error.retryAfterMs).toISOString();
+  }
+  return null;
+}
+
 function errorCategory(error: unknown) {
+  if (isReplicateRateLimitError(error)) return 'rate_limited';
   if (isAssetPersistenceError(error)) return 'asset_persistence';
   if (isSeedanceModerationError(error) || providerFallbackDiagnosticsFromError(error)) return 'moderation';
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
@@ -477,6 +551,12 @@ function creatorErrorMessage(error: unknown) {
   }
   if (isSeedanceModerationError(error) || providerFallbackDiagnosticsFromError(error)) {
     return 'This scene needs a simpler direction before rendering.';
+  }
+  if (isReplicateRateLimitError(error)) {
+    const seconds = rateLimitDelaySeconds(error);
+    return seconds
+      ? `Render queue is cooling down. Try again in about ${seconds} seconds.`
+      : 'Render queue is cooling down. Try again in a moment.';
   }
   const message = error instanceof Error ? error.message : String(error);
   if (message.toLowerCase().includes('timeout') || message.toLowerCase().includes('timed out')) {
@@ -507,7 +587,18 @@ export function processAsyncRenderJob(jobId: string) {
       return;
     }
 
+    let lockKey: string | null = null;
+    let lockAcquired = false;
+
     try {
+      lockKey = `render:${job.userId}`;
+      if (activeRenderLocks.has(lockKey)) {
+        activeProcessors.delete(jobId);
+        setTimeout(() => processAsyncRenderJob(jobId), 2_000);
+        return;
+      }
+      activeRenderLocks.add(lockKey);
+      lockAcquired = true;
       await updateProjectStatus(job.projectId, 'rendering');
       const result = await createSeedanceGeneration({
         ...input,
@@ -544,14 +635,25 @@ export function processAsyncRenderJob(jobId: string) {
     } catch (error) {
       job = await getAsyncRenderJob(jobId);
       const category = errorCategory(error);
-      await markJobFailed({
-        jobId,
-        projectId: job?.projectId ?? null,
-        message: creatorErrorMessage(error),
-        category,
-        status: category === 'timeout' ? 'paused' : 'failed',
-      });
+      if (category === 'rate_limited') {
+        await markJobRateLimited({
+          jobId,
+          projectId: job?.projectId ?? null,
+          message: creatorErrorMessage(error),
+          retryAfterSeconds: rateLimitDelaySeconds(error),
+          retryAvailableAt: rateLimitAvailableAt(error),
+        });
+      } else {
+        await markJobFailed({
+          jobId,
+          projectId: job?.projectId ?? null,
+          message: creatorErrorMessage(error),
+          category,
+          status: category === 'timeout' ? 'paused' : 'failed',
+        });
+      }
     } finally {
+      if (lockAcquired && lockKey) activeRenderLocks.delete(lockKey);
       activeProcessors.delete(jobId);
     }
   })();
@@ -564,11 +666,17 @@ export async function createAsyncSeedanceRenderJob(input: AsyncRenderJobInput) {
 
   const activeJob = await findActiveRenderJob(input);
   if (activeJob) {
-    processAsyncRenderJob(activeJob.id);
+    duplicateRenderPreventedCount += 1;
+    const retryReady = activeJob.status === 'rate_limited' &&
+      (!activeJob.retryAvailableAt || Date.parse(activeJob.retryAvailableAt) <= Date.now());
+    const job = retryReady ? await resumeRateLimitedJob(activeJob) : activeJob;
+    if (job.status === 'queued' || job.status === 'rendering') processAsyncRenderJob(job.id);
     return {
-      job: activeJob,
-      duplicateOf: activeJob.id,
-      message: 'Lumora is already rendering this scene.',
+      job,
+      duplicateOf: job.id,
+      message: job.status === 'rate_limited'
+        ? formatRenderJobStatus(job).progressLabel
+        : 'Lumora is already rendering this scene.',
     };
   }
 
@@ -632,7 +740,7 @@ async function finalizePredictionJob(job: AsyncRenderJobRecord, prediction: Pred
 }
 
 export async function pollRenderJob(job: AsyncRenderJobRecord) {
-  if (!job.providerPredictionId || job.status === 'completed' || job.status === 'failed') return job;
+  if (job.status === 'rate_limited' || !job.providerPredictionId || job.status === 'completed' || job.status === 'failed') return job;
   if (job.timeoutAt && Date.parse(job.timeoutAt) < Date.now()) {
     await markJobFailed({
       jobId: job.id,
@@ -688,9 +796,16 @@ export async function getRenderJobStatus(jobId: string) {
 export function formatRenderJobStatus(job: AsyncRenderJobRecord) {
   const status = job.status === 'processing' ? 'rendering' : job.status;
   const outputUrl = job.outputUrl ?? job.resultAssetUrl;
+  const retrySeconds = job.retryAvailableAt
+    ? Math.max(0, Math.ceil((Date.parse(job.retryAvailableAt) - Date.now()) / 1000))
+    : job.retryAfterSeconds;
   const progressLabel =
     status === 'completed'
       ? 'Your cinematic draft is saved.'
+      : status === 'rate_limited'
+        ? retrySeconds && retrySeconds > 0
+          ? `Render queue is cooling down. Try again in about ${retrySeconds} seconds.`
+          : 'Render queue is ready. Resume render when you are ready.'
       : status === 'failed'
         ? 'Lumora paused this render.'
         : status === 'paused'
@@ -722,6 +837,8 @@ export function formatRenderJobStatus(job: AsyncRenderJobRecord) {
     renderMode: job.renderMode,
     providerFallbackStage: job.providerFallbackStage,
     referenceCount: job.referenceCount,
+    retryAfterSeconds: retrySeconds ?? null,
+    retryAvailableAt: job.retryAvailableAt,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
   };
@@ -775,6 +892,8 @@ export async function buildAsyncRenderJobDiagnostics() {
       stuckJobCount: number;
       jobsMissingProviderPredictionId: number;
       jobsRenderingOverExpectedDuration: number;
+      replicateRateLimitedCount: number;
+      lastRetryAfterSeconds: number | null;
     }>(
       `select
          count(*) filter (where status = 'queued')::int as "pendingJobCount",
@@ -791,7 +910,17 @@ export async function buildAsyncRenderJobDiagnostics() {
          count(*) filter (
            where status in ('rendering', 'processing')
              and coalesce(started_at, created_at) < now() - interval '30 minutes'
-         )::int as "jobsRenderingOverExpectedDuration"
+         )::int as "jobsRenderingOverExpectedDuration",
+         count(*) filter (
+           where status = 'rate_limited' or error_category = 'rate_limited'
+         )::int as "replicateRateLimitedCount",
+         (
+           select retry_after_seconds
+           from generation_jobs
+           where error_category = 'rate_limited' or status = 'rate_limited'
+           order by updated_at desc
+           limit 1
+         )::int as "lastRetryAfterSeconds"
        from generation_jobs`,
     );
     const row = result.rows[0] ?? {
@@ -800,6 +929,8 @@ export async function buildAsyncRenderJobDiagnostics() {
       stuckJobCount: 0,
       jobsMissingProviderPredictionId: 0,
       jobsRenderingOverExpectedDuration: 0,
+      replicateRateLimitedCount: 0,
+      lastRetryAfterSeconds: null,
     };
 
     return {
@@ -808,6 +939,8 @@ export async function buildAsyncRenderJobDiagnostics() {
       webhookConfigured: Boolean(env.REPLICATE_WEBHOOK_SECRET),
       pollerConfigured: true,
       activeInProcessJobs: activeProcessors.size,
+      activeRenderLocks: activeRenderLocks.size,
+      duplicateRenderPreventedCount,
     };
   } catch (error) {
     return {
@@ -817,9 +950,13 @@ export async function buildAsyncRenderJobDiagnostics() {
       stuckJobCount: 0,
       jobsMissingProviderPredictionId: 0,
       jobsRenderingOverExpectedDuration: 0,
+      replicateRateLimitedCount: 0,
+      lastRetryAfterSeconds: null,
       webhookConfigured: Boolean(env.REPLICATE_WEBHOOK_SECRET),
       pollerConfigured: false,
       activeInProcessJobs: activeProcessors.size,
+      activeRenderLocks: activeRenderLocks.size,
+      duplicateRenderPreventedCount,
       error: serializeDiagnosticError(error),
     };
   }

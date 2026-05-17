@@ -174,6 +174,22 @@ export default function DiagnosticsPage() {
                   <strong>{diagnostics.asyncRenderJobs.jobsRenderingOverExpectedDuration}</strong>
                 </p>
                 <p className="diagnostic-row">
+                  <span>rate limited</span>
+                  <strong>{diagnostics.asyncRenderJobs.replicateRateLimitedCount}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>last retry after</span>
+                  <strong>{diagnostics.asyncRenderJobs.lastRetryAfterSeconds ?? 0}s</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>active render locks</span>
+                  <strong>{diagnostics.asyncRenderJobs.activeRenderLocks}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>duplicate renders prevented</span>
+                  <strong>{diagnostics.asyncRenderJobs.duplicateRenderPreventedCount}</strong>
+                </p>
+                <p className="diagnostic-row">
                   <span>poller</span>
                   <strong>{diagnostics.asyncRenderJobs.pollerConfigured ? 'Ready' : 'Unavailable'}</strong>
                 </p>
