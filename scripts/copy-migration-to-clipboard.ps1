@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true, Position = 0)]
-  [ValidateSet('character-profiles', 'memory-engine', 'scene-executor', 'feed-drafts', 'profile-characters', 'moderation-orchestrator', 'creator-experience')]
+  [ValidateSet('character-profiles', 'memory-engine', 'scene-executor', 'feed-drafts', 'profile-characters', 'moderation-orchestrator', 'creator-experience', 'async-render-jobs')]
   [string] $Migration
 )
 
@@ -13,6 +13,7 @@ $migrationFiles = @{
   'profile-characters' = 'backend/supabase/migrations/20260512_profile_characters_ui.sql'
   'moderation-orchestrator' = 'backend/supabase/migrations/20260513_moderation_orchestrator.sql'
   'creator-experience' = 'backend/supabase/migrations/20260515_creator_experience_events.sql'
+  'async-render-jobs' = 'backend/supabase/migrations/20260516_async_render_jobs.sql'
 }
 
 $migrationPath = Join-Path $repoRoot $migrationFiles[$Migration]

@@ -34,6 +34,26 @@ const requiredGenerationJobColumns = [
   'scene_metadata',
 ] as const;
 
+const asyncRenderJobColumns = [
+  'provider_prediction_id',
+  'provider_prediction_url',
+  'provider_status',
+  'provider_name',
+  'provider_model',
+  'started_at',
+  'completed_at',
+  'failed_at',
+  'last_polled_at',
+  'retry_count',
+  'timeout_at',
+  'output_url',
+  'thumbnail_url',
+  'error_category',
+  'render_mode',
+  'provider_fallback_stage',
+  'reference_count',
+] as const;
+
 const feedProjectColumns = [
   'status',
   'published_at',
@@ -580,6 +600,9 @@ export async function buildDatabaseDiagnostics() {
   const generationJobColumnChecks = await Promise.all(
     requiredGenerationJobColumns.map((column) => checkColumnExists('generation_jobs', column)),
   );
+  const asyncRenderJobColumnChecks = await Promise.all(
+    asyncRenderJobColumns.map((column) => checkColumnExists('generation_jobs', column)),
+  );
   const feedProjectColumnChecks = await Promise.all(
     feedProjectColumns.map((column) => checkColumnExists('projects', column)),
   );
@@ -627,12 +650,16 @@ export async function buildDatabaseDiagnostics() {
     checkIndexExists('follows_following_idx'),
     checkIndexExists('character_profiles_owner_self_created_idx'),
     checkIndexExists('posts_user_published_profile_idx'),
+    checkIndexExists('generation_jobs_provider_prediction_id_idx'),
+    checkIndexExists('generation_jobs_async_status_idx'),
+    checkIndexExists('generation_jobs_stuck_render_idx'),
   ]);
   const serviceRoleAccess = await Promise.all(requiredTables.map(checkServiceRoleAccess));
   const rlsPolicies = await checkRlsPolicies();
   const schemaChecks = [
     ...tableChecks,
     ...generationJobColumnChecks,
+    ...asyncRenderJobColumnChecks,
     ...feedProjectColumnChecks,
     ...feedPostColumnChecks,
     ...characterProfileColumnChecks,

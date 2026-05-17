@@ -12,6 +12,7 @@ import { charactersRouter } from './routes/characters';
 import { billingRouter } from './routes/billing';
 import { notificationsRouter } from './routes/notifications';
 import { postsRouter } from './routes/posts';
+import { providersRouter } from './routes/providers';
 
 const app = express();
 app.use(cors(corsOptionsDelegate));
@@ -36,6 +37,7 @@ app.use('/api/generations', generationsRouter);
 app.use('/api/posts', postsRouter);
 app.use('/api/billing', billingRouter);
 app.use('/api/notifications', notificationsRouter);
+app.use('/api/providers', providersRouter);
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(error);

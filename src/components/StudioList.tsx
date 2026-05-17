@@ -26,7 +26,10 @@ const privacyOptions: PrivacySetting[] = ['private', 'approved_only', 'public'];
 function formatStatus(status: string) {
   if (status === 'draft') return 'Draft';
   if (status === 'queued-demo') return 'Queued';
+  if (status === 'queued') return 'Queued';
+  if (status === 'rendering') return 'Rendering';
   if (status === 'processing') return 'Rendering';
+  if (status === 'paused') return 'Paused';
   if (status === 'completed') return 'Completed';
   if (status === 'published') return 'Published';
   if (status === 'failed') return 'Failed';

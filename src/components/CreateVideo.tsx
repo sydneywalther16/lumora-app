@@ -191,6 +191,9 @@ function continuityMemoryChanged(
 }
 
 type GenerateVideoApiResponse = {
+  id?: unknown;
+  jobId?: unknown;
+  status?: unknown;
   videoUrl?: unknown;
   video?: unknown;
   outputUrl?: unknown;
@@ -220,8 +223,18 @@ type GenerateVideoApiResponse = {
   providerFallbackDiagnostics?: unknown;
   warnings?: unknown;
   error?: string;
+  errorMessage?: string;
+  errorCategory?: string;
   suggestion?: string;
   details?: unknown;
+  message?: string;
+  progressLabel?: string;
+  providerStatus?: string | null;
+  providerPredictionId?: string | null;
+  providerPredictionUrl?: string | null;
+  providerFallbackStage?: string | null;
+  renderMode?: string | null;
+  duplicateOf?: string | null;
 };
 
 type GenerationStatusState = 'idle' | 'queued' | 'processing' | 'completed' | 'failed';
@@ -236,6 +249,29 @@ const generationStatusLabels: Record<Exclude<GenerationStatusState, 'idle'>, str
   completed: 'Saved',
   failed: 'Paused',
 };
+
+const asyncRenderStatuses = new Set(['queued', 'rendering', 'processing', 'paused']);
+
+function asyncRenderJobId(data: GenerateVideoApiResponse | GenerationResponse | null | undefined) {
+  if (!data) return null;
+  const jobId = typeof data.jobId === 'string' ? data.jobId : null;
+  const id = typeof data.id === 'string' ? data.id : null;
+  return jobId || id;
+}
+
+function isAsyncRenderResponse(data: GenerateVideoApiResponse | GenerationResponse | null | undefined) {
+  const status = typeof data?.status === 'string' ? data.status : '';
+  const outputUrl = normalizeVideoUrl(data?.videoUrl ?? data?.outputUrl);
+  return Boolean(asyncRenderJobId(data) && asyncRenderStatuses.has(status) && !outputUrl);
+}
+
+function asyncRenderStatusMessage(data: GenerateVideoApiResponse | GenerationResponse) {
+  if (typeof data.progressLabel === 'string' && data.progressLabel) return data.progressLabel;
+  if (typeof data.message === 'string' && data.message) return data.message;
+  const status = typeof data.status === 'string' ? data.status : '';
+  if (status === 'paused') return 'This scene took longer than expected. Completed shots are saved in Drafts.';
+  return 'Rendering your cinematic take...';
+}
 
 function creatorRenderModeLabel(mode: string) {
   switch (mode) {
@@ -774,6 +810,7 @@ export default function CreateVideo({
   const [generatedReferenceImageUrl, setGeneratedReferenceImageUrl] = useState<string | null>(null);
   const [generatedMode, setGeneratedMode] = useState<GenerationMode | null>(null);
   const [generationWarnings, setGenerationWarnings] = useState<string[]>([]);
+  const [activeRenderJobId, setActiveRenderJobId] = useState<string | null>(null);
   const [selectedFeedbackChoices, setSelectedFeedbackChoices] = useState<LumoraIdentityFeedbackChoice[]>([]);
   const [feedbackNote, setFeedbackNote] = useState('');
   const [feedbackStatus, setFeedbackStatus] = useState('');
@@ -1017,6 +1054,117 @@ export default function CreateVideo({
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!activeRenderJobId) return undefined;
+    const renderJobId = activeRenderJobId;
+
+    let active = true;
+    let pollTimer: number | null = null;
+
+    async function pollJob() {
+      try {
+        const job = await api.getGenerationJob(renderJobId);
+        if (!active) return;
+
+        const outputUrl = normalizeVideoUrl(job.videoUrl ?? job.outputUrl);
+        const statusValue = typeof job.status === 'string' ? job.status : '';
+        const progressLabel = asyncRenderStatusMessage(job);
+
+        if (statusValue === 'completed' && outputUrl) {
+          const thumbnailUrl = getBestThumbnail({
+            thumbnailUrl: job.thumbnailUrl,
+            posterUrl: job.posterUrl,
+            previewImageUrl: job.previewImageUrl,
+            characterAvatar,
+          });
+          const displayEngine = job.displayEngine ?? (
+            engine === SEEDANCE_QUALITY_ENGINE_ID
+              ? 'Seedance Quality'
+              : engine === SEEDANCE_ENGINE_ID
+                ? 'Seedance Fast'
+                : engineLabels[engine] ?? engine
+          );
+          const posterUrl = getBestPoster({
+            thumbnailUrl,
+            posterUrl: job.posterUrl,
+            previewImageUrl: job.previewImageUrl,
+            characterAvatar,
+          });
+          const completedAt = new Date().toISOString();
+          setGeneratedVideoUrl(outputUrl);
+          setFinalGeneratedPrompt(job.finalPrompt ?? job.prompt ?? activePrompt);
+          setGeneratedModel(job.model ?? '');
+          setGeneratedDisplayEngine(displayEngine);
+          setGeneratedReferenceImageUrl(null);
+          setGeneratedMode(job.generationMode ?? selectedGenerationMode);
+          setGenerationResult({
+            id: job.id ?? renderJobId,
+            jobId: job.jobId ?? renderJobId,
+            status: 'completed',
+            engine,
+            provider: job.provider ?? 'replicate',
+            characterId,
+            characterName,
+            characterAvatar,
+            isDefaultSelfCharacter,
+            prompt: job.prompt ?? activePrompt,
+            outputUrl,
+            videoUrl: outputUrl,
+            thumbnailUrl,
+            posterUrl,
+            generationMode: job.generationMode ?? selectedGenerationMode,
+            finalPrompt: job.finalPrompt ?? job.prompt ?? activePrompt,
+            model: job.model ?? null,
+            displayEngine,
+            projectId: job.projectId ?? null,
+            createdAt: job.createdAt ?? completedAt,
+            message: 'Your cinematic draft is saved.',
+          });
+          setActiveRenderJobId(null);
+          finishGenerationProgress('completed');
+          setStatus('Your cinematic draft is saved.');
+          showToast({ type: 'success', message: 'Your cinematic draft is saved. Continue the story from Drafts when ready.' });
+          return;
+        }
+
+        if (statusValue === 'failed' || statusValue === 'paused') {
+          setActiveRenderJobId(null);
+          finishGenerationProgress('failed');
+          setGenerationError(job.error || job.errorMessage || progressLabel);
+          setStatus(progressLabel);
+          showToast({ type: 'error', message: 'Lumora paused this scene. Completed work is saved in Drafts.' });
+          return;
+        }
+
+        setGenerationStatusState(statusValue === 'queued' ? 'queued' : 'processing');
+        setStatus(progressLabel);
+        pollTimer = window.setTimeout(pollJob, 4000);
+      } catch (error) {
+        if (!active) return;
+        setStatus(error instanceof Error
+          ? error.message
+          : 'Your scene is still rendering. Lumora will keep checking and save it to Drafts.');
+        pollTimer = window.setTimeout(pollJob, 6000);
+      }
+    }
+
+    void pollJob();
+
+    return () => {
+      active = false;
+      if (pollTimer) window.clearTimeout(pollTimer);
+    };
+  }, [
+    activeRenderJobId,
+    activePrompt,
+    characterAvatar,
+    characterId,
+    characterName,
+    engine,
+    isDefaultSelfCharacter,
+    selectedGenerationMode,
+  ]);
 
   useEffect(() => {
     if (!sceneExecutorUserId) {
@@ -1642,6 +1790,9 @@ export default function CreateVideo({
         });
 
         data = {
+          id: seedanceResult.id,
+          jobId: seedanceResult.jobId,
+          status: seedanceResult.status,
           videoUrl: seedanceResult.videoUrl ?? seedanceResult.outputUrl,
           outputUrl: seedanceResult.outputUrl,
           provider: seedanceResult.provider ?? 'replicate',
@@ -1658,6 +1809,14 @@ export default function CreateVideo({
           sanitizedPrompt: seedanceResult.sanitizedPrompt ?? undefined,
           moderationDiagnostics: seedanceResult.moderationDiagnostics ?? undefined,
           warnings: seedanceResult.warnings ?? undefined,
+          message: seedanceResult.message,
+          progressLabel: seedanceResult.progressLabel ?? undefined,
+          providerStatus: seedanceResult.providerStatus,
+          providerPredictionId: seedanceResult.providerPredictionId,
+          providerPredictionUrl: seedanceResult.providerPredictionUrl,
+          providerFallbackStage: seedanceResult.providerFallbackStage,
+          renderMode: seedanceResult.renderMode,
+          duplicateOf: seedanceResult.duplicateOf,
         };
       } else if (selectedIsBackendProviderEngine) {
         const providerResult = await api.createGeneration({
@@ -1679,6 +1838,9 @@ export default function CreateVideo({
         }
 
         data = {
+          id: providerResult.id,
+          jobId: providerResult.jobId,
+          status: providerResult.status,
           videoUrl: providerResult.videoUrl ?? providerResult.outputUrl,
           outputUrl: providerResult.outputUrl,
           provider: providerResult.provider ?? selectedEngine,
@@ -1689,6 +1851,9 @@ export default function CreateVideo({
           durationSeconds: providerResult.durationSeconds,
           displayEngine: providerResult.displayEngine ?? engineLabels[selectedEngine],
           warnings: providerResult.warnings ?? undefined,
+          message: providerResult.message,
+          progressLabel: providerResult.progressLabel ?? undefined,
+          providerStatus: providerResult.providerStatus,
         };
       } else {
         const res = await fetch('/api/lumora/generate-video', {
@@ -1748,6 +1913,54 @@ export default function CreateVideo({
       }
 
       console.log('GENERATION RESPONSE:', data);
+
+      if (isAsyncRenderResponse(data)) {
+        const jobId = asyncRenderJobId(data);
+        if (!jobId) {
+          throw new Error('Lumora started rendering, but the render job could not be tracked.');
+        }
+
+        setActiveRenderJobId(jobId);
+        setGenerationStatusState(data.status === 'queued' ? 'queued' : 'processing');
+        setStatus(asyncRenderStatusMessage(data));
+        setGenerationResult({
+          id: typeof data.id === 'string' ? data.id : jobId,
+          jobId,
+          status: typeof data.status === 'string' ? data.status : 'rendering',
+          engine: selectedEngine,
+          provider: data.provider ?? 'replicate',
+          characterId,
+          characterName,
+          characterAvatar,
+          isDefaultSelfCharacter,
+          prompt: currentPrompt,
+          outputUrl: '',
+          thumbnailUrl: getBestThumbnail({
+            thumbnailUrl: data.thumbnailUrl,
+            posterUrl: data.posterUrl,
+            previewImageUrl: data.previewImageUrl,
+            characterAvatar,
+          }),
+          generationMode: data.generationMode ?? videoGenerationMode,
+          model: data.model ?? null,
+          displayEngine: data.displayEngine ?? (selectedEngine === SEEDANCE_QUALITY_ENGINE_ID ? 'Seedance Quality' : 'Seedance Fast'),
+          projectId: null,
+          createdAt: new Date().toISOString(),
+          message: data.message || 'Lumora is rendering your scene.',
+          providerStatus: data.providerStatus ?? null,
+          providerPredictionId: data.providerPredictionId ?? null,
+          providerPredictionUrl: data.providerPredictionUrl ?? null,
+          providerFallbackStage: data.providerFallbackStage ?? null,
+          renderMode: data.renderMode ?? null,
+        });
+        showToast({
+          type: 'success',
+          message: data.duplicateOf
+            ? 'Lumora found the current render and will keep checking it.'
+            : 'Lumora is rendering your scene and will save it to Drafts.',
+        });
+        return;
+      }
 
       const nextVideoUrl = normalizeVideoUrl(data.videoUrl ?? data.outputUrl ?? data.video);
       const generationProvider = (typeof data.provider === 'string' && data.provider

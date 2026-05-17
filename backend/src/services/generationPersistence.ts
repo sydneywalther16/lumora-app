@@ -6,6 +6,7 @@ const GENERATED_VIDEO_BUCKET = 'generated-videos';
 export type CompletedGenerationPersistenceInput = {
   userId?: string | null;
   id: string;
+  projectId?: string | null;
   title?: string | null;
   prompt: string;
   finalPrompt?: string | null;
@@ -75,30 +76,46 @@ async function insertCompletedProject(input: CompletedGenerationPersistenceInput
     throw new Error('Supabase admin client is not configured.');
   }
 
+  const payload = {
+    user_id: input.userId,
+    title: input.title || 'Lumora generation',
+    prompt: input.prompt,
+    final_prompt: input.finalPrompt ?? input.prompt,
+    style_preset: input.engine,
+    status: 'completed',
+    provider: input.provider,
+    engine: input.engine,
+    output_type: 'video',
+    video_url: input.videoUrl,
+    cover_asset_url: input.videoUrl,
+    thumbnail_url: input.thumbnailUrl ?? input.characterAvatar ?? null,
+    poster_url: input.posterUrl ?? input.thumbnailUrl ?? input.characterAvatar ?? null,
+    character_id: input.characterId ?? null,
+    character_name: input.characterName ?? null,
+    character_avatar: input.characterAvatar ?? null,
+    is_default_self_character: Boolean(input.isDefaultSelfCharacter),
+    privacy: input.privacy ?? 'private',
+    duration_seconds: input.durationSeconds ?? null,
+    aspect_ratio: input.aspectRatio ?? null,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (input.projectId) {
+    const { data, error } = await supabaseAdmin
+      .from('projects')
+      .update(payload)
+      .eq('id', input.projectId)
+      .eq('user_id', input.userId)
+      .select('id')
+      .maybeSingle();
+
+    if (error) throw error;
+    if (typeof data?.id === 'string') return data.id;
+  }
+
   const { data, error } = await supabaseAdmin
     .from('projects')
-    .insert({
-      user_id: input.userId,
-      title: input.title || 'Lumora generation',
-      prompt: input.prompt,
-      final_prompt: input.finalPrompt ?? input.prompt,
-      style_preset: input.engine,
-      status: 'completed',
-      provider: input.provider,
-      engine: input.engine,
-      output_type: 'video',
-      video_url: input.videoUrl,
-      cover_asset_url: input.videoUrl,
-      thumbnail_url: input.thumbnailUrl ?? input.characterAvatar ?? null,
-      poster_url: input.posterUrl ?? input.thumbnailUrl ?? input.characterAvatar ?? null,
-      character_id: input.characterId ?? null,
-      character_name: input.characterName ?? null,
-      character_avatar: input.characterAvatar ?? null,
-      is_default_self_character: Boolean(input.isDefaultSelfCharacter),
-      privacy: input.privacy ?? 'private',
-      duration_seconds: input.durationSeconds ?? null,
-      aspect_ratio: input.aspectRatio ?? null,
-    })
+    .insert(payload)
     .select('id')
     .single();
 

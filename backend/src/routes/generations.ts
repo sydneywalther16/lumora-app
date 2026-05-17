@@ -2,10 +2,14 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { createRateLimit } from '../middleware/rateLimit';
 import { persistCompletedGeneration } from '../services/generationPersistence';
-import { createSeedanceGeneration } from '../services/generationService';
 import { isAssetPersistenceError } from '../services/assetPersistence';
 import { isSeedanceModerationError } from '../services/providers/seedanceProvider';
 import { providerFallbackDiagnosticsFromError } from '../services/providerFallbackOrchestrator';
+import {
+  createAsyncSeedanceRenderJob,
+  formatRenderJobStatus,
+  getRenderJobStatus,
+} from '../services/renderJobPoller';
 import { createVideoGeneration } from '../video';
 
 const generationEngines = ['seedance-2.0', 'seedance-quality', 'veo', 'runway', 'mock', 'openai'] as const;
@@ -33,6 +37,8 @@ const generationSchema = z.object({
   characterAvatar: z.string().optional().nullable(),
   isDefaultSelfCharacter: z.boolean().optional().nullable(),
   referenceImages: z.array(seedanceReferenceImageSchema).optional(),
+  referenceImageUrls: z.record(z.string(), z.unknown()).optional().nullable(),
+  additionalReferenceImageUrls: z.array(z.string()).optional().nullable(),
 });
 
 const seedanceGenerationSchema = z.object({
@@ -47,6 +53,8 @@ const seedanceGenerationSchema = z.object({
   characterAvatar: z.string().optional().nullable(),
   isDefaultSelfCharacter: z.boolean().optional().nullable(),
   referenceImages: z.array(seedanceReferenceImageSchema).optional(),
+  referenceImageUrls: z.record(z.string(), z.unknown()).optional().nullable(),
+  additionalReferenceImageUrls: z.array(z.string()).optional().nullable(),
 });
 
 function stylePrompt(value: string | string[] | undefined, prompt: string) {
@@ -95,6 +103,15 @@ const generationRateLimit = createRateLimit({
   keyPrefix: 'generation',
 });
 
+generationsRouter.get('/jobs/:id', async (req, res) => {
+  const status = await getRenderJobStatus(req.params.id);
+  if (!status) {
+    res.status(404).json({ error: 'Render job not found.' });
+    return;
+  }
+  res.json(status);
+});
+
 generationsRouter.get('/', async (_req, res) => {
   res.json({ jobs: [] });
 });
@@ -106,11 +123,13 @@ generationsRouter.post('/seedance', generationRateLimit, async (req, res) => {
     ? `${payload.prompt}\n\nStyle: ${selectedStyle}`
     : payload.prompt;
   const quality = payload.engine === 'seedance-quality' ? 'quality' : payload.quality;
+  const engine = quality === 'quality' ? 'seedance-quality' : 'seedance-2.0';
 
   try {
-    const result = await createSeedanceGeneration({
+    const { job, duplicateOf, message } = await createAsyncSeedanceRenderJob({
       prompt,
       quality,
+      engine,
       userId: payload.userId ?? null,
       title: payload.title ?? null,
       characterId: payload.characterId ?? null,
@@ -118,87 +137,35 @@ generationsRouter.post('/seedance', generationRateLimit, async (req, res) => {
       characterAvatar: payload.characterAvatar ?? null,
       isDefaultSelfCharacter: payload.isDefaultSelfCharacter ?? null,
       referenceImages: seedanceReferenceImages(payload.referenceImages),
+      referenceImageUrls: payload.referenceImageUrls ?? {},
+      additionalReferenceImageUrls: payload.additionalReferenceImageUrls ?? [],
     });
-    const { rawOutput: _rawOutput, ...publicResult } = result;
+    const status = formatRenderJobStatus(job);
 
-    res.json({
-      ...publicResult,
+    res.status(202).json({
+      ...status,
+      status: status.status === 'queued' ? 'queued' : status.status,
       characterId: payload.characterId ?? null,
       characterName: payload.characterName ?? null,
       characterAvatar: payload.characterAvatar ?? null,
       isDefaultSelfCharacter: payload.isDefaultSelfCharacter ?? null,
       displayEngine: quality === 'quality' ? 'Seedance Quality' : 'Seedance Fast',
-      generationMode: publicResult.multimodalReferenceMode ? 'seedance-multimodal-reference' : 'seedance-text-to-video',
-      assetPersistence: publicResult.assetPersistence ?? null,
+      generationMode: seedanceReferenceImages(payload.referenceImages).length > 0
+        ? 'seedance-multimodal-reference'
+        : 'seedance-text-to-video',
+      outputUrl: status.outputUrl ?? '',
+      videoUrl: status.videoUrl ?? '',
+      duplicateOf,
+      message,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Seedance generation failed.';
-    if (isAssetPersistenceError(error)) {
-      res.status(error.statusCode).json({
-        id: null,
-        jobId: null,
-        status: 'failed',
-        engine: quality === 'quality' ? 'seedance-quality' : 'seedance-2.0',
-        provider: 'replicate',
-        prompt,
-        outputUrl: '',
-        videoUrl: '',
-        error: message,
-        message,
-        assetPersistence: true,
-        assetPersistenceDiagnostics: error.toDiagnostics(),
-        createdAt: new Date().toISOString(),
-      });
-      return;
-    }
-    if (isSeedanceModerationError(error)) {
-      const providerFallbackDiagnostics = providerFallbackDiagnosticsFromError(error);
-      const creatorMessage = providerFallbackDiagnostics
-        ? 'This scene needs a simpler direction before rendering.'
-        : 'Seedance moderation paused this render after Lumora tried moderation-safe cinematic orchestration.';
-      console.warn('SEEDANCE GENERATION MODERATION RESPONSE:', {
-        engine: payload.engine ?? 'seedance-2.0',
-        quality,
-        diagnostics: error.diagnostics,
-        providerFallbackDiagnostics,
-        exactProviderMessage: error.diagnostics.providerMessage,
-      });
-      res.status(error.statusCode).json({
-        id: null,
-        jobId: null,
-        status: 'failed',
-        engine: quality === 'quality' ? 'seedance-quality' : 'seedance-2.0',
-        provider: 'replicate',
-        prompt,
-        outputUrl: '',
-        videoUrl: '',
-        error: creatorMessage,
-        message: creatorMessage,
-        moderation: true,
-        suggestion: error.suggestion,
-        suggestedPrompt: error.suggestedPrompt,
-        sanitizedPrompt: error.sanitizedPrompt,
-        moderationDiagnostics: error.diagnostics,
-        providerFallbackDiagnostics,
-        referenceImages: error.referenceImages,
-        referenceImageCount: error.referenceImages.length,
-        multimodalReferenceMode: error.referenceImages.length > 1,
-        generationMode: error.referenceImages.length > 0 ? 'seedance-multimodal-reference' : 'seedance-text-to-video',
-        createdAt: new Date().toISOString(),
-      });
-      return;
-    }
-
-    console.error('SEEDANCE GENERATION FAILED:', {
-      engine: payload.engine ?? 'seedance-2.0',
-      quality,
-      error,
-    });
+    const message = error instanceof Error ? error.message : 'Lumora could not start this render.';
+    console.error('SEEDANCE ASYNC RENDER START FAILED:', { engine, quality, error });
     res.status(500).json({
       id: null,
       jobId: null,
       status: 'failed',
-      engine: quality === 'quality' ? 'seedance-quality' : 'seedance-2.0',
+      engine,
       provider: 'replicate',
       prompt,
       outputUrl: '',
@@ -219,27 +186,36 @@ generationsRouter.post('/', generationRateLimit, async (req, res) => {
 
   try {
     if (payload.engine === 'seedance-2.0' || payload.engine === 'seedance-quality') {
-      const result = await createSeedanceGeneration({
+      const quality = payload.engine === 'seedance-quality' ? 'quality' : 'fast';
+      const references = seedanceReferenceImages(payload.referenceImages);
+      const { job, duplicateOf, message } = await createAsyncSeedanceRenderJob({
         prompt,
-        quality: payload.engine === 'seedance-quality' ? 'quality' : 'fast',
+        quality,
+        engine: payload.engine,
         userId: payload.userId ?? null,
         title: payload.title ?? null,
         characterId: payload.characterId ?? null,
         characterName: payload.characterName ?? null,
         characterAvatar: payload.characterAvatar ?? null,
         isDefaultSelfCharacter: payload.isDefaultSelfCharacter ?? null,
-        referenceImages: seedanceReferenceImages(payload.referenceImages),
+        referenceImages: references,
+        referenceImageUrls: payload.referenceImageUrls ?? {},
+        additionalReferenceImageUrls: payload.additionalReferenceImageUrls ?? [],
       });
-      const { rawOutput: _rawOutput, ...publicResult } = result;
-      res.json({
-        ...publicResult,
+      const status = formatRenderJobStatus(job);
+
+      res.status(202).json({
+        ...status,
         characterId: payload.characterId ?? null,
         characterName: payload.characterName ?? null,
         characterAvatar: payload.characterAvatar ?? null,
         isDefaultSelfCharacter: payload.isDefaultSelfCharacter ?? null,
         displayEngine: payload.engine === 'seedance-quality' ? 'Seedance Quality' : 'Seedance Fast',
-        generationMode: publicResult.multimodalReferenceMode ? 'seedance-multimodal-reference' : 'seedance-text-to-video',
-        assetPersistence: publicResult.assetPersistence ?? null,
+        generationMode: references.length > 0 ? 'seedance-multimodal-reference' : 'seedance-text-to-video',
+        outputUrl: status.outputUrl ?? '',
+        videoUrl: status.videoUrl ?? '',
+        duplicateOf,
+        message,
       });
       return;
     }

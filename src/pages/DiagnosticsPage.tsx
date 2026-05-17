@@ -150,6 +150,39 @@ export default function DiagnosticsPage() {
                 <p className="muted">{diagnostics.providerFallback.note}</p>
               </div>
             ) : null}
+            {diagnostics.asyncRenderJobs ? (
+              <div>
+                <span className="eyebrow">async render jobs</span>
+                <p className="diagnostic-row">
+                  <span>pending</span>
+                  <strong>{diagnostics.asyncRenderJobs.pendingJobCount}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>rendering</span>
+                  <strong>{diagnostics.asyncRenderJobs.renderingJobCount}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>stuck</span>
+                  <strong>{diagnostics.asyncRenderJobs.stuckJobCount}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>missing prediction id</span>
+                  <strong>{diagnostics.asyncRenderJobs.jobsMissingProviderPredictionId}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>over expected duration</span>
+                  <strong>{diagnostics.asyncRenderJobs.jobsRenderingOverExpectedDuration}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>poller</span>
+                  <strong>{diagnostics.asyncRenderJobs.pollerConfigured ? 'Ready' : 'Unavailable'}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>webhook</span>
+                  <strong>{diagnostics.asyncRenderJobs.webhookConfigured ? 'Configured' : 'Polling only'}</strong>
+                </p>
+              </div>
+            ) : null}
             {diagnostics.referenceCleanup ? (
               <div>
                 <span className="eyebrow">reference cleanup</span>

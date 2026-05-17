@@ -42,7 +42,7 @@ async function request<T>(path: string, init: RequestInitWithTimeout = {}): Prom
     );
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('Generation request timed out. Try again in a moment.');
+      throw new Error('Your scene is still rendering. Lumora will keep checking and save it to Drafts.');
     }
     throw error;
   } finally {
@@ -308,6 +308,16 @@ export type GenerationResponse = {
   multimodalReferenceMode?: boolean | null;
   createdAt: string;
   message?: string;
+  providerStatus?: string | null;
+  progressLabel?: string | null;
+  providerPredictionId?: string | null;
+  providerPredictionUrl?: string | null;
+  providerFallbackStage?: string | null;
+  renderMode?: string | null;
+  duplicateOf?: string | null;
+  errorMessage?: string | null;
+  errorCategory?: string | null;
+  referenceCount?: number | null;
 };
 
 export type GenerationJob = {
@@ -584,6 +594,18 @@ export type ApiHealthDiagnostics = {
     safeTestPrompts: string[];
     providerOrder: ProviderFallbackProvider[];
     note: string;
+  };
+  asyncRenderJobs?: {
+    ok: boolean;
+    pendingJobCount: number;
+    renderingJobCount: number;
+    stuckJobCount: number;
+    jobsMissingProviderPredictionId: number;
+    jobsRenderingOverExpectedDuration: number;
+    webhookConfigured: boolean;
+    pollerConfigured: boolean;
+    activeInProcessJobs: number;
+    error?: unknown;
   };
   generationProviders: Array<{
     id: string;
@@ -890,14 +912,19 @@ export const api = {
     request<GenerationResponse>('/api/generations', {
       method: 'POST',
       body: JSON.stringify(payload),
-      timeoutMs: 240_000,
+      timeoutMs: 45_000,
     }),
 
   createSeedanceGeneration: (payload: GenerationPayload) =>
     request<GenerationResponse>('/api/generations/seedance', {
       method: 'POST',
       body: JSON.stringify(payload),
-      timeoutMs: 240_000,
+      timeoutMs: 45_000,
+    }),
+
+  getGenerationJob: (jobId: string) =>
+    request<GenerationResponse>(`/api/generations/jobs/${encodeURIComponent(jobId)}`, {
+      timeoutMs: 20_000,
     }),
 
   listGenerationJobs: () => request<{ jobs: GenerationJob[] }>('/api/generations'),

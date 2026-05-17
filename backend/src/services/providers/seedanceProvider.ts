@@ -62,6 +62,18 @@ export type SeedanceReferenceImage = {
   token?: string;
 };
 
+export type SeedancePredictionEvent = {
+  prediction: Prediction;
+  model: typeof SEEDANCE_FAST_MODEL | typeof SEEDANCE_QUALITY_MODEL;
+  quality: SeedanceQualityMode;
+  referenceImages: SeedanceReferenceImage[];
+  referenceImageCount: number;
+  prompt: string;
+  attemptLabel: string;
+  renderingMode: ModerationRenderingMode;
+  providerFallbackStage?: string | null;
+};
+
 export type SeedanceModerationDiagnostics = {
   detected: boolean;
   provider: 'replicate';
@@ -111,6 +123,8 @@ type GenerateSeedanceVideoOptions = {
   characterDisplayName?: string | null;
   projectId?: string | null;
   providerFallbackStage?: string | null;
+  onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
+  onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -178,7 +192,7 @@ function stringifyUrl(value: unknown): string | null {
   return null;
 }
 
-function extractVideoUrl(output: unknown): string | null {
+export function extractVideoUrl(output: unknown): string | null {
   const directUrl = stringifyUrl(output);
   if (directUrl) return directUrl;
 
@@ -433,8 +447,15 @@ async function pollPrediction(input: {
   replicate: Replicate;
   prediction: Prediction;
   model: string;
+  quality: SeedanceQualityMode;
+  prompt: string;
+  referenceImages: SeedanceReferenceImage[];
+  attemptLabel: string;
+  renderingMode: ModerationRenderingMode;
+  providerFallbackStage?: string | null;
   timeoutMs: number;
   pollIntervalMs: number;
+  onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 }): Promise<Prediction> {
   const startedAt = Date.now();
   let prediction = input.prediction;
@@ -447,6 +468,17 @@ async function pollPrediction(input: {
       model: input.model,
       phase,
       elapsedMs,
+    });
+    await input.onPredictionPolled?.({
+      prediction,
+      model: input.model as typeof SEEDANCE_FAST_MODEL | typeof SEEDANCE_QUALITY_MODEL,
+      quality: input.quality,
+      referenceImages: input.referenceImages,
+      referenceImageCount: input.referenceImages.length,
+      prompt: input.prompt,
+      attemptLabel: input.attemptLabel,
+      renderingMode: input.renderingMode,
+      providerFallbackStage: input.providerFallbackStage,
     });
 
     if (elapsedMs >= input.timeoutMs) {
@@ -469,6 +501,18 @@ async function pollPrediction(input: {
       },
     );
   }
+
+  await input.onPredictionPolled?.({
+    prediction,
+    model: input.model as typeof SEEDANCE_FAST_MODEL | typeof SEEDANCE_QUALITY_MODEL,
+    quality: input.quality,
+    referenceImages: input.referenceImages,
+    referenceImageCount: input.referenceImages.length,
+    prompt: input.prompt,
+    attemptLabel: input.attemptLabel,
+    renderingMode: input.renderingMode,
+    providerFallbackStage: input.providerFallbackStage,
+  });
 
   return prediction;
 }
@@ -551,6 +595,9 @@ async function runSeedanceAttempt(input: {
   pollIntervalMs: number;
   attemptLabel: string;
   renderingMode: ModerationRenderingMode;
+  providerFallbackStage?: string | null;
+  onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
+  onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 }) {
   const requestInput = buildSeedanceRequestInput(input.prompt, input.referenceImages);
 
@@ -588,13 +635,31 @@ async function runSeedanceAttempt(input: {
     attempt: input.attemptLabel,
     status: prediction.status,
   });
+  await input.onPredictionCreated?.({
+    prediction,
+    model: input.model,
+    quality: input.quality,
+    referenceImages: input.referenceImages,
+    referenceImageCount: input.referenceImages.length,
+    prompt: input.prompt,
+    attemptLabel: input.attemptLabel,
+    renderingMode: input.renderingMode,
+    providerFallbackStage: input.providerFallbackStage,
+  });
 
   const completedPrediction = await pollPrediction({
     replicate: input.replicate,
     prediction,
     model: input.model,
+    quality: input.quality,
+    prompt: input.prompt,
+    referenceImages: input.referenceImages,
+    attemptLabel: input.attemptLabel,
+    renderingMode: input.renderingMode,
+    providerFallbackStage: input.providerFallbackStage,
     timeoutMs: input.timeoutMs,
     pollIntervalMs: input.pollIntervalMs,
+    onPredictionPolled: input.onPredictionPolled,
   });
 
   if (completedPrediction.status !== 'succeeded') {
@@ -745,6 +810,9 @@ export async function generateSeedanceVideo(
         pollIntervalMs: options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
         attemptLabel: orchestrationAttempt.attemptLabel,
         renderingMode: orchestrationAttempt.renderingMode,
+        providerFallbackStage: options.providerFallbackStage ?? orchestrationAttempt.attemptLabel,
+        onPredictionCreated: options.onPredictionCreated,
+        onPredictionPolled: options.onPredictionPolled,
       });
       const finalSuccessfulOrchestrationPath = orchestrationPath
         .map((pathAttempt) => `${pathAttempt.attemptLabel}:${pathAttempt.realismModeSelected}`)

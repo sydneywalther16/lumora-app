@@ -4,6 +4,7 @@ import {
   isSeedanceModerationError,
   safeCinematicRewrite,
   type SeedanceModerationDiagnostics,
+  type SeedancePredictionEvent,
   type SeedanceQualityMode,
   type SeedanceReferenceImage,
   type SeedanceVideoResult,
@@ -435,6 +436,8 @@ export async function generateSeedanceWithProviderFallback(input: {
   characterName?: string | null;
   characterDisplayName?: string | null;
   projectId?: string | null;
+  onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
+  onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 }): Promise<ProviderFallbackSeedanceResult> {
   const requestedQuality = input.quality ?? 'fast';
   const providerAttempted = providerForQuality(requestedQuality);
@@ -494,6 +497,8 @@ export async function generateSeedanceWithProviderFallback(input: {
         characterDisplayName: input.characterDisplayName,
         projectId: input.projectId,
         providerFallbackStage: inputAttempt.stage,
+        onPredictionCreated: input.onPredictionCreated,
+        onPredictionPolled: input.onPredictionPolled,
       });
       stage.status = 'succeeded';
 

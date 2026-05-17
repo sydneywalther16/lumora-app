@@ -6,6 +6,7 @@ import {
 } from './assetPersistence';
 import {
   type SeedanceModerationDiagnostics,
+  type SeedancePredictionEvent,
   type SeedanceQualityMode,
   type SeedanceReferenceImage,
 } from './providers/seedanceProvider';
@@ -121,12 +122,15 @@ export async function createSeedanceGeneration(input: {
   prompt: string;
   quality?: SeedanceQualityMode;
   userId?: string | null;
+  projectId?: string | null;
   title?: string | null;
   characterId?: string | null;
   characterName?: string | null;
   characterAvatar?: string | null;
   isDefaultSelfCharacter?: boolean | null;
   referenceImages?: SeedanceReferenceImage[];
+  onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
+  onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 }): Promise<SeedanceGenerationRecord> {
   const persistedReferences = await persistSeedanceReferenceImages({
     userId: input.userId ?? null,
@@ -141,12 +145,16 @@ export async function createSeedanceGeneration(input: {
     userId: input.userId,
     characterId: input.characterId,
     characterName: input.characterName,
+    projectId: input.projectId,
+    onPredictionCreated: input.onPredictionCreated,
+    onPredictionPolled: input.onPredictionPolled,
   });
   const createdAt = new Date().toISOString();
   const referenceThumbnailUrl = persistedReferences.referenceImages.map((reference) => reference.url).find(Boolean) ?? input.characterAvatar ?? null;
   const persistence = await persistCompletedGeneration({
     userId: input.userId ?? null,
     id: result.id,
+    projectId: input.projectId ?? null,
     title: input.title ?? null,
     prompt: input.prompt,
     finalPrompt: result.finalPrompt,

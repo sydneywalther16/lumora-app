@@ -35,6 +35,7 @@ const envSchema = z.object({
   GOOGLE_API_KEY: z.string().min(1).optional(),
   RUNWAY_API_KEY: z.string().min(1).optional(),
   REPLICATE_API_TOKEN: z.string().min(1).optional(),
+  REPLICATE_WEBHOOK_SECRET: z.string().min(1).optional(),
   RESEND_API_KEY: z.string().min(1).optional(),
   NOTIFICATION_FROM: z.string().email().default('alerts@example.com'),
 });
