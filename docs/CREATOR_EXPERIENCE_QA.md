@@ -60,6 +60,10 @@ Use this checklist for the emotional creator loop: first-use, Story Memory, Draf
 
 ## Live Create State QA
 
+- Confirm `/create` does not show `Storyboard before rendering`, `Build storyboard`, or `Storyboard and Scene Flow` before Generate.
+- Confirm the primary CTA reads `Generate Cinematic Scene` when ready.
+- Confirm clicking Generate starts creator-facing progress such as `Understanding your scene...` and `Shaping cinematic beats...`.
+- Confirm `View cinematic structure` appears only after Lumora starts shaping or has shaped the scene.
 - Open `/create?mockRateLimit=1` in local development only.
 - Enter a simple safe prompt and click Generate.
 - Confirm the cooling-down card is readable at phone width.

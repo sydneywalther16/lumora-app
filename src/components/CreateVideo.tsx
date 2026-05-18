@@ -1202,7 +1202,7 @@ export default function CreateVideo({
   const generateBusy = !canGenerate || busy || generationLoading || referenceLoading || renderCooldownActive || activeRenderBlocksGenerate;
   const saveBusy = busy || generationLoading;
   const sceneExecuteDisabledReason = !creativePlan
-    ? 'Build a storyboard first'
+    ? 'Shape cinematic beats first'
     : !sceneExecutorUserId
       ? 'Sign in to save each shot'
       : !isSeedanceEngine
@@ -1249,8 +1249,8 @@ export default function CreateVideo({
     {
       label: 'Flow',
       copy: creativePlan
-        ? 'Your storyboard is ready to move shot by shot.'
-        : 'Lumora can shape your idea into cinematic beats.',
+        ? 'Your cinematic beats are ready to guide the scene.'
+        : 'Lumora shapes your idea into cinematic beats automatically.',
     },
   ];
   const storyMemoryMoment = continuityMemoryDraft.environment
@@ -1266,6 +1266,27 @@ export default function CreateVideo({
     headline: renderStateHeadline(generationStatusState),
     body: renderStateBody(generationStatusState, renderCooldownSeconds),
   };
+  const showCinematicStructure = Boolean(
+    creativePlanLoading ||
+    creativePlan ||
+    sceneExecutionPlan ||
+    sceneExecutionResult ||
+    creativePlanStatus ||
+    creativePlanError ||
+    sceneExecutionStatus ||
+    sceneExecutionError,
+  );
+  const cinematicStructureStatusLabel = creativePlanLoading
+    ? 'Shaping'
+    : sceneExecutionResult?.status === 'completed'
+      ? 'Saved'
+      : sceneExecutionResult?.status === 'failed' || generationStatusState === 'failed'
+        ? 'Paused'
+        : generationStatusState === 'processing'
+          ? 'Rendering'
+          : sceneExecutionPlan || creativePlan
+            ? 'Ready'
+            : 'Preparing';
 
   useEffect(() => {
     const savedPrompt = localStorage.getItem('remixPrompt');
@@ -1532,11 +1553,11 @@ export default function CreateVideo({
   function beginGenerationProgress() {
     clearRenderCooldown();
     setGenerationStatusState('queued');
-    setStatus('Preparing your cast and saving scene references...');
+    setStatus('Understanding your scene...');
     if (progressTimerRef.current) window.clearTimeout(progressTimerRef.current);
     progressTimerRef.current = window.setTimeout(() => {
       setGenerationStatusState('processing');
-      setStatus('Preserving Story Memory and shaping emotional pacing...');
+      setStatus('Shaping cinematic beats and preserving Story Memory...');
       progressTimerRef.current = null;
     }, 1400);
   }
@@ -1613,15 +1634,10 @@ export default function CreateVideo({
     }
   }
 
-  async function handleBuildCreativePlan() {
-    if (!activePrompt.trim()) {
-      setCreativePlanError('Add a prompt before Lumora builds your storyboard.');
-      return;
-    }
-
+  async function buildCinematicStructureForPrompt(options: { visible?: boolean; source: 'generate' | 'advanced' }): Promise<CreativeBrainScenePlan | null> {
     setCreativePlanLoading(true);
     setCreativePlanError('');
-    setCreativePlanStatus('Creative Brain is building your storyboard...');
+    setCreativePlanStatus(options.visible ? 'Lumora is shaping cinematic beats...' : '');
 
     try {
       const styleTheme = selectedStylePrompt(selectedStyles, activePrompt);
@@ -1666,16 +1682,28 @@ export default function CreateVideo({
       setCreativePlan(response.plan);
       setCreativePlanDraft(formatCreativePlan(response.plan));
       setSceneExecutionResult(null);
-      setSceneExecutionPlan(null);
+      setSceneExecutionPlan(response.plan);
       setSceneExecutionError('');
-      setCreativePlanStatus('Storyboard ready. Review the beats before rendering.');
-      void trackCreatorEvent('first_storyboard_built', { source: 'create', characterId }, authUser?.id ?? null);
+      setSceneExecutionStatus('Cinematic beats are ready. Lumora is carrying them into the render.');
+      setCreativePlanStatus('Cinematic beats are ready.');
+      void trackCreatorEvent('first_storyboard_built', { source: options.source, characterId }, authUser?.id ?? null);
+      return response.plan;
     } catch (error) {
-      setCreativePlanError(error instanceof Error ? friendlyCharacterProfileError(error) : 'Lumora could not build your storyboard yet.');
+      setCreativePlanError(error instanceof Error ? creatorFacingErrorMessage(error, 'Lumora will shape the scene directly this time.') : 'Lumora will shape the scene directly this time.');
       setCreativePlanStatus('');
+      return null;
     } finally {
       setCreativePlanLoading(false);
     }
+  }
+
+  async function handleBuildCreativePlan() {
+    if (!activePrompt.trim()) {
+      setCreativePlanError('Add a scene idea before Lumora shapes cinematic beats.');
+      return;
+    }
+
+    await buildCinematicStructureForPrompt({ visible: true, source: 'advanced' });
   }
 
   function handleCreativePlanDraftChange(value: string) {
@@ -1684,12 +1712,12 @@ export default function CreateVideo({
     if (nextPlan) {
       setCreativePlan(nextPlan);
       setCreativePlanError('');
-      setCreativePlanStatus('Storyboard beats updated.');
+      setCreativePlanStatus('Cinematic beats updated.');
       setSceneExecutionResult(null);
-      setSceneExecutionPlan(null);
+      setSceneExecutionPlan(nextPlan);
       setSceneExecutionError('');
     } else {
-      setCreativePlanError('Advanced storyboard edits need valid structure before Lumora can use them.');
+      setCreativePlanError('Advanced cinematic structure edits need valid notes before Lumora can use them.');
     }
   }
 
@@ -1698,7 +1726,7 @@ export default function CreateVideo({
 
     const activePlan = parseCreativePlanDraft(creativePlanDraft) ?? creativePlan;
     if (!activePlan) {
-      setSceneExecutionError('Build or fix your storyboard before starting Scene Flow.');
+      setSceneExecutionError('Shape cinematic beats before starting the story flow.');
       return;
     }
 
@@ -2109,6 +2137,14 @@ export default function CreateVideo({
     setGeneratedMode(null);
     setGenerationWarnings([]);
     setGenerationResult(null);
+    setCreativePlan(null);
+    setCreativePlanDraft('');
+    setCreativePlanError('');
+    setCreativePlanStatus('');
+    setSceneExecutionPlan(null);
+    setSceneExecutionResult(null);
+    setSceneExecutionError('');
+    setSceneExecutionStatus('');
     setStatus('');
     beginGenerationProgress();
 
@@ -2130,6 +2166,18 @@ export default function CreateVideo({
     }
 
     try {
+      if (continuityMemoryDirty && sceneExecutorUserId) {
+        setStatus('Preserving Story Memory...');
+        await saveContinuityMemory({ silent: true });
+      }
+      setStatus('Shaping cinematic beats...');
+      const invisiblePlan = await buildCinematicStructureForPrompt({ source: 'generate' });
+      if (invisiblePlan) {
+        setStatus('Preparing your cast for the render...');
+      } else {
+        setStatus('Preparing your cinematic render...');
+      }
+
       const generationStylePrompt = selectedStylePrompt(selectedStyles, currentPrompt);
       const videoGenerationMode: GenerationMode = selectedGenerationMode;
 
@@ -2906,6 +2954,7 @@ export default function CreateVideo({
           </details>
         </div>
 
+        {creativePlan && activeReferenceRepair && sceneExecutionResult && false && (
         <details className="advanced-create-details cinematic-flow-details">
           <summary>Storyboard and Scene Flow</summary>
           <div className="creative-brain-panel">
@@ -2931,14 +2980,14 @@ export default function CreateVideo({
           {creativePlan ? (
             <div className="creative-plan-preview">
               <div className="creative-plan-summary">
-                <span><strong>Tone</strong>{creativePlan.cinematicTone}</span>
-                <span><strong>Style</strong>{creativePlan.visualStyle}</span>
-                <span><strong>Sound</strong>{creativePlan.soundtrackMood}</span>
+                <span><strong>Tone</strong>{creativePlan!.cinematicTone}</span>
+                <span><strong>Style</strong>{creativePlan!.visualStyle}</span>
+                <span><strong>Sound</strong>{creativePlan!.soundtrackMood}</span>
               </div>
-              <p><strong>Environment:</strong> {creativePlan.environmentDescription}</p>
-              <p><strong>Pacing:</strong> {creativePlan.emotionalPacing}</p>
+              <p><strong>Environment:</strong> {creativePlan!.environmentDescription}</p>
+              <p><strong>Pacing:</strong> {creativePlan!.emotionalPacing}</p>
               <ol className="creative-shot-list">
-                {creativePlan.shotList.map((shot) => (
+                {creativePlan!.shotList.map((shot) => (
                   <li key={shot.id}>
                     <strong>{shot.title}</strong>
                     <span>{shot.description}</span>
@@ -2983,9 +3032,9 @@ export default function CreateVideo({
                 <div className="reference-repair-panel">
                   <div>
                     <span className="eyebrow">reference repair</span>
-                    <h3>{assetRepairTitle(activeReferenceRepair)}</h3>
-                    <p>{activeReferenceRepair.label}</p>
-                    <p className="muted">{assetRepairCopy(activeReferenceRepair)}</p>
+                    <h3>{assetRepairTitle(activeReferenceRepair!)}</h3>
+                    <p>{activeReferenceRepair!.label}</p>
+                    <p className="muted">{assetRepairCopy(activeReferenceRepair!)}</p>
                   </div>
                   {renderReferenceRepairActions()}
                   {repairStatus ? <p className="muted">{repairStatus}</p> : null}
@@ -3010,7 +3059,7 @@ export default function CreateVideo({
                   </div>
                   <ol className="scene-progress-list">
                     {sceneExecutionResult
-                      ? sceneExecutionResult.clips.map((clip) => {
+                      ? sceneExecutionResult!.clips.map((clip) => {
                           const clipModerationStages = moderationRetryStageMessages(
                             clip.moderationDiagnostics ?? clip.metadata.moderationOrchestration,
                           );
@@ -3091,13 +3140,13 @@ export default function CreateVideo({
                   </ol>
                   {sceneExecutionResult?.clips.some((clip) => Boolean(clip.videoUrl)) ? (
                     <div className="scene-clip-timeline">
-                      {sceneExecutionResult.clips
+                      {sceneExecutionResult!.clips
                         .filter((clip) => Boolean(clip.videoUrl))
                         .map((clip) => (
                           <article key={`${clip.id}-video`} className="scene-clip-card">
                             <div className="row-between">
                               <span className="eyebrow">Shot {clip.clipOrder}</span>
-                              <span className="tiny-pill">{clip.model || sceneExecutionResult.engine}</span>
+                              <span className="tiny-pill">{clip.model || sceneExecutionResult!.engine}</span>
                             </div>
                             <strong>{clip.title}</strong>
                             {clip.videoUrl ? (
@@ -3113,6 +3162,7 @@ export default function CreateVideo({
           ) : null}
           </div>
         </details>
+        )}
 
         <div className="field-block">
           <span>Duration</span>
@@ -3329,6 +3379,8 @@ export default function CreateVideo({
           </div>
         ) : null}
 
+        <p className="muted cinematic-auto-flow-copy">Lumora shapes cinematic beats automatically, then saves the render to Drafts.</p>
+
         <div className="button-row luxury-action-row">
           <button type="button" className="primary-btn" onClick={handleGenerate} disabled={generateBusy} aria-busy={generateBusy}>
             {renderCooldownActive
@@ -3338,22 +3390,14 @@ export default function CreateVideo({
               : activeRenderBlocksGenerate
                 ? 'Rendering in Drafts'
               : generationLoading
-              ? 'Rendering...'
+              ? 'Shaping your scene...'
               : referenceLoading
                   ? 'Checking self character...'
                 : !hasPrompt
-                  ? 'Add prompt before generating'
+                  ? 'Add a scene idea'
                 : !canGenerate
                   ? 'Add reference before generating'
-                : isSeedanceEngine
-                  ? `Generate with ${selectedProviderOption.label}`
-                : engine === 'mock'
-                  ? 'Generate demo preview'
-                : engine === 'veo'
-                  ? 'Generate with Veo Experimental'
-                  : engine === 'replicate' && selfReferenceMode
-                    ? 'Generate new scene with my Lumora character'
-                  : 'Generate video'}
+                : 'Generate Cinematic Scene'}
           </button>
           <button type="button" className="ghost-btn" onClick={() => void handleSaveDraft()} disabled={saveBusy}>
             Save draft
@@ -3394,6 +3438,157 @@ export default function CreateVideo({
               </div>
             ) : null}
           </div>
+        ) : null}
+        {showCinematicStructure ? (
+          <details className="advanced-create-details cinematic-flow-details invisible-flow-details">
+            <summary>View cinematic structure</summary>
+            <div className="creative-brain-panel">
+              <div className="row-between">
+                <div>
+                  <span className="eyebrow">Story flow</span>
+                  <strong>Lumora is shaping your scene behind the curtain.</strong>
+                </div>
+                <span className="tiny-pill">{cinematicStructureStatusLabel}</span>
+              </div>
+              <p className="muted">
+                Cinematic beats, cast guidance, and Story Memory stay quietly aligned while your render moves toward Drafts.
+              </p>
+              {creativePlanStatus ? <p className="muted">{creativePlanStatus}</p> : null}
+              {creativePlanError ? <p className="muted">{creativePlanError}</p> : null}
+              {creativePlan ? (
+                <div className="creative-plan-preview">
+                  <div className="creative-plan-summary">
+                    <span><strong>Tone</strong>{creativePlan.cinematicTone}</span>
+                    <span><strong>Style</strong>{creativePlan.visualStyle}</span>
+                    <span><strong>Sound</strong>{creativePlan.soundtrackMood}</span>
+                  </div>
+                  <p><strong>Environment:</strong> {creativePlan.environmentDescription}</p>
+                  <p><strong>Pacing:</strong> {creativePlan.emotionalPacing}</p>
+                  <details className="creative-plan-editor-shell">
+                    <summary>Advanced cinematic notes</summary>
+                    <label className="field-block creative-plan-editor">
+                      <span>Structured scene notes</span>
+                      <textarea
+                        value={creativePlanDraft}
+                        onChange={(event) => handleCreativePlanDraftChange(event.target.value)}
+                        rows={12}
+                      />
+                    </label>
+                  </details>
+                </div>
+              ) : creativePlanLoading ? (
+                <div className="scene-progress-panel cinematic-shimmer" aria-live="polite">
+                  <div className="row-between">
+                    <div>
+                      <span className="eyebrow">Story flow</span>
+                      <strong>Shaping cinematic beats</strong>
+                    </div>
+                    <span className="tiny-pill">Shaping</span>
+                  </div>
+                  <p className="muted">Understanding your scene, preparing your cast, and preserving Story Memory.</p>
+                </div>
+              ) : null}
+              {sceneExecutionStatus ? <p className="muted">{sceneExecutionStatus}</p> : null}
+              {sceneExecutionError ? (
+                <div className="generation-error-card scene-flow-error-card">
+                  <p>{sceneExecutionError}</p>
+                  <p>Your cinematic work is preserved. Resume when you are ready.</p>
+                </div>
+              ) : null}
+              {sceneExecutionPlan || sceneExecutionResult ? (
+                <div className="scene-progress-panel" aria-live="polite">
+                  <div className="row-between">
+                    <div>
+                      <span className="eyebrow">Story flow</span>
+                      <strong>{sceneExecutionResult ? 'Cinematic beats saved' : 'Cinematic beats ready'}</strong>
+                    </div>
+                    <span className="tiny-pill">{cinematicStructureStatusLabel}</span>
+                  </div>
+                  <ol className="scene-progress-list">
+                    {sceneExecutionResult
+                      ? sceneExecutionResult.clips.map((clip) => {
+                          const clipModerationStages = moderationRetryStageMessages(
+                            clip.moderationDiagnostics ?? clip.metadata.moderationOrchestration,
+                          );
+                          const clipProviderFallbackStages = providerFallbackStageMessages(
+                            clip.providerFallbackDiagnostics ?? clip.metadata.providerFallback,
+                          );
+                          const clipDescription = clip.metadata.shotDescription || clip.title;
+                          const clipDescriptionKey = `visible-clip-${clip.id}`;
+                          const clipExpanded = expandedSceneDescriptions.has(clipDescriptionKey);
+                          const clipCanExpand = clipDescription.length > 180;
+                          const clipSafeError = clip.error
+                            ? creatorFacingErrorMessage(clip.error, 'This shot paused safely.')
+                            : '';
+                          const clipHasAdaptation = clipModerationStages.length > 0 || clipProviderFallbackStages.length > 0;
+
+                          return (
+                            <li key={clip.id} className={`scene-progress-item ${clip.status}`}>
+                              <span className="scene-progress-index">{clip.clipOrder}</span>
+                              <div className="scene-progress-body">
+                                <div className="scene-progress-title-row">
+                                  <strong>{clip.title}</strong>
+                                  <span className="tiny-pill scene-status-pill">{creatorSceneStatusLabel(clip.status)}</span>
+                                </div>
+                                <p className={`scene-shot-description ${clipExpanded ? 'expanded' : ''}`}>
+                                  {clipDescription}
+                                </p>
+                                <div className="scene-shot-meta">
+                                  <span>{clip.metadata.cameraFraming}</span>
+                                  <span>{clip.metadata.cameraMovement}</span>
+                                </div>
+                                {clipHasAdaptation ? (
+                                  <small className="scene-shot-note">Creative adaptation guided this shot.</small>
+                                ) : null}
+                                {clipSafeError ? <small className="scene-shot-safe-error">{clipSafeError}</small> : null}
+                                {clipCanExpand ? (
+                                  <button type="button" className="text-btn scene-expand-btn" onClick={() => toggleSceneDescription(clipDescriptionKey)}>
+                                    {clipExpanded ? 'Collapse scene' : 'Expand scene'}
+                                  </button>
+                                ) : null}
+                              </div>
+                            </li>
+                          );
+                        })
+                      : sceneExecutionPlan?.shotList.map((shot, index) => {
+                          const shotDescriptionKey = `visible-shot-${shot.id}`;
+                          const shotExpanded = expandedSceneDescriptions.has(shotDescriptionKey);
+                          const shotCanExpand = shot.description.length > 180;
+
+                          return (
+                            <li
+                              key={shot.id}
+                              className={`scene-progress-item ${generationStatusState === 'processing' && index === 0 ? 'processing' : 'queued'}`}
+                            >
+                              <span className="scene-progress-index">{index + 1}</span>
+                              <div className="scene-progress-body">
+                                <div className="scene-progress-title-row">
+                                  <strong>{shot.title}</strong>
+                                  <span className="tiny-pill scene-status-pill">
+                                    {generationStatusState === 'processing' && index === 0 ? 'Rendering' : 'Queued'}
+                                  </span>
+                                </div>
+                                <p className={`scene-shot-description ${shotExpanded ? 'expanded' : ''}`}>
+                                  {shot.description}
+                                </p>
+                                <div className="scene-shot-meta">
+                                  <span>{shot.cameraFraming}</span>
+                                  <span>{shot.cameraMovement}</span>
+                                </div>
+                                {shotCanExpand ? (
+                                  <button type="button" className="text-btn scene-expand-btn" onClick={() => toggleSceneDescription(shotDescriptionKey)}>
+                                    {shotExpanded ? 'Collapse scene' : 'Expand scene'}
+                                  </button>
+                                ) : null}
+                              </div>
+                            </li>
+                          );
+                        })}
+                  </ol>
+                </div>
+              ) : null}
+            </div>
+          </details>
         ) : null}
         {generationError ? (
           <div className="generation-error-card">

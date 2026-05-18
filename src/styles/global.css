@@ -1923,6 +1923,33 @@ button {
   min-height: 48px;
 }
 
+.luxury-action-row .primary-btn {
+  min-height: 56px;
+  border-radius: 20px;
+  font-size: 0.98rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  box-shadow:
+    0 18px 42px rgba(126, 231, 216, 0.16),
+    0 0 40px rgba(255, 105, 212, 0.1);
+  transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
+}
+
+.luxury-action-row .primary-btn:hover:not(:disabled),
+.luxury-action-row .primary-btn:focus-visible:not(:disabled) {
+  transform: translateY(-1px);
+  filter: saturate(1.05);
+  box-shadow:
+    0 22px 54px rgba(126, 231, 216, 0.2),
+    0 0 52px rgba(255, 105, 212, 0.13);
+}
+
+.cinematic-auto-flow-copy {
+  margin: 0;
+  text-align: center;
+  line-height: 1.45;
+}
+
 .create-status-copy {
   margin: 0;
   padding: 9px 11px;
@@ -2334,6 +2361,18 @@ button {
 
 .scene-flow-error-card p + p {
   color: var(--muted-text);
+}
+
+.invisible-flow-details {
+  border-radius: 24px;
+}
+
+.invisible-flow-details summary {
+  color: var(--soft-text);
+}
+
+.invisible-flow-details[open] {
+  border-color: color-mix(in srgb, var(--selected-outline) 24%, var(--surface-border));
 }
 
 .reference-repair-panel {
