@@ -300,9 +300,12 @@ function asyncRenderStatusMessage(data: GenerateVideoApiResponse | GenerationRes
       ? `Resume available in ${seconds} seconds.`
       : 'The render queue is ready. Resume when you are ready.';
   }
-  if (typeof data.progressLabel === 'string' && data.progressLabel) return data.progressLabel;
-  if (typeof data.message === 'string' && data.message) return data.message;
   const status = typeof data.status === 'string' ? data.status : '';
+  const progressLabel = typeof data.progressLabel === 'string' ? data.progressLabel : '';
+  const message = typeof data.message === 'string' ? data.message : '';
+  const visibleMessage = progressLabel || message;
+  if (visibleMessage && !isProviderTechnicalText(visibleMessage)) return visibleMessage;
+  if (status === 'queued') return 'Render queued. Lumora is preparing your scene.';
   if (status === 'paused') return 'This scene took longer than expected. Completed shots are saved in Drafts.';
   return 'Rendering your cinematic take...';
 }
@@ -548,12 +551,12 @@ function formatUnknownDetail(value: unknown): string {
 }
 
 const providerSafetyFilterMessage =
-  'Creative safety paused this render. Try gentler cinematic wording with styled wardrobe and fictional framing.';
+  'This scene needs a softer cinematic direction before rendering.';
 const providerModerationMessage =
-  'Creative safety paused this render after Lumora tried safer cinematic styling.';
-const providerQueueBusyMessage = 'The render line is busy. Lumora will try again in a moment...';
+  'This scene needs a softer cinematic direction before rendering.';
+const providerQueueBusyMessage = 'Render queue is cooling down.';
 const replicateThrottledMessage =
-  'The cinematic renderer is cooling down for a moment. Wait a minute and try again.';
+  'Render queue is cooling down.';
 
 function isProviderSafetyFilterError(value: string): boolean {
   const lower = value.toLowerCase();
@@ -611,7 +614,7 @@ function providerFallbackStageMessages(value: unknown): string[] {
     value.stages
       .map((stage) => stage.message)
       .filter((message): message is string => typeof message === 'string' && message.trim().length > 0),
-  ));
+  )).map(creatorFacingStageMessage);
 }
 
 function providerFallbackWarningMessages(value: unknown): string[] {
@@ -688,6 +691,28 @@ function creatorModerationStageMessage(stage: string): string {
     .replace(/moderation/gi, 'creative safety');
 }
 
+function creatorFacingStageMessage(stage: string): string {
+  const mapped = creatorModerationStageMessage(stage);
+  const lower = mapped.toLowerCase();
+
+  if (isProviderQueueBusyError(mapped)) return 'Waiting for the render queue...';
+  if (isProviderSafetyFilterError(mapped)) return 'Trying a softer cinematic direction...';
+  if (
+    lower.includes('prediction failed') ||
+    lower.includes('async prediction') ||
+    lower.includes('modelerror') ||
+    lower.includes('model error') ||
+    lower.includes('provider') ||
+    lower.includes('replicate') ||
+    lower.includes('seedance') ||
+    lower.includes('stack trace')
+  ) {
+    return 'Trying another safe creative path...';
+  }
+
+  return mapped;
+}
+
 function moderationWarningMessages(value: unknown): string[] {
   const stages = moderationRetryStageMessages(value);
   if (!stages.length) return [];
@@ -734,6 +759,85 @@ function isProviderQueueBusyError(value: string): boolean {
 
 function isReplicateThrottledError(value: string): boolean {
   return value.toLowerCase().includes('replicate is temporarily throttling this account');
+}
+
+function isTimeoutOrStillProcessingText(value: string): boolean {
+  const lower = value.toLowerCase();
+  return (
+    lower.includes('timed out') ||
+    lower.includes('timeout') ||
+    lower.includes('aborterror') ||
+    lower.includes('still rendering') ||
+    lower.includes('still processing')
+  );
+}
+
+function isProviderTechnicalText(value: string): boolean {
+  const lower = value.toLowerCase();
+  return (
+    lower.includes('prediction failed') ||
+    lower.includes('async prediction failed') ||
+    lower.includes('modelerror') ||
+    lower.includes('model error') ||
+    lower.includes('provider exception') ||
+    lower.includes('provider failed') ||
+    lower.includes('provider_error') ||
+    lower.includes('replicate') ||
+    lower.includes('seedance') ||
+    lower.includes('e005') ||
+    lower.includes('flagged as sensitive') ||
+    lower.includes('stack trace') ||
+    lower.includes('traceback') ||
+    lower.includes('details:') ||
+    lower.includes('prediction_id') ||
+    lower.includes('provider_prediction')
+  );
+}
+
+function collectErrorText(value: unknown): string {
+  const fragments: string[] = [];
+
+  const visit = (input: unknown, depth: number) => {
+    if (input === null || input === undefined || depth > 3) return;
+    if (typeof input === 'string' || typeof input === 'number' || typeof input === 'boolean') {
+      const text = String(input).trim();
+      if (text) fragments.push(text);
+      return;
+    }
+    if (input instanceof ApiRequestError) {
+      fragments.push(input.message);
+      visit(input.payload, depth + 1);
+      return;
+    }
+    if (input instanceof Error) {
+      fragments.push(input.message);
+      return;
+    }
+    if (Array.isArray(input)) {
+      input.forEach((item) => visit(item, depth + 1));
+      return;
+    }
+    if (typeof input === 'object') {
+      const record = input as Record<string, unknown>;
+      [
+        'error',
+        'message',
+        'details',
+        'detail',
+        'suggestion',
+        'code',
+        'errorMessage',
+        'errorCategory',
+        'providerMessage',
+        'providerStatus',
+        'reason',
+        'status',
+      ].forEach((key) => visit(record[key], depth + 1));
+    }
+  };
+
+  visit(value, 0);
+  return Array.from(new Set(fragments)).join(' ');
 }
 
 function parseGenerateResponse(text: string): {
@@ -806,6 +910,65 @@ function friendlyCharacterProfileError(error: unknown) {
   return message;
 }
 
+function creatorFacingErrorMessage(value: unknown, fallback = 'Lumora safely paused this scene.'): string {
+  const raw = collectErrorText(value) || (value instanceof Error ? value.message : String(value ?? ''));
+  const lower = raw.toLowerCase();
+
+  if (
+    lower.includes('generation_jobs') &&
+    (lower.includes('character_id') || lower.includes('character profiles'))
+  ) {
+    return characterProfilesMigrationWarning;
+  }
+  if (lower.includes('reference') && (lower.includes('re-upload') || lower.includes('protected') || lower.includes('expired'))) {
+    return 'One reference needs to be re-uploaded before Lumora can use it.';
+  }
+  if (isProviderQueueBusyError(raw)) {
+    return 'Render queue is cooling down.';
+  }
+  if (isTimeoutOrStillProcessingText(raw)) {
+    return 'Your cinematic moment is still processing.';
+  }
+  if (isProviderSafetyFilterError(raw)) {
+    return 'This scene needs a softer cinematic direction before rendering.';
+  }
+  if (isProviderTechnicalText(raw)) {
+    return 'This renderer paused the scene safely.';
+  }
+  if (!raw || raw === 'Request failed' || raw.length > 220 || raw.includes('{') || raw.includes('}')) {
+    return fallback;
+  }
+
+  return raw;
+}
+
+function creatorFacingPausedDetail(value: unknown): string {
+  const raw = collectErrorText(value);
+  if (isProviderSafetyFilterError(raw)) {
+    return 'Try a simpler, softer cinematic direction. Your cast and Story Memory are preserved.';
+  }
+  if (isProviderQueueBusyError(raw)) {
+    return 'Your scene is saved and ready to resume when the queue cools down.';
+  }
+  return 'Your cinematic work is preserved. Resume when you are ready.';
+}
+
+function creatorFacingWarningMessage(value: string): string | null {
+  if (!value.trim()) return null;
+  if (isProviderQueueBusyError(value)) return 'Render queue is cooling down.';
+  if (isProviderSafetyFilterError(value)) return 'Creative adaptation kept this scene safe.';
+  if (isProviderTechnicalText(value)) return 'Lumora kept your work safe while the renderer paused.';
+  return value;
+}
+
+function formatCreatorWarnings(messages: string[]): string[] {
+  return Array.from(new Set(
+    messages
+      .map(creatorFacingWarningMessage)
+      .filter((message): message is string => Boolean(message)),
+  ));
+}
+
 export default function CreateVideo({
   refreshKey = 0,
   characterId,
@@ -865,6 +1028,7 @@ export default function CreateVideo({
   const [sceneExecutionStatus, setSceneExecutionStatus] = useState('');
   const [sceneExecutionPlan, setSceneExecutionPlan] = useState<CreativeBrainScenePlan | null>(null);
   const [sceneExecutionResult, setSceneExecutionResult] = useState<SceneExecutorResult | null>(null);
+  const [expandedSceneDescriptions, setExpandedSceneDescriptions] = useState<Set<string>>(new Set());
   const [referenceRepair, setReferenceRepair] = useState<ReferenceRepairIssue | null>(null);
   const [repairUploading, setRepairUploading] = useState(false);
   const [repairStatus, setRepairStatus] = useState('');
@@ -1223,11 +1387,15 @@ export default function CreateVideo({
         }
 
         if (statusValue === 'failed' || statusValue === 'paused') {
+          const pausedMessage = creatorFacingErrorMessage(
+            [job.error, job.errorMessage, progressLabel],
+            'This renderer paused the scene safely.',
+          );
           clearRenderCooldown();
           setActiveRenderJobId(null);
           finishGenerationProgress('failed');
-          setGenerationError(job.error || job.errorMessage || progressLabel);
-          setStatus(progressLabel);
+          setGenerationError(pausedMessage);
+          setStatus('Your cinematic work is preserved in Drafts.');
           showToast({ type: 'error', message: 'Lumora paused this scene. Completed work is saved in Drafts.' });
           return;
         }
@@ -1238,9 +1406,7 @@ export default function CreateVideo({
         pollTimer = window.setTimeout(pollJob, 4000);
       } catch (error) {
         if (!active) return;
-        setStatus(error instanceof Error
-          ? error.message
-          : 'Your scene is still rendering. Lumora will keep checking and save it to Drafts.');
+        setStatus(creatorFacingErrorMessage(error, 'Your scene is still rendering. Lumora will keep checking and save it to Drafts.'));
         pollTimer = window.setTimeout(pollJob, 6000);
       }
     }
@@ -1625,7 +1791,12 @@ export default function CreateVideo({
       if (result.status === 'completed') {
         showToast({ type: 'success', message: 'Scene continuity preserved and saved to Drafts.' });
       } else {
-        showToast({ type: 'error', message: result.failedClip?.error || 'That shot needs another take. Finished shots stayed saved.' });
+        showToast({
+          type: 'error',
+          message: result.failedClip?.error
+            ? creatorFacingErrorMessage(result.failedClip.error, 'That shot needs another take. Finished shots stayed saved.')
+            : 'That shot needs another take. Finished shots stayed saved.',
+        });
       }
     } catch (error) {
       const repairIssue = error instanceof ApiRequestError
@@ -1638,7 +1809,7 @@ export default function CreateVideo({
       const message = error instanceof ApiRequestError || error instanceof Error
         ? repairIssue
           ? 'One reference image needs to be re-uploaded before Lumora can use it.'
-          : friendlyCharacterProfileError(error)
+          : creatorFacingErrorMessage(error, friendlyCharacterProfileError(error))
         : 'Lumora could not finish the storyboard yet.';
       setSceneExecutionError(message);
       setSceneExecutionStatus('');
@@ -1646,6 +1817,18 @@ export default function CreateVideo({
     } finally {
       setSceneExecutionLoading(false);
     }
+  }
+
+  function toggleSceneDescription(key: string) {
+    setExpandedSceneDescriptions((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
   }
 
   function handleContinueWithoutReference() {
@@ -2015,7 +2198,10 @@ export default function CreateVideo({
         });
 
         if (providerResult.status === 'failed') {
-          throw new Error(providerResult.error || providerResult.message || 'Lumora paused this scene.');
+          throw new Error(creatorFacingErrorMessage(
+            [providerResult.error, providerResult.message, providerResult.providerStatus],
+            'This renderer paused the scene safely.',
+          ));
         }
 
         data = {
@@ -2071,21 +2257,23 @@ export default function CreateVideo({
         if (!res.ok) {
           const detail = formatUnknownDetail(parsedData.details);
           const apiMessage = parsedData.error || parseError || 'Lumora paused this scene.';
-          if (isProviderSafetyFilterError([apiMessage, parsedData.suggestion || '', detail].join(' '))) {
-            throw new Error(providerSafetyFilterMessage);
+          const rawFailure = [apiMessage, parsedData.suggestion || '', detail].join(' ');
+          console.error('Video generation request paused', {
+            status: res.status,
+            error: apiMessage,
+            details: detail,
+          });
+          if (isProviderSafetyFilterError(rawFailure)) {
+            throw new Error(creatorFacingErrorMessage(rawFailure, providerSafetyFilterMessage));
           }
-          if (isReplicateThrottledError([apiMessage, parsedData.suggestion || '', detail].join(' '))) {
-            throw new Error(replicateThrottledMessage);
+          if (isReplicateThrottledError(rawFailure)) {
+            throw new Error(creatorFacingErrorMessage(rawFailure, replicateThrottledMessage));
           }
-          if (isProviderQueueBusyError([apiMessage, detail].join(' '))) {
-            throw new Error(providerQueueBusyMessage);
+          if (isProviderQueueBusyError(rawFailure)) {
+            throw new Error(creatorFacingErrorMessage(rawFailure, providerQueueBusyMessage));
           }
 
-          throw new Error(
-            [apiMessage, detail]
-              .filter(Boolean)
-              .join(' Details: '),
-          );
+          throw new Error(creatorFacingErrorMessage(rawFailure, 'Lumora safely paused this scene.'));
         }
 
         if (parseError) {
@@ -2204,7 +2392,7 @@ export default function CreateVideo({
         referenceImageUrls: referencePayload,
         characterAvatar,
       });
-      const nextWarnings = Array.from(new Set([
+      const nextWarnings = formatCreatorWarnings([
         ...formatWarnings(data.warnings),
         ...moderationWarningMessages(data.moderationDiagnostics),
         ...providerFallbackWarningMessages(data.providerFallbackDiagnostics),
@@ -2212,7 +2400,7 @@ export default function CreateVideo({
         ...(selectedIsSeedanceEngine && selectedSeedanceReferences.length === 1
           ? ['Only one image is uploaded. Add side, full-body, expression, or outfit references for stronger cast consistency.']
           : []),
-      ]));
+      ]);
       const nextModerationStages = Array.from(new Set([
         ...moderationRetryStageMessages(data.moderationDiagnostics),
         ...providerFallbackStageMessages(data.providerFallbackDiagnostics),
@@ -2363,9 +2551,11 @@ export default function CreateVideo({
             studioSaveStatus = 'Video generated. Account save failed, so a local Drafts backup was saved.';
             setGenerationWarnings((current) => [
               ...current,
-              saveError instanceof Error
-                ? `Account save failed: ${saveError.message}. A local Drafts backup was saved.`
-                : 'Account save failed. A local Drafts backup was saved.',
+              creatorFacingWarningMessage(
+                saveError instanceof Error
+                  ? `Account save failed: ${saveError.message}. A local Drafts backup was saved.`
+                  : 'Account save failed. A local Drafts backup was saved.',
+              ) ?? 'A local Drafts backup was saved.',
             ]);
           }
         } else {
@@ -2441,17 +2631,19 @@ export default function CreateVideo({
           ? replicateThrottledMessage
         : isProviderQueueBusyError(message)
           ? providerQueueBusyMessage
-        : message;
+        : creatorFacingErrorMessage(error, 'Lumora safely paused this scene.');
       setGenerationSafeRewrite(suggestedRewrite);
       setGenerationModerationDetail(
         repairIssue
           ? assetRepairCopy(repairIssue)
           : providerFallbackPayload
           ? 'Lumora kept your cast and Story Memory intact. Try the safer rewrite, simplify the scene, or save the draft before another take.'
-          : moderationPayload?.suggestion ||
+          : moderationPayload?.suggestion && !isProviderTechnicalText(moderationPayload.suggestion)
+            ? moderationPayload.suggestion
+            :
         (moderationPayload
           ? 'Lumora preserved your cast, Story Memory, and storyboard while adapting the style for cinematic safety.'
-          : ''),
+          : creatorFacingPausedDetail(error)),
       );
       setGenerationModerationStages(retryStages);
       if (moderationPayload) {
@@ -2468,7 +2660,7 @@ export default function CreateVideo({
       showToast({
         type: 'error',
         message: moderationPayload
-          ? 'Creative safety paused this render. A safer cinematic rewrite is ready.'
+          ? 'Lumora is trying a softer cinematic direction.'
           : 'Lumora paused this scene. You can retry when ready.',
       });
     } finally {
@@ -2781,7 +2973,12 @@ export default function CreateVideo({
                 </small>
               </div>
               {sceneExecutionStatus ? <p className="muted">{sceneExecutionStatus}</p> : null}
-              {sceneExecutionError ? <p className="creative-plan-error">{sceneExecutionError}</p> : null}
+              {sceneExecutionError ? (
+                <div className="generation-error-card scene-flow-error-card">
+                  <p>{sceneExecutionError}</p>
+                  <p>Your cinematic work is preserved. Resume when you are ready.</p>
+                </div>
+              ) : null}
               {sceneExecutionError && activeReferenceRepair ? (
                 <div className="reference-repair-panel">
                   <div>
@@ -2820,37 +3017,77 @@ export default function CreateVideo({
                           const clipProviderFallbackStages = providerFallbackStageMessages(
                             clip.providerFallbackDiagnostics ?? clip.metadata.providerFallback,
                           );
+                          const clipDescription = clip.metadata.shotDescription || clip.title;
+                          const clipDescriptionKey = `clip-${clip.id}`;
+                          const clipExpanded = expandedSceneDescriptions.has(clipDescriptionKey);
+                          const clipCanExpand = clipDescription.length > 180;
+                          const clipSafeError = clip.error
+                            ? creatorFacingErrorMessage(clip.error, 'This shot paused safely.')
+                            : '';
+                          const clipHasAdaptation = clipModerationStages.length > 0 || clipProviderFallbackStages.length > 0;
 
                           return (
                             <li key={clip.id} className={`scene-progress-item ${clip.status}`}>
                               <span className="scene-progress-index">{clip.clipOrder}</span>
-                              <span>
-                                <strong>{clip.title}</strong>
-                                <small>{clip.metadata.cameraFraming} / {clip.metadata.cameraMovement}</small>
-                                {[...clipModerationStages, ...clipProviderFallbackStages].map((stage) => (
-                                  <small key={stage}>{stage}</small>
-                                ))}
-                                {clip.error ? <small className="creative-plan-error">{clip.error}</small> : null}
-                              </span>
-                              <span className="tiny-pill">{creatorSceneStatusLabel(clip.status)}</span>
+                              <div className="scene-progress-body">
+                                <div className="scene-progress-title-row">
+                                  <strong>{clip.title}</strong>
+                                  <span className="tiny-pill scene-status-pill">{creatorSceneStatusLabel(clip.status)}</span>
+                                </div>
+                                <p className={`scene-shot-description ${clipExpanded ? 'expanded' : ''}`}>
+                                  {clipDescription}
+                                </p>
+                                <div className="scene-shot-meta">
+                                  <span>{clip.metadata.cameraFraming}</span>
+                                  <span>{clip.metadata.cameraMovement}</span>
+                                </div>
+                                {clipHasAdaptation ? (
+                                  <small className="scene-shot-note">Creative adaptation guided this shot.</small>
+                                ) : null}
+                                {clipSafeError ? <small className="scene-shot-safe-error">{clipSafeError}</small> : null}
+                                {clipCanExpand ? (
+                                  <button type="button" className="text-btn scene-expand-btn" onClick={() => toggleSceneDescription(clipDescriptionKey)}>
+                                    {clipExpanded ? 'Collapse scene' : 'Expand scene'}
+                                  </button>
+                                ) : null}
+                              </div>
                             </li>
                           );
                         })
-                      : sceneExecutionPlan?.shotList.map((shot, index) => (
-                          <li
-                            key={shot.id}
-                            className={`scene-progress-item ${sceneExecutionLoading && index === 0 ? 'processing' : 'queued'}`}
-                          >
-                            <span className="scene-progress-index">{index + 1}</span>
-                            <span>
-                              <strong>{shot.title}</strong>
-                              <small>{shot.cameraFraming} / {shot.cameraMovement}</small>
-                            </span>
-                            <span className="tiny-pill">
-                              {sceneExecutionLoading && index === 0 ? 'Rendering' : 'Queued'}
-                            </span>
-                          </li>
-                        ))}
+                      : sceneExecutionPlan?.shotList.map((shot, index) => {
+                          const shotDescriptionKey = `shot-${shot.id}`;
+                          const shotExpanded = expandedSceneDescriptions.has(shotDescriptionKey);
+                          const shotCanExpand = shot.description.length > 180;
+
+                          return (
+                            <li
+                              key={shot.id}
+                              className={`scene-progress-item ${sceneExecutionLoading && index === 0 ? 'processing' : 'queued'}`}
+                            >
+                              <span className="scene-progress-index">{index + 1}</span>
+                              <div className="scene-progress-body">
+                                <div className="scene-progress-title-row">
+                                  <strong>{shot.title}</strong>
+                                  <span className="tiny-pill scene-status-pill">
+                                    {sceneExecutionLoading && index === 0 ? 'Rendering' : 'Queued'}
+                                  </span>
+                                </div>
+                                <p className={`scene-shot-description ${shotExpanded ? 'expanded' : ''}`}>
+                                  {shot.description}
+                                </p>
+                                <div className="scene-shot-meta">
+                                  <span>{shot.cameraFraming}</span>
+                                  <span>{shot.cameraMovement}</span>
+                                </div>
+                                {shotCanExpand ? (
+                                  <button type="button" className="text-btn scene-expand-btn" onClick={() => toggleSceneDescription(shotDescriptionKey)}>
+                                    {shotExpanded ? 'Collapse scene' : 'Expand scene'}
+                                  </button>
+                                ) : null}
+                              </div>
+                            </li>
+                          );
+                        })}
                   </ol>
                   {sceneExecutionResult?.clips.some((clip) => Boolean(clip.videoUrl)) ? (
                     <div className="scene-clip-timeline">

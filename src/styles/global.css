@@ -1054,17 +1054,19 @@ button {
 
 .scene-progress-panel {
   display: grid;
-  gap: 10px;
-  padding: 10px;
+  gap: 14px;
+  padding: 14px;
   border: 1px solid var(--control-border);
-  border-radius: 14px;
-  background: var(--control-background);
+  border-radius: 24px;
+  background:
+    linear-gradient(145deg, rgba(126, 231, 216, 0.055), rgba(255, 105, 212, 0.045)),
+    var(--control-background);
   animation: cinematicPanelIn 180ms ease both;
 }
 
 .scene-progress-list {
   display: grid;
-  gap: 8px;
+  gap: 12px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1072,14 +1074,17 @@ button {
 
 .scene-progress-item {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-  padding: 8px;
-  border: 1px solid var(--control-border);
-  border-radius: 12px;
-  background: var(--surface-soft);
-  transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 12px;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--control-border) 82%, rgba(255, 255, 255, 0.16));
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.025)),
+    var(--surface-soft);
+  transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
 
 .scene-progress-item:hover {
@@ -1095,30 +1100,107 @@ button {
 
 .scene-progress-item.failed {
   border-color: var(--warning-border);
+  background:
+    linear-gradient(145deg, rgba(255, 206, 115, 0.08), rgba(255, 255, 255, 0.025)),
+    var(--surface-soft);
 }
 
 .scene-progress-index {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 34px;
+  height: 34px;
   border-radius: 999px;
   background: var(--pill-background);
   color: var(--pill-text);
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   font-weight: 800;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--selected-outline) 30%, transparent);
 }
 
-.scene-progress-item strong,
-.scene-progress-item small {
-  display: block;
+.scene-progress-body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
 }
 
-.scene-progress-item small {
-  margin-top: 4px;
+.scene-progress-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.scene-progress-title-row strong {
+  min-width: 0;
+  color: var(--text-primary);
+  line-height: 1.28;
+}
+
+.scene-status-pill {
+  flex: 0 0 auto;
+  margin-top: -1px;
+}
+
+.scene-shot-description {
+  display: -webkit-box;
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  color: var(--soft-text);
+  font-size: 0.9rem;
+  line-height: 1.55;
+  overflow-wrap: normal;
+  word-break: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.scene-shot-description.expanded {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+}
+
+.scene-shot-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.scene-shot-meta span {
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--surface-border);
+  border-radius: 999px;
   color: var(--muted-text);
-  line-height: 1.35;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.scene-shot-note,
+.scene-shot-safe-error {
+  display: block;
+  color: var(--muted-text);
+  line-height: 1.45;
+}
+
+.scene-shot-safe-error {
+  color: var(--warning-text);
+}
+
+.scene-expand-btn {
+  justify-self: flex-start;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.78rem;
 }
 
 .scene-clip-timeline {
@@ -2246,6 +2328,14 @@ button {
   gap: 8px;
 }
 
+.scene-flow-error-card {
+  border-radius: 22px;
+}
+
+.scene-flow-error-card p + p {
+  color: var(--muted-text);
+}
+
 .reference-repair-panel {
   border-radius: 24px;
 }
@@ -3131,6 +3221,37 @@ button:disabled,
   .render-state-actions .ghost-btn {
     width: 100%;
     flex: unset;
+  }
+
+  .scene-progress-panel {
+    padding: 12px;
+    border-radius: 22px;
+  }
+
+  .scene-progress-item {
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 10px;
+    padding: 12px;
+    border-radius: 18px;
+  }
+
+  .scene-progress-index {
+    width: 32px;
+    height: 32px;
+  }
+
+  .scene-progress-title-row {
+    display: grid;
+    gap: 8px;
+  }
+
+  .scene-status-pill {
+    width: fit-content;
+    margin-top: 0;
+  }
+
+  .scene-shot-description {
+    -webkit-line-clamp: 3;
   }
 }
 

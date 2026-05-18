@@ -72,6 +72,9 @@ Use this checklist for the emotional creator loop: first-use, Story Memory, Draf
 - Confirm Drafts cooling cards show `Cooling down`, `Resume render`, and `Saved safely`.
 - Confirm raw provider errors, model error codes, stack traces, and payload text are not visible in normal Create/Drafts UI.
 - Confirm mobile bottom nav does not cover required Create actions.
+- Confirm provider/prediction messages are replaced with calm creator copy such as `This renderer paused the scene safely.`
+- Confirm Scene Flow shot cards show one compact status, clamp long descriptions, and do not repeat cooldown copy inside every shot.
+- Confirm `Expand scene` opens long shot descriptions smoothly and keeps the mobile layout readable.
 
 ## Safety And Failure States
 
