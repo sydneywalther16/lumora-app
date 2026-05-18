@@ -36,7 +36,7 @@ Use this checklist for the emotional creator loop: first-use, Story Memory, Draf
 - Confirm CTA goes to Create.
 - With a draft present, confirm thumbnail/poster renders.
 - Open draft detail.
-- Confirm `Continue story`, `Remix This`, `Post`, and `Share` actions appear.
+- Confirm `Continue Story`, `Edit scene`, `Publish`, and `Share` actions appear.
 - Publish a disposable test draft.
 - Confirm it disappears from Drafts and appears on Profile.
 
@@ -47,16 +47,31 @@ Use this checklist for the emotional creator loop: first-use, Story Memory, Draf
 - Confirm Story World and Creator Identity accents render.
 - Confirm empty grid copy: `Your published cinematic moments will appear here.`
 - With published posts, confirm newest-first vertical thumbnails.
-- Open a profile post and confirm `Continue story`, React, Save, and Follow actions.
+- Open a profile post and confirm `Continue Story`, React, Save, and Follow actions.
 
 ## For You Discovery
 
 - Open `/for-you`.
 - Confirm sticky search bar appears.
-- Confirm sections or labels: Trending cinematic stories, Because you follow, Recently published, Popular cast moments, Continue watching.
+- Confirm sections or labels: Trending story worlds, Because you follow, Recently published, Popular cast moments, Continue watching.
 - Open a post and confirm `Why this?` microcopy.
 - Click React, Save, Follow and confirm tap feedback.
-- Click `Continue story` and confirm Create opens with context preloaded.
+- Click `Continue Story` and confirm Create opens with context preloaded.
+
+## Live Create State QA
+
+- Open `/create?mockRateLimit=1` in local development only.
+- Enter a simple safe prompt and click Generate.
+- Confirm the cooling-down card is readable at phone width.
+- Confirm copy says `Render queue is cooling down.` and `Resume available in ... seconds` or `The render queue is almost ready.`
+- Confirm the message does not wrap one word per line.
+- Confirm `Resume render` is disabled during countdown and enabled when the cooldown ends.
+- Confirm `Save draft` stays visible without crowding the message.
+- Confirm repeated Generate clicks do not start duplicate renders while an active render is queued, rendering, or cooling down.
+- Confirm rendering, queued, paused, moderation, reference repair, and still-checking states use creator-facing copy.
+- Confirm Drafts cooling cards show `Cooling down`, `Resume render`, and `Saved safely`.
+- Confirm raw provider errors, model error codes, stack traces, and payload text are not visible in normal Create/Drafts UI.
+- Confirm mobile bottom nav does not cover required Create actions.
 
 ## Safety And Failure States
 

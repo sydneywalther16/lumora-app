@@ -2099,6 +2099,157 @@ button {
   box-shadow: 0 20px 56px rgba(0, 0, 0, 0.22);
 }
 
+.render-state-card {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--surface-border);
+  border-radius: 24px;
+  background:
+    linear-gradient(145deg, rgba(126, 231, 216, 0.08), rgba(255, 105, 212, 0.06)),
+    var(--surface-background);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 18px 46px rgba(0, 0, 0, 0.18);
+  color: var(--text-primary);
+  animation: cinematicPanelIn 180ms ease both;
+}
+
+.render-state-card.rate-limit-card {
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  border-color: rgba(255, 206, 115, 0.3);
+  background:
+    linear-gradient(145deg, rgba(255, 206, 115, 0.13), rgba(126, 231, 216, 0.07)),
+    var(--surface-background);
+}
+
+.render-state-cooling {
+  animation: cooldownGlow 2.6s ease-in-out infinite;
+}
+
+.render-state-rendering,
+.render-state-queued {
+  border-color: rgba(126, 231, 216, 0.22);
+}
+
+.render-state-paused {
+  border-color: rgba(255, 206, 115, 0.28);
+}
+
+.render-state-complete {
+  color: var(--success-text);
+}
+
+.render-state-topline,
+.render-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.render-state-topline {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.render-state-topline .tiny-pill {
+  width: fit-content;
+}
+
+.render-state-safe-note {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 9px;
+  border: 1px solid rgba(139, 195, 74, 0.24);
+  border-radius: 999px;
+  background: rgba(139, 195, 74, 0.08);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.render-state-copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.render-state-copy strong,
+.render-state-copy p {
+  max-width: 100%;
+  margin: 0;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.render-state-copy strong {
+  color: var(--text-primary);
+  font-size: 1rem;
+  line-height: 1.24;
+}
+
+.render-state-copy p,
+.render-state-card.rate-limit-card p {
+  color: var(--soft-text);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.render-state-card.rate-limit-card strong {
+  color: var(--text-primary);
+}
+
+.generation-progress.compact {
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 999px;
+  padding: 6px;
+  gap: 5px;
+}
+
+.generation-progress.compact span:not(.active) {
+  background: transparent;
+  color: var(--muted-text);
+}
+
+.render-state-actions {
+  align-items: stretch;
+}
+
+.render-state-actions .primary-btn,
+.render-state-actions .ghost-btn {
+  flex: 1 1 150px;
+  min-width: 0;
+  min-height: 44px;
+  white-space: normal;
+}
+
+.generation-error-card {
+  gap: 12px;
+  padding: 14px;
+  border-radius: 22px;
+  background:
+    linear-gradient(145deg, rgba(255, 206, 115, 0.1), rgba(240, 113, 120, 0.08)),
+    var(--warning-background);
+}
+
+.generation-error-card p {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.generation-error-card .button-row {
+  gap: 8px;
+}
+
+.reference-repair-panel {
+  border-radius: 24px;
+}
+
 @keyframes continuityPulse {
   0%,
   100% {
@@ -2106,6 +2257,22 @@ button {
   }
   50% {
     box-shadow: 0 0 0 7px rgba(126, 231, 216, 0.03);
+  }
+}
+
+@keyframes cooldownGlow {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 18px 46px rgba(0, 0, 0, 0.18),
+      0 0 0 0 rgba(255, 206, 115, 0.12);
+  }
+  50% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 18px 46px rgba(0, 0, 0, 0.18),
+      0 0 34px rgba(255, 206, 115, 0.1);
   }
 }
 
@@ -2939,6 +3106,31 @@ button:disabled,
 
   .profile-magic-stats {
     gap: 6px;
+  }
+
+  .render-state-card {
+    padding: 13px;
+    border-radius: 22px;
+  }
+
+  .render-state-topline {
+    align-items: flex-start;
+    justify-content: flex-start;
+  }
+
+  .generation-progress.compact {
+    width: 100%;
+  }
+
+  .render-state-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .render-state-actions .primary-btn,
+  .render-state-actions .ghost-btn {
+    width: 100%;
+    flex: unset;
   }
 }
 

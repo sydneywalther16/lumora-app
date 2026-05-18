@@ -297,14 +297,47 @@ function asyncRenderStatusMessage(data: GenerateVideoApiResponse | GenerationRes
   if (data.status === 'rate_limited') {
     const seconds = retrySecondsForRender(data);
     return seconds > 0
-      ? `Render queue is cooling down. Try again in about ${seconds} seconds.`
-      : 'Render queue is ready. Resume render when you are ready.';
+      ? `Resume available in ${seconds} seconds.`
+      : 'The render queue is ready. Resume when you are ready.';
   }
   if (typeof data.progressLabel === 'string' && data.progressLabel) return data.progressLabel;
   if (typeof data.message === 'string' && data.message) return data.message;
   const status = typeof data.status === 'string' ? data.status : '';
   if (status === 'paused') return 'This scene took longer than expected. Completed shots are saved in Drafts.';
   return 'Rendering your cinematic take...';
+}
+
+function cooldownBodyCopy(seconds: number) {
+  if (seconds > 3) return `Resume available in ${seconds} seconds. Your scene is saved and ready to resume.`;
+  if (seconds > 0) return 'The render queue is almost ready. Your scene is saved and ready to resume.';
+  return 'Your scene is saved and ready to resume.';
+}
+
+function renderStateTone(state: GenerationStatusState) {
+  if (state === 'rate_limited') return 'cooling';
+  if (state === 'queued') return 'queued';
+  if (state === 'processing') return 'rendering';
+  if (state === 'completed') return 'complete';
+  if (state === 'failed') return 'paused';
+  return 'idle';
+}
+
+function renderStateHeadline(state: GenerationStatusState) {
+  if (state === 'rate_limited') return 'Render queue is cooling down.';
+  if (state === 'queued') return 'Your scene is queued.';
+  if (state === 'processing') return 'Lumora is shaping your cinematic moment.';
+  if (state === 'completed') return 'Your cinematic draft is saved.';
+  if (state === 'failed') return 'Lumora paused this scene safely.';
+  return '';
+}
+
+function renderStateBody(state: GenerationStatusState, cooldownSeconds: number) {
+  if (state === 'rate_limited') return cooldownBodyCopy(cooldownSeconds);
+  if (state === 'queued') return 'Preparing your cast, saving scene references, and keeping this draft protected.';
+  if (state === 'processing') return 'Preserving Story Memory and scene flow while your draft saves in the background.';
+  if (state === 'completed') return 'This moment is ready in Drafts.';
+  if (state === 'failed') return 'Your completed work is saved in Drafts. Edit the scene or try another take when ready.';
+  return '';
 }
 
 function creatorRenderModeLabel(mode: string) {
@@ -857,6 +890,11 @@ export default function CreateVideo({
   const toastTimerRef = useRef<number | null>(null);
   const repairFileInputRef = useRef<HTMLInputElement | null>(null);
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const mockRateLimitUi = Boolean(
+    import.meta.env.DEV &&
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('mockRateLimit') === '1'
+  );
   const primaryReferenceImage = pickReferenceImage({ referenceImageUrl, referenceImageUrls });
   const hasSelfCharacter = forceSelfMode || isDefaultSelfCharacter;
   const selectedSelfReferenceImageUrl = hasSelfCharacter
@@ -1058,6 +1096,12 @@ export default function CreateVideo({
       : continuityMemoryDraft.emotionalTone
         ? 'Emotional pacing matched your prior scene.'
         : 'Lumora will remember your world as you create.';
+  const visibleRenderState = generationStatusState === 'idle' ? null : {
+    label: generationStatusLabels[generationStatusState],
+    tone: renderStateTone(generationStatusState),
+    headline: renderStateHeadline(generationStatusState),
+    body: renderStateBody(generationStatusState, renderCooldownSeconds),
+  };
 
   useEffect(() => {
     const savedPrompt = localStorage.getItem('remixPrompt');
@@ -1788,7 +1832,7 @@ export default function CreateVideo({
     }
 
     if (generationStatusState === 'rate_limited' && renderCooldownSeconds > 0) {
-      setStatus(`Render queue is cooling down. Try again in about ${renderCooldownSeconds} seconds.`);
+      setStatus(cooldownBodyCopy(renderCooldownSeconds));
       return;
     }
 
@@ -1884,6 +1928,23 @@ export default function CreateVideo({
     setGenerationResult(null);
     setStatus('');
     beginGenerationProgress();
+
+    if (mockRateLimitUi) {
+      const retryAfterSeconds = 10;
+      pauseGenerationProgressForCooldown({
+        status: 'rate_limited',
+        retryAfterSeconds,
+        retryAvailableAt: new Date(Date.now() + retryAfterSeconds * 1000).toISOString(),
+      });
+      setGenerationError('');
+      setStatus('Your scene is saved and ready to resume.');
+      showToast({
+        type: 'error',
+        message: 'Render queue is cooling down. Your scene is saved and ready to resume.',
+      });
+      releaseGenerateLock();
+      return;
+    }
 
     try {
       const generationStylePrompt = selectedStylePrompt(selectedStyles, currentPrompt);
@@ -2342,10 +2403,10 @@ export default function CreateVideo({
         setGenerationModerationDetail('');
         setGenerationModerationStages([]);
         setGenerationError('');
-        setStatus('Lumora saved your scene direction. Resume render when the queue is ready.');
+        setStatus('Your scene is saved and ready to resume.');
         showToast({
           type: 'error',
-          message: `Render queue is cooling down. Try again in about ${retryAfterSeconds} seconds.`,
+          message: `Render queue is cooling down. Resume available in ${retryAfterSeconds} seconds.`,
         });
         return;
       }
@@ -3034,7 +3095,7 @@ export default function CreateVideo({
         <div className="button-row luxury-action-row">
           <button type="button" className="primary-btn" onClick={handleGenerate} disabled={generateBusy} aria-busy={generateBusy}>
             {renderCooldownActive
-              ? `Resume in ${renderCooldownSeconds}s`
+              ? `Cooling down ${renderCooldownSeconds}s`
               : generationStatusState === 'rate_limited'
                 ? 'Resume render'
               : activeRenderBlocksGenerate
@@ -3061,35 +3122,40 @@ export default function CreateVideo({
             Save draft
           </button>
         </div>
-        {generationStatusState !== 'idle' ? (
-          <div className="generation-progress" aria-live="polite">
-            {(['queued', 'processing', 'rate_limited', 'completed', 'failed'] as const).map((phase) => (
-              <span key={phase} className={generationStatusState === phase ? 'active' : ''}>
-                {generationStatusLabels[phase]}
-              </span>
-            ))}
-          </div>
-        ) : null}
-        {generationLoading ? (
-          <p className="muted cinematic-loading-line">
-            <span className="tiny-dot" />
-            Rendering your cinematic moment and saving the draft as it goes...
-          </p>
-        ) : null}
-        {generationStatusState === 'rate_limited' ? (
-          <div className="rate-limit-card" role="status" aria-live="polite">
-            <span className="tiny-pill">Cooling down</span>
-            <div>
-              <strong>Render queue is cooling down.</strong>
-              <p>
-                {renderCooldownSeconds > 0
-                  ? `Try again in about ${renderCooldownSeconds} seconds.`
-                  : 'The queue is ready. Resume render when you are ready.'}
-              </p>
+        {visibleRenderState ? (
+          <div
+            className={`render-state-card render-state-${visibleRenderState.tone} ${generationStatusState === 'rate_limited' ? 'rate-limit-card' : ''}`}
+            role="status"
+            aria-live="polite"
+          >
+            <div className="render-state-topline">
+              <span className="tiny-pill">{visibleRenderState.label}</span>
+              {activeRenderJobId || generationStatusState === 'rate_limited' ? (
+                <span className="render-state-safe-note">Saved safely</span>
+              ) : null}
             </div>
-            <button type="button" className="ghost-btn" onClick={handleGenerate} disabled={renderCooldownActive || generationLoading}>
-              {renderCooldownActive ? `Resume in ${renderCooldownSeconds}s` : 'Resume render'}
-            </button>
+            <div className="render-state-copy">
+              <strong>{visibleRenderState.headline}</strong>
+              <p>{visibleRenderState.body}</p>
+            </div>
+            <div className="generation-progress compact" aria-hidden="true">
+              <span className="active">{visibleRenderState.label}</span>
+              {generationStatusState === 'rate_limited' ? (
+                <span>{renderCooldownSeconds > 0 ? 'Queue cooldown' : 'Ready to resume'}</span>
+              ) : generationStatusState === 'processing' || generationStatusState === 'queued' ? (
+                <span>Drafts autosave</span>
+              ) : null}
+            </div>
+            {generationStatusState === 'rate_limited' ? (
+              <div className="render-state-actions">
+                <button type="button" className="primary-btn" onClick={handleGenerate} disabled={renderCooldownActive || generationLoading}>
+                  {renderCooldownActive ? `Resume in ${renderCooldownSeconds}s` : 'Resume render'}
+                </button>
+                <button type="button" className="ghost-btn" onClick={() => void handleSaveDraft()} disabled={saveBusy}>
+                  Save draft
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : null}
         {generationError ? (
@@ -3170,7 +3236,7 @@ export default function CreateVideo({
             ))}
           </div>
         ) : null}
-        {status ? <p className="muted create-status-copy">{status}</p> : null}
+        {status && !visibleRenderState ? <p className="muted create-status-copy">{status}</p> : null}
         {generatedVideoUrl && !generationResult ? (
           <div style={{ display: 'grid', gap: '12px', marginTop: '14px' }}>
             <video

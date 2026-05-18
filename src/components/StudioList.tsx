@@ -39,13 +39,24 @@ function formatStatus(status: string) {
 
 function draftStateCopy(job: GenerationJob) {
   const status = (job.status || '').toLowerCase();
-  if (status === 'rate_limited') return 'Render queue is cooling down. Your scene is saved here.';
+  if (status === 'rate_limited') return 'Your scene is saved and ready to resume.';
   if (status === 'queued') return 'Queued for rendering. Lumora will keep checking.';
   if (status === 'rendering' || status === 'processing') return 'Rendering your cinematic moment.';
   if (status === 'paused') return 'Completed shots are safely saved in Drafts.';
   if (status === 'failed') return 'This scene is paused. Edit the direction and try again.';
   if (job.resultAssetUrl) return 'Scene ready for its next move.';
   return 'Lumora is still shaping this scene.';
+}
+
+function draftSafetyLabel(job: GenerationJob) {
+  const status = (job.status || '').toLowerCase();
+  if (status === 'rate_limited') return 'Saved safely';
+  if (status === 'queued') return 'Waiting in queue';
+  if (status === 'rendering' || status === 'processing') return 'Saving to Drafts';
+  if (status === 'paused') return 'Paused safely';
+  if (status === 'failed') return 'Needs your next take';
+  if (job.resultAssetUrl) return 'Ready to publish';
+  return 'Draft saved';
 }
 
 function primaryDraftAction(job: GenerationJob) {
@@ -553,7 +564,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
                 )}
                 <span className="draft-media-overlay">
                   <span className="tiny-pill">{statusLabel}</span>
-                  <span>{draftStateCopy(job)}</span>
+                  <span>{draftSafetyLabel(job)}</span>
                 </span>
               </button>
 
@@ -572,7 +583,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
 
               <div className="stats-row" style={{ marginTop: '14px', gap: '14px' }}>
                 <span>{getJobCharacterLabel(job)}</span>
-                <span>{draftStateCopy(job)}</span>
+                <span>{draftSafetyLabel(job)}</span>
               </div>
 
               <div className="story-memory-moment" style={{ marginTop: '12px' }}>
