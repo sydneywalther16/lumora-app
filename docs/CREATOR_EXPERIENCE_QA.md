@@ -101,12 +101,21 @@ Use this checklist for the emotional creator loop: first-use, Story Memory, Draf
 - Confirm `/create` starts with Cast, then Scene idea, style/duration, and one dominant Generate action.
 - Confirm onboarding, identity, and progress cards do not stack above the Create action.
 - Confirm Story Memory is compact and supportive, not a giant panel.
-- Confirm cinematic structure is collapsed by default and reads like `Cinematic structure ready - 4 beats`.
+- Confirm cinematic structure is collapsed by default and reads like `Structure ready - 4 beats`.
 - Confirm expanded cinematic beats use short summaries and quiet status badges.
 - Confirm Draft cards show thumbnail first, one overlay state, a short continuity note, and one primary action.
-- Confirm completed Draft cards prioritize `Continue Story`; Publish and View scene are secondary/quiet.
+- Confirm completed Draft cards prioritize `Continue Story`; View scene is secondary and Publish is quiet.
 - Open `/drafts?mockStates=1` in local development to verify the completed Draft card hierarchy without creating test data.
 - Confirm no route shows repeated emotional copy in adjacent cards.
+
+## Minimal Cinematic UI QA
+
+- Confirm Create does not show nested structure cards inside the cinematic structure drawer.
+- Confirm the default Create screen has one focal point: Generate or the active render state.
+- Confirm the memory note is tiny, magical, and expandable only through `View memory details`.
+- Confirm the timeline reads as numbered cinematic moments, not debug/storyboard cards.
+- Confirm Draft cards show one overlay state, one short continuity note, and one dominant action.
+- Confirm Publish remains available but does not compete visually with Continue Story.
 
 ## Safety And Failure States
 

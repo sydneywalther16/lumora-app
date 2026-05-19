@@ -48,17 +48,6 @@ function draftStateCopy(job: GenerationJob) {
   return 'Lumora is still shaping this scene.';
 }
 
-function draftSafetyLabel(job: GenerationJob) {
-  const status = (job.status || '').toLowerCase();
-  if (status === 'rate_limited') return 'Saved safely';
-  if (status === 'queued') return 'Waiting in queue';
-  if (status === 'rendering' || status === 'processing') return 'Saving to Drafts';
-  if (status === 'paused') return 'Paused safely';
-  if (status === 'failed') return 'Needs your next take';
-  if (job.resultAssetUrl) return 'Ready to publish';
-  return 'Draft saved';
-}
-
 function primaryDraftAction(job: GenerationJob) {
   const status = (job.status || '').toLowerCase();
   if (job.resultAssetUrl) return 'Continue Story';
@@ -70,12 +59,6 @@ function primaryDraftAction(job: GenerationJob) {
 
 function statusClass(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-}
-
-function formatUpdated(iso: string) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString();
 }
 
 function createLocalPostId() {
@@ -575,8 +558,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
                   </div>
                 )}
                 <span className="draft-media-overlay">
-                  <span className="tiny-pill">{statusLabel}</span>
-                  <span>{draftSafetyLabel(job)}</span>
+                  <span>{statusLabel}</span>
                 </span>
               </button>
 
@@ -602,8 +584,6 @@ export default function StudioList({ jobs, onPublished }: Props) {
               </div>
 
               <div className="draft-card-footer">
-                <span>Updated {formatUpdated(job.updatedAt)}</span>
-
                 <div className="draft-action-row focused-draft-actions">
                   {job.resultAssetUrl ? (
                     <>
@@ -622,21 +602,21 @@ export default function StudioList({ jobs, onPublished }: Props) {
                         className="ghost-btn"
                         onClick={(event) => {
                           event.stopPropagation();
-                          void postToFeed(job, job.caption || job.prompt || '');
+                          openJob(job);
                         }}
-                        disabled={isPosted(job.id)}
                       >
-                        {isPosted(job.id) ? 'Posted' : 'Publish'}
+                        View scene
                       </button>
                       <button
                         type="button"
                         className="quiet-btn"
                         onClick={(event) => {
                           event.stopPropagation();
-                          openJob(job);
+                          void postToFeed(job, job.caption || job.prompt || '');
                         }}
+                        disabled={isPosted(job.id)}
                       >
-                        View scene
+                        {isPosted(job.id) ? 'Posted' : 'Publish'}
                       </button>
                     </>
                   ) : (

@@ -1341,8 +1341,8 @@ export default function CreateVideo({
     creativePlan?.shotList.length ??
     0;
   const cinematicStructureSummary = cinematicBeatCount
-    ? `Cinematic structure ready - ${cinematicBeatCount} beat${cinematicBeatCount === 1 ? '' : 's'}`
-    : 'Cinematic structure ready';
+    ? `Structure ready - ${cinematicBeatCount} beat${cinematicBeatCount === 1 ? '' : 's'}`
+    : 'Structure ready';
 
   useEffect(() => {
     const savedPrompt = localStorage.getItem('remixPrompt');
@@ -2990,26 +2990,24 @@ export default function CreateVideo({
       ) : null}
       <section className="editor-card lumora-card create-luxury-card">
         <div>
-          <span className="eyebrow">director mode</span>
-          <h3>Shape your cinematic moment</h3>
+          <h3>Create a cinematic moment</h3>
         </div>
 
         {schemaWarning ? (
-          <div className="generation-warning-list" role="status">
+          <div className="generation-warning-list schema-warning-card" role="status">
             <p>{schemaWarning}</p>
           </div>
         ) : null}
 
         <div className="cast-summary-card">
           <div>
-            <span className="eyebrow">Cast</span>
             <strong>{characterName ? (isDefaultSelfCharacter ? 'Cinematic self selected' : characterName) : 'Cinematic self selected'}</strong>
             <p className="muted">
               {isSeedanceEngine
-                ? `${savedSeedanceReferenceCount || seedanceReferenceCount} cast reference${(savedSeedanceReferenceCount || seedanceReferenceCount) === 1 ? '' : 's'} saved to Lumora`
+                ? `${savedSeedanceReferenceCount || seedanceReferenceCount} reference${(savedSeedanceReferenceCount || seedanceReferenceCount) === 1 ? '' : 's'} ready`
                 : hasGenerationReference
-                  ? 'Self reference ready for this scene'
-                  : 'Choose or save a cast reference before rendering'}
+                  ? 'Reference ready'
+                  : 'Choose a cast reference'}
             </p>
           </div>
           {characterAvatar ? (
@@ -3019,12 +3017,14 @@ export default function CreateVideo({
           )}
         </div>
 
-        <label className="field-block">
-          <span>Scene title</span>
-          <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Title" />
-        </label>
+        <details className="advanced-create-details minimal-title-details">
+          <summary>Title</summary>
+          <label className="field-block">
+            <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Scene title" />
+          </label>
+        </details>
 
-        <label className="field-block">
+        <label className="field-block minimal-scene-idea">
           <span>Scene idea</span>
           <textarea
             ref={promptTextareaRef}
@@ -3035,7 +3035,7 @@ export default function CreateVideo({
           />
         </label>
 
-        <div className="field-block">
+        <div className="field-block minimal-style-field">
           <span>Cinematic style</span>
           <div className="chip-row wrap">
             {STYLE_PRESETS.map((style) => (
@@ -3055,7 +3055,6 @@ export default function CreateVideo({
         <div className="continuity-memory-panel focused-memory-moment">
           <div className="row-between">
             <div>
-              <span className="eyebrow">Story Memory</span>
               <strong>{storyMemoryMoment}</strong>
             </div>
             <span className="tiny-pill continuity-confidence-pill">{continuityConfidencePercent}%</span>
@@ -3064,7 +3063,7 @@ export default function CreateVideo({
           {continuityMemoryStatus ? <p className="muted">{continuityMemoryStatus}</p> : null}
           {continuityMemoryError ? <p className="creative-plan-error">{continuityMemoryError}</p> : null}
           <details className="advanced-create-details continuity-memory-details">
-            <summary>Edit Story Memory</summary>
+            <summary>View memory details</summary>
             <div className="continuity-memory-grid">
               {continuityMemoryFields.map((field) => (
                 <label key={field} className="continuity-memory-field">
@@ -3114,10 +3113,10 @@ export default function CreateVideo({
                 onClick={() => void saveContinuityMemory()}
                 disabled={!sceneExecutorUserId || continuityMemorySaving || !continuityMemoryDirty}
               >
-                {continuityMemorySaving ? 'Saving...' : continuityMemoryDirty ? 'Save Story Memory' : 'Story Memory saved'}
+                {continuityMemorySaving ? 'Saving...' : continuityMemoryDirty ? 'Save memory' : 'Memory saved'}
               </button>
               <small className="muted">
-                {sceneExecutorUserId ? (continuityMemoryDirty ? 'Unsaved changes' : 'Scene continuity preserved.') : 'Sign in to save Story Memory'}
+                {sceneExecutorUserId ? (continuityMemoryDirty ? 'Unsaved changes' : 'Continuity synced.') : 'Sign in to save memory'}
               </small>
             </div>
           </details>
@@ -3335,7 +3334,7 @@ export default function CreateVideo({
         </details>
         )}
 
-        <div className="field-block">
+        <div className="field-block minimal-duration-field">
           <span>Duration</span>
           <div className="chip-row wrap">
             {durations.map((option) => (
@@ -3351,7 +3350,7 @@ export default function CreateVideo({
           </div>
         </div>
 
-        <div className="field-block">
+        <div className="field-block minimal-aspect-field">
           <span>Aspect ratio</span>
           <div className="chip-row wrap">
             {aspectRatios.map((option) => (
@@ -3367,25 +3366,27 @@ export default function CreateVideo({
           </div>
         </div>
 
-        <div className="field-block">
-          <span>Render feel</span>
-          <div className="chip-row wrap render-preference-row">
-            {renderPreferenceOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={`chip render-preference-chip ${renderPreference === option.value ? 'active' : ''}`}
-                onClick={() => setRenderPreference(option.value)}
-                title={option.description}
-              >
-                {option.label}
-              </button>
-            ))}
+        <details className="advanced-create-details minimal-render-feel">
+          <summary>Render feel</summary>
+          <div className="field-block">
+            <div className="chip-row wrap render-preference-row">
+              {renderPreferenceOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`chip render-preference-chip ${renderPreference === option.value ? 'active' : ''}`}
+                  onClick={() => setRenderPreference(option.value)}
+                  title={option.description}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <small className="muted">
+              {renderPreferenceOptions.find((option) => option.value === renderPreference)?.description}
+            </small>
           </div>
-          <small className="muted">
-            {renderPreferenceOptions.find((option) => option.value === renderPreference)?.description}
-          </small>
-        </div>
+        </details>
 
         <details className="advanced-create-details renderer-details">
           <summary>Cinematic renderer</summary>
@@ -3415,25 +3416,15 @@ export default function CreateVideo({
 
         <div className="reference-mode-card focused-reference-summary">
           <div className="reference-mode-copy">
-            <span className="eyebrow">Scene references</span>
             <strong>
               {referenceLoading
                 ? 'Preparing your cast...'
                 : isSeedanceEngine
-                  ? `${savedSeedanceReferenceCount || seedanceReferenceCount} cast reference${(savedSeedanceReferenceCount || seedanceReferenceCount) === 1 ? '' : 's'} saved to Lumora`
+                  ? `${savedSeedanceReferenceCount || seedanceReferenceCount} reference${(savedSeedanceReferenceCount || seedanceReferenceCount) === 1 ? '' : 's'} ready`
                   : hasGenerationReference
                     ? 'Cast reference ready'
                     : 'Save a reference before rendering'}
             </strong>
-            <span className="muted">
-              {referenceLoading
-                ? 'Finding your saved scene references.'
-                : isSeedanceEngine
-                  ? 'Saved references stay behind the scene unless one needs repair.'
-                  : hasGenerationReference
-                    ? 'Lumora will use this quietly for cast consistency.'
-                    : 'Choose your cinematic self or a saved cast member first.'}
-            </span>
             {seedanceMultimodalActive ? (
               <span className="tiny-pill multimodal-reference-badge">Cast reference mode</span>
             ) : null}
@@ -3600,21 +3591,17 @@ export default function CreateVideo({
         ) : null}
         {showCinematicStructure ? (
           <details className="advanced-create-details cinematic-flow-details invisible-flow-details">
-            <summary>{cinematicStructureSummary}</summary>
-            <div className="creative-brain-panel">
-              <div className="row-between">
-                <div>
-                  <span className="eyebrow">Story flow</span>
-                  <strong>Cinematic beats</strong>
-                </div>
-                <span className="tiny-pill">{cinematicStructureStatusLabel}</span>
-              </div>
+            <summary>
+              <span>{cinematicStructureSummary}</span>
+              <span className="minimal-structure-status">{cinematicStructureStatusLabel}</span>
+            </summary>
+            <div className="minimal-structure-body">
               {creativePlanStatus ? <p className="muted">{creativePlanStatus}</p> : null}
               {creativePlanError ? <p className="muted">{creativePlanError}</p> : null}
               {creativePlan ? (
-                <div className="creative-plan-preview">
+                <div className="minimal-structure-metadata">
                   <details className="creative-plan-editor-shell compact-metadata-details">
-                    <summary>Beat metadata</summary>
+                    <summary>Details</summary>
                     <div className="creative-plan-summary">
                       <span><strong>Tone</strong>{creativePlan.cinematicTone}</span>
                       <span><strong>Style</strong>{creativePlan.visualStyle}</span>
@@ -3624,9 +3611,8 @@ export default function CreateVideo({
                     <p><strong>Pacing:</strong> {creativePlan.emotionalPacing}</p>
                   </details>
                   <details className="creative-plan-editor-shell">
-                    <summary>Advanced cinematic notes</summary>
+                    <summary>Edit structure</summary>
                     <label className="field-block creative-plan-editor">
-                      <span>Structured scene notes</span>
                       <textarea
                         value={creativePlanDraft}
                         onChange={(event) => handleCreativePlanDraftChange(event.target.value)}
@@ -3636,42 +3622,17 @@ export default function CreateVideo({
                   </details>
                 </div>
               ) : creativePlanLoading ? (
-                <div className="scene-progress-panel focused-beat-list cinematic-shimmer" aria-live="polite">
-                  <div className="row-between">
-                    <div>
-                      <span className="eyebrow">Story flow</span>
-                      <strong>Shaping cinematic beats</strong>
-                    </div>
-                    <span className="tiny-pill">Shaping</span>
-                  </div>
-                  <p className="muted">Understanding your scene and preparing your cast.</p>
-                </div>
+                <p className="minimal-structure-note cinematic-shimmer">Shaping the beats...</p>
               ) : null}
               {sceneExecutionStatus ? <p className="muted">{sceneExecutionStatus}</p> : null}
               {sceneExecutionError ? (
-                <div className="generation-error-card scene-flow-error-card">
-                  <p>{sceneExecutionError}</p>
-                  <p>Your cinematic work is preserved. Resume when you are ready.</p>
-                </div>
+                <p className="minimal-structure-note">Your scene is preserved. Resume when you are ready.</p>
               ) : null}
               {sceneExecutionPlan || sceneExecutionResult ? (
-                <div className="scene-progress-panel focused-beat-list" aria-live="polite">
-                  <div className="row-between">
-                    <div>
-                      <span className="eyebrow">Cinematic beats</span>
-                      <strong>{sceneExecutionResult ? 'Cinematic beats saved' : 'Cinematic beats ready'}</strong>
-                    </div>
-                    <span className="tiny-pill">{cinematicStructureStatusLabel}</span>
-                  </div>
-                  <ol className="scene-progress-list">
+                <div className="minimal-timeline-shell" aria-live="polite">
+                  <ol className="minimal-beat-timeline">
                     {sceneExecutionResult
                       ? sceneExecutionResult.clips.map((clip) => {
-                          const clipModerationStages = moderationRetryStageMessages(
-                            clip.moderationDiagnostics ?? clip.metadata.moderationOrchestration,
-                          );
-                          const clipProviderFallbackStages = providerFallbackStageMessages(
-                            clip.providerFallbackDiagnostics ?? clip.metadata.providerFallback,
-                          );
                           const clipDescription = clip.metadata.shotDescription || clip.title;
                           const clipDescriptionKey = `visible-clip-${clip.id}`;
                           const clipExpanded = expandedSceneDescriptions.has(clipDescriptionKey);
@@ -3681,27 +3642,19 @@ export default function CreateVideo({
                               ? 'Shot paused safely.'
                               : creatorFacingErrorMessage(clip.error, 'This shot paused safely.')
                             : '';
-                          const clipHasAdaptation = clipModerationStages.length > 0 || clipProviderFallbackStages.length > 0;
 
                           return (
-                            <li key={clip.id} className={`scene-progress-item ${clip.status}`}>
-                              <span className="scene-progress-index">{clip.clipOrder}</span>
-                              <div className="scene-progress-body">
-                                <div className="scene-progress-title-row">
+                            <li key={clip.id} className={`minimal-beat-item ${clip.status}`}>
+                              <span className="minimal-beat-index">{clip.clipOrder}</span>
+                              <div className="minimal-beat-body">
+                                <div className="minimal-beat-title-row">
                                   <strong>{clip.title}</strong>
-                                  <span className="tiny-pill scene-status-pill">{creatorSceneStatusLabel(clip.status)}</span>
+                                  <span className="minimal-beat-status">{creatorSceneStatusLabel(clip.status)}</span>
                                 </div>
-                                <p className={`scene-shot-description ${clipExpanded ? 'expanded' : ''}`}>
+                                <p className={`minimal-beat-description ${clipExpanded ? 'expanded' : ''}`}>
                                   {clipDescription}
                                 </p>
-                                <div className="scene-shot-meta">
-                                  <span>{clip.metadata.cameraFraming}</span>
-                                  <span>{clip.metadata.cameraMovement}</span>
-                                </div>
-                                {clipHasAdaptation ? (
-                                  <small className="scene-shot-note">Creative adaptation guided this shot.</small>
-                                ) : null}
-                                {clipSafeError ? <small className="scene-shot-safe-error">{clipSafeError}</small> : null}
+                                {clipSafeError ? <small className="minimal-beat-note">{clipSafeError}</small> : null}
                                 {clipCanExpand ? (
                                   <button type="button" className="text-btn scene-expand-btn" onClick={() => toggleSceneDescription(clipDescriptionKey)}>
                                     {clipExpanded ? 'Collapse scene' : 'Expand scene'}
@@ -3719,23 +3672,19 @@ export default function CreateVideo({
                           return (
                             <li
                               key={shot.id}
-                              className={`scene-progress-item ${generationStatusState === 'processing' && index === 0 ? 'processing' : 'queued'}`}
+                              className={`minimal-beat-item ${generationStatusState === 'processing' && index === 0 ? 'processing' : 'queued'}`}
                             >
-                              <span className="scene-progress-index">{index + 1}</span>
-                              <div className="scene-progress-body">
-                                <div className="scene-progress-title-row">
+                              <span className="minimal-beat-index">{index + 1}</span>
+                              <div className="minimal-beat-body">
+                                <div className="minimal-beat-title-row">
                                   <strong>{shot.title}</strong>
-                                  <span className="tiny-pill scene-status-pill">
+                                  <span className="minimal-beat-status">
                                     {generationStatusState === 'processing' && index === 0 ? 'Rendering' : 'Queued'}
                                   </span>
                                 </div>
-                                <p className={`scene-shot-description ${shotExpanded ? 'expanded' : ''}`}>
+                                <p className={`minimal-beat-description ${shotExpanded ? 'expanded' : ''}`}>
                                   {shot.description}
                                 </p>
-                                <div className="scene-shot-meta">
-                                  <span>{shot.cameraFraming}</span>
-                                  <span>{shot.cameraMovement}</span>
-                                </div>
                                 {shotCanExpand ? (
                                   <button type="button" className="text-btn scene-expand-btn" onClick={() => toggleSceneDescription(shotDescriptionKey)}>
                                     {shotExpanded ? 'Collapse scene' : 'Expand scene'}
@@ -3744,7 +3693,7 @@ export default function CreateVideo({
                               </div>
                             </li>
                           );
-                        })}
+                      })}
                   </ol>
                 </div>
               ) : null}
@@ -3755,7 +3704,6 @@ export default function CreateVideo({
           <div className="render-trust-stack">
             <div className="generation-error-card paused-render-card">
               <div className="render-state-topline">
-                <span className="tiny-pill">{activeReferenceRepair ? 'Reference repair' : pausedRenderCopy.label}</span>
                 <span className="render-state-safe-note">Saved safely</span>
               </div>
               <div className="render-state-copy">
@@ -3771,7 +3719,7 @@ export default function CreateVideo({
               </div>
               {!activeReferenceRepair ? (
                 <div className="focused-next-take">
-                  <span className="eyebrow">Suggested next take</span>
+                  <strong>Suggested next take</strong>
                   <p>A gentler cinematic version may render more smoothly.</p>
                   <blockquote className="next-take-preview">{suggestedTakePreview}</blockquote>
                   <div className="next-take-actions">
