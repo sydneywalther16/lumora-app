@@ -2,7 +2,6 @@ import { env } from '../lib/env';
 import {
   generateSeedanceVideo,
   isSeedanceModerationError,
-  safeCinematicRewrite,
   type SeedanceModerationDiagnostics,
   type SeedancePredictionEvent,
   type SeedanceQualityMode,
@@ -11,9 +10,18 @@ import {
 } from './providers/seedanceProvider';
 import {
   buildCreatorSafeRewrite,
-  buildStyleSafeScenePrompt,
   sanitizeProviderPrompt,
 } from './providerPromptSanitizer';
+import {
+  buildReliableRenderAttemptPlan,
+  buildStylizedReliabilityPrompt,
+  optimizeCinematicScene,
+  recordRenderFailureMemory,
+  recordRenderSuccessMemory,
+  storybookFallbackPrompt,
+  type RenderSuccessMode,
+  type SceneOptimizationDiagnostics,
+} from './sceneOptimization';
 
 export type ProviderFallbackProvider =
   | 'seedance-quality'
@@ -81,6 +89,12 @@ export type ProviderFallbackDiagnostics = {
   suggestedPrompt?: string | null;
   sanitizedPrompt?: string | null;
   moderationDiagnostics?: SeedanceModerationDiagnostics | null;
+  sceneOptimization?: SceneOptimizationDiagnostics | null;
+  successMode?: RenderSuccessMode | null;
+  safeStyle?: string | null;
+  complexityScore?: number | null;
+  referenceQualityScore?: number | null;
+  creatorMessage?: string | null;
 };
 
 export type ProviderFallbackSeedanceResult = SeedanceVideoResult & {
@@ -262,13 +276,6 @@ export function applyCastSafePromptMask(input: {
   } satisfies CastSafePromptResult;
 }
 
-function stylizedCinematicPrompt(prompt: string) {
-  return collapseWhitespace([
-    sanitizeProviderPrompt({ prompt: safeCinematicRewrite(prompt) }).prompt,
-    'Stylized cinematic storybook realism, elegant wardrobe, gentle emotional pacing, natural movement, no public-figure framing.',
-  ].join(' '));
-}
-
 function providerForQuality(quality: SeedanceQualityMode): ProviderFallbackProvider {
   return quality === 'quality' ? 'seedance-quality' : 'seedance-fast';
 }
@@ -300,6 +307,7 @@ function diagnosticsFromStages(input: {
   moderationDiagnostics?: SeedanceModerationDiagnostics | null;
   suggestedPrompt?: string | null;
   sanitizedPrompt?: string | null;
+  sceneOptimization?: SceneOptimizationDiagnostics | null;
 }) {
   const providersAttempted = uniqueValues(
     input.stages
@@ -335,6 +343,12 @@ function diagnosticsFromStages(input: {
     suggestedPrompt: input.suggestedPrompt ?? null,
     sanitizedPrompt: input.sanitizedPrompt ?? null,
     moderationDiagnostics: input.moderationDiagnostics ?? null,
+    sceneOptimization: input.sceneOptimization ?? null,
+    successMode: input.sceneOptimization?.successMode ?? null,
+    safeStyle: input.sceneOptimization?.safeStyle ?? null,
+    complexityScore: input.sceneOptimization?.complexity.score ?? null,
+    referenceQualityScore: input.sceneOptimization?.referenceQualityScore ?? null,
+    creatorMessage: input.sceneOptimization?.creatorMessage ?? null,
   } satisfies ProviderFallbackDiagnostics;
 }
 
@@ -364,7 +378,8 @@ function shouldAttachDiagnostics(diagnostics: ProviderFallbackDiagnostics) {
     diagnostics.displayNameMasked ||
     diagnostics.riskyTermsRemoved.length > 0 ||
     diagnostics.stages.some((stage) => stage.status === 'blocked') ||
-    diagnostics.providerAttempted !== diagnostics.finalProvider;
+    diagnostics.providerAttempted !== diagnostics.finalProvider ||
+    Boolean(diagnostics.sceneOptimization?.simplified);
 }
 
 function withProviderFallbackDiagnostics(
@@ -397,60 +412,51 @@ export function providerFallbackDiagnosticsFromError(error: unknown) {
     : null;
 }
 
-function referenceText(reference: SeedanceReferenceImage) {
-  return `${reference.role ?? ''} ${reference.label ?? ''}`.toLowerCase();
-}
-
-function reducedCastReferences(referenceImages: SeedanceReferenceImage[]) {
-  const reduced = referenceImages.filter((reference) => {
-    const text = referenceText(reference);
-    return !(
-      text.includes('full_body') ||
-      text.includes('full body') ||
-      text.includes('manual_reference_override') ||
-      text.includes('manual reference') ||
-      text.includes('manual override') ||
-      text.includes('identity_reference') ||
-      text.includes('outfit')
-    );
-  });
-
-  return reduced.length > 0 ? reduced : referenceImages.slice(0, Math.min(2, referenceImages.length));
-}
-
-function primaryReference(referenceImages: SeedanceReferenceImage[]) {
-  const preferred = referenceImages.find((reference) => {
-    const text = referenceText(reference);
-    return text.includes('front') || text.includes('face') || text.includes('primary');
-  });
-
-  return (preferred ?? referenceImages[0]) ? [preferred ?? referenceImages[0]] : [];
-}
-
 export async function generateSeedanceWithProviderFallback(input: {
   prompt: string;
   quality?: SeedanceQualityMode;
+  renderPreference?: RenderSuccessMode | string | null;
   referenceImages?: SeedanceReferenceImage[];
   userId?: string | null;
   characterId?: string | null;
   characterName?: string | null;
   characterDisplayName?: string | null;
   projectId?: string | null;
+  sceneCount?: number;
+  cameraText?: string | null;
+  environmentText?: string | null;
+  emotionalText?: string | null;
+  continuityNotes?: string[];
   onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
   onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 }): Promise<ProviderFallbackSeedanceResult> {
   const requestedQuality = input.quality ?? 'fast';
   const providerAttempted = providerForQuality(requestedQuality);
-  const castSafePrompt = applyCastSafePromptMask({
+  const optimization = optimizeCinematicScene({
     prompt: input.prompt,
+    requestedQuality,
+    successMode: input.renderPreference,
+    referenceImages: input.referenceImages ?? [],
+    sceneCount: input.sceneCount,
+    cameraText: input.cameraText,
+    environmentText: input.environmentText,
+    emotionalText: input.emotionalText,
+    continuityNotes: input.continuityNotes,
+  });
+  const castSafePrompt = applyCastSafePromptMask({
+    prompt: optimization.optimizedPrompt,
     characterName: input.characterName,
     characterDisplayName: input.characterDisplayName,
   });
+  const stylizedPrompt = buildStylizedReliabilityPrompt(castSafePrompt.prompt, optimization.safeStyle);
+  const storybookPrompt = storybookFallbackPrompt();
+  const attemptPlan = buildReliableRenderAttemptPlan({
+    requestedQuality,
+    referenceSets: optimization.referenceSets,
+  });
   const stages: ProviderFallbackStage[] = [];
   let lastModerationError: unknown = null;
-  const allReferenceImages = input.referenceImages ?? [];
-  const reducedReferences = reducedCastReferences(allReferenceImages);
-  const primaryReferences = primaryReference(allReferenceImages);
+  let lastAttemptPrompt = castSafePrompt.prompt;
 
   async function attempt(inputAttempt: {
     stage: ProviderFallbackStageId;
@@ -485,6 +491,9 @@ export async function generateSeedanceWithProviderFallback(input: {
       riskyTermsRemoved: castSafePrompt.riskyTermsRemoved,
       referenceStrategy: stage.referenceStrategy,
       referenceCount: stage.referenceCount,
+      complexityScore: optimization.diagnostics.complexity.score,
+      referenceQualityScore: optimization.diagnostics.referenceQualityScore,
+      successMode: optimization.successMode,
     });
 
     try {
@@ -512,8 +521,28 @@ export async function generateSeedanceWithProviderFallback(input: {
         moderationDiagnostics: result.moderationDiagnostics ?? null,
         suggestedPrompt: result.suggestedPrompt ?? null,
         sanitizedPrompt: result.sanitizedPrompt ?? null,
+        sceneOptimization: optimization.diagnostics,
       });
       recordProviderFallbackDiagnostics(diagnostics);
+      await recordRenderSuccessMemory({
+        userId: input.userId,
+        characterId: input.characterId,
+        provider,
+        prompt: result.finalPrompt,
+        successMode: optimization.successMode,
+        safeStyle: optimization.safeStyle,
+        referenceStrategy: stage.referenceStrategy ?? null,
+        referenceCount: stage.referenceCount ?? 0,
+        complexityScore: optimization.diagnostics.complexity.score,
+        referenceQualityScore: optimization.diagnostics.referenceQualityScore,
+        stage: stage.stage,
+        metadata: {
+          providerFallbackStage: stage.stage,
+          renderPreference: optimization.successMode,
+          selectedReferenceCount: optimization.diagnostics.selectedReferenceCount,
+          originalReferenceCount: optimization.diagnostics.originalReferenceCount,
+        },
+      });
       console.info('PROVIDER FALLBACK SUCCEEDED:', {
         provider: diagnostics.finalProvider,
         providerAttempted: diagnostics.providerAttempted,
@@ -522,12 +551,15 @@ export async function generateSeedanceWithProviderFallback(input: {
         displayNameMasked: diagnostics.displayNameMasked,
         riskyTermsRemoved: diagnostics.riskyTermsRemoved,
         finalProviderStatus: diagnostics.finalProviderStatus,
+        complexityScore: diagnostics.complexityScore,
+        referenceQualityScore: diagnostics.referenceQualityScore,
       });
 
       return {
         ...result,
         warnings: [
           ...result.warnings,
+          ...(optimization.creatorMessage ? [optimization.creatorMessage] : []),
           ...(diagnostics.displayNameMasked
             ? ['Lumora kept the cast name in your story metadata and used visual references for provider-safe identity continuity.']
             : []),
@@ -543,7 +575,23 @@ export async function generateSeedanceWithProviderFallback(input: {
         providerFallbackDiagnostics: shouldAttachDiagnostics(diagnostics) ? diagnostics : undefined,
       } satisfies ProviderFallbackSeedanceResult;
     } catch (error) {
-      if (!isSeedanceModerationError(error)) throw error;
+      if (!isSeedanceModerationError(error)) {
+        await recordRenderFailureMemory({
+          userId: input.userId,
+          characterId: input.characterId,
+          provider,
+          prompt: inputAttempt.prompt,
+          successMode: optimization.successMode,
+          safeStyle: optimization.safeStyle,
+          referenceStrategy: stage.referenceStrategy ?? null,
+          referenceCount: stage.referenceCount ?? 0,
+          complexityScore: optimization.diagnostics.complexity.score,
+          referenceQualityScore: optimization.diagnostics.referenceQualityScore,
+          stage: stage.stage,
+          category: 'provider',
+        });
+        throw error;
+      }
 
       lastModerationError = error;
       stage.status = 'blocked';
@@ -558,62 +606,23 @@ export async function generateSeedanceWithProviderFallback(input: {
     }
   }
 
-  const firstResult = await attempt({
-    stage: 'cast_safe_prompt',
-    quality: requestedQuality,
-    prompt: castSafePrompt.prompt,
-    message: 'Trying a cast-safe cinematic prompt...',
-    referenceImages: allReferenceImages,
-    referenceStrategy: 'all_saved_references',
-  });
-  if (firstResult) return firstResult;
-
-  if (requestedQuality === 'quality') {
-    const fastResult = await attempt({
-      stage: 'seedance_fast',
-      quality: 'fast',
-      prompt: castSafePrompt.prompt,
-      message: 'Trying a lighter rendering path...',
-      referenceImages: allReferenceImages,
-      referenceStrategy: 'all_saved_references',
+  for (const plan of attemptPlan) {
+    const prompt = plan.promptVariant === 'storybook'
+      ? storybookPrompt
+      : plan.promptVariant === 'stylized'
+        ? stylizedPrompt
+        : castSafePrompt.prompt;
+    lastAttemptPrompt = prompt;
+    const result = await attempt({
+      stage: plan.stage,
+      quality: plan.quality,
+      prompt,
+      message: plan.message,
+      referenceImages: plan.referenceImages,
+      referenceStrategy: plan.referenceStrategy,
     });
-    if (fastResult) return fastResult;
+    if (result) return result;
   }
-
-  if (allReferenceImages.length > 1 && reducedReferences.length < allReferenceImages.length) {
-    const reducedResult = await attempt({
-      stage: 'reduced_references',
-      quality: 'fast',
-      prompt: castSafePrompt.prompt,
-      message: 'Trying fewer cast references...',
-      referenceImages: reducedReferences,
-      referenceStrategy: 'reduced_cast_references',
-    });
-    if (reducedResult) return reducedResult;
-  }
-
-  if (allReferenceImages.length > 1 && primaryReferences.length === 1) {
-    const primaryResult = await attempt({
-      stage: 'primary_reference',
-      quality: 'fast',
-      prompt: castSafePrompt.prompt,
-      message: 'Trying a lighter identity pass...',
-      referenceImages: primaryReferences,
-      referenceStrategy: 'primary_reference',
-    });
-    if (primaryResult) return primaryResult;
-  }
-
-  const stylizedPrompt = buildStyleSafeScenePrompt();
-  const stylizedResult = await attempt({
-    stage: 'storybook_text_only',
-    quality: 'fast',
-    prompt: stylizedPrompt,
-    message: 'Trying a storybook cinematic version...',
-    referenceImages: [],
-    referenceStrategy: 'no_reference_storybook',
-  });
-  if (stylizedResult) return stylizedResult;
 
   stages.push({
     stage: 'paused',
@@ -635,13 +644,32 @@ export async function generateSeedanceWithProviderFallback(input: {
     castSafePrompt,
     finalProviderStatus: 'paused',
     finalProvider: null,
-    finalPrompt: stylizedPrompt,
+    finalPrompt: lastAttemptPrompt,
     stages,
     moderationDiagnostics: seedanceError?.diagnostics ?? null,
     suggestedPrompt: buildCreatorSafeRewrite(),
-    sanitizedPrompt: seedanceError?.sanitizedPrompt ?? stylizedPrompt,
+    sanitizedPrompt: seedanceError?.sanitizedPrompt ?? lastAttemptPrompt,
+    sceneOptimization: optimization.diagnostics,
   });
   recordProviderFallbackDiagnostics(diagnostics);
+  await recordRenderFailureMemory({
+    userId: input.userId,
+    characterId: input.characterId,
+    provider: providerForQuality(requestedQuality === 'quality' ? 'fast' : requestedQuality),
+    prompt: lastAttemptPrompt,
+    successMode: optimization.successMode,
+    safeStyle: optimization.safeStyle,
+    referenceStrategy: diagnostics.referenceStrategy,
+    referenceCount: 0,
+    complexityScore: optimization.diagnostics.complexity.score,
+    referenceQualityScore: optimization.diagnostics.referenceQualityScore,
+    stage: 'paused',
+    category: 'moderation',
+    metadata: {
+      providerFallbackStages: stages.map((stage) => stage.stage),
+      blockedReasonCategory: diagnostics.blockedReasonCategory,
+    },
+  });
   console.warn('PROVIDER FALLBACK PAUSED:', {
     providerAttempted: diagnostics.providerAttempted,
     providersAttempted: diagnostics.providersAttempted,
@@ -649,6 +677,7 @@ export async function generateSeedanceWithProviderFallback(input: {
     castSafePromptApplied: diagnostics.castSafePromptApplied,
     displayNameMasked: diagnostics.displayNameMasked,
     riskyTermsRemoved: diagnostics.riskyTermsRemoved,
+    complexityScore: diagnostics.complexityScore,
   });
 
   throw withProviderFallbackDiagnostics(lastModerationError, diagnostics);

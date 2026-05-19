@@ -18,6 +18,7 @@ type SeedanceRequestBody = {
   characterName?: unknown;
   characterAvatar?: unknown;
   isDefaultSelfCharacter?: unknown;
+  renderPreference?: unknown;
   referenceImages?: unknown;
 };
 
@@ -68,6 +69,12 @@ function referenceImagesValue(value: unknown) {
 function qualityValue(body: SeedanceRequestBody) {
   if (body.engine === 'seedance-quality' || body.quality === 'quality') return 'quality';
   return 'fast';
+}
+
+function renderPreferenceValue(value: unknown) {
+  return value === 'cinematic_quality' || value === 'success_first' || value === 'balanced'
+    ? value
+    : 'balanced';
 }
 
 function stylePrompt(value: unknown, prompt: string) {
@@ -161,6 +168,7 @@ export default async function handler(req: SeedanceRequest, res: ServerResponse)
       characterName: stringValue(body.characterName),
       characterAvatar: stringValue(body.characterAvatar),
       isDefaultSelfCharacter: booleanValue(body.isDefaultSelfCharacter),
+      renderPreference: renderPreferenceValue(body.renderPreference),
       referenceImages: referenceImagesValue(body.referenceImages),
     });
     const { rawOutput: _rawOutput, ...publicResult } = result;

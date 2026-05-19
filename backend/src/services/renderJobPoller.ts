@@ -15,6 +15,7 @@ import {
   type SeedanceReferenceImage,
 } from './providers/seedanceProvider';
 import { serializeDiagnosticError } from './schemaDiagnostics';
+import type { RenderSuccessMode } from './sceneOptimization';
 
 const activeProcessors = new Set<string>();
 const activeRenderLocks = new Set<string>();
@@ -32,6 +33,7 @@ export type AsyncRenderJobInput = {
   characterName?: string | null;
   characterAvatar?: string | null;
   isDefaultSelfCharacter?: boolean | null;
+  renderPreference?: RenderSuccessMode | null;
   referenceImages: SeedanceReferenceImage[];
   referenceImageUrls?: Record<string, unknown> | null;
   additionalReferenceImageUrls?: string[] | null;
@@ -110,6 +112,7 @@ function asyncMetadata(input: AsyncRenderJobInput) {
       characterName: input.characterName ?? null,
       characterAvatar: input.characterAvatar ?? null,
       isDefaultSelfCharacter: Boolean(input.isDefaultSelfCharacter),
+      renderPreference: input.renderPreference ?? 'balanced',
       referenceImages: input.referenceImages,
       referenceImageUrls: input.referenceImageUrls ?? {},
       additionalReferenceImageUrls: input.additionalReferenceImageUrls ?? [],
@@ -142,6 +145,11 @@ function metadataInput(job: AsyncRenderJobRecord): AsyncRenderJobInput | null {
     characterName: typeof record.characterName === 'string' ? record.characterName : null,
     characterAvatar: typeof record.characterAvatar === 'string' ? record.characterAvatar : null,
     isDefaultSelfCharacter: record.isDefaultSelfCharacter === true,
+    renderPreference: record.renderPreference === 'cinematic_quality' ||
+      record.renderPreference === 'success_first' ||
+      record.renderPreference === 'balanced'
+      ? record.renderPreference
+      : 'balanced',
     referenceImages,
     referenceImageUrls: (record.referenceImageUrls && typeof record.referenceImageUrls === 'object')
       ? record.referenceImageUrls as Record<string, unknown>
@@ -313,7 +321,7 @@ async function insertRenderJob(input: AsyncRenderJobInput, projectId: string | n
        created_at,
        updated_at
      )
-     values ($1, $2, $3, 'replicate', $4, 'video', $5, 'queued', $6, 5, '16:9', 'private', $7, 'queued', $8::jsonb, $9, $10, 'cinematic', now(), now())
+     values ($1, $2, $3, 'replicate', $4, 'video', $5, 'queued', $6, 5, '16:9', 'private', $7, 'queued', $8::jsonb, $9, $10, $11, now(), now())
      returning ${asyncRenderJobSelect}`,
     [
       input.userId,
@@ -326,6 +334,7 @@ async function insertRenderJob(input: AsyncRenderJobInput, projectId: string | n
       JSON.stringify(asyncMetadata(input)),
       timeoutAt,
       input.referenceImages.length,
+      input.renderPreference ?? 'balanced',
     ],
   );
 

@@ -63,6 +63,8 @@ async function request<T>(path: string, init: RequestInitWithTimeout = {}): Prom
   return response.json() as Promise<T>;
 }
 
+export type RenderSuccessMode = 'cinematic_quality' | 'balanced' | 'success_first';
+
 export type GenerationPayload = {
   title?: string;
   prompt: string;
@@ -77,6 +79,7 @@ export type GenerationPayload = {
   aspectRatio?: VideoAspectRatio;
   engine?: VideoEngine;
   quality?: 'fast' | 'quality';
+  renderPreference?: RenderSuccessMode;
   privacy?: PrivacySetting;
   referenceImages?: SeedanceReferenceImage[];
   referenceImageUrls?: Partial<ReferenceImageUrls> | null;
@@ -264,6 +267,7 @@ export type SceneExecutorPayload = {
   characterMetadata?: Record<string, unknown> | null;
   referenceImages?: SeedanceReferenceImage[];
   quality?: 'fast' | 'quality';
+  renderPreference?: RenderSuccessMode;
   privacy?: PrivacySetting;
 };
 
@@ -290,6 +294,14 @@ export type GenerationResponse = {
   sanitizedPrompt?: string | null;
   moderationDiagnostics?: ProviderModerationDiagnostics | null;
   providerFallbackDiagnostics?: ProviderFallbackDiagnostics | null;
+  sceneOptimization?: SceneOptimizationDiagnostics | null;
+  renderReliability?: {
+    complexityScore: number | null;
+    referenceQualityScore: number | null;
+    successMode: RenderSuccessMode | null;
+    referenceStrategy: string | null;
+    creatorMessage: string | null;
+  } | null;
   assetPersistence?: boolean | AssetPersistenceSummary | null;
   assetPersistenceDiagnostics?: AssetPersistenceFailureDiagnostics | Record<string, unknown> | null;
   generationMode?: GenerationMode | null;
@@ -491,6 +503,31 @@ export type ProviderModerationDiagnostics = {
   providerFallbackReady?: boolean;
 };
 
+export type SceneOptimizationDiagnostics = {
+  originalPromptLength: number;
+  optimizedPromptLength: number;
+  simplified: boolean;
+  successMode: RenderSuccessMode;
+  safeStyle: string;
+  complexity: {
+    score: number;
+    level: 'low' | 'medium' | 'high';
+    promptLength: number;
+    referenceCount: number;
+    sceneCount: number;
+    emotionalDensity: number;
+    cameraComplexity: number;
+    environmentComplexity: number;
+    recommendations: string[];
+  };
+  selectedReferenceCount: number;
+  originalReferenceCount: number;
+  referenceQualityScore: number;
+  referenceStrategy: 'all_saved_references' | 'reduced_cast_references' | 'primary_reference' | 'no_reference_storybook';
+  creatorMessage: string | null;
+  promptFingerprint: string;
+};
+
 export type ProviderFallbackProvider =
   | 'seedance-quality'
   | 'seedance-fast'
@@ -534,6 +571,12 @@ export type ProviderFallbackDiagnostics = {
   suggestedPrompt?: string | null;
   sanitizedPrompt?: string | null;
   moderationDiagnostics?: ProviderModerationDiagnostics | null;
+  sceneOptimization?: SceneOptimizationDiagnostics | null;
+  successMode?: RenderSuccessMode | null;
+  safeStyle?: string | null;
+  complexityScore?: number | null;
+  referenceQualityScore?: number | null;
+  creatorMessage?: string | null;
 };
 
 export type ApiHealthDiagnostics = {
@@ -596,6 +639,21 @@ export type ApiHealthDiagnostics = {
     safeTestPrompts: string[];
     providerOrder: ProviderFallbackProvider[];
     note: string;
+  };
+  renderReliability?: {
+    ok: boolean;
+    persistenceAvailable: boolean;
+    configured: boolean;
+    safeStyles: string[];
+    inMemory: Record<string, unknown>;
+    persistedMemoryCount?: number;
+    providerSuccessRate?: number | null;
+    moderationFailureRate?: number | null;
+    timeoutFailureRate?: number | null;
+    averageComplexityScore?: number | null;
+    averageReferenceQualityScore?: number | null;
+    warning?: string;
+    error?: unknown;
   };
   asyncRenderJobs?: {
     ok: boolean;

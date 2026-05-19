@@ -16,6 +16,7 @@ type SceneExecutorRequestBody = {
   characterMetadata?: unknown;
   referenceImages?: unknown;
   quality?: unknown;
+  renderPreference?: unknown;
   privacy?: unknown;
 };
 
@@ -37,6 +38,7 @@ const executeScenePlanRequestSchema = z.object({
   characterMetadata: z.record(z.string(), z.unknown()).optional().nullable(),
   referenceImages: z.array(seedanceReferenceImageSchema).optional(),
   quality: z.enum(['fast', 'quality']).default('fast'),
+  renderPreference: z.enum(['cinematic_quality', 'balanced', 'success_first']).default('balanced'),
   privacy: z.enum(['private', 'approved_only', 'public']).default('private'),
 });
 
@@ -149,6 +151,7 @@ export default async function handler(req: SceneExecutorRequest, res: ServerResp
       characterMetadata: parsed.data.characterMetadata ?? null,
       referenceImages: seedanceReferenceImages(parsed.data.referenceImages),
       quality: parsed.data.quality,
+      renderPreference: parsed.data.renderPreference,
       privacy: parsed.data.privacy,
     });
 

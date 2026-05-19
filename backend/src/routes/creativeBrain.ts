@@ -44,6 +44,7 @@ const creativeBrainExecuteRequestSchema = z.object({
   characterMetadata: z.record(z.string(), z.unknown()).optional().nullable(),
   referenceImages: z.array(seedanceReferenceImageSchema).optional(),
   quality: z.enum(['fast', 'quality']).default('fast'),
+  renderPreference: z.enum(['cinematic_quality', 'balanced', 'success_first']).default('balanced'),
   privacy: z.enum(['private', 'approved_only', 'public']).default('private'),
 });
 
@@ -181,6 +182,7 @@ creativeBrainRouter.post('/execute', sceneExecutorRateLimit, async (req, res) =>
       characterMetadata: payload.characterMetadata ?? null,
       referenceImages: seedanceReferenceImages(payload.referenceImages),
       quality: payload.quality,
+      renderPreference: payload.renderPreference,
       privacy: payload.privacy,
     });
 

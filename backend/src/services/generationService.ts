@@ -14,6 +14,10 @@ import {
   generateSeedanceWithProviderFallback,
   type ProviderFallbackDiagnostics,
 } from './providerFallbackOrchestrator';
+import type {
+  RenderSuccessMode,
+  SceneOptimizationDiagnostics,
+} from './sceneOptimization';
 
 const optionalGenerationJobColumns = [
   'character_id',
@@ -113,6 +117,14 @@ export type SeedanceGenerationRecord = {
   assetPersistence?: AssetPersistenceSummary;
   moderationDiagnostics?: SeedanceModerationDiagnostics;
   providerFallbackDiagnostics?: ProviderFallbackDiagnostics;
+  sceneOptimization?: SceneOptimizationDiagnostics | null;
+  renderReliability?: {
+    complexityScore: number | null;
+    referenceQualityScore: number | null;
+    successMode: RenderSuccessMode | null;
+    referenceStrategy: string | null;
+    creatorMessage: string | null;
+  } | null;
   suggestedPrompt?: string;
   sanitizedPrompt?: string;
   rawOutput: unknown;
@@ -128,6 +140,7 @@ export async function createSeedanceGeneration(input: {
   characterName?: string | null;
   characterAvatar?: string | null;
   isDefaultSelfCharacter?: boolean | null;
+  renderPreference?: RenderSuccessMode | string | null;
   referenceImages?: SeedanceReferenceImage[];
   onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
   onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
@@ -141,6 +154,7 @@ export async function createSeedanceGeneration(input: {
   const result = await generateSeedanceWithProviderFallback({
     prompt: input.prompt,
     quality: input.quality,
+    renderPreference: input.renderPreference,
     referenceImages: persistedReferences.referenceImages,
     userId: input.userId,
     characterId: input.characterId,
@@ -200,6 +214,16 @@ export async function createSeedanceGeneration(input: {
     assetPersistence: persistedReferences.summary,
     moderationDiagnostics: result.moderationDiagnostics,
     providerFallbackDiagnostics: result.providerFallbackDiagnostics,
+    sceneOptimization: result.providerFallbackDiagnostics?.sceneOptimization ?? null,
+    renderReliability: result.providerFallbackDiagnostics
+      ? {
+          complexityScore: result.providerFallbackDiagnostics.complexityScore ?? null,
+          referenceQualityScore: result.providerFallbackDiagnostics.referenceQualityScore ?? null,
+          successMode: result.providerFallbackDiagnostics.successMode ?? null,
+          referenceStrategy: result.providerFallbackDiagnostics.referenceStrategy ?? null,
+          creatorMessage: result.providerFallbackDiagnostics.creatorMessage ?? null,
+        }
+      : null,
     suggestedPrompt: result.suggestedPrompt,
     sanitizedPrompt: result.sanitizedPrompt,
     rawOutput: result.rawOutput,

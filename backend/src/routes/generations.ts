@@ -13,6 +13,7 @@ import {
 import { createVideoGeneration } from '../video';
 
 const generationEngines = ['seedance-2.0', 'seedance-quality', 'veo', 'runway', 'mock', 'openai'] as const;
+const renderPreferences = ['cinematic_quality', 'balanced', 'success_first'] as const;
 const seedanceReferenceImageSchema = z.union([
   z.string().url(),
   z.object({
@@ -36,6 +37,7 @@ const generationSchema = z.object({
   characterName: z.string().optional().nullable(),
   characterAvatar: z.string().optional().nullable(),
   isDefaultSelfCharacter: z.boolean().optional().nullable(),
+  renderPreference: z.enum(renderPreferences).default('balanced'),
   referenceImages: z.array(seedanceReferenceImageSchema).optional(),
   referenceImageUrls: z.record(z.string(), z.unknown()).optional().nullable(),
   additionalReferenceImageUrls: z.array(z.string()).optional().nullable(),
@@ -52,6 +54,7 @@ const seedanceGenerationSchema = z.object({
   characterName: z.string().optional().nullable(),
   characterAvatar: z.string().optional().nullable(),
   isDefaultSelfCharacter: z.boolean().optional().nullable(),
+  renderPreference: z.enum(renderPreferences).default('balanced'),
   referenceImages: z.array(seedanceReferenceImageSchema).optional(),
   referenceImageUrls: z.record(z.string(), z.unknown()).optional().nullable(),
   additionalReferenceImageUrls: z.array(z.string()).optional().nullable(),
@@ -136,6 +139,7 @@ generationsRouter.post('/seedance', generationRateLimit, async (req, res) => {
       characterName: payload.characterName ?? null,
       characterAvatar: payload.characterAvatar ?? null,
       isDefaultSelfCharacter: payload.isDefaultSelfCharacter ?? null,
+      renderPreference: payload.renderPreference,
       referenceImages: seedanceReferenceImages(payload.referenceImages),
       referenceImageUrls: payload.referenceImageUrls ?? {},
       additionalReferenceImageUrls: payload.additionalReferenceImageUrls ?? [],
@@ -198,6 +202,7 @@ generationsRouter.post('/', generationRateLimit, async (req, res) => {
         characterName: payload.characterName ?? null,
         characterAvatar: payload.characterAvatar ?? null,
         isDefaultSelfCharacter: payload.isDefaultSelfCharacter ?? null,
+        renderPreference: payload.renderPreference,
         referenceImages: references,
         referenceImageUrls: payload.referenceImageUrls ?? {},
         additionalReferenceImageUrls: payload.additionalReferenceImageUrls ?? [],

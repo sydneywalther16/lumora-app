@@ -18,7 +18,9 @@ import {
   type ProviderModerationDiagnostics,
   type ProviderFallbackDiagnostics,
   type ReferenceImageUrls,
+  type RenderSuccessMode,
   type SceneExecutorResult,
+  type SceneOptimizationDiagnostics,
   type SeedanceReferenceImage,
   type VideoAspectRatio,
   type VideoEngine,
@@ -80,6 +82,27 @@ type CreateVideoProps = {
 
 const durations = [4, 8, 12, 16];
 const aspectRatios: VideoAspectRatio[] = ['9:16', '16:9', '1:1'];
+const renderPreferenceOptions: Array<{
+  value: RenderSuccessMode;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: 'cinematic_quality',
+    label: 'Cinematic Quality',
+    description: 'Richer motion and identity detail.',
+  },
+  {
+    value: 'balanced',
+    label: 'Balanced',
+    description: 'A calm mix of beauty and reliability.',
+  },
+  {
+    value: 'success_first',
+    label: 'Success First',
+    description: 'Shorter, gentler scenes with stronger render odds.',
+  },
+];
 const providerOptions: Array<{
   engine: VideoEngine;
   label: string;
@@ -221,6 +244,14 @@ type GenerateVideoApiResponse = {
   sanitizedPrompt?: unknown;
   moderationDiagnostics?: unknown;
   providerFallbackDiagnostics?: unknown;
+  sceneOptimization?: SceneOptimizationDiagnostics | null;
+  renderReliability?: {
+    complexityScore: number | null;
+    referenceQualityScore: number | null;
+    successMode: RenderSuccessMode | null;
+    referenceStrategy: string | null;
+    creatorMessage: string | null;
+  } | null;
   warnings?: unknown;
   error?: string;
   errorMessage?: string;
@@ -627,6 +658,12 @@ function providerFallbackWarningMessages(value: unknown): string[] {
   if (value.finalProviderStatus === 'succeeded' && value.stages.some((stage) => stage.status === 'blocked')) {
     messages.push('Lumora found a safer cinematic route.');
   }
+  if (value.creatorMessage) {
+    messages.push(value.creatorMessage);
+  }
+  if (value.sceneOptimization?.simplified) {
+    messages.push('Lumora simplified this scene to help it render smoothly.');
+  }
   if (value.renderedWithLighterCastGuidance) {
     messages.push('Rendered with lighter cast guidance.');
   }
@@ -1002,6 +1039,7 @@ export default function CreateVideo({
 
   const [duration, setDuration] = useState(8);
   const [aspectRatio, setAspectRatio] = useState<VideoAspectRatio>('9:16');
+  const [renderPreference, setRenderPreference] = useState<RenderSuccessMode>('balanced');
   const [engine, setEngine] = useState<VideoEngine>('replicate');
   const [status, setStatus] = useState('');
   const [generationStatusState, setGenerationStatusState] = useState<GenerationStatusState>('idle');
@@ -1761,6 +1799,7 @@ export default function CreateVideo({
         characterId,
         referenceImages: seedanceReferenceImages,
         quality: engine === SEEDANCE_QUALITY_ENGINE_ID ? 'quality' : 'fast',
+        renderPreference,
         privacy: 'private',
         characterMetadata: {
           characterId,
@@ -2190,6 +2229,7 @@ export default function CreateVideo({
           userId: authUser?.id ?? identityProfile?.userId ?? null,
           engine: selectedEngine,
           quality: selectedEngine === SEEDANCE_QUALITY_ENGINE_ID ? 'quality' : 'fast',
+          renderPreference,
           characterId,
           characterName,
           characterAvatar,
@@ -2243,6 +2283,7 @@ export default function CreateVideo({
           duration,
           aspectRatio: selectedAspectRatio,
           engine: selectedEngine,
+          renderPreference,
         });
 
         if (providerResult.status === 'failed') {
@@ -2295,6 +2336,7 @@ export default function CreateVideo({
             audio: true,
             provider: 'replicate',
             engine: selectedEngine,
+            renderPreference,
             generationMode: videoGenerationMode,
           }),
         });
@@ -2442,6 +2484,8 @@ export default function CreateVideo({
       });
       const nextWarnings = formatCreatorWarnings([
         ...formatWarnings(data.warnings),
+        ...(data.renderReliability?.creatorMessage ? [data.renderReliability.creatorMessage] : []),
+        ...(data.sceneOptimization?.creatorMessage ? [data.sceneOptimization.creatorMessage] : []),
         ...moderationWarningMessages(data.moderationDiagnostics),
         ...providerFallbackWarningMessages(data.providerFallbackDiagnostics),
         ...(data.referenceImageNote ? [data.referenceImageNote] : []),
@@ -2503,6 +2547,8 @@ export default function CreateVideo({
           ? data.moderationDiagnostics
           : null,
         providerFallbackDiagnostics,
+        sceneOptimization: data.sceneOptimization ?? providerFallbackDiagnostics?.sceneOptimization ?? null,
+        renderReliability: data.renderReliability ?? null,
         finalPrompt: nextFinalPrompt,
         model: data.model || null,
         displayEngine: nextDisplayEngine,
@@ -2751,6 +2797,7 @@ export default function CreateVideo({
             referenceImageUrl: selectedSelfReferenceImageUrl,
             referenceImageUrls: referencePayload,
             referenceImages: isSeedanceEngine ? seedanceReferenceImages : undefined,
+            renderPreference,
           },
         });
         setStatus('Draft saved to your account.');
@@ -3194,6 +3241,26 @@ export default function CreateVideo({
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="field-block">
+          <span>Render feel</span>
+          <div className="chip-row wrap render-preference-row">
+            {renderPreferenceOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={`chip render-preference-chip ${renderPreference === option.value ? 'active' : ''}`}
+                onClick={() => setRenderPreference(option.value)}
+                title={option.description}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <small className="muted">
+            {renderPreferenceOptions.find((option) => option.value === renderPreference)?.description}
+          </small>
         </div>
 
         <details className="advanced-create-details renderer-details">

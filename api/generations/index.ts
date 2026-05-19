@@ -22,6 +22,7 @@ type GenerationRequestBody = {
   characterName?: unknown;
   characterAvatar?: unknown;
   isDefaultSelfCharacter?: unknown;
+  renderPreference?: unknown;
   referenceImages?: unknown;
 };
 
@@ -83,6 +84,12 @@ function aspectRatioValue(value: unknown) {
 function durationValue(value: unknown) {
   const duration = Number(value);
   return Number.isFinite(duration) ? Math.min(30, Math.max(2, Math.round(duration))) : 8;
+}
+
+function renderPreferenceValue(value: unknown) {
+  return value === 'cinematic_quality' || value === 'success_first' || value === 'balanced'
+    ? value
+    : 'balanced';
 }
 
 function privacyValue(value: unknown) {
@@ -181,6 +188,7 @@ export default async function handler(req: GenerationRequest, res: ServerRespons
         characterName: stringValue(body.characterName),
         characterAvatar: stringValue(body.characterAvatar),
         isDefaultSelfCharacter: booleanValue(body.isDefaultSelfCharacter),
+        renderPreference: renderPreferenceValue(body.renderPreference),
         referenceImages: referenceImagesValue(body.referenceImages),
       });
       const { rawOutput: _rawOutput, ...publicResult } = result;

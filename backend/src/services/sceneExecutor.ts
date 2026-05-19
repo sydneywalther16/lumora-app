@@ -41,6 +41,7 @@ import {
   persistSeedanceReferenceImages,
   type AssetPersistenceSummary,
 } from './assetPersistence';
+import type { RenderSuccessMode } from './sceneOptimization';
 
 export type SceneExecutorClipStatus = 'queued' | 'processing' | 'completed' | 'failed';
 
@@ -110,6 +111,7 @@ export type ExecuteScenePlanInput = {
   characterMetadata?: Record<string, unknown> | null;
   referenceImages?: SeedanceReferenceImage[];
   quality?: SeedanceQualityMode;
+  renderPreference?: RenderSuccessMode | string | null;
   privacy?: string;
 };
 
@@ -369,12 +371,20 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
       const seedanceResult = await generateSeedanceWithProviderFallback({
         prompt,
         quality: input.quality,
+        renderPreference: parsedPlan.shotList.length >= 5
+          ? 'success_first'
+          : input.renderPreference,
         referenceImages: safeReferenceImages,
         userId: input.userId,
         characterId: executionCharacterId,
         characterName: characterProfile?.displayName ?? null,
         characterDisplayName: characterProfile?.displayName ?? null,
         projectId: input.projectId ?? null,
+        sceneCount: parsedPlan.shotList.length,
+        cameraText: `${shot.cameraFraming} ${shot.cameraMovement} ${parsedPlan.cameraFraming.join(' ')}`,
+        environmentText: `${parsedPlan.environmentDescription} ${shot.environmentFocus}`,
+        emotionalText: `${parsedPlan.emotionalPacing} ${metadata.emotionalState}`,
+        continuityNotes: parsedPlan.continuityNotes,
       });
       const completedJob = await updateGenerationJobStatus({
         jobId: clip.jobId ?? clip.id,
