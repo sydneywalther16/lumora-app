@@ -58,6 +58,13 @@ import {
   referenceStatus,
   type ReferenceRepairIssue,
 } from '../lib/referenceRepair';
+import {
+  buildSafeTakePreview,
+  buildSafeTakePrompt,
+  creatorRenderStateCopy,
+  sanitizeCreatorErrorMessage,
+  successFirstOverrides,
+} from '../lib/renderStateCopy';
 
 type CreateVideoProps = {
   refreshKey?: number;
@@ -342,36 +349,22 @@ function asyncRenderStatusMessage(data: GenerateVideoApiResponse | GenerationRes
 }
 
 function cooldownBodyCopy(seconds: number) {
-  if (seconds > 3) return `Resume available in ${seconds} seconds. Your scene is saved and ready to resume.`;
-  if (seconds > 0) return 'The render queue is almost ready. Your scene is saved and ready to resume.';
-  return 'Your scene is saved and ready to resume.';
+  return creatorRenderStateCopy('rate_limited', seconds).body;
 }
 
 function renderStateTone(state: GenerationStatusState) {
-  if (state === 'rate_limited') return 'cooling';
-  if (state === 'queued') return 'queued';
-  if (state === 'processing') return 'rendering';
-  if (state === 'completed') return 'complete';
-  if (state === 'failed') return 'paused';
-  return 'idle';
+  if (state === 'idle') return 'idle';
+  return creatorRenderStateCopy(state === 'processing' ? 'rendering' : state).tone;
 }
 
 function renderStateHeadline(state: GenerationStatusState) {
-  if (state === 'rate_limited') return 'Render queue is cooling down.';
-  if (state === 'queued') return 'Your scene is queued.';
-  if (state === 'processing') return 'Lumora is shaping your cinematic moment.';
-  if (state === 'completed') return 'Your cinematic draft is saved.';
-  if (state === 'failed') return 'Lumora paused this scene safely.';
-  return '';
+  if (state === 'idle') return '';
+  return creatorRenderStateCopy(state === 'processing' ? 'rendering' : state).title;
 }
 
 function renderStateBody(state: GenerationStatusState, cooldownSeconds: number) {
-  if (state === 'rate_limited') return cooldownBodyCopy(cooldownSeconds);
-  if (state === 'queued') return 'Preparing your cast, saving scene references, and keeping this draft protected.';
-  if (state === 'processing') return 'Preserving Story Memory and scene flow while your draft saves in the background.';
-  if (state === 'completed') return 'This moment is ready in Drafts.';
-  if (state === 'failed') return 'Your completed work is saved in Drafts. Edit the scene or try another take when ready.';
-  return '';
+  if (state === 'idle') return '';
+  return creatorRenderStateCopy(state === 'processing' ? 'rendering' : state, cooldownSeconds).body;
 }
 
 function creatorRenderModeLabel(mode: string) {
@@ -976,7 +969,7 @@ function creatorFacingErrorMessage(value: unknown, fallback = 'Lumora safely pau
     return fallback;
   }
 
-  return raw;
+  return sanitizeCreatorErrorMessage(raw, fallback);
 }
 
 function creatorFacingPausedDetail(value: unknown): string {
@@ -1096,6 +1089,16 @@ export default function CreateVideo({
     import.meta.env.DEV &&
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('mockRateLimit') === '1'
+  );
+  const mockPausedUi = Boolean(
+    import.meta.env.DEV &&
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('mockPaused') === '1'
+  );
+  const mockBlockedUi = Boolean(
+    import.meta.env.DEV &&
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('mockBlocked') === '1'
   );
   const primaryReferenceImage = pickReferenceImage({ referenceImageUrl, referenceImageUrls });
   const hasSelfCharacter = forceSelfMode || isDefaultSelfCharacter;
@@ -1234,7 +1237,7 @@ export default function CreateVideo({
     !referenceLoading &&
     hasPrompt &&
     !(activeReferenceRepair && !activeReferenceRepair.canContinueWithoutReference) &&
-    (!requiresReferenceImage || hasGenerationReference);
+    (!requiresReferenceImage || hasGenerationReference || mockRateLimitUi);
   const renderCooldownActive = renderCooldownSeconds > 0;
   const activeRenderBlocksGenerate = Boolean(activeRenderJobId) && generationStatusState !== 'rate_limited';
   const generateBusy = !canGenerate || busy || generationLoading || referenceLoading || renderCooldownActive || activeRenderBlocksGenerate;
@@ -1304,6 +1307,34 @@ export default function CreateVideo({
     headline: renderStateHeadline(generationStatusState),
     body: renderStateBody(generationStatusState, renderCooldownSeconds),
   };
+  const pausedRenderCopy = creatorRenderStateCopy('paused');
+  const suggestedTakePrompt = buildSafeTakePrompt(
+    generationSafeRewrite || activePrompt,
+    { displayName: characterName },
+  );
+  const suggestedTakePreview = buildSafeTakePreview(
+    generationSafeRewrite || activePrompt,
+    { displayName: characterName },
+  );
+  const showSuggestedTakePanel = Boolean(generationError && !activeReferenceRepair);
+  const tryTakeBusy = busy || generationLoading || referenceLoading || renderCooldownActive || activeRenderBlocksGenerate;
+  const generateCtaLabel = renderCooldownActive
+    ? `Cooling down ${renderCooldownSeconds}s`
+    : generationStatusState === 'rate_limited'
+      ? 'Resume render'
+    : generationError && !activeReferenceRepair
+      ? 'Try this take'
+    : activeRenderBlocksGenerate
+      ? 'Rendering in Drafts'
+    : generationLoading
+      ? 'Shaping cinematic beats...'
+    : referenceLoading
+      ? 'Preparing your cast...'
+    : !hasPrompt
+      ? 'Add a scene idea'
+    : !canGenerate
+      ? 'Add reference before generating'
+    : 'Generate Cinematic Scene';
   const showCinematicStructure = Boolean(
     creativePlanLoading ||
     creativePlan ||
@@ -1329,6 +1360,7 @@ export default function CreateVideo({
   useEffect(() => {
     const savedPrompt = localStorage.getItem('remixPrompt');
     const savedTitle = localStorage.getItem('remixTitle');
+    const savedRenderPreference = localStorage.getItem('lumora_remix_render_preference');
 
     if (savedPrompt) {
       setActivePrompt(savedPrompt);
@@ -1338,6 +1370,15 @@ export default function CreateVideo({
     if (savedTitle) {
       setDraftTitle(savedTitle);
       localStorage.removeItem('remixTitle');
+    }
+
+    if (
+      savedRenderPreference === 'success_first' ||
+      savedRenderPreference === 'balanced' ||
+      savedRenderPreference === 'cinematic_quality'
+    ) {
+      setRenderPreference(savedRenderPreference);
+      localStorage.removeItem('lumora_remix_render_preference');
     }
   }, [setActivePrompt, setDraftTitle]);
 
@@ -1517,6 +1558,19 @@ export default function CreateVideo({
   }, [renderCooldownUntil]);
 
   useEffect(() => {
+    if (!mockPausedUi && !mockBlockedUi) return;
+
+    const sourcePrompt = activePrompt.trim() ||
+      'The cast character walks through a sunlit garden, gently picking flowers.';
+    setGenerationStatusState('failed');
+    setGenerationError(creatorRenderStateCopy('paused').title);
+    setGenerationModerationDetail('');
+    setGenerationModerationStages(mockBlockedUi ? ['Trying a softer cinematic direction...'] : []);
+    setGenerationSafeRewrite(buildSafeTakePrompt(sourcePrompt, { displayName: characterName }));
+    setStatus('Your cinematic work is preserved in Drafts.');
+  }, [activePrompt, characterName, mockBlockedUi, mockPausedUi]);
+
+  useEffect(() => {
     if (!sceneExecutorUserId) {
       setContinuityMemory(null);
       setContinuityMemoryDraft(emptyContinuityMemoryState);
@@ -1672,15 +1726,20 @@ export default function CreateVideo({
     }
   }
 
-  async function buildCinematicStructureForPrompt(options: { visible?: boolean; source: 'generate' | 'advanced' }): Promise<CreativeBrainScenePlan | null> {
+  async function buildCinematicStructureForPrompt(options: {
+    visible?: boolean;
+    source: 'generate' | 'advanced';
+    promptOverride?: string;
+  }): Promise<CreativeBrainScenePlan | null> {
     setCreativePlanLoading(true);
     setCreativePlanError('');
     setCreativePlanStatus(options.visible ? 'Lumora is shaping cinematic beats...' : '');
 
     try {
-      const styleTheme = selectedStylePrompt(selectedStyles, activePrompt);
+      const planPrompt = options.promptOverride ?? activePrompt;
+      const styleTheme = selectedStylePrompt(selectedStyles, planPrompt);
       const response = await api.createCreativeBrainPlan({
-        prompt: activePrompt,
+        prompt: planPrompt,
         userId: sceneExecutorUserId,
         characterId,
         styleTheme: styleTheme || null,
@@ -2073,10 +2132,17 @@ export default function CreateVideo({
     );
   }
 
-  async function handleGenerate() {
+  async function handleGenerate(options: {
+    promptOverride?: string;
+    renderPreferenceOverride?: RenderSuccessMode;
+    durationOverride?: number;
+    forceNewTake?: boolean;
+  } = {}) {
     if (generationInFlightRef.current) return;
 
-    if (activeRenderJobId && generationStatusState !== 'rate_limited') {
+    const canStartFreshTakeFromPause = Boolean(options.forceNewTake && generationStatusState === 'failed');
+
+    if (activeRenderJobId && generationStatusState !== 'rate_limited' && !canStartFreshTakeFromPause) {
       setStatus('Lumora is already rendering this scene and will save it to Drafts.');
       return;
     }
@@ -2106,9 +2172,11 @@ export default function CreateVideo({
       return;
     }
 
-    const currentPrompt = activePrompt;
+    const currentPrompt = options.promptOverride ?? activePrompt;
     const selectedAspectRatio = aspectRatio;
     const selectedEngine = engine;
+    const selectedDuration = options.durationOverride ?? duration;
+    const selectedRenderPreference = options.renderPreferenceOverride ?? renderPreference;
     const selectedReferenceImageUrl = resolveRenderableReferenceUrl(referenceImageUrl) || selectedSelfReferenceImageUrl;
 
     if (!currentPrompt.trim()) {
@@ -2118,7 +2186,7 @@ export default function CreateVideo({
       return;
     }
 
-    if (selectedEngine === 'replicate' && !selectedReferenceImageUrl) {
+    if (selectedEngine === 'replicate' && !selectedReferenceImageUrl && !mockRateLimitUi) {
       setGenerationError('Add or re-save a public reference photo before generating.');
       setGenerationStatusState('failed');
       releaseGenerateLock();
@@ -2210,7 +2278,7 @@ export default function CreateVideo({
         await saveContinuityMemory({ silent: true });
       }
       setStatus('Shaping cinematic beats...');
-      const invisiblePlan = await buildCinematicStructureForPrompt({ source: 'generate' });
+      const invisiblePlan = await buildCinematicStructureForPrompt({ source: 'generate', promptOverride: currentPrompt });
       if (invisiblePlan) {
         setStatus('Preparing your cast for the render...');
       } else {
@@ -2229,11 +2297,12 @@ export default function CreateVideo({
           userId: authUser?.id ?? identityProfile?.userId ?? null,
           engine: selectedEngine,
           quality: selectedEngine === SEEDANCE_QUALITY_ENGINE_ID ? 'quality' : 'fast',
-          renderPreference,
+          renderPreference: selectedRenderPreference,
           characterId,
           characterName,
           characterAvatar,
           isDefaultSelfCharacter,
+          duration: selectedDuration,
           referenceImages: selectedSeedanceReferences,
           referenceImageUrls: referencePayload,
           additionalReferenceImageUrls,
@@ -2280,10 +2349,10 @@ export default function CreateVideo({
           characterName,
           characterAvatar,
           isDefaultSelfCharacter,
-          duration,
+          duration: selectedDuration,
           aspectRatio: selectedAspectRatio,
           engine: selectedEngine,
-          renderPreference,
+          renderPreference: selectedRenderPreference,
         });
 
         if (providerResult.status === 'failed') {
@@ -2331,12 +2400,12 @@ export default function CreateVideo({
             referenceImages: additionalReferenceImageUrls,
             referenceImageUrls: referencePayload,
             aspectRatio: selectedAspectRatio,
-            duration,
+            duration: selectedDuration,
             style: generationStylePrompt,
             audio: true,
             provider: 'replicate',
             engine: selectedEngine,
-            renderPreference,
+            renderPreference: selectedRenderPreference,
             generationMode: videoGenerationMode,
           }),
         });
@@ -2762,6 +2831,34 @@ export default function CreateVideo({
     }
   }
 
+  async function handleTrySuggestedTake() {
+    const safeTake = suggestedTakePrompt;
+    const overrides = successFirstOverrides(duration);
+
+    setActivePrompt(safeTake);
+    setRenderPreference(overrides.renderPreference);
+    if (overrides.duration !== duration) {
+      setDuration(overrides.duration);
+    }
+    setGenerationSafeRewrite('');
+    setGenerationModerationDetail('');
+    setGenerationModerationStages([]);
+    setGenerationError('');
+    setStatus('Lumora is trying a gentler cinematic take.');
+    void trackCreatorEvent('continue_story_clicked', {
+      source: 'create_suggested_take',
+      renderPreference: overrides.renderPreference,
+      shortenedDuration: overrides.duration !== duration,
+    }, authUser?.id ?? null);
+
+    await handleGenerate({
+      promptOverride: safeTake,
+      renderPreferenceOverride: overrides.renderPreference,
+      durationOverride: overrides.duration,
+      forceNewTake: true,
+    });
+  }
+
   async function handleSaveDraft() {
     if (configured && sessionLoading && !authUser) {
       setStatus('Checking your account session. Try again in a moment.');
@@ -2877,7 +2974,7 @@ export default function CreateVideo({
         <div className="cast-summary-card">
           <div>
             <span className="eyebrow">Cast</span>
-            <strong>{characterName ? (isDefaultSelfCharacter ? 'Created as self' : characterName) : 'Created as self'}</strong>
+            <strong>{characterName ? (isDefaultSelfCharacter ? 'Cinematic self selected' : characterName) : 'Cinematic self selected'}</strong>
             <p className="muted">
               {isSeedanceEngine
                 ? `${savedSeedanceReferenceCount || seedanceReferenceCount} cast reference${(savedSeedanceReferenceCount || seedanceReferenceCount) === 1 ? '' : 's'} saved to Lumora`
@@ -3118,7 +3215,9 @@ export default function CreateVideo({
                           const clipExpanded = expandedSceneDescriptions.has(clipDescriptionKey);
                           const clipCanExpand = clipDescription.length > 180;
                           const clipSafeError = clip.error
-                            ? creatorFacingErrorMessage(clip.error, 'This shot paused safely.')
+                            ? generationStatusState === 'failed'
+                              ? 'Shot paused safely.'
+                              : creatorFacingErrorMessage(clip.error, 'This shot paused safely.')
                             : '';
                           const clipHasAdaptation = clipModerationStages.length > 0 || clipProviderFallbackStages.length > 0;
 
@@ -3306,7 +3405,7 @@ export default function CreateVideo({
               {isSeedanceEngine
                 ? 'Generate a fresh scene from your cast references'
                 : engine === 'replicate' && selfReferenceMode
-                  ? 'Generate new scenes from your reusable identity'
+                  ? 'Generate new scenes from your cinematic self'
                 : engine === 'veo'
                   ? 'Try the experimental cinematic route'
                 : engine === 'mock'
@@ -3449,28 +3548,22 @@ export default function CreateVideo({
         <p className="muted cinematic-auto-flow-copy">Lumora shapes cinematic beats automatically, then saves the render to Drafts.</p>
 
         <div className="button-row luxury-action-row">
-          <button type="button" className="primary-btn" onClick={handleGenerate} disabled={generateBusy} aria-busy={generateBusy}>
-            {renderCooldownActive
-              ? `Cooling down ${renderCooldownSeconds}s`
-              : generationStatusState === 'rate_limited'
-                ? 'Resume render'
-              : activeRenderBlocksGenerate
-                ? 'Rendering in Drafts'
-              : generationLoading
-              ? 'Shaping your scene...'
-              : referenceLoading
-                  ? 'Checking self character...'
-                : !hasPrompt
-                  ? 'Add a scene idea'
-                : !canGenerate
-                  ? 'Add reference before generating'
-                : 'Generate Cinematic Scene'}
+          <button
+            type="button"
+            className={`primary-btn cinematic-generate-btn state-${generationStatusState}`}
+            onClick={() => {
+              void (generationError && !activeReferenceRepair ? handleTrySuggestedTake() : handleGenerate());
+            }}
+            disabled={generationError && !activeReferenceRepair ? tryTakeBusy : generateBusy}
+            aria-busy={generateBusy}
+          >
+            {generateCtaLabel}
           </button>
           <button type="button" className="ghost-btn" onClick={() => void handleSaveDraft()} disabled={saveBusy}>
             Save draft
           </button>
         </div>
-        {visibleRenderState ? (
+        {visibleRenderState && !(generationError && generationStatusState === 'failed') ? (
           <div
             className={`render-state-card render-state-${visibleRenderState.tone} ${generationStatusState === 'rate_limited' ? 'rate-limit-card' : ''}`}
             role="status"
@@ -3496,7 +3589,7 @@ export default function CreateVideo({
             </div>
             {generationStatusState === 'rate_limited' ? (
               <div className="render-state-actions">
-                <button type="button" className="primary-btn" onClick={handleGenerate} disabled={renderCooldownActive || generationLoading}>
+                <button type="button" className="primary-btn" onClick={() => void handleGenerate()} disabled={renderCooldownActive || generationLoading}>
                   {renderCooldownActive ? `Resume in ${renderCooldownSeconds}s` : 'Resume render'}
                 </button>
                 <button type="button" className="ghost-btn" onClick={() => void handleSaveDraft()} disabled={saveBusy}>
@@ -3585,7 +3678,9 @@ export default function CreateVideo({
                           const clipExpanded = expandedSceneDescriptions.has(clipDescriptionKey);
                           const clipCanExpand = clipDescription.length > 180;
                           const clipSafeError = clip.error
-                            ? creatorFacingErrorMessage(clip.error, 'This shot paused safely.')
+                            ? generationStatusState === 'failed'
+                              ? 'Shot paused safely.'
+                              : creatorFacingErrorMessage(clip.error, 'This shot paused safely.')
                             : '';
                           const clipHasAdaptation = clipModerationStages.length > 0 || clipProviderFallbackStages.length > 0;
 
@@ -3658,74 +3753,87 @@ export default function CreateVideo({
           </details>
         ) : null}
         {generationError ? (
-          <div className="generation-error-card">
-            <p>{generationError}</p>
-            {generationModerationDetail ? <p>{generationModerationDetail}</p> : null}
-            {activeReferenceRepair ? (
-              <div className="reference-repair-panel">
-                <div>
-                  <span className="eyebrow">reference repair</span>
-                  <h3>{assetRepairTitle(activeReferenceRepair)}</h3>
-                  <p>{activeReferenceRepair.label}</p>
-                  {activeReferenceRepair.host ? <p className="muted">This image link is protected.</p> : null}
-                </div>
-                {activeReferenceRepair.sourceUrl ? (
-                  <div className="reference-repair-preview">
-                    <img src={activeReferenceRepair.sourceUrl} alt={`${activeReferenceRepair.label} preview`} />
-                  </div>
+          <div className="render-trust-stack">
+            <div className="generation-error-card paused-render-card">
+              <div className="render-state-topline">
+                <span className="tiny-pill">{activeReferenceRepair ? 'Reference repair' : pausedRenderCopy.label}</span>
+                <span className="render-state-safe-note">Saved safely</span>
+              </div>
+              <div className="render-state-copy">
+                <strong>{activeReferenceRepair ? 'One reference needs to be re-uploaded.' : pausedRenderCopy.title}</strong>
+                <p>
+                  {activeReferenceRepair
+                    ? 'Upload the image directly so Lumora can save it safely, or keep creating with your saved Lumora references.'
+                    : pausedRenderCopy.body}
+                </p>
+                {!activeReferenceRepair && pausedRenderCopy.suggestedNextStep ? (
+                  <small>{pausedRenderCopy.suggestedNextStep}</small>
                 ) : null}
-                {renderReferenceRepairActions()}
-                {repairStatus ? <p className="muted">{repairStatus}</p> : null}
               </div>
-            ) : null}
-            {generationModerationStages.length ? (
-              <div className="generation-warning-list">
-                {generationModerationStages.map((stage) => (
-                  <p key={stage}>{stage}</p>
-                ))}
-              </div>
-            ) : null}
-            {generationSafeRewrite ? (
-              <div className="safe-rewrite-card">
-                <span className="eyebrow">cinematic direction</span>
-                <p>{generationSafeRewrite}</p>
-                <button
-                  type="button"
-                  className="ghost-btn"
-                  onClick={() => {
-                    setActivePrompt(generationSafeRewrite);
-                    setGenerationError('');
-                    setGenerationModerationDetail('');
-                    setGenerationModerationStages([]);
-                    setGenerationSafeRewrite('');
-                    setStatus('Safer cinematic rewrite loaded. Your references stayed intact.');
-                  }}
-                >
-                  {generationSafeRewrite.toLowerCase().includes('storybook cinematic version')
-                    ? 'Use storybook garden version'
-                    : 'Use cinematic direction'}
-                </button>
-              </div>
-            ) : null}
-            <div className="button-row">
-              <button
-                type="button"
-                className="ghost-btn"
-                onClick={() => {
-                  setGenerationError('');
-                  setStatus('Adjust the scene direction, then Lumora can try another take.');
-                  promptTextareaRef.current?.focus();
-                }}
-              >
-                Edit prompt
-              </button>
-              <button type="button" className="ghost-btn" onClick={() => void handleSaveDraft()} disabled={saveBusy}>
-                Save draft
-              </button>
-              <button type="button" className="ghost-btn" onClick={handleGenerate} disabled={generateBusy}>
-                {renderCooldownActive ? `Resume in ${renderCooldownSeconds}s` : 'Try another take'}
-              </button>
+              {activeReferenceRepair ? (
+                <div className="reference-repair-panel">
+                  <div>
+                    <span className="eyebrow">reference repair</span>
+                    <h3>{assetRepairTitle(activeReferenceRepair)}</h3>
+                    <p>{activeReferenceRepair.label}</p>
+                    {activeReferenceRepair.host ? <p className="muted">This image link is protected.</p> : null}
+                  </div>
+                  {activeReferenceRepair.sourceUrl ? (
+                    <div className="reference-repair-preview">
+                      <img src={activeReferenceRepair.sourceUrl} alt={`${activeReferenceRepair.label} preview`} />
+                    </div>
+                  ) : null}
+                  {renderReferenceRepairActions()}
+                  {repairStatus ? <p className="muted">{repairStatus}</p> : null}
+                </div>
+              ) : null}
             </div>
+
+            {showSuggestedTakePanel ? (
+              <div className="safe-rewrite-card next-take-panel">
+                <span className="eyebrow">suggested next take</span>
+                <h3>Suggested next take</h3>
+                <p>A gentler cinematic version may render more smoothly.</p>
+                <blockquote className="next-take-preview">{suggestedTakePreview}</blockquote>
+                <div className="next-take-actions">
+                  <button
+                    type="button"
+                    className="primary-btn cinematic-generate-btn"
+                    onClick={() => void handleTrySuggestedTake()}
+                    disabled={tryTakeBusy}
+                  >
+                    Try this take
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    onClick={() => {
+                      setGenerationError('');
+                      setGenerationModerationDetail('');
+                      setGenerationModerationStages([]);
+                      setStatus('Adjust the scene direction, then Lumora can try another take.');
+                      promptTextareaRef.current?.focus();
+                    }}
+                  >
+                    Edit scene
+                  </button>
+                  <button type="button" className="quiet-btn" onClick={() => void handleSaveDraft()} disabled={saveBusy}>
+                    Save draft
+                  </button>
+                </div>
+                {generationModerationDetail || generationModerationStages.length ? (
+                  <details className="advanced-create-details technical-details">
+                    <summary>Creative adaptation steps</summary>
+                    {generationModerationDetail ? <p className="muted">{generationModerationDetail}</p> : null}
+                    <div className="generation-warning-list">
+                      {generationModerationStages.map((stage) => (
+                        <p key={stage}>{stage}</p>
+                      ))}
+                    </div>
+                  </details>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         ) : null}
         {generationWarnings.length ? (
@@ -3780,7 +3888,7 @@ export default function CreateVideo({
             </span>
           </div>
           {isDefaultSelfCharacter ? (
-            <p><strong>Created as self</strong></p>
+            <p><strong>Cinematic self selected</strong></p>
           ) : generationResult.characterName ? (
             <p>Character: <strong>{generationResult.characterName}</strong></p>
           ) : null}

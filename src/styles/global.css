@@ -1910,6 +1910,8 @@ button {
 }
 
 .luxury-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(118px, auto);
   align-items: stretch;
   padding: 8px;
   border: 1px solid var(--surface-border);
@@ -2379,6 +2381,134 @@ button {
   border-radius: 24px;
 }
 
+.render-trust-stack {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  animation: cinematicPanelIn 180ms ease both;
+}
+
+.paused-render-card {
+  display: grid;
+  gap: 12px;
+  border-color: rgba(255, 206, 115, 0.28);
+  background:
+    linear-gradient(145deg, rgba(255, 206, 115, 0.1), rgba(126, 231, 216, 0.055)),
+    var(--surface-background);
+}
+
+.paused-render-card .render-state-copy small {
+  color: var(--muted-text);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.next-take-panel {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--selected-outline) 34%, var(--surface-border));
+  border-radius: 24px;
+  background:
+    linear-gradient(145deg, rgba(126, 231, 216, 0.09), rgba(255, 105, 212, 0.07)),
+    var(--surface-background);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 18px 44px rgba(0, 0, 0, 0.18);
+}
+
+.next-take-panel h3,
+.next-take-panel p {
+  margin: 0;
+}
+
+.next-take-preview {
+  margin: 0;
+  padding: 12px 13px;
+  border: 1px solid rgba(126, 231, 216, 0.18);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--soft-text);
+  line-height: 1.55;
+}
+
+.next-take-actions {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.35fr) minmax(132px, 0.9fr) minmax(110px, 0.7fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.next-take-actions .primary-btn,
+.next-take-actions .ghost-btn,
+.next-take-actions .quiet-btn {
+  min-width: 0;
+  min-height: 46px;
+  white-space: normal;
+}
+
+.quiet-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 16px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-text);
+  font-weight: 800;
+  text-align: center;
+  text-decoration: none;
+  transition: color 160ms ease, background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.quiet-btn:hover:not(:disabled),
+.quiet-btn:focus-visible:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--surface-border);
+  background: rgba(255, 255, 255, 0.045);
+  transform: translateY(-1px);
+}
+
+.quiet-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.technical-details {
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.cinematic-generate-btn {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.cinematic-generate-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 4%, rgba(255, 255, 255, 0.2) 42%, transparent 72%);
+  transform: translateX(-130%);
+  opacity: 0.65;
+  animation: luxuryButtonShimmer 3.8s ease-in-out infinite;
+}
+
+.cinematic-generate-btn:hover:not(:disabled)::after,
+.cinematic-generate-btn:focus-visible:not(:disabled)::after {
+  animation-duration: 1.8s;
+  opacity: 0.85;
+}
+
+.cinematic-generate-btn.state-processing,
+.cinematic-generate-btn[aria-busy='true'] {
+  animation: luxuryPulse 2.2s ease-in-out infinite;
+}
+
 @keyframes continuityPulse {
   0%,
   100% {
@@ -2408,6 +2538,17 @@ button {
 @keyframes luxuryShimmer {
   100% {
     transform: translateX(110%);
+  }
+}
+
+@keyframes luxuryButtonShimmer {
+  0%,
+  42% {
+    transform: translateX(-130%);
+  }
+  70%,
+  100% {
+    transform: translateX(130%);
   }
 }
 
@@ -3034,6 +3175,39 @@ button {
 }
 
 @media (max-width: 640px) {
+  .render-trust-stack,
+  .next-take-panel,
+  .paused-render-card {
+    gap: 11px;
+  }
+
+  .next-take-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .luxury-action-row {
+    grid-template-columns: 1fr;
+  }
+
+  .scene-progress-item {
+    grid-template-columns: 30px minmax(0, 1fr);
+    gap: 10px;
+    padding: 13px;
+  }
+
+  .scene-progress-title-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .scene-status-pill {
+    margin-top: 0;
+  }
+
+  .scene-shot-description {
+    -webkit-line-clamp: 3;
+  }
+
   .character-hub-overlay {
     align-items: end;
     padding: 0;

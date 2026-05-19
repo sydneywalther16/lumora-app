@@ -15,6 +15,7 @@ import type { GenerationJob, LumoraPost, PrivacySetting } from '../lib/api';
 import { getBestPoster, getBestThumbnail } from '../lib/mediaThumbnail';
 import { openContinueStory } from '../lib/continueStory';
 import { trackCreatorEvent } from '../lib/creatorEvents';
+import { buildSafeTakePrompt, creatorRenderStateCopy } from '../lib/renderStateCopy';
 
 type Props = {
   jobs: GenerationJob[];
@@ -33,7 +34,7 @@ function formatStatus(status: string) {
   if (status === 'rate_limited') return 'Cooling down';
   if (status === 'completed') return 'Completed';
   if (status === 'published') return 'Published';
-  if (status === 'failed') return 'Failed';
+  if (status === 'failed') return 'Paused';
   return status;
 }
 
@@ -42,8 +43,7 @@ function draftStateCopy(job: GenerationJob) {
   if (status === 'rate_limited') return 'Your scene is saved and ready to resume.';
   if (status === 'queued') return 'Queued for rendering. Lumora will keep checking.';
   if (status === 'rendering' || status === 'processing') return 'Rendering your cinematic moment.';
-  if (status === 'paused') return 'Completed shots are safely saved in Drafts.';
-  if (status === 'failed') return 'This scene is paused. Edit the direction and try again.';
+  if (status === 'paused' || status === 'failed') return 'Your scene is saved. Try a gentler cinematic direction or continue the story.';
   if (job.resultAssetUrl) return 'Scene ready for its next move.';
   return 'Lumora is still shaping this scene.';
 }
@@ -64,6 +64,7 @@ function primaryDraftAction(job: GenerationJob) {
   if (job.resultAssetUrl) return 'Open';
   if (status === 'rate_limited') return 'Resume render';
   if (status === 'queued' || status === 'rendering' || status === 'processing') return 'Continue checking';
+  if (status === 'paused' || status === 'failed') return creatorRenderStateCopy('paused').primaryActionLabel ?? 'Try this take';
   return 'Edit scene';
 }
 
@@ -101,7 +102,7 @@ function getPostedProjectIds(): string[] {
 function getJobCharacterLabel(job: GenerationJob) {
   // Always prioritize isDefaultSelfCharacter flag
   if (Boolean(job.isDefaultSelfCharacter)) {
-    return 'Created as self';
+    return 'Cinematic self selected';
   }
   
   // Otherwise, show character name if available
@@ -346,14 +347,23 @@ export default function StudioList({ jobs, onPublished }: Props) {
     alert(job.resultAssetUrl);
   }
 
-  function remixJob(job: GenerationJob) {
-    localStorage.setItem('remixPrompt', job.prompt || job.title || '');
-    localStorage.setItem('remixTitle', `Remix of ${job.title || 'Untitled concept'}`);
+  function remixJob(job: GenerationJob, mode: 'edit' | 'safe_take' = 'edit') {
+    const sourcePrompt = job.prompt || job.title || '';
+    const nextPrompt = mode === 'safe_take'
+      ? buildSafeTakePrompt(sourcePrompt, { displayName: job.characterName })
+      : sourcePrompt;
+    localStorage.setItem('remixPrompt', nextPrompt);
+    localStorage.setItem('remixTitle', mode === 'safe_take'
+      ? `Next take of ${job.title || 'Untitled concept'}`
+      : `Remix of ${job.title || 'Untitled concept'}`);
+    if (mode === 'safe_take') {
+      localStorage.setItem('lumora_remix_render_preference', 'success_first');
+    }
     localStorage.setItem(
       'lumora_remix_project',
       JSON.stringify({
         projectId: job.projectId || job.id,
-        prompt: job.prompt || '',
+        prompt: nextPrompt,
         title: job.title || 'Untitled concept',
         characterId: job.characterId,
         characterName: job.characterName ?? null,
@@ -430,6 +440,8 @@ export default function StudioList({ jobs, onPublished }: Props) {
       <section className="list-stack">
         {visibleJobs.map((job) => {
           const statusLabel = formatStatus(job.status);
+          const statusValue = (job.status || '').toLowerCase();
+          const showProviderDetail = !['failed', 'paused', 'rate_limited'].includes(statusValue);
           const videoFailed = failedVideoIds.has(job.id);
           const thumbnailUrl = getBestThumbnail(job);
           const posterUrl = getBestPoster(job);
@@ -577,7 +589,9 @@ export default function StudioList({ jobs, onPublished }: Props) {
                 </div>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                   <span className={`tiny-pill status-${statusClass(statusLabel)}`}>{statusLabel}</span>
-                  <span className="tiny-pill">{(job.displayEngine || job.provider).toUpperCase()}</span>
+                  {showProviderDetail ? (
+                    <span className="tiny-pill">{(job.displayEngine || job.provider).toUpperCase()}</span>
+                  ) : null}
                 </div>
               </div>
 
@@ -640,7 +654,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
                         className="text-btn"
                         onClick={(event) => {
                           event.stopPropagation();
-                          remixJob(job);
+                          remixJob(job, statusValue === 'paused' || statusValue === 'failed' ? 'safe_take' : 'edit');
                         }}
                       >
                         {primaryDraftAction(job)}

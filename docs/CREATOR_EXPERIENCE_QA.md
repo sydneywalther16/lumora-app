@@ -80,6 +80,22 @@ Use this checklist for the emotional creator loop: first-use, Story Memory, Draf
 - Confirm Scene Flow shot cards show one compact status, clamp long descriptions, and do not repeat cooldown copy inside every shot.
 - Confirm `Expand scene` opens long shot descriptions smoothly and keeps the mobile layout readable.
 
+## Paused / Blocked Scene Emotional QA
+
+- Open `/create?mockPaused=1` in local development only.
+- Confirm no raw provider errors, model error codes, stack traces, or prediction details are visible.
+- Confirm there is one primary paused state only: `Lumora paused this scene safely.`
+- Confirm the suggested next take panel is separate and reads `Suggested next take`.
+- Confirm the safe take preview is short, gentle, and does not include cast display names, photoshoot, influencer, glamour, superstar, celebrity, public figure, or social-caption language.
+- Confirm button hierarchy is clear: `Try this take` primary, `Edit scene` secondary, `Save draft` tertiary.
+- Confirm `Try this take` switches the next render to Success First behavior and does not simply retry the exact same wording.
+- Confirm repeated clicks do not create duplicate paid renders while a render is active or cooling down.
+- Confirm there are no repeated warnings directly under the paused state.
+- Confirm Scene Flow cards stay readable, use one compact paused badge, and do not repeat the full pause message inside every shot.
+- Open `/create?mockBlocked=1` in local development only and repeat the same checks.
+- Confirm Drafts shows paused/blocked renders as saved and resumable with `Needs your next take`, not as a scary failure.
+- Confirm mobile width has no one-word-per-line wrapping, squeezed buttons, or bottom-nav overlap.
+
 ## Safety And Failure States
 
 - Trigger or simulate a moderation adaptation if possible.
