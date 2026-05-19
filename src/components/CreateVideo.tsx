@@ -1274,26 +1274,6 @@ export default function CreateVideo({
   const continuityConfidencePercent = Math.round((continuityMemory?.continuityConfidence ?? 0.5) * 100);
   const recentDriftAlerts = continuityMemory?.driftAlerts.slice(0, 3) ?? [];
   const recentSceneMemorySummaries = continuityMemory?.sceneMemorySummaries.slice(0, 3) ?? [];
-  const creatorInsightCards = [
-    {
-      label: 'Style',
-      copy: selectedStyles.length
-        ? `Lumora remembered your ${selectedStyles.slice(0, 2).join(' + ')} direction.`
-        : 'Choose a style and Lumora will remember the feeling.',
-    },
-    {
-      label: 'Memory',
-      copy: continuityMemory?.id
-        ? 'Your story memory shaped this transition.'
-        : 'This scene can become the first memory in your world.',
-    },
-    {
-      label: 'Flow',
-      copy: creativePlan
-        ? 'Your cinematic beats are ready to guide the scene.'
-        : 'Lumora shapes your idea into cinematic beats automatically.',
-    },
-  ];
   const storyMemoryMoment = continuityMemoryDraft.environment
     ? `Lumora remembered this setting: ${continuityMemoryDraft.environment}.`
     : continuityMemoryDraft.wardrobe
@@ -1316,7 +1296,6 @@ export default function CreateVideo({
     generationSafeRewrite || activePrompt,
     { displayName: characterName },
   );
-  const showSuggestedTakePanel = Boolean(generationError && !activeReferenceRepair);
   const tryTakeBusy = busy || generationLoading || referenceLoading || renderCooldownActive || activeRenderBlocksGenerate;
   const generateCtaLabel = renderCooldownActive
     ? `Cooling down ${renderCooldownSeconds}s`
@@ -1356,6 +1335,14 @@ export default function CreateVideo({
           : sceneExecutionPlan || creativePlan
             ? 'Ready'
             : 'Preparing';
+  const cinematicBeatCount =
+    sceneExecutionResult?.clips.length ??
+    sceneExecutionPlan?.shotList.length ??
+    creativePlan?.shotList.length ??
+    0;
+  const cinematicStructureSummary = cinematicBeatCount
+    ? `Cinematic structure ready - ${cinematicBeatCount} beat${cinematicBeatCount === 1 ? '' : 's'}`
+    : 'Cinematic structure ready';
 
   useEffect(() => {
     const savedPrompt = localStorage.getItem('remixPrompt');
@@ -1567,8 +1554,59 @@ export default function CreateVideo({
     setGenerationModerationDetail('');
     setGenerationModerationStages(mockBlockedUi ? ['Trying a softer cinematic direction...'] : []);
     setGenerationSafeRewrite(buildSafeTakePrompt(sourcePrompt, { displayName: characterName }));
+    setSceneExecutionPlan({
+      cinematicTone: 'Gentle cinematic',
+      visualStyle: 'Soft storybook light',
+      soundtrackMood: 'Quiet emotional lift',
+      continuityNotes: ['Story Memory stays aligned.'],
+      cameraFraming: ['Medium portrait'],
+      environmentDescription: 'A calm sunlit garden.',
+      emotionalPacing: 'Slow and peaceful.',
+      sceneTransitions: ['Soft fade'],
+      promptRewrite: sourcePrompt,
+      shotList: [
+        {
+          id: 'mock-beat-1',
+          title: 'Scene 1',
+          description: 'The cast character enters the garden with calm movement and soft light.',
+          cameraFraming: 'Medium portrait',
+          cameraMovement: 'Gentle push-in',
+          subjectAction: 'Walks through the flowers',
+          environmentFocus: 'Sunlit blooms',
+          durationHint: '4s',
+          transition: 'Soft fade',
+        },
+        {
+          id: 'mock-beat-2',
+          title: 'Scene 2',
+          description: 'The moment settles into a peaceful close detail with Story Memory preserved.',
+          cameraFraming: 'Close detail',
+          cameraMovement: 'Slow drift',
+          subjectAction: 'Pauses gently',
+          environmentFocus: 'Soft garden light',
+          durationHint: '4s',
+          transition: 'Gentle dissolve',
+        },
+      ],
+    });
     setStatus('Your cinematic work is preserved in Drafts.');
   }, [activePrompt, characterName, mockBlockedUi, mockPausedUi]);
+
+  useEffect(() => {
+    if (!mockRateLimitUi) return;
+
+    const retryAfterSeconds = 10;
+    pauseGenerationProgressForCooldown({
+      status: 'rate_limited',
+      retryAfterSeconds,
+      retryAvailableAt: new Date(Date.now() + retryAfterSeconds * 1000).toISOString(),
+    });
+    setGenerationError('');
+    setGenerationModerationDetail('');
+    setGenerationModerationStages([]);
+    setGenerationSafeRewrite('');
+    setStatus('Your scene is saved and ready to resume.');
+  }, [mockRateLimitUi]);
 
   useEffect(() => {
     if (!sceneExecutorUserId) {
@@ -2962,15 +3000,6 @@ export default function CreateVideo({
           </div>
         ) : null}
 
-        <div className="creator-intelligence-strip" aria-label="Lumora creator signals">
-          {creatorInsightCards.map((item) => (
-            <span key={item.label}>
-              <strong>{item.label}</strong>
-              {item.copy}
-            </span>
-          ))}
-        </div>
-
         <div className="cast-summary-card">
           <div>
             <span className="eyebrow">Cast</span>
@@ -3023,21 +3052,17 @@ export default function CreateVideo({
           </div>
         </div>
 
-        <div className="continuity-memory-panel">
+        <div className="continuity-memory-panel focused-memory-moment">
           <div className="row-between">
             <div>
               <span className="eyebrow">Story Memory</span>
-              <strong>Your cinematic world remembers this character.</strong>
+              <strong>{storyMemoryMoment}</strong>
             </div>
             <span className="tiny-pill continuity-confidence-pill">{continuityConfidencePercent}%</span>
           </div>
           {continuityMemoryLoading ? <p className="muted">Syncing Story Memory...</p> : null}
           {continuityMemoryStatus ? <p className="muted">{continuityMemoryStatus}</p> : null}
           {continuityMemoryError ? <p className="creative-plan-error">{continuityMemoryError}</p> : null}
-          <div className="story-memory-moment">
-            <span className="tiny-dot" />
-            <p>{storyMemoryMoment}</p>
-          </div>
           <details className="advanced-create-details continuity-memory-details">
             <summary>Edit Story Memory</summary>
             <div className="continuity-memory-grid">
@@ -3388,50 +3413,26 @@ export default function CreateVideo({
           <small className="muted">{engineRoutingMessage}</small>
         </details>
 
-        <div className="reference-mode-card">
+        <div className="reference-mode-card focused-reference-summary">
           <div className="reference-mode-copy">
-            <span className="eyebrow">
-              {isSeedanceEngine
-                ? 'Cast guidance'
-                : engine === 'replicate' && selfReferenceMode
-                  ? 'Lumora Cast'
-                : referenceLoading
-                  ? 'Preparing your cast'
-                : isTextFallbackMode
-                    ? 'Reference required'
-                    : 'Reference scene'}
-            </span>
+            <span className="eyebrow">Scene references</span>
             <strong>
-              {isSeedanceEngine
-                ? 'Generate a fresh scene from your cast references'
-                : engine === 'replicate' && selfReferenceMode
-                  ? 'Generate new scenes from your cinematic self'
-                : engine === 'veo'
-                  ? 'Try the experimental cinematic route'
-                : engine === 'mock'
-                  ? 'Preview instantly with demo output'
-                : referenceLoading
-                  ? 'Preparing your saved cast references'
-                : isTextFallbackMode
-                  ? 'Save a reference image first'
-                  : 'Use a reference-led scene'}
+              {referenceLoading
+                ? 'Preparing your cast...'
+                : isSeedanceEngine
+                  ? `${savedSeedanceReferenceCount || seedanceReferenceCount} cast reference${(savedSeedanceReferenceCount || seedanceReferenceCount) === 1 ? '' : 's'} saved to Lumora`
+                  : hasGenerationReference
+                    ? 'Cast reference ready'
+                    : 'Save a reference before rendering'}
             </strong>
             <span className="muted">
               {referenceLoading
-                ? 'Lumora is finding your saved self references.'
+                ? 'Finding your saved scene references.'
                 : isSeedanceEngine
-                ? 'Lumora sends your saved cast references as guidance without forcing any image as the first frame.'
-                : engine === 'veo'
-                ? 'If Veo is unavailable, Lumora keeps the scene safe and lets you keep creating.'
-                : engine === 'mock'
-                ? 'Demo preview uses a known sample so you can check Drafts save and playback.'
-                : selfReferenceMode
-                ? primaryReferenceImage.url
-                  ? 'Build a reusable cinematic character from your reference photos and videos.'
-                  : 'Lumora cast references will be sent when available.'
-                : isTextFallbackMode
-                  ? 'Save a reference image before this route can render.'
-                  : 'Lumora will guide motion from the selected image.'}
+                  ? 'Saved references stay behind the scene unless one needs repair.'
+                  : hasGenerationReference
+                    ? 'Lumora will use this quietly for cast consistency.'
+                    : 'Choose your cinematic self or a saved cast member first.'}
             </span>
             {seedanceMultimodalActive ? (
               <span className="tiny-pill multimodal-reference-badge">Cast reference mode</span>
@@ -3545,8 +3546,6 @@ export default function CreateVideo({
           </div>
         ) : null}
 
-        <p className="muted cinematic-auto-flow-copy">Lumora shapes cinematic beats automatically, then saves the render to Drafts.</p>
-
         <div className="button-row luxury-action-row">
           <button
             type="button"
@@ -3559,7 +3558,7 @@ export default function CreateVideo({
           >
             {generateCtaLabel}
           </button>
-          <button type="button" className="ghost-btn" onClick={() => void handleSaveDraft()} disabled={saveBusy}>
+          <button type="button" className="quiet-btn" onClick={() => void handleSaveDraft()} disabled={saveBusy}>
             Save draft
           </button>
         </div>
@@ -3601,29 +3600,29 @@ export default function CreateVideo({
         ) : null}
         {showCinematicStructure ? (
           <details className="advanced-create-details cinematic-flow-details invisible-flow-details">
-            <summary>View cinematic structure</summary>
+            <summary>{cinematicStructureSummary}</summary>
             <div className="creative-brain-panel">
               <div className="row-between">
                 <div>
                   <span className="eyebrow">Story flow</span>
-                  <strong>Lumora is shaping your scene behind the curtain.</strong>
+                  <strong>Cinematic beats</strong>
                 </div>
                 <span className="tiny-pill">{cinematicStructureStatusLabel}</span>
               </div>
-              <p className="muted">
-                Cinematic beats, cast guidance, and Story Memory stay quietly aligned while your render moves toward Drafts.
-              </p>
               {creativePlanStatus ? <p className="muted">{creativePlanStatus}</p> : null}
               {creativePlanError ? <p className="muted">{creativePlanError}</p> : null}
               {creativePlan ? (
                 <div className="creative-plan-preview">
-                  <div className="creative-plan-summary">
-                    <span><strong>Tone</strong>{creativePlan.cinematicTone}</span>
-                    <span><strong>Style</strong>{creativePlan.visualStyle}</span>
-                    <span><strong>Sound</strong>{creativePlan.soundtrackMood}</span>
-                  </div>
-                  <p><strong>Environment:</strong> {creativePlan.environmentDescription}</p>
-                  <p><strong>Pacing:</strong> {creativePlan.emotionalPacing}</p>
+                  <details className="creative-plan-editor-shell compact-metadata-details">
+                    <summary>Beat metadata</summary>
+                    <div className="creative-plan-summary">
+                      <span><strong>Tone</strong>{creativePlan.cinematicTone}</span>
+                      <span><strong>Style</strong>{creativePlan.visualStyle}</span>
+                      <span><strong>Sound</strong>{creativePlan.soundtrackMood}</span>
+                    </div>
+                    <p><strong>Environment:</strong> {creativePlan.environmentDescription}</p>
+                    <p><strong>Pacing:</strong> {creativePlan.emotionalPacing}</p>
+                  </details>
                   <details className="creative-plan-editor-shell">
                     <summary>Advanced cinematic notes</summary>
                     <label className="field-block creative-plan-editor">
@@ -3637,7 +3636,7 @@ export default function CreateVideo({
                   </details>
                 </div>
               ) : creativePlanLoading ? (
-                <div className="scene-progress-panel cinematic-shimmer" aria-live="polite">
+                <div className="scene-progress-panel focused-beat-list cinematic-shimmer" aria-live="polite">
                   <div className="row-between">
                     <div>
                       <span className="eyebrow">Story flow</span>
@@ -3645,7 +3644,7 @@ export default function CreateVideo({
                     </div>
                     <span className="tiny-pill">Shaping</span>
                   </div>
-                  <p className="muted">Understanding your scene, preparing your cast, and preserving Story Memory.</p>
+                  <p className="muted">Understanding your scene and preparing your cast.</p>
                 </div>
               ) : null}
               {sceneExecutionStatus ? <p className="muted">{sceneExecutionStatus}</p> : null}
@@ -3656,10 +3655,10 @@ export default function CreateVideo({
                 </div>
               ) : null}
               {sceneExecutionPlan || sceneExecutionResult ? (
-                <div className="scene-progress-panel" aria-live="polite">
+                <div className="scene-progress-panel focused-beat-list" aria-live="polite">
                   <div className="row-between">
                     <div>
-                      <span className="eyebrow">Story flow</span>
+                      <span className="eyebrow">Cinematic beats</span>
                       <strong>{sceneExecutionResult ? 'Cinematic beats saved' : 'Cinematic beats ready'}</strong>
                     </div>
                     <span className="tiny-pill">{cinematicStructureStatusLabel}</span>
@@ -3770,6 +3769,50 @@ export default function CreateVideo({
                   <small>{pausedRenderCopy.suggestedNextStep}</small>
                 ) : null}
               </div>
+              {!activeReferenceRepair ? (
+                <div className="focused-next-take">
+                  <span className="eyebrow">Suggested next take</span>
+                  <p>A gentler cinematic version may render more smoothly.</p>
+                  <blockquote className="next-take-preview">{suggestedTakePreview}</blockquote>
+                  <div className="next-take-actions">
+                    <button
+                      type="button"
+                      className="primary-btn cinematic-generate-btn"
+                      onClick={() => void handleTrySuggestedTake()}
+                      disabled={tryTakeBusy}
+                    >
+                      Try this take
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost-btn"
+                      onClick={() => {
+                        setGenerationError('');
+                        setGenerationModerationDetail('');
+                        setGenerationModerationStages([]);
+                        setStatus('Adjust the scene direction, then Lumora can try another take.');
+                        promptTextareaRef.current?.focus();
+                      }}
+                    >
+                      Edit scene
+                    </button>
+                    <button type="button" className="quiet-btn" onClick={() => void handleSaveDraft()} disabled={saveBusy}>
+                      Save draft
+                    </button>
+                  </div>
+                  {generationModerationDetail || generationModerationStages.length ? (
+                    <details className="advanced-create-details technical-details">
+                      <summary>Creative adaptation steps</summary>
+                      {generationModerationDetail ? <p className="muted">{generationModerationDetail}</p> : null}
+                      <div className="generation-warning-list">
+                        {generationModerationStages.map((stage) => (
+                          <p key={stage}>{stage}</p>
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
+                </div>
+              ) : null}
               {activeReferenceRepair ? (
                 <div className="reference-repair-panel">
                   <div>
@@ -3788,52 +3831,6 @@ export default function CreateVideo({
                 </div>
               ) : null}
             </div>
-
-            {showSuggestedTakePanel ? (
-              <div className="safe-rewrite-card next-take-panel">
-                <span className="eyebrow">suggested next take</span>
-                <h3>Suggested next take</h3>
-                <p>A gentler cinematic version may render more smoothly.</p>
-                <blockquote className="next-take-preview">{suggestedTakePreview}</blockquote>
-                <div className="next-take-actions">
-                  <button
-                    type="button"
-                    className="primary-btn cinematic-generate-btn"
-                    onClick={() => void handleTrySuggestedTake()}
-                    disabled={tryTakeBusy}
-                  >
-                    Try this take
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    onClick={() => {
-                      setGenerationError('');
-                      setGenerationModerationDetail('');
-                      setGenerationModerationStages([]);
-                      setStatus('Adjust the scene direction, then Lumora can try another take.');
-                      promptTextareaRef.current?.focus();
-                    }}
-                  >
-                    Edit scene
-                  </button>
-                  <button type="button" className="quiet-btn" onClick={() => void handleSaveDraft()} disabled={saveBusy}>
-                    Save draft
-                  </button>
-                </div>
-                {generationModerationDetail || generationModerationStages.length ? (
-                  <details className="advanced-create-details technical-details">
-                    <summary>Creative adaptation steps</summary>
-                    {generationModerationDetail ? <p className="muted">{generationModerationDetail}</p> : null}
-                    <div className="generation-warning-list">
-                      {generationModerationStages.map((stage) => (
-                        <p key={stage}>{stage}</p>
-                      ))}
-                    </div>
-                  </details>
-                ) : null}
-              </div>
-            ) : null}
           </div>
         ) : null}
         {generationWarnings.length ? (

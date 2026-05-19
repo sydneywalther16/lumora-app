@@ -85,7 +85,7 @@ Use this checklist for the emotional creator loop: first-use, Story Memory, Draf
 - Open `/create?mockPaused=1` in local development only.
 - Confirm no raw provider errors, model error codes, stack traces, or prediction details are visible.
 - Confirm there is one primary paused state only: `Lumora paused this scene safely.`
-- Confirm the suggested next take panel is separate and reads `Suggested next take`.
+- Confirm the suggested next take appears inside the single paused card and reads `Suggested next take`.
 - Confirm the safe take preview is short, gentle, and does not include cast display names, photoshoot, influencer, glamour, superstar, celebrity, public figure, or social-caption language.
 - Confirm button hierarchy is clear: `Try this take` primary, `Edit scene` secondary, `Save draft` tertiary.
 - Confirm `Try this take` switches the next render to Success First behavior and does not simply retry the exact same wording.
@@ -95,6 +95,18 @@ Use this checklist for the emotional creator loop: first-use, Story Memory, Draf
 - Open `/create?mockBlocked=1` in local development only and repeat the same checks.
 - Confirm Drafts shows paused/blocked renders as saved and resumable with `Needs your next take`, not as a scary failure.
 - Confirm mobile width has no one-word-per-line wrapping, squeezed buttons, or bottom-nav overlap.
+
+## Focused Cinematic UI QA
+
+- Confirm `/create` starts with Cast, then Scene idea, style/duration, and one dominant Generate action.
+- Confirm onboarding, identity, and progress cards do not stack above the Create action.
+- Confirm Story Memory is compact and supportive, not a giant panel.
+- Confirm cinematic structure is collapsed by default and reads like `Cinematic structure ready - 4 beats`.
+- Confirm expanded cinematic beats use short summaries and quiet status badges.
+- Confirm Draft cards show thumbnail first, one overlay state, a short continuity note, and one primary action.
+- Confirm completed Draft cards prioritize `Continue Story`; Publish and View scene are secondary/quiet.
+- Open `/drafts?mockStates=1` in local development to verify the completed Draft card hierarchy without creating test data.
+- Confirm no route shows repeated emotional copy in adjacent cards.
 
 ## Safety And Failure States
 

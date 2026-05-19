@@ -2939,6 +2939,268 @@ button {
   padding: 0;
 }
 
+/* Focused Cinematic UI v1 */
+.focused-create-page {
+  gap: var(--lumora-space-3);
+}
+
+.focused-cast-section {
+  display: grid;
+  gap: var(--lumora-space-2);
+}
+
+.focused-cast-section .character-library {
+  margin: 0;
+}
+
+.focused-cast-manage {
+  justify-self: end;
+  min-height: 38px;
+  padding: 9px 13px;
+}
+
+.focused-create-page .create-video-stack {
+  gap: var(--lumora-space-3);
+}
+
+.focused-create-page .create-luxury-card {
+  gap: 18px;
+  padding: clamp(18px, 4vw, 26px);
+}
+
+.focused-memory-moment {
+  gap: 8px;
+  padding: 12px 14px;
+  margin-bottom: 0;
+  box-shadow: none;
+}
+
+.focused-memory-moment .row-between {
+  align-items: center;
+}
+
+.focused-memory-moment strong {
+  color: var(--text-primary);
+  font-size: 0.92rem;
+  line-height: 1.38;
+}
+
+.focused-memory-moment > .muted {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.focused-memory-moment .continuity-memory-details {
+  margin: 2px 0 0;
+}
+
+.focused-reference-summary {
+  grid-template-columns: minmax(0, 1fr) 56px;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 0;
+  box-shadow: none;
+}
+
+.focused-reference-summary .reference-mode-copy {
+  gap: 4px;
+}
+
+.focused-reference-summary strong {
+  font-size: 0.94rem;
+  line-height: 1.28;
+}
+
+.focused-reference-summary .reference-mode-copy > .muted {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.42;
+}
+
+.focused-reference-summary .reference-mode-thumb {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+}
+
+.focused-reference-summary .compact-reference-details {
+  margin-top: 6px;
+}
+
+.focused-reference-summary .reference-mode-pill {
+  display: none;
+}
+
+.luxury-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.luxury-action-row .cinematic-generate-btn {
+  min-height: 56px;
+}
+
+.luxury-action-row .quiet-btn {
+  min-width: 112px;
+}
+
+.invisible-flow-details {
+  background:
+    linear-gradient(145deg, rgba(126, 231, 216, 0.045), rgba(255, 255, 255, 0.018)),
+    var(--control-background);
+  box-shadow: none;
+}
+
+.invisible-flow-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  color: var(--text-primary);
+}
+
+.invisible-flow-details .creative-brain-panel {
+  gap: 12px;
+}
+
+.compact-metadata-details {
+  margin-bottom: 8px;
+}
+
+.compact-metadata-details .creative-plan-summary {
+  margin: 0 12px 10px;
+}
+
+.focused-beat-list {
+  gap: 12px;
+  padding: 12px;
+  border-radius: 20px;
+  box-shadow: none;
+}
+
+.focused-beat-list .scene-progress-list {
+  gap: 8px;
+}
+
+.focused-beat-list .scene-progress-item {
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 16px;
+}
+
+.focused-beat-list .scene-progress-index {
+  width: 30px;
+  height: 30px;
+  font-size: 0.78rem;
+}
+
+.focused-beat-list .scene-progress-title-row {
+  gap: 8px;
+}
+
+.focused-beat-list .scene-progress-title-row strong {
+  font-size: 0.92rem;
+}
+
+.focused-beat-list .scene-shot-description {
+  margin: 4px 0 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  -webkit-line-clamp: 2;
+}
+
+.focused-beat-list .scene-shot-meta {
+  display: none;
+}
+
+.focused-beat-list .scene-shot-note,
+.focused-beat-list .scene-shot-safe-error {
+  font-size: 0.72rem;
+}
+
+.render-trust-stack {
+  gap: 0;
+}
+
+.focused-next-take {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.focused-next-take > p {
+  margin: 0;
+  color: var(--muted-text);
+  line-height: 1.45;
+}
+
+.focused-next-take .next-take-preview {
+  font-size: 0.88rem;
+}
+
+.draft-card-copy {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.draft-card-copy h3 {
+  margin: 0;
+}
+
+.draft-summary-clamp {
+  display: -webkit-box;
+  margin: 6px 0 0;
+  overflow: hidden;
+  color: var(--muted-text);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.draft-continuity-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  margin-top: 12px;
+  color: var(--soft-text);
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.draft-continuity-note p {
+  margin: 0;
+}
+
+.draft-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 16px;
+  color: var(--muted-text);
+  font-size: 0.8rem;
+}
+
+.focused-draft-actions {
+  align-items: stretch;
+}
+
+.focused-draft-actions .continue-story-action {
+  min-width: 152px;
+}
+
+.focused-draft-actions .quiet-btn {
+  min-height: 40px;
+}
+
 .character-list-stack,
 .character-detail-sections {
   gap: var(--lumora-space-3);
@@ -4029,3 +4291,64 @@ button:disabled,
 .primary-btn,.ghost-btn{padding:12px 16px;}
 input, textarea, select { width: 100%; padding: 12px 14px; border-radius: 18px; background: var(--input-background); color: var(--input-text); border: 1px solid var(--input-border); }
 .primary-btn:disabled { opacity: 0.65; cursor: wait; }
+
+@media (max-width: 640px) {
+  .focused-create-page .create-luxury-card {
+    padding: 16px;
+  }
+
+  .focused-cast-manage {
+    justify-self: stretch;
+  }
+
+  .focused-reference-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .focused-reference-summary .reference-mode-thumb {
+    display: none;
+  }
+
+  .luxury-action-row {
+    grid-template-columns: 1fr;
+  }
+
+  .luxury-action-row .quiet-btn,
+  .luxury-action-row .cinematic-generate-btn {
+    width: 100%;
+  }
+
+  .focused-beat-list .scene-progress-item {
+    grid-template-columns: 28px minmax(0, 1fr);
+    padding: 10px;
+  }
+
+  .focused-beat-list .scene-progress-index {
+    width: 28px;
+    height: 28px;
+  }
+
+  .focused-beat-list .scene-shot-description {
+    -webkit-line-clamp: 2;
+  }
+
+  .render-trust-stack {
+    gap: 0;
+  }
+
+  .focused-next-take .next-take-actions,
+  .focused-draft-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .draft-card-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .focused-draft-actions .primary-btn,
+  .focused-draft-actions .ghost-btn,
+  .focused-draft-actions .quiet-btn {
+    width: 100%;
+  }
+}

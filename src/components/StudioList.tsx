@@ -61,7 +61,7 @@ function draftSafetyLabel(job: GenerationJob) {
 
 function primaryDraftAction(job: GenerationJob) {
   const status = (job.status || '').toLowerCase();
-  if (job.resultAssetUrl) return 'Open';
+  if (job.resultAssetUrl) return 'Continue Story';
   if (status === 'rate_limited') return 'Resume render';
   if (status === 'queued' || status === 'rendering' || status === 'processing') return 'Continue checking';
   if (status === 'paused' || status === 'failed') return creatorRenderStateCopy('paused').primaryActionLabel ?? 'Try this take';
@@ -580,71 +580,63 @@ export default function StudioList({ jobs, onPublished }: Props) {
                 </span>
               </button>
 
-              <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start' }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="draft-card-copy">
+                <div>
                   <h3>{job.title}</h3>
-                  <p style={{ margin: '6px 0 0', color: 'var(--muted-text)', overflowWrap: 'anywhere' }}>
+                  <p className="draft-summary-clamp">
                     {job.prompt}
                   </p>
                 </div>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                  <span className={`tiny-pill status-${statusClass(statusLabel)}`}>{statusLabel}</span>
-                  {showProviderDetail ? (
-                    <span className="tiny-pill">{(job.displayEngine || job.provider).toUpperCase()}</span>
-                  ) : null}
-                </div>
+                {showProviderDetail ? (
+                  <span className="tiny-pill">{(job.displayEngine || job.provider).toUpperCase()}</span>
+                ) : null}
               </div>
 
-              <div className="stats-row" style={{ marginTop: '14px', gap: '14px' }}>
-                <span>{getJobCharacterLabel(job)}</span>
-                <span>{draftSafetyLabel(job)}</span>
-              </div>
-
-              <div className="story-memory-moment" style={{ marginTop: '12px' }}>
+              <div className="draft-continuity-note">
                 <span className="tiny-dot" />
                 <p>
                   {job.characterName
-                    ? `${job.characterName}'s story details can carry into the next scene.`
-                    : 'Story Memory can carry this mood, setting, and visual tone forward.'}
+                    ? `${getJobCharacterLabel(job)} can carry into the next scene.`
+                    : 'Story Memory can carry this mood forward.'}
                 </p>
               </div>
 
-              <div className="row-between muted-line" style={{ marginTop: '14px' }}>
+              <div className="draft-card-footer">
                 <span>Updated {formatUpdated(job.updatedAt)}</span>
 
-                <div className="draft-action-row">
+                <div className="draft-action-row focused-draft-actions">
                   {job.resultAssetUrl ? (
                     <>
                       <button
                         type="button"
-                        className="text-btn"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          openJob(job);
-                        }}
-                      >
-                        {primaryDraftAction(job)}
-                      </button>
-
-                      <button
-                        type="button"
-                        className="ghost-btn"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          remixJob(job);
-                        }}
-                      >
-                        Edit scene
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost-btn"
+                        className="primary-btn continue-story-action"
                         onClick={(event) => {
                           event.stopPropagation();
                           continueStory(job);
                         }}
                       >
                         Continue Story
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-btn"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void postToFeed(job, job.caption || job.prompt || '');
+                        }}
+                        disabled={isPosted(job.id)}
+                      >
+                        {isPosted(job.id) ? 'Posted' : 'Publish'}
+                      </button>
+                      <button
+                        type="button"
+                        className="quiet-btn"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openJob(job);
+                        }}
+                      >
+                        View scene
                       </button>
                     </>
                   ) : (
@@ -661,28 +653,16 @@ export default function StudioList({ jobs, onPublished }: Props) {
                       </button>
                       <button
                         type="button"
-                        className="ghost-btn"
+                        className="quiet-btn"
                         onClick={(event) => {
                           event.stopPropagation();
                           openJob(job);
                         }}
                       >
-                        View state
+                        Details
                       </button>
                     </>
                   )}
-                  {job.resultAssetUrl ? (
-                    <button
-                      type="button"
-                      className="primary-btn"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void postToFeed(job, job.caption || job.prompt || '');
-                      }}
-                    >
-                      Publish
-                    </button>
-                  ) : null}
                 </div>
               </div>
             </article>

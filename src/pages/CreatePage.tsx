@@ -1,9 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import CharacterLibrary from '../components/CharacterLibrary';
-import CreatorIdentityCard from '../components/CreatorIdentityCard';
-import CreatorOnboarding from '../components/CreatorOnboarding';
 import CreateVideo from '../components/CreateVideo';
-import StoryWorldProgress from '../components/StoryWorldProgress';
 import {
   getCreatorSelfCharacter,
   getStoredCharacters,
@@ -11,8 +8,6 @@ import {
   saveStoredCharacters,
 } from '../lib/characterStorage';
 import { loadLumoraProfile, type LumoraProfile } from '../lib/profileStorage';
-import { loadPostedPublications } from '../lib/postStorage';
-import { loadStudioProjects } from '../lib/projectStorage';
 import { type CharacterProfile, type GenerationMode, type ReferenceImageUrls } from '../lib/api';
 import { trackCreatorEvent } from '../lib/creatorEvents';
 import { useSession } from '../hooks/useSession';
@@ -33,7 +28,6 @@ import {
   mergeIdentityFeedback,
 } from '../lib/identityCharacter';
 import type { LumoraIdentityFeedback } from '../lib/api';
-import { buildCreatorIdentityCard, buildStoryWorldProgress } from '../lib/storyWorld';
 
 function manualHttpsReferenceUrl(...values: Array<string | null | undefined>): string | null {
   const value = values.find((item) => typeof item === 'string' && item.trim().startsWith('https://'));
@@ -298,16 +292,6 @@ export default function CreatePage() {
     : null;
 
   const pageLoading = creatorDataLoading || !isHydrated;
-  const storyWorldProgress = buildStoryWorldProgress({
-    drafts: loadStudioProjects(),
-    posts: loadPostedPublications(),
-    characters: authUserId ? [defaultSelfCharacter, selectedCharacter].filter((item): item is CharacterProfile => Boolean(item)) : getStoredCharacters(),
-  });
-  const creatorIdentityCard = buildCreatorIdentityCard({
-    profile,
-    characters: authUserId ? [defaultSelfCharacter, selectedCharacter].filter((item): item is CharacterProfile => Boolean(item)) : getStoredCharacters(),
-  });
-
   useEffect(() => {
     console.log("FINAL referenceImageUrl:", referenceImageUrl);
   }, [referenceImageUrl]);
@@ -378,22 +362,10 @@ export default function CreatePage() {
   }
 
   return (
-    <div className="page lumora-page">
-      <CreatorOnboarding embedded />
-
-      <section className="headline-card lumora-card lumora-card-hero creator-create-hero">
-        <span className="eyebrow">create</span>
-        <h2>Start a cinematic scene</h2>
-        <p>Your cast, style, and Story Memory stay with the scene while Lumora shapes the next moment.</p>
-      </section>
-
-      <StoryWorldProgress progress={storyWorldProgress} compact />
-
-      <CreatorIdentityCard card={creatorIdentityCard} compact />
-
+    <div className="page lumora-page focused-create-page">
       <section
         ref={castSectionRef}
-        className="cast-selection-anchor"
+        className="cast-selection-anchor focused-cast-section"
         tabIndex={-1}
         aria-label="Cast for this scene"
       >
@@ -409,21 +381,9 @@ export default function CreatePage() {
           onSelect={handleCastSelection}
           compact
         />
-      </section>
-
-      <section className="editor-card lumora-card lumora-card-soft" style={{ display: 'grid', gap: '10px' }}>
-        <div className="row-between" style={{ gap: '12px', flexWrap: 'wrap' }}>
-          <div>
-            <span className="eyebrow">cast</span>
-            <h3>Characters</h3>
-          </div>
-          <button type="button" className="ghost-btn" style={{ flex: 'unset' }} onClick={openCharactersHub}>
-            Open Characters
-          </button>
-        </div>
-        <p className="muted" style={{ margin: 0 }}>
-          Build, cast, and tune reusable characters. Drafts stay private until you publish.
-        </p>
+        <button type="button" className="quiet-btn focused-cast-manage" onClick={openCharactersHub}>
+          Open Characters
+        </button>
       </section>
 
       <CreateVideo

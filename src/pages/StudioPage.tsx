@@ -8,6 +8,48 @@ import { getBestPoster, getBestThumbnail } from '../lib/mediaThumbnail';
 
 const characterProfilesMigrationWarning = 'Cast needs the latest Lumora update.';
 
+function shouldShowMockDraftStates() {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('mockStates') === '1';
+}
+
+function mockDraftJobs(): GenerationJob[] {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: 'mock-focused-completed-draft',
+      projectId: 'mock-focused-completed-draft',
+      characterId: 'mock-cast',
+      characterName: 'Cinematic self',
+      characterAvatar: '/demo-placeholder.jpg',
+      isDefaultSelfCharacter: true,
+      creatorName: 'Lumora Creator',
+      creatorUsername: 'lumora.creator',
+      creatorAvatar: null,
+      title: 'Sunlit garden moment',
+      caption: 'A quiet cinematic scene ready to continue.',
+      prompt: 'The cast character walks through a sunlit garden with peaceful movement and soft cinematic light.',
+      status: 'completed',
+      outputType: 'video',
+      provider: 'mock',
+      displayEngine: null,
+      durationSeconds: 4,
+      aspectRatio: '9:16',
+      privacy: 'private',
+      resultAssetUrl: '/demo-placeholder.jpg',
+      thumbnailUrl: '/demo-placeholder.jpg',
+      posterUrl: '/demo-placeholder.jpg',
+      referenceImageUrl: '/demo-placeholder.jpg',
+      referenceImageUrls: null,
+      additionalReferenceImageUrls: null,
+      generationMode: 'seedance-multimodal-reference',
+      errorMessage: null,
+      createdAt: now,
+      updatedAt: now,
+    },
+  ];
+}
+
 function studioLoadErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   const lower = message.toLowerCase();
@@ -33,6 +75,12 @@ export default function StudioPage() {
     let active = true;
 
     async function loadJobs() {
+      if (shouldShowMockDraftStates()) {
+        setJobs(mockDraftJobs());
+        setStatus('');
+        return;
+      }
+
       if (configured && loading && !authUser) {
         setStatus('Loading drafts...');
         return;
