@@ -308,7 +308,7 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
   }
 
   return (
-    <section className="editor-card character-capture">
+    <section className="editor-card lumora-card-soft character-capture">
       <div>
         <span className="eyebrow">capture</span>
         <h3>Character capture</h3>

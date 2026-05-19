@@ -47,9 +47,9 @@ const onboardingSteps = [
     beats: ['Style seed', 'Story Memory seed', 'First scene idea'],
   },
   {
-    eyebrow: 'storyboard',
-    title: 'Build your first storyboard.',
-    body: 'Lumora shapes your idea into cinematic beats before the scene begins rendering.',
+    eyebrow: 'story flow',
+    title: 'Shape your first cinematic beats.',
+    body: 'Lumora turns your idea into a smooth story flow before the scene begins rendering.',
     beats: ['Emotional pacing', 'Camera feeling', 'Scene rhythm'],
   },
   {
@@ -114,7 +114,7 @@ export default function CreatorOnboarding({ embedded = false }: CreatorOnboardin
   if (!visible) return null;
 
   return (
-    <section className={embedded ? 'creator-onboarding-card' : 'creator-onboarding-page'} aria-label="Lumora onboarding">
+    <section className={`${embedded ? 'creator-onboarding-card' : 'creator-onboarding-page'} lumora-card`} aria-label="Lumora onboarding">
       <div className="creator-onboarding-art" aria-hidden="true">
         <span />
         <span />
@@ -154,7 +154,7 @@ export default function CreatorOnboarding({ embedded = false }: CreatorOnboardin
       <div className="button-row">
         <button
           type="button"
-          className="primary-btn"
+          className="primary-btn lumora-primary-action"
           onClick={() => {
             if (isLastStep) {
               close('/create');
@@ -165,7 +165,7 @@ export default function CreatorOnboarding({ embedded = false }: CreatorOnboardin
         >
           {isLastStep ? 'Start first scene' : 'Continue'}
         </button>
-        <button type="button" className="ghost-btn" onClick={() => close('/create')}>
+        <button type="button" className="ghost-btn lumora-secondary-action" onClick={() => close('/create')}>
           Skip for now
         </button>
       </div>

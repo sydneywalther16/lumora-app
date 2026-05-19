@@ -170,7 +170,7 @@ export default function CharacterLibrary({
   }
 
   return (
-    <section className="editor-card character-library">
+    <section className="editor-card lumora-card-soft character-library">
       <div className="row-between">
         <div>
           <span className="eyebrow">cast</span>

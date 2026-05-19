@@ -17,8 +17,8 @@ export default function App() {
 
   if (configured && !authReady) {
     return (
-      <div className="page" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
-        <section className="headline-card" style={{ width: 'min(420px, 100%)', textAlign: 'center' }}>
+      <div className="page lumora-page" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
+        <section className="headline-card lumora-card lumora-card-hero" style={{ width: 'min(420px, 100%)', textAlign: 'center' }}>
           <span className="eyebrow">lumora</span>
           <h1 style={{ marginTop: '8px' }}>Restoring Lumora session...</h1>
         </section>

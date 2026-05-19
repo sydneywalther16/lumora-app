@@ -153,8 +153,8 @@ function stylePreferenceEntries(character: CharacterProfile): Array<readonly [st
 function orchestrationMemoryEntries(character: CharacterProfile): Array<readonly [string, string]> {
   const preferences = character.stylePreferences ?? {};
   const entries: Array<[string, unknown]> = [
-    ['Rendering mode', preferences.renderingMode ?? preferences.realismMode ?? preferences.preferredRenderingMode],
-    ['Successful fallback', preferences.successfulFallbackPath ?? preferences.lastSuccessfulFallbackPath],
+    ['Cinematic mode', preferences.renderingMode ?? preferences.realismMode ?? preferences.preferredRenderingMode],
+    ['Successful take path', preferences.successfulFallbackPath ?? preferences.lastSuccessfulFallbackPath],
     ['Creative style preference', preferences.providerFallbackPreference ?? preferences.stylizationFallbackPreference],
     ['Creative safety notes', preferences.moderationMemory ?? preferences.moderationRewritePreferences ?? preferences.moderationSafeRewritePreferences],
     ['Story inheritance', preferences.continuityInheritance ?? preferences.inheritedContinuity],
@@ -174,7 +174,7 @@ function CharacterHubFrame({
 }) {
   return (
     <div className="character-hub-overlay" role="presentation">
-      <div className="character-hub-panel" role="dialog" aria-modal="true" aria-label="Characters">
+      <div className="character-hub-panel lumora-panel" role="dialog" aria-modal="true" aria-label="Characters">
         <div className="character-hub-scroll">
           {children}
         </div>
@@ -591,7 +591,7 @@ export default function CharacterHub({
             <span className="eyebrow">cast</span>
             <h2 style={{ marginTop: '8px' }}>Create Cast Member</h2>
             <p className="muted" style={{ margin: '8px 0 0' }}>
-              Add a reusable cinematic identity to your cast.
+              Add a reusable cast member to your cinematic world.
             </p>
           </div>
           <button type="button" className="text-btn" onClick={returnToList}>
@@ -621,7 +621,7 @@ export default function CharacterHub({
               <span className="tiny-pill">Self</span>
               <h2 style={{ margin: '8px 0 0' }}>Create your self character</h2>
               <p className="character-hero-summary">
-                Build the pinned identity Lumora can reuse across your cinematic scenes.
+                Build the pinned cinematic self Lumora can bring back across scenes.
               </p>
               <div className="character-quick-stats" aria-label="Self character setup stats">
                 <span><strong>New</strong> story</span>
@@ -642,7 +642,7 @@ export default function CharacterHub({
             onToggle={toggleDetailSection}
           >
             {children || (
-              <article className="list-card" style={{ borderRadius: '18px', padding: '14px' }}>
+              <article className="list-card lumora-card-soft" style={{ borderRadius: '18px', padding: '14px' }}>
                 <p className="muted">Loading self character editor...</p>
               </article>
             )}
@@ -717,7 +717,7 @@ export default function CharacterHub({
                 <span><strong>{formatPercent(continuityConfidence)}</strong> story</span>
                 <span><strong>{sceneAppearances}</strong> scenes</span>
                 <span><strong>{memorySnapshotCount}</strong> memories</span>
-                <span><strong>{orchestrationEntries.length}</strong> adaptations</span>
+                <span><strong>{orchestrationEntries.length}</strong> style notes</span>
               </div>
             </div>
           </div>
@@ -737,7 +737,7 @@ export default function CharacterHub({
           >
             {selectedIsSelf ? (
               children || (
-                <article className="list-card" style={{ borderRadius: '18px', padding: '14px' }}>
+                <article className="list-card lumora-card-soft" style={{ borderRadius: '18px', padding: '14px' }}>
                   <p className="muted">Loading self character editor...</p>
                 </article>
               )
@@ -1063,7 +1063,7 @@ export default function CharacterHub({
         ))}
 
         {!visibleCharacters.length ? (
-          <article className="list-card" style={{ borderRadius: '22px', padding: '16px' }}>
+          <article className="list-card lumora-card lumora-empty-state" style={{ borderRadius: '22px', padding: '16px' }}>
             <h3>Build your reusable cinematic cast.</h3>
             <p className="muted">Create self and cast members you can bring back across scenes.</p>
           </article>

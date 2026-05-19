@@ -25,7 +25,7 @@ Use this checklist for the emotional creator loop: first-use, Story Memory, Draf
 - Confirm Create feels like directing a scene, not managing jobs.
 - Confirm Story World progress and Creator Identity Card show near the top.
 - Select a cast member or use self.
-- Enter a simple prompt and build a storyboard.
+- Enter a simple prompt and click `Generate Cinematic Scene`.
 - Confirm progress copy: saving scene references, shaping emotional pacing, preserving Story Memory.
 - Confirm Story Memory shows a creator-facing micro-moment.
 
@@ -116,3 +116,49 @@ Use this checklist for the emotional creator loop: first-use, Story Memory, Draf
 - Open `/diagnostics`.
 - Confirm internal diagnostics are still accessible.
 - Confirm creator-facing routes do not expose raw JSON, Memory Engine, generation jobs, or orchestration language.
+
+## UI Polish System QA
+
+- Confirm `docs/UI_POLISH_AUDIT.md` and `docs/UI_POLISH_BASELINE.md` match the current route behavior.
+- Confirm the main creator routes use the shared Lumora surface language: `.lumora-page`, `.lumora-card`, `.lumora-card-soft`, `.lumora-card-hero`, and `.lumora-empty-state`.
+- Confirm Create has one dominant `Generate Cinematic Scene` action before rendering starts.
+- Confirm Scene Flow appears only after Lumora starts shaping or rendering.
+- Confirm Scene Flow cards feel like cinematic beats: title, 2 to 3 line summary, quiet status, and optional `Expand scene`.
+- Confirm Drafts cards prioritize thumbnail, saved/resumable state, Continue Story, and Publish when output exists.
+- Confirm Profile hero reads like a creator profile, not a dashboard.
+- Confirm For You reads like discovery, with search, section labels, and polished thumbnail cards.
+- Confirm Characters opens as a clean list, with self pinned first and detail/edit separated.
+- Confirm empty states include a headline, one-sentence explanation, and a direct action.
+- Confirm normal creator routes do not show raw technical terms such as `provider`, `prediction`, `schema`, `generation_jobs`, `ModelError`, `E005`, `Scene Executor`, `Memory Engine`, or `orchestration retry`.
+
+## Screenshot Checklist
+
+- Capture `/onboarding`, `/create`, `/drafts`, `/profile`, `/for-you`, and Characters.
+- Capture `/create?mockRateLimit=1`, `/create?mockPaused=1`, and `/create?mockBlocked=1` in local development.
+- Confirm every screenshot has one obvious primary action.
+- Confirm no card uses mismatched radii or obviously different surface styling.
+- Confirm status chips stay secondary and do not create pill clutter.
+- Confirm typography hierarchy is clear: page title, section title, card title, body, metadata.
+
+## Empty State Checklist
+
+- Drafts: `Your cinematic scenes will appear here.` plus Create CTA.
+- Profile: `Your published cinematic moments will appear here.` plus Create CTA.
+- For You no results: discovery copy plus Explore CTA when no query is active.
+- Characters: `Build your reusable cinematic cast.` plus Create character CTA when under limit.
+- Story Memory: creator-facing memory seed or gentle explanation, not raw JSON.
+
+## Action Hierarchy Checklist
+
+- Primary: Generate Cinematic Scene, Try this take, Continue Story, Publish.
+- Secondary: Edit scene, Resume render, Open Characters.
+- Quiet: Save draft, Details, Cancel, Close.
+- Mobile action rows stack or wrap cleanly.
+- No three-equal-button row should compete with the next best action.
+
+## Raw Technical Text Checklist
+
+- Search normal UI screenshots for: `Prediction failed`, `Async prediction failed`, `ModelError`, `E005`, `provider`, `prediction id`, `schema`, `generation_jobs`, `Seedance Quality`, `fallback`, and `orchestration`.
+- Technical details are allowed only on `/diagnostics` or collapsed advanced panels.
+- Draft cards should not prominently show provider/model names.
+- Scene Flow shot cards should not show raw provider/model names.

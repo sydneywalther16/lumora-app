@@ -1164,13 +1164,13 @@ export default function CreateVideo({
   const identityStatusLabel = !identityProfile
     ? 'Needs references'
     : identityProfile.status === 'building'
-      ? 'Building identity'
-      : (identityProfile.feedbackIterations ?? 0) > 0
-        ? 'Identity learning'
+      ? 'Building cinematic self'
+    : (identityProfile.feedbackIterations ?? 0) > 0
+        ? 'Cinematic self learning'
         : (identityProfile.identityStrength ?? 0) >= 70
-          ? 'Identity stabilized'
+          ? 'Cinematic self stabilized'
           : identityProfile.status === 'ready'
-            ? 'Identity ready'
+            ? 'Cinematic self ready'
             : 'Needs references';
   const identityReferenceCards = [
     {
@@ -1247,9 +1247,9 @@ export default function CreateVideo({
     : !sceneExecutorUserId
       ? 'Sign in to save each shot'
       : !isSeedanceEngine
-        ? 'Select Seedance Fast or Seedance Quality'
+        ? 'Choose a cast-friendly render path'
         : sceneExecutionLoading
-          ? 'Rendering scene flow...'
+          ? 'Rendering story flow...'
           : '';
   const sceneExecuteBusy = Boolean(sceneExecuteDisabledReason) || generationLoading || busy;
   const engineRoutingMessage =
@@ -1833,7 +1833,7 @@ export default function CreateVideo({
     }
 
     if (!isSeedanceEngine) {
-      setSceneExecutionError('Scene Flow renders Seedance shots. Select Seedance Fast or Seedance Quality first.');
+      setSceneExecutionError('Choose a cast-friendly render path before rendering this story flow.');
       return;
     }
 
@@ -1936,7 +1936,7 @@ export default function CreateVideo({
         ? repairIssue
           ? 'One reference image needs to be re-uploaded before Lumora can use it.'
           : creatorFacingErrorMessage(error, friendlyCharacterProfileError(error))
-        : 'Lumora could not finish the storyboard yet.';
+        : 'Lumora could not finish shaping the cinematic beats yet.';
       setSceneExecutionError(message);
       setSceneExecutionStatus('');
       showToast({ type: 'error', message });
@@ -2805,7 +2805,7 @@ export default function CreateVideo({
             ? moderationPayload.suggestion
             :
         (moderationPayload
-          ? 'Lumora preserved your cast, Story Memory, and storyboard while adapting the style for cinematic safety.'
+          ? 'Lumora preserved your cast, Story Memory, and story flow while adapting the style for cinematic safety.'
           : creatorFacingPausedDetail(error)),
       );
       setGenerationModerationStages(retryStages);
@@ -2950,7 +2950,7 @@ export default function CreateVideo({
           {toast.message}
         </div>
       ) : null}
-      <section className="editor-card create-luxury-card">
+      <section className="editor-card lumora-card create-luxury-card">
         <div>
           <span className="eyebrow">director mode</span>
           <h3>Shape your cinematic moment</h3>
@@ -3100,12 +3100,12 @@ export default function CreateVideo({
 
         {creativePlan && activeReferenceRepair && sceneExecutionResult && false && (
         <details className="advanced-create-details cinematic-flow-details">
-          <summary>Storyboard and Scene Flow</summary>
+          <summary>View cinematic structure</summary>
           <div className="creative-brain-panel">
           <div className="row-between">
             <div>
-              <span className="eyebrow">Storyboard</span>
-              <strong>Storyboard before rendering</strong>
+              <span className="eyebrow">Story flow</span>
+              <strong>Cinematic beats before rendering</strong>
             </div>
             <button
               type="button"
@@ -3113,7 +3113,7 @@ export default function CreateVideo({
               onClick={() => void handleBuildCreativePlan()}
               disabled={creativePlanLoading || !hasPrompt}
             >
-              {creativePlanLoading ? 'Building...' : creativePlan ? 'Refresh storyboard' : 'Build storyboard'}
+              {creativePlanLoading ? 'Shaping...' : creativePlan ? 'Refresh cinematic beats' : 'Shape cinematic beats'}
             </button>
           </div>
           <p className="muted">
@@ -3140,7 +3140,7 @@ export default function CreateVideo({
                 ))}
               </ol>
               <details className="creative-plan-editor-shell">
-                <summary>Advanced storyboard structure</summary>
+                <summary>Advanced cinematic structure</summary>
                 <label className="field-block creative-plan-editor">
                   <span>Structured scene notes</span>
                   <textarea
@@ -3159,7 +3159,7 @@ export default function CreateVideo({
                   aria-busy={sceneExecutionLoading}
                   title={sceneExecuteDisabledReason || undefined}
                 >
-                  {sceneExecutionLoading ? 'Preserving story flow...' : 'Render storyboard'}
+                  {sceneExecutionLoading ? 'Preserving story flow...' : 'Render cinematic beats'}
                 </button>
                 <small className="muted">
                   {sceneExecuteDisabledReason || 'Renders one beat at a time while keeping the story flow intact.'}
@@ -3396,7 +3396,7 @@ export default function CreateVideo({
                 : engine === 'replicate' && selfReferenceMode
                   ? 'Lumora Cast'
                 : referenceLoading
-                  ? 'Checking self reference'
+                  ? 'Preparing your cast'
                 : isTextFallbackMode
                     ? 'Reference required'
                     : 'Reference scene'}
@@ -3411,7 +3411,7 @@ export default function CreateVideo({
                 : engine === 'mock'
                   ? 'Preview instantly with demo output'
                 : referenceLoading
-                  ? 'Looking for saved self-character photos'
+                  ? 'Preparing your saved cast references'
                 : isTextFallbackMode
                   ? 'Save a reference image first'
                   : 'Use a reference-led scene'}
@@ -3877,15 +3877,13 @@ export default function CreateVideo({
       </section>
 
       {generationResult ? (
-        <section className="editor-card video-result-card">
+        <section className="editor-card lumora-card video-result-card">
           <div className="row-between">
             <div>
               <span className="eyebrow">scene reveal</span>
               <h3>Your cinematic draft is ready</h3>
             </div>
-            <span className="tiny-pill">
-              {(generatedDisplayEngine || generatedModel || generationResult.engine).toUpperCase()}
-            </span>
+            <span className="tiny-pill">Draft saved</span>
           </div>
           {isDefaultSelfCharacter ? (
             <p><strong>Cinematic self selected</strong></p>
@@ -3914,7 +3912,7 @@ export default function CreateVideo({
                 label="Reference image used for likeness"
                 reference={normalizedGeneratedReference}
               />
-              <span className="muted">Reference image used for likeness</span>
+              <span className="muted">Scene reference used for cast consistency</span>
             </div>
           ) : null}
           {generatedVideoUrl ? (

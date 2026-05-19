@@ -146,7 +146,7 @@ function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
   const authorUsername = post.creatorUsername || post.username || 'lumora.creator';
   const authorAvatar = post.creatorAvatar || post.avatar || fallbackAuthorAvatar;
   const featuring = !post.isDefaultSelfCharacter && post.characterName ? `Featuring ${post.characterName}` : undefined;
-  const defaultSelfLabel = post.isDefaultSelfCharacter ? 'Created as self' : undefined;
+  const defaultSelfLabel = post.isDefaultSelfCharacter ? 'Cinematic self' : undefined;
   const hasVideo = Boolean(post.videoUrl);
 
   return (
@@ -345,7 +345,7 @@ export default function HomePage() {
   const emptyCategoryLabel = activeCategory.toLowerCase();
 
   return (
-    <div className="page">
+    <div className="page lumora-page">
       <TopChips
         items={topChips}
         activeItem={activeCategory}
@@ -379,7 +379,7 @@ export default function HomePage() {
 
       {localPosts.length && !filteredLocalPosts.length ? (
         <section className="list-stack">
-          <article className="list-card">
+          <article className="list-card lumora-card lumora-empty-state">
             <div className="row-between">
               <h3>No {emptyCategoryLabel} posts yet</h3>
               <span className="tiny-pill" style={{ background: 'var(--pill-background)' }}>
@@ -393,7 +393,7 @@ export default function HomePage() {
         <SwipeFeed posts={filteredDemoPosts} />
       ) : !localPosts.length ? (
         <section className="list-stack">
-          <article className="list-card">
+          <article className="list-card lumora-card lumora-empty-state">
             <div className="row-between">
               <h3>No {emptyCategoryLabel} demos yet</h3>
               <span className="tiny-pill status-drafting">Ready</span>

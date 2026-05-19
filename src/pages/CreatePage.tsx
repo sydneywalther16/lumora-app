@@ -368,17 +368,20 @@ export default function CreatePage() {
 
   if (pageLoading) {
     return (
-      <div className="page">
-        <h2>Waking up your creator identity...</h2>
+      <div className="page lumora-page">
+        <section className="headline-card lumora-card lumora-card-hero">
+          <span className="eyebrow">cast</span>
+          <h2>Waking up your creator identity...</h2>
+        </section>
       </div>
     );
   }
 
   return (
-    <div className="page">
+    <div className="page lumora-page">
       <CreatorOnboarding embedded />
 
-      <section className="headline-card creator-create-hero">
+      <section className="headline-card lumora-card lumora-card-hero creator-create-hero">
         <span className="eyebrow">create</span>
         <h2>Start a cinematic scene</h2>
         <p>Your cast, style, and Story Memory stay with the scene while Lumora shapes the next moment.</p>
@@ -408,7 +411,7 @@ export default function CreatePage() {
         />
       </section>
 
-      <section className="editor-card" style={{ display: 'grid', gap: '10px' }}>
+      <section className="editor-card lumora-card lumora-card-soft" style={{ display: 'grid', gap: '10px' }}>
         <div className="row-between" style={{ gap: '12px', flexWrap: 'wrap' }}>
           <div>
             <span className="eyebrow">cast</span>
@@ -419,10 +422,7 @@ export default function CreatePage() {
           </button>
         </div>
         <p className="muted" style={{ margin: 0 }}>
-          Build and edit the cinematic cast members you can reuse across stories.
-        </p>
-        <p className="muted" style={{ margin: 0 }}>
-          Drafts stay private until published. You control your cast and can update references any time.
+          Build, cast, and tune reusable characters. Drafts stay private until you publish.
         </p>
       </section>
 
@@ -438,7 +438,7 @@ export default function CreatePage() {
         referenceImageUrls={effectiveReferenceImageUrls}
         additionalReferenceImageUrls={effectiveAdditionalReferenceImageUrls}
         referenceLoading={referenceLoading}
-        referenceLabel={remixProject ? 'Remixed project reference' : manualReferenceImageUrl && effectiveReferenceImageUrl === manualReferenceImageUrl ? 'Backup reference URL' : identityProfile ? 'Lumora Identity Character' : null}
+        referenceLabel={remixProject ? 'Remixed scene reference' : manualReferenceImageUrl && effectiveReferenceImageUrl === manualReferenceImageUrl ? 'Backup scene reference' : identityProfile ? 'Saved cinematic self' : null}
         forceSelfMode={effectiveIsDefaultSelfCharacter}
         isHydrated={isHydrated}
         identityProfile={effectiveIsDefaultSelfCharacter ? identityProfile : null}

@@ -412,7 +412,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
       <>
         {publishToast}
         <section className="list-stack">
-          <article className="list-card luxury-empty-state">
+          <article className="list-card lumora-card lumora-empty-state luxury-empty-state">
             <div className="row-between">
               <h3>{jobs.length ? 'Posting your scene...' : 'Your cinematic scenes will appear here.'}</h3>
               <span className="tiny-pill status-drafting">Ready</span>
@@ -441,14 +441,14 @@ export default function StudioList({ jobs, onPublished }: Props) {
         {visibleJobs.map((job) => {
           const statusLabel = formatStatus(job.status);
           const statusValue = (job.status || '').toLowerCase();
-          const showProviderDetail = !['failed', 'paused', 'rate_limited'].includes(statusValue);
+          const showProviderDetail = false;
           const videoFailed = failedVideoIds.has(job.id);
           const thumbnailUrl = getBestThumbnail(job);
           const posterUrl = getBestPoster(job);
 
           return (
             <article
-              className={`list-card cinematic-draft-card status-${statusClass(statusLabel)}`}
+              className={`list-card lumora-card cinematic-draft-card status-${statusClass(statusLabel)}`}
               key={job.id}
               role="button"
               tabIndex={0}
@@ -612,7 +612,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
               <div className="row-between muted-line" style={{ marginTop: '14px' }}>
                 <span>Updated {formatUpdated(job.updatedAt)}</span>
 
-                <div style={{ display: 'flex', gap: '10px' }}>
+                <div className="draft-action-row">
                   {job.resultAssetUrl ? (
                     <>
                       <button
@@ -628,7 +628,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
 
                       <button
                         type="button"
-                        className="text-btn"
+                        className="ghost-btn"
                         onClick={(event) => {
                           event.stopPropagation();
                           remixJob(job);
@@ -638,7 +638,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
                       </button>
                       <button
                         type="button"
-                        className="text-btn"
+                        className="ghost-btn"
                         onClick={(event) => {
                           event.stopPropagation();
                           continueStory(job);
@@ -651,7 +651,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
                     <>
                       <button
                         type="button"
-                        className="text-btn"
+                        className="primary-btn"
                         onClick={(event) => {
                           event.stopPropagation();
                           remixJob(job, statusValue === 'paused' || statusValue === 'failed' ? 'safe_take' : 'edit');
@@ -661,7 +661,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
                       </button>
                       <button
                         type="button"
-                        className="text-btn"
+                        className="ghost-btn"
                         onClick={(event) => {
                           event.stopPropagation();
                           openJob(job);
@@ -674,7 +674,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
                   {job.resultAssetUrl ? (
                     <button
                       type="button"
-                      className="text-btn"
+                      className="primary-btn"
                       onClick={(event) => {
                         event.stopPropagation();
                         void postToFeed(job, job.caption || job.prompt || '');

@@ -95,7 +95,7 @@ export default function StudioPage() {
       title:
         project.title ||
         (project.isDefaultSelfCharacter
-          ? 'Created as self'
+          ? 'Cinematic self selected'
           : project.characterName
             ? `Character: ${project.characterName}`
             : 'Generated video'),
@@ -122,8 +122,8 @@ export default function StudioPage() {
   }
 
   return (
-    <div className="page">
-      <section className="headline-card luxury-page-hero drafts-workbench-hero">
+    <div className="page lumora-page">
+      <section className="headline-card lumora-card lumora-card-hero luxury-page-hero drafts-workbench-hero">
         <div>
           <span className="eyebrow">drafts</span>
           <h2>Your cinematic workbench</h2>

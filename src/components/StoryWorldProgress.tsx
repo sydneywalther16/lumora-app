@@ -14,7 +14,7 @@ export default function StoryWorldProgress({ progress, compact = false }: StoryW
   ];
 
   return (
-    <section className={`story-world-progress ${compact ? 'compact' : ''}`} aria-label="Story World progress">
+    <section className={`story-world-progress lumora-card ${compact ? 'compact' : ''}`} aria-label="Story World progress">
       <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start' }}>
         <div>
           <span className="eyebrow">Story World</span>

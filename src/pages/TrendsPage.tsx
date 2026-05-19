@@ -179,7 +179,7 @@ function ForYouCard({
   return (
     <button
       type="button"
-      className="for-you-card"
+      className="for-you-card lumora-card"
       onClick={() => onSelect(post)}
       title={title}
       style={{
@@ -308,6 +308,7 @@ function ForYouPreviewModal({
     <div
       role="dialog"
       aria-modal="true"
+      className="luxury-modal-backdrop"
       onClick={onClose}
       style={{
         position: 'fixed',
@@ -322,6 +323,7 @@ function ForYouPreviewModal({
     >
       <div
         onClick={(event) => event.stopPropagation()}
+        className="luxury-preview-modal"
         style={{
           width: 'min(900px, 100%)',
           maxHeight: '92vh',
@@ -494,9 +496,9 @@ export default function TrendsPage() {
   }
 
   return (
-    <div className="page">
+    <div className="page lumora-page">
       <section
-        className="for-you-topbar luxury-page-hero"
+        className="for-you-topbar lumora-card-hero luxury-page-hero"
         style={{
           position: 'sticky',
           top: 0,
@@ -526,7 +528,7 @@ export default function TrendsPage() {
       </section>
 
       {errorMessage ? (
-        <article className="list-card" style={{ borderRadius: '18px', padding: '12px' }}>
+        <article className="list-card lumora-card-soft" style={{ borderRadius: '18px', padding: '12px' }}>
           <p style={{ margin: 0 }}>{errorMessage}</p>
         </article>
       ) : null}
@@ -586,7 +588,7 @@ export default function TrendsPage() {
           </section>
         </>
       ) : (
-        <article className="list-card luxury-empty-state" style={{ borderRadius: '24px' }}>
+        <article className="list-card lumora-card lumora-empty-state luxury-empty-state" style={{ borderRadius: '24px' }}>
           <div className="row-between">
             <h3>{debouncedQuery ? 'No matches yet' : 'No public videos yet'}</h3>
             <span className="tiny-pill status-drafting">Explore</span>

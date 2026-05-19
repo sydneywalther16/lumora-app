@@ -68,7 +68,7 @@ export default function PromptEditor() {
   }
 
   return (
-    <section className="editor-card">
+    <section className="editor-card lumora-card-soft">
       <label className="field-block">
         <span>Project title</span>
         <input value={draftTitle} onChange={(e) => setDraftTitle(e.target.value)} placeholder="Title" />

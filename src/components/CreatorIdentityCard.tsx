@@ -8,7 +8,7 @@ type CreatorIdentityCardProps = {
 
 export default function CreatorIdentityCard({ card, compact = false, onEdit }: CreatorIdentityCardProps) {
   return (
-    <article className={`creator-identity-card ${compact ? 'compact' : ''}`}>
+    <article className={`creator-identity-card lumora-card ${compact ? 'compact' : ''}`}>
       <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start' }}>
         <div>
           <span className="eyebrow">Creator Identity Card</span>

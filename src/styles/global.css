@@ -64,6 +64,51 @@
   --success-text: #8bc34a;
   --error-text: #f07178;
   --media-background: #000000;
+  --lumora-space-0: 0;
+  --lumora-space-1: 4px;
+  --lumora-space-2: 8px;
+  --lumora-space-3: 12px;
+  --lumora-space-4: 16px;
+  --lumora-space-5: 20px;
+  --lumora-space-6: 24px;
+  --lumora-space-7: 28px;
+  --lumora-space-8: 32px;
+  --lumora-radius-sm: 12px;
+  --lumora-radius-md: 18px;
+  --lumora-radius-card: 24px;
+  --lumora-radius-hero: 30px;
+  --lumora-radius-pill: 999px;
+  --lumora-surface-card: var(--surface-background);
+  --lumora-surface-panel: var(--panel-background);
+  --lumora-surface-soft: var(--surface-soft);
+  --lumora-surface-border: var(--surface-border);
+  --lumora-text-muted: var(--muted-text);
+  --lumora-text-soft: var(--soft-text);
+  --lumora-gradient-primary: var(--active-gradient);
+  --lumora-gradient-hero:
+    linear-gradient(145deg, rgba(126, 231, 216, 0.1), rgba(255, 105, 212, 0.09) 52%, rgba(255, 206, 115, 0.06)),
+    var(--surface-background);
+  --lumora-shadow-card:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 18px 48px rgba(0, 0, 0, 0.22);
+  --lumora-shadow-hero:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 24px 70px rgba(0, 0, 0, 0.28);
+  --lumora-glow-soft: 0 0 34px rgba(126, 231, 216, 0.11);
+  --lumora-glow-warm: 0 0 34px rgba(255, 206, 115, 0.1);
+  --lumora-type-page: clamp(1.65rem, 6vw, 2.35rem);
+  --lumora-type-section: 1.08rem;
+  --lumora-type-card: 0.98rem;
+  --lumora-type-body: 0.92rem;
+  --lumora-type-meta: 0.76rem;
+  --lumora-status-success: var(--success-text);
+  --lumora-status-warning: var(--warning-text);
+  --lumora-status-paused: #ffce73;
+  --lumora-status-rendering: #7ee7d8;
+  --lumora-motion-fast: 140ms;
+  --lumora-motion-medium: 200ms;
+  --lumora-motion-slow: 280ms;
+  --lumora-content-width: 430px;
   background: var(--app-background);
   color: var(--text-primary);
 }
@@ -238,6 +283,134 @@ button {
   padding-bottom: 18px;
 }
 
+.lumora-page {
+  display: grid;
+  gap: var(--lumora-space-4);
+  padding-bottom: var(--lumora-space-6);
+}
+
+.lumora-section {
+  display: grid;
+  gap: var(--lumora-space-3);
+  min-width: 0;
+}
+
+.lumora-card,
+.lumora-card-soft,
+.lumora-card-hero,
+.lumora-panel,
+.lumora-status-card,
+.lumora-empty-state {
+  min-width: 0;
+  border: 1px solid var(--lumora-surface-border);
+  color: var(--text-primary);
+}
+
+.lumora-card {
+  padding: var(--lumora-space-4);
+  border-radius: var(--lumora-radius-card);
+  background: var(--lumora-surface-card);
+  box-shadow: var(--lumora-shadow-card);
+}
+
+.lumora-card-soft,
+.lumora-panel {
+  padding: var(--lumora-space-4);
+  border-radius: var(--lumora-radius-md);
+  background: var(--lumora-surface-panel);
+  box-shadow: var(--surface-shadow);
+}
+
+.lumora-card-hero {
+  padding: var(--lumora-space-5);
+  border-radius: var(--lumora-radius-hero);
+  background: var(--lumora-gradient-hero);
+  box-shadow: var(--lumora-shadow-hero);
+}
+
+.lumora-panel {
+  display: grid;
+  gap: var(--lumora-space-3);
+}
+
+.lumora-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 7px 10px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--lumora-radius-pill);
+  background: var(--pill-background);
+  color: var(--pill-text);
+  font-size: var(--lumora-type-meta);
+  font-weight: 800;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.lumora-status-card {
+  display: grid;
+  gap: var(--lumora-space-3);
+  padding: var(--lumora-space-4);
+  border-radius: var(--lumora-radius-card);
+  background:
+    linear-gradient(145deg, rgba(126, 231, 216, 0.08), rgba(255, 105, 212, 0.06)),
+    var(--surface-background);
+  box-shadow: var(--lumora-shadow-card);
+}
+
+.lumora-empty-state {
+  display: grid;
+  gap: var(--lumora-space-3);
+  min-height: 180px;
+  align-content: center;
+  padding: var(--lumora-space-5);
+  border-radius: var(--lumora-radius-card);
+  background:
+    linear-gradient(145deg, rgba(126, 231, 216, 0.08), rgba(255, 105, 212, 0.08)),
+    var(--surface-background);
+  box-shadow: var(--lumora-shadow-card);
+}
+
+.lumora-empty-state h3,
+.lumora-empty-state p {
+  margin: 0;
+}
+
+.lumora-primary-action,
+.lumora-secondary-action,
+.lumora-quiet-action {
+  min-height: 44px;
+  border-radius: var(--lumora-radius-pill);
+  font-weight: 850;
+  text-decoration: none;
+  transition:
+    transform var(--lumora-motion-fast) ease,
+    box-shadow var(--lumora-motion-fast) ease,
+    border-color var(--lumora-motion-fast) ease,
+    background var(--lumora-motion-fast) ease,
+    color var(--lumora-motion-fast) ease;
+}
+
+.lumora-primary-action {
+  background: var(--lumora-gradient-primary);
+  color: var(--active-text);
+  box-shadow: var(--lumora-glow-soft);
+}
+
+.lumora-secondary-action {
+  border: 1px solid var(--control-border);
+  background: var(--control-background);
+  color: var(--control-text);
+}
+
+.lumora-quiet-action {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--lumora-text-muted);
+}
+
 .headline-card,
 .hero-stat-card,
 .editor-card,
@@ -257,6 +430,21 @@ button {
 .list-card {
   border-radius: 24px;
   padding: 16px;
+}
+
+.headline-card,
+.editor-card,
+.list-card,
+.profile-hero,
+.bottom-sheet,
+.feed-card {
+  min-width: 0;
+}
+
+.headline-card,
+.editor-card,
+.list-card {
+  box-shadow: var(--lumora-shadow-card);
 }
 
 .headline-card.compact {
@@ -337,6 +525,33 @@ button {
 .primary-btn {
   background: var(--active-gradient);
   color: var(--active-text);
+}
+
+.primary-btn,
+.lumora-primary-action {
+  border: 1px solid color-mix(in srgb, var(--selected-outline) 44%, transparent);
+  box-shadow: var(--lumora-glow-soft);
+}
+
+.ghost-btn,
+.lumora-secondary-action {
+  border: 1px solid var(--control-border);
+}
+
+.text-btn,
+.quiet-btn,
+.lumora-quiet-action {
+  border: 1px solid transparent;
+}
+
+.primary-btn:hover:not(:disabled),
+.primary-btn:focus-visible:not(:disabled),
+.lumora-primary-action:hover:not(:disabled),
+.lumora-primary-action:focus-visible:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow:
+    var(--lumora-glow-soft),
+    0 16px 38px rgba(0, 0, 0, 0.18);
 }
 
 .feed-stack,
@@ -2509,6 +2724,275 @@ button {
   animation: luxuryPulse 2.2s ease-in-out infinite;
 }
 
+/* Lumora UI polish system v1 */
+.page.lumora-page,
+.page {
+  gap: var(--lumora-space-4);
+}
+
+.headline-card.lumora-card-hero,
+.profile-hero.lumora-card-hero,
+.for-you-topbar.lumora-card-hero {
+  background: var(--lumora-gradient-hero);
+  box-shadow: var(--lumora-shadow-hero);
+}
+
+.editor-card.lumora-card,
+.list-card.lumora-card,
+.feed-card.lumora-card,
+.for-you-card.lumora-card {
+  border-radius: var(--lumora-radius-card);
+  box-shadow: var(--lumora-shadow-card);
+}
+
+.create-video-stack {
+  gap: var(--lumora-space-4);
+}
+
+.create-luxury-card,
+.continuity-memory-panel,
+.reference-mode-card,
+.render-state-card,
+.generation-error-card,
+.next-take-panel,
+.video-result-card {
+  border-radius: var(--lumora-radius-card);
+}
+
+.create-luxury-card {
+  gap: var(--lumora-space-4);
+  padding: var(--lumora-space-5);
+}
+
+.field-block span,
+.continuity-memory-label,
+.provider-option strong {
+  letter-spacing: 0;
+}
+
+.field-block > span,
+.renderer-details summary,
+.advanced-create-details summary,
+.compact-reference-details summary {
+  color: var(--text-primary);
+  font-size: var(--lumora-type-meta);
+  font-weight: 850;
+}
+
+.cast-summary-card,
+.reference-mode-card,
+.continuity-memory-panel {
+  box-shadow: var(--surface-shadow);
+}
+
+.cast-summary-card {
+  border-radius: var(--lumora-radius-card);
+  padding: var(--lumora-space-4);
+}
+
+.reference-mode-card {
+  grid-template-columns: minmax(0, 1fr) 68px;
+  padding: var(--lumora-space-4);
+}
+
+.compact-reference-details {
+  width: 100%;
+}
+
+.compact-reference-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lumora-space-2);
+}
+
+.seedance-reference-list {
+  gap: var(--lumora-space-2);
+}
+
+.seedance-reference-list span,
+.reference-status-chip,
+.reference-status-badge {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.continuity-memory-panel {
+  background:
+    linear-gradient(145deg, rgba(126, 231, 216, 0.065), rgba(255, 105, 212, 0.045)),
+    var(--surface-background);
+}
+
+.scene-progress-panel {
+  gap: var(--lumora-space-4);
+  padding: var(--lumora-space-4);
+  border-color: color-mix(in srgb, var(--surface-border) 74%, rgba(255, 255, 255, 0.18));
+  box-shadow: var(--lumora-shadow-card);
+}
+
+.scene-progress-list {
+  gap: var(--lumora-space-3);
+}
+
+.scene-progress-item {
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: var(--lumora-space-3);
+  padding: var(--lumora-space-4);
+  border-radius: var(--lumora-radius-card);
+}
+
+.scene-progress-index {
+  width: 38px;
+  height: 38px;
+}
+
+.scene-progress-title-row {
+  gap: var(--lumora-space-3);
+}
+
+.scene-progress-title-row strong {
+  font-size: var(--lumora-type-card);
+}
+
+.scene-status-pill {
+  opacity: 0.86;
+}
+
+.scene-shot-description {
+  font-size: var(--lumora-type-body);
+  line-height: 1.58;
+  -webkit-line-clamp: 3;
+}
+
+.scene-shot-meta {
+  opacity: 0.76;
+}
+
+.scene-shot-meta span {
+  font-size: 0.7rem;
+}
+
+.cinematic-draft-card {
+  padding: var(--lumora-space-4);
+}
+
+.cinematic-draft-card h3,
+.for-you-card strong,
+.profile-post-tile strong {
+  line-height: 1.22;
+}
+
+.draft-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--lumora-space-2);
+}
+
+.draft-action-row .primary-btn,
+.draft-action-row .ghost-btn,
+.draft-action-row .text-btn {
+  flex: 0 1 auto;
+  min-height: 40px;
+  white-space: normal;
+}
+
+.draft-action-row .primary-btn {
+  padding-inline: var(--lumora-space-4);
+}
+
+.profile-magic-stats span,
+.creator-intelligence-strip span,
+.story-world-stats span,
+.creator-identity-grid span {
+  border-radius: var(--lumora-radius-md);
+}
+
+.profile-published-grid {
+  gap: var(--lumora-space-2);
+}
+
+.profile-post-tile,
+.for-you-card {
+  border-radius: var(--lumora-radius-md);
+}
+
+.for-you-topbar {
+  padding: var(--lumora-space-4);
+  margin: 0;
+}
+
+.for-you-grid {
+  gap: var(--lumora-space-3) !important;
+}
+
+.character-hub-panel {
+  border-radius: var(--lumora-radius-hero);
+  background:
+    linear-gradient(145deg, rgba(126, 231, 216, 0.06), rgba(255, 105, 212, 0.045)),
+    var(--panel-background);
+}
+
+.character-hub-panel.lumora-panel {
+  display: block;
+  gap: 0;
+  padding: 0;
+}
+
+.character-list-stack,
+.character-detail-sections {
+  gap: var(--lumora-space-3);
+}
+
+.character-cast-row,
+.character-accordion-section,
+.character-detail-hero {
+  border-radius: var(--lumora-radius-card);
+}
+
+.character-cast-row {
+  min-height: 78px;
+  padding: var(--lumora-space-3);
+}
+
+.character-detail-hero {
+  padding: var(--lumora-space-4);
+  box-shadow: var(--lumora-shadow-card);
+}
+
+.character-reference-grid {
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+}
+
+.character-reference-item {
+  padding: var(--lumora-space-3);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--lumora-radius-md);
+  background: var(--control-background);
+}
+
+.luxury-empty-state,
+.list-card.luxury-empty-state,
+.lumora-empty-state {
+  border-radius: var(--lumora-radius-card);
+  padding: var(--lumora-space-5);
+  box-shadow: var(--lumora-shadow-card);
+}
+
+.luxury-empty-state .primary-btn,
+.lumora-empty-state .primary-btn {
+  flex: unset;
+  width: fit-content;
+}
+
+.social-action-row .primary-btn {
+  order: -1;
+}
+
+.luxury-preview-modal {
+  border: 1px solid var(--surface-border);
+}
+
 @keyframes continuityPulse {
   0%,
   100% {
@@ -3175,6 +3659,19 @@ button {
 }
 
 @media (max-width: 640px) {
+  .lumora-card,
+  .lumora-card-soft,
+  .lumora-card-hero,
+  .lumora-panel,
+  .lumora-status-card,
+  .lumora-empty-state {
+    padding: var(--lumora-space-4);
+  }
+
+  .row-between {
+    gap: var(--lumora-space-3);
+  }
+
   .render-trust-stack,
   .next-take-panel,
   .paused-render-card {
@@ -3190,7 +3687,7 @@ button {
   }
 
   .scene-progress-item {
-    grid-template-columns: 30px minmax(0, 1fr);
+    grid-template-columns: 34px minmax(0, 1fr);
     gap: 10px;
     padding: 13px;
   }
@@ -3238,6 +3735,27 @@ button {
 
   .character-quick-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .draft-action-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .draft-action-row .primary-btn,
+  .draft-action-row .ghost-btn,
+  .draft-action-row .text-btn {
+    width: 100%;
+  }
+
+  .reference-mode-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .reference-mode-thumb {
+    width: 64px;
+    height: 64px;
   }
 }
 
@@ -3388,6 +3906,15 @@ button:disabled,
     border: 0;
   }
 
+  .screen-scroll {
+    padding-inline: 12px;
+  }
+
+  .page,
+  .page.lumora-page {
+    gap: 13px;
+  }
+
   .creative-plan-summary {
     grid-template-columns: 1fr;
   }
@@ -3409,6 +3936,10 @@ button:disabled,
 
   .profile-magic-stats {
     gap: 6px;
+  }
+
+  .profile-magic-stats span {
+    padding: 9px 5px;
   }
 
   .render-state-card {
@@ -3465,6 +3996,31 @@ button:disabled,
 
   .scene-shot-description {
     -webkit-line-clamp: 3;
+  }
+
+  .luxury-action-row {
+    padding: 7px;
+    border-radius: 22px;
+  }
+
+  .luxury-action-row .primary-btn {
+    min-height: 54px;
+  }
+
+  .creator-intelligence-strip {
+    gap: 7px;
+  }
+
+  .for-you-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .character-cast-row {
+    grid-template-columns: 52px minmax(0, 1fr);
+  }
+
+  .character-cast-row-self {
+    grid-template-columns: 52px minmax(0, 1fr) auto;
   }
 }
 

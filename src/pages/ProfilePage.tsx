@@ -890,7 +890,7 @@ function buildSelfFormAppearanceSummary(form: SelfCharacterForm): string {
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="list-stack luxury-section-stack" style={{ marginTop: '22px' }}>
-      <div className="headline-card compact luxury-section-header" style={{ padding: '22px', borderRadius: '30px' }}>
+      <div className="headline-card lumora-card lumora-card-soft compact luxury-section-header" style={{ padding: '22px', borderRadius: '30px' }}>
         <span className="eyebrow">{title}</span>
       </div>
       {children}
@@ -995,7 +995,7 @@ function ProfilePostTile({
   const mediaUrl = thumbnailUrl || post.imageUrl;
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
   const characterLabel = post.isDefaultSelfCharacter
-    ? 'Created as self'
+    ? 'Cinematic self'
     : post.characterName
       ? `Featuring ${post.characterName}`
       : null;
@@ -1103,7 +1103,7 @@ function ProfilePostPreviewModal({
   const authorUsername = post.creatorUsername || post.username || 'lumora.creator';
   const authorAvatar = post.creatorAvatar || post.avatar || fallbackAvatar;
   const characterLabel = post.isDefaultSelfCharacter
-    ? 'Created as self'
+    ? 'Cinematic self'
     : post.characterName
       ? `Featuring ${post.characterName}`
       : null;
@@ -1581,7 +1581,7 @@ function ProjectCard({ project, onOpen }: { project: StudioProject; onOpen: () =
   const thumbnailUrl = getBestThumbnail(project);
   const posterUrl = getBestPoster(project);
   const characterLabel = project.isDefaultSelfCharacter
-    ? 'Created as self'
+    ? 'Cinematic self'
     : project.characterName
       ? `Character: ${project.characterName}`
       : 'No character selected';
@@ -1934,13 +1934,13 @@ export default function ProfilePage() {
   const identityLifecycleLabel = !creatorIdentityProfile
     ? 'Needs references'
     : creatorIdentityProfile.status === 'building'
-      ? 'Building identity'
-      : (creatorIdentityProfile.feedbackIterations ?? 0) > 0
-        ? 'Identity learning'
+      ? 'Building cinematic self'
+    : (creatorIdentityProfile.feedbackIterations ?? 0) > 0
+        ? 'Cinematic self learning'
         : ((creatorIdentityProfile.keyframeUrl && creatorIdentityProfile.keyframeUrl !== creatorIdentityProfile.frontFaceUrl) || identityConfidence >= 70)
-          ? 'Identity stabilized'
+          ? 'Cinematic self stabilized'
           : creatorIdentityProfile.status === 'ready'
-            ? 'Identity ready'
+            ? 'Cinematic self ready'
             : 'Needs references';
   const storyWorldProgress = buildStoryWorldProgress({
     drafts,
@@ -2490,12 +2490,12 @@ export default function ProfilePage() {
     const fullBodyUrl = resolvedSelfReferenceSource(selfForm, 'fullBody');
 
     if (!primaryReference) {
-      setIdentityBuildStatus('Add or re-save a public front photo before building identity.');
+      setIdentityBuildStatus('Add or re-save a public front photo before building your cinematic self.');
       return;
     }
 
     setBuildingIdentity(true);
-    setIdentityBuildStatus('Building identity...');
+    setIdentityBuildStatus('Building cinematic self...');
 
     try {
       const response = await fetch('/api/lumora/build-identity', {
@@ -2527,23 +2527,23 @@ export default function ProfilePage() {
       } : {};
 
       if (!response.ok || !data.identityProfile) {
-        throw new Error(data.error || 'Unable to build Lumora identity profile.');
+        throw new Error(data.error || 'Unable to build your cinematic self.');
       }
 
       await persistSelfCharacterReferences(
         selfForm,
         data.identityProfile.keyframeUrl && !data.warnings?.length
-          ? 'Identity stabilized. Master keyframe saved.'
-          : 'Identity profile saved. Image-animation fallback remains available.',
+          ? 'Cinematic self stabilized. Master frame saved.'
+          : 'Cinematic self saved. Image animation remains available.',
         data.identityProfile,
       );
       setIdentityBuildStatus(
         data.warnings?.length
-          ? `Identity learning. ${data.warnings[0]}`
-          : 'Identity stabilized.',
+          ? `Cinematic self learning. ${data.warnings[0]}`
+          : 'Cinematic self stabilized.',
       );
     } catch (error) {
-      setIdentityBuildStatus(error instanceof Error ? error.message : 'Unable to build Lumora identity.');
+      setIdentityBuildStatus(error instanceof Error ? error.message : 'Unable to build your cinematic self.');
     } finally {
       setBuildingIdentity(false);
     }
@@ -2922,8 +2922,8 @@ export default function ProfilePage() {
 
   if (!authReady || sessionLoading || !isHydrated) {
     return (
-      <div className="page" style={{ minHeight: '70vh', display: 'grid', placeItems: 'center' }}>
-        <section className="headline-card" style={{ width: 'min(420px, 100%)', textAlign: 'center' }}>
+      <div className="page lumora-page" style={{ minHeight: '70vh', display: 'grid', placeItems: 'center' }}>
+        <section className="headline-card lumora-card lumora-card-hero" style={{ width: 'min(420px, 100%)', textAlign: 'center' }}>
           <span className="eyebrow">identity</span>
           <h1 style={{ marginTop: '8px' }}>Waking up your creator identity...</h1>
         </section>
@@ -2932,8 +2932,8 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="page" style={{ paddingBottom: '40px' }}>
-      <section className="profile-hero cinematic-profile-hero luxury-page-hero" style={{ borderRadius: '30px', padding: '22px' }}>
+    <div className="page lumora-page" style={{ paddingBottom: '40px' }}>
+      <section className="profile-hero lumora-card lumora-card-hero cinematic-profile-hero luxury-page-hero" style={{ borderRadius: '30px', padding: '22px' }}>
         <div style={{ display: 'grid', gap: '18px', justifyItems: 'center', textAlign: 'center' }}>
           <div className="row-between" style={{ width: '100%', alignItems: 'center' }}>
             <span className="eyebrow">creator profile</span>
@@ -3001,10 +3001,10 @@ export default function ProfilePage() {
           </div>
 
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
-            <button type="button" className="primary-btn" onClick={openProfileEditor}>
+            <button type="button" className="primary-btn lumora-primary-action" onClick={openProfileEditor}>
               Edit profile
             </button>
-            <button type="button" className="ghost-btn" onClick={openCharactersHub}>
+            <button type="button" className="ghost-btn lumora-secondary-action" onClick={openCharactersHub}>
               Characters
             </button>
           </div>
@@ -3029,7 +3029,7 @@ export default function ProfilePage() {
       ) : null}
 
       {signedIn && (syncLocalProfileAvailable || syncLocalSelfAvailable) ? (
-        <section className="headline-card compact" style={{ borderRadius: '24px', padding: '14px' }}>
+        <section className="headline-card lumora-card lumora-card-soft compact" style={{ borderRadius: '24px', padding: '14px' }}>
           <div className="row-between" style={{ gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
             <div>
               <span className="eyebrow">account sync</span>
@@ -3064,7 +3064,7 @@ export default function ProfilePage() {
       ) : null}
 
       {editingProfile ? (
-        <section className="headline-card compact" style={{ marginTop: '18px', padding: '22px', borderRadius: '30px' }}>
+        <section className="headline-card lumora-card compact" style={{ marginTop: '18px', padding: '22px', borderRadius: '30px' }}>
           <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start' }}>
             <div>
               <span className="eyebrow">edit profile</span>
@@ -3136,7 +3136,7 @@ export default function ProfilePage() {
         {editingSelfCharacter && isHydrated ? (
         <section
           ref={selfCharacterEditorRef}
-          className="headline-card compact"
+          className="headline-card lumora-card compact"
           style={{ marginTop: '18px', padding: '22px', borderRadius: '30px' }}
         >
           <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start' }}>
@@ -3233,7 +3233,7 @@ export default function ProfilePage() {
 
             <div style={{ display: 'grid', gap: '12px', padding: '16px', borderRadius: '18px', background: 'var(--panel-background)' }}>
               <div>
-                <span className="eyebrow">Backup reference URL</span>
+              <span className="eyebrow">Backup scene reference</span>
                 <p className="muted" style={{ margin: '8px 0 0' }}>
                   Optional public HTTPS image URL used only when the saved front photo is not available.
                 </p>
@@ -3266,7 +3266,7 @@ export default function ProfilePage() {
                 </div>
               ) : selfForm.manualReferenceImageUrl.trim() ? (
                 <p className="muted" style={{ margin: 0 }}>
-                  Backup reference must start with https:// to be used for generation.
+                  Backup scene reference must start with https:// before Lumora can use it.
                 </p>
               ) : null}
             </div>
@@ -3422,9 +3422,9 @@ export default function ProfilePage() {
               Save changes to your self character photos, voice, features, and style.
             </p>
             <div style={{ display: 'grid', gap: '10px', padding: '16px', borderRadius: '18px', background: 'var(--panel-background)' }}>
-              <span className="eyebrow">Build My Lumora Character</span>
+              <span className="eyebrow">Build my cinematic self</span>
               <strong>
-                {buildingIdentity ? 'Building identity' : selfCharacterReferencesReady ? 'Identity ready' : 'Needs references'}
+                {buildingIdentity ? 'Building cinematic self' : selfCharacterReferencesReady ? 'Cinematic self ready' : 'Needs references'}
               </strong>
               <p className="muted" style={{ margin: 0 }}>
                 Build a reusable cinematic character from your reference photos and videos.
@@ -3438,7 +3438,7 @@ export default function ProfilePage() {
                 onClick={() => void handleBuildIdentityCharacter()}
                 disabled={buildingIdentity}
               >
-                {buildingIdentity ? 'Building identity...' : creatorIdentityProfile?.keyframeUrl ? 'Improve My Character' : 'Build My Lumora Character'}
+                {buildingIdentity ? 'Building cinematic self...' : creatorIdentityProfile?.keyframeUrl ? 'Improve My Character' : 'Build My Cinematic Self'}
               </button>
               {identityBuildStatus ? <p className="muted" style={{ margin: 0 }}>{identityBuildStatus}</p> : null}
             </div>
@@ -3469,7 +3469,7 @@ export default function ProfilePage() {
             ))}
           </div>
         ) : (
-          <article className="list-card luxury-empty-state" style={{ borderRadius: '28px', padding: '18px' }}>
+          <article className="list-card lumora-card lumora-empty-state luxury-empty-state" style={{ borderRadius: '28px', padding: '18px' }}>
             <h3>Your published cinematic moments will appear here.</h3>
             <p className="muted">Create a draft, post it when it feels right, and your profile becomes a living story grid.</p>
             <button type="button" className="primary-btn" onClick={() => { window.location.href = '/create'; }} style={{ width: 'fit-content', flex: 'unset' }}>
