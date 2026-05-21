@@ -13,6 +13,7 @@ import { billingRouter } from './routes/billing';
 import { notificationsRouter } from './routes/notifications';
 import { postsRouter } from './routes/posts';
 import { providersRouter } from './routes/providers';
+import { renderSuccessRouter } from './routes/renderSuccess';
 
 const app = express();
 app.use(cors(corsOptionsDelegate));
@@ -38,6 +39,7 @@ app.use('/api/posts', postsRouter);
 app.use('/api/billing', billingRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/providers', providersRouter);
+app.use(renderSuccessRouter);
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(error);

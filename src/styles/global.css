@@ -2542,6 +2542,40 @@ button {
   color: var(--muted-text);
 }
 
+.success-ladder-progress {
+  display: grid;
+  gap: 6px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted-text);
+  font-size: 0.82rem;
+}
+
+.success-ladder-progress li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+}
+
+.success-ladder-progress li::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.28);
+  flex: 0 0 auto;
+}
+
+.success-ladder-progress li.active {
+  color: var(--text-primary);
+}
+
+.success-ladder-progress li.active::before {
+  background: var(--dot-background);
+}
+
 .render-state-actions {
   align-items: stretch;
 }

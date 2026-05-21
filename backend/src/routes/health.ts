@@ -5,6 +5,7 @@ import { buildProviderFallbackDiagnostics } from '../services/providerFallbackOr
 import { buildAsyncRenderJobDiagnostics } from '../services/renderJobPoller';
 import { buildDatabaseDiagnostics } from '../services/schemaDiagnostics';
 import { buildReferenceCleanupDiagnostics } from '../services/referenceCleanup';
+import { buildRenderSuccessDiagnostics } from '../services/renderSuccessEngine';
 import { buildRenderReliabilityDiagnostics } from '../services/sceneOptimization';
 
 export const healthRouter = Router();
@@ -22,6 +23,7 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
     assetPersistence: await buildAssetPersistenceDiagnostics(),
     referenceCleanup: await buildReferenceCleanupDiagnostics(),
     providerFallback: await buildProviderFallbackDiagnostics(),
+    renderSuccessEngine: await buildRenderSuccessDiagnostics(),
     renderReliability: await buildRenderReliabilityDiagnostics(),
     asyncRenderJobs: await buildAsyncRenderJobDiagnostics(),
   });

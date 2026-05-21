@@ -1,5 +1,8 @@
 import type { RenderSuccessMode } from './api';
 
+export const ULTRA_SAFE_SCENE_PROMPT =
+  'the cast character walks through a peaceful sunlit garden, natural movement, fully clothed, soft storybook cinematic style, gentle camera motion';
+
 export type CreatorRenderStatus =
   | 'queued'
   | 'rendering'
@@ -169,7 +172,7 @@ export function successFirstOverrides(duration: number): {
 } {
   return {
     renderPreference: 'success_first',
-    duration: duration > 8 ? 4 : duration,
+    duration: duration === 4 ? duration : 4,
   };
 }
 
@@ -180,11 +183,10 @@ export function creatorRenderStateCopy(status: CreatorRenderStatus, cooldownSeco
         label: 'Cooling down',
         title: 'Render queue is cooling down.',
         body: cooldownSeconds > 3
-          ? `Resume available in ${cooldownSeconds} seconds. Your scene is saved and ready to resume.`
+          ? `Lumora will resume automatically in about ${cooldownSeconds} seconds.`
           : cooldownSeconds > 0
-            ? 'The render queue is almost ready. Your scene is saved and ready to resume.'
-            : 'Your scene is saved and ready to resume.',
-        primaryActionLabel: cooldownSeconds > 0 ? `Resume in ${cooldownSeconds}s` : 'Resume render',
+            ? 'The render queue is almost ready. Lumora will resume automatically.'
+            : 'Lumora will resume automatically.',
         tertiaryActionLabel: 'Save draft',
         tone: 'cooling',
       };
@@ -199,8 +201,8 @@ export function creatorRenderStateCopy(status: CreatorRenderStatus, cooldownSeco
     case 'processing':
       return {
         label: 'Rendering',
-        title: 'Lumora is shaping your cinematic moment.',
-        body: 'Preserving Story Memory and scene flow while your draft saves in the background.',
+        title: 'Lumora is finding the cleanest render path.',
+        body: 'Trying the simplest safe cinematic route first and saving successful drafts as they complete.',
         tone: 'rendering',
       };
     case 'completed':
@@ -243,11 +245,11 @@ export function creatorRenderStateCopy(status: CreatorRenderStatus, cooldownSeco
       return {
         label: 'Paused',
         title: 'Lumora paused this scene safely.',
-        body: 'Your cinematic work is preserved in Drafts. Try a gentler direction, edit the scene, or save it for later.',
-        primaryActionLabel: 'Try this take',
+        body: 'This scene needs a simpler direction before rendering.',
+        primaryActionLabel: 'Try ultra-safe scene',
         secondaryActionLabel: 'Edit scene',
         tertiaryActionLabel: 'Save draft',
-        suggestedNextStep: 'Suggested next step: try a softer cinematic take.',
+        suggestedNextStep: 'Suggested next step: try the ultra-safe garden scene.',
         tone: 'paused',
       };
   }

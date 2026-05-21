@@ -427,6 +427,7 @@ export async function generateSeedanceWithProviderFallback(input: {
   environmentText?: string | null;
   emotionalText?: string | null;
   continuityNotes?: string[];
+  durationSeconds?: number | null;
   onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
   onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 }): Promise<ProviderFallbackSeedanceResult> {
@@ -506,6 +507,7 @@ export async function generateSeedanceWithProviderFallback(input: {
         characterDisplayName: input.characterDisplayName,
         projectId: input.projectId,
         providerFallbackStage: inputAttempt.stage,
+        durationSeconds: input.durationSeconds,
         onPredictionCreated: input.onPredictionCreated,
         onPredictionPolled: input.onPredictionPolled,
       });

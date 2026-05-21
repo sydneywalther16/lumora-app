@@ -34,6 +34,12 @@ const DEFAULT_SEEDANCE_SETTINGS = {
 const DEFAULT_POLL_INTERVAL_MS = 4_000;
 const DEFAULT_TIMEOUT_MS = 180_000;
 
+export type SeedanceSettings = {
+  duration: number;
+  aspect_ratio: typeof DEFAULT_SEEDANCE_SETTINGS.aspect_ratio;
+  resolution: typeof DEFAULT_SEEDANCE_SETTINGS.resolution;
+};
+
 export type SeedanceVideoResult = {
   id: string;
   provider: 'replicate';
@@ -52,7 +58,7 @@ export type SeedanceVideoResult = {
   rawOutput: unknown;
   logs?: string;
   metrics?: Prediction['metrics'];
-  settings: typeof DEFAULT_SEEDANCE_SETTINGS;
+  settings: SeedanceSettings;
 };
 
 export type SeedanceReferenceImage = {
@@ -123,6 +129,7 @@ type GenerateSeedanceVideoOptions = {
   characterDisplayName?: string | null;
   projectId?: string | null;
   providerFallbackStage?: string | null;
+  durationSeconds?: number | null;
   onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
   onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 };
@@ -589,13 +596,29 @@ async function pollPrediction(input: {
   return prediction;
 }
 
-function buildSeedanceRequestInput(prompt: string, referenceImages: SeedanceReferenceImage[]) {
+function normalizedDurationSeconds(value?: number | null) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_SEEDANCE_SETTINGS.duration;
+  return Math.min(30, Math.max(2, Math.round(value)));
+}
+
+function settingsForOptions(options: GenerateSeedanceVideoOptions): SeedanceSettings {
+  return {
+    ...DEFAULT_SEEDANCE_SETTINGS,
+    duration: normalizedDurationSeconds(options.durationSeconds),
+  };
+}
+
+function buildSeedanceRequestInput(
+  prompt: string,
+  referenceImages: SeedanceReferenceImage[],
+  settings: SeedanceSettings,
+) {
   return {
     prompt,
     ...(referenceImages.length
       ? { reference_images: referenceImages.map((reference) => reference.url) }
       : {}),
-    ...DEFAULT_SEEDANCE_SETTINGS,
+    ...settings,
   };
 }
 
@@ -663,6 +686,7 @@ async function runSeedanceAttempt(input: {
   prompt: string;
   referenceImages: SeedanceReferenceImage[];
   sanitizer: ProviderPromptSanitizerResult;
+  settings: SeedanceSettings;
   timeoutMs: number;
   pollIntervalMs: number;
   attemptLabel: string;
@@ -671,7 +695,7 @@ async function runSeedanceAttempt(input: {
   onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
   onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 }) {
-  const requestInput = buildSeedanceRequestInput(input.prompt, input.referenceImages);
+  const requestInput = buildSeedanceRequestInput(input.prompt, input.referenceImages, input.settings);
 
   console.info('SEEDANCE PROVIDER REQUEST:', {
     model: input.model,
@@ -801,6 +825,7 @@ export async function generateSeedanceVideo(
   const quality = options.quality ?? 'fast';
   const model = modelForQuality(quality);
   const referenceImages = normalizeReferenceImages(options.referenceImages);
+  const settings = settingsForOptions(options);
   const orchestrationPlan = await createModerationOrchestrationPlan({
     prompt: safePrompt,
     provider: 'seedance',
@@ -878,6 +903,7 @@ export async function generateSeedanceVideo(
         prompt: finalPrompt,
         referenceImages,
         sanitizer: finalSanitizer,
+        settings,
         timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         pollIntervalMs: options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
         attemptLabel: orchestrationAttempt.attemptLabel,
@@ -964,7 +990,7 @@ export async function generateSeedanceVideo(
         rawOutput: attempt.completedPrediction.output,
         logs: attempt.completedPrediction.logs,
         metrics: attempt.completedPrediction.metrics,
-        settings: DEFAULT_SEEDANCE_SETTINGS,
+        settings,
       };
     } catch (error) {
       if (!isSeedanceModerationResponse(error)) {

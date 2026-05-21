@@ -102,7 +102,7 @@ export type SeedanceGenerationRecord = {
   videoUrl: string;
   thumbnailUrl: string | null;
   posterUrl: string | null;
-  durationSeconds: 5;
+  durationSeconds: number;
   aspectRatio: '16:9';
   resolution: '720p';
   message: string;
@@ -142,6 +142,7 @@ export async function createSeedanceGeneration(input: {
   isDefaultSelfCharacter?: boolean | null;
   renderPreference?: RenderSuccessMode | string | null;
   referenceImages?: SeedanceReferenceImage[];
+  durationSeconds?: number | null;
   onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
   onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 }): Promise<SeedanceGenerationRecord> {
@@ -160,6 +161,7 @@ export async function createSeedanceGeneration(input: {
     characterId: input.characterId,
     characterName: input.characterName,
     projectId: input.projectId,
+    durationSeconds: input.durationSeconds,
     onPredictionCreated: input.onPredictionCreated,
     onPredictionPolled: input.onPredictionPolled,
   });

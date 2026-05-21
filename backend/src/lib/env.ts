@@ -36,6 +36,9 @@ const envSchema = z.object({
   RUNWAY_API_KEY: z.string().min(1).optional(),
   REPLICATE_API_TOKEN: z.string().min(1).optional(),
   REPLICATE_WEBHOOK_SECRET: z.string().min(1).optional(),
+  RENDER_SUCCESS_MAX_PAID_ATTEMPTS: z.coerce.number().int().min(1).max(5).default(3),
+  RENDER_SUCCESS_AUTO_RETRY: booleanEnv.default(true),
+  ENABLE_RENDER_PROBE: booleanEnv.default(false),
   RESEND_API_KEY: z.string().min(1).optional(),
   NOTIFICATION_FROM: z.string().email().default('alerts@example.com'),
 });

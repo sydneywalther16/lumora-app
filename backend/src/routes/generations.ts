@@ -10,6 +10,11 @@ import {
   formatRenderJobStatus,
   getRenderJobStatus,
 } from '../services/renderJobPoller';
+import {
+  formatRenderSuccessJobStatus,
+  getRenderSuccessJobStatus,
+  startRenderSuccessJob,
+} from '../services/renderSuccessEngine';
 import { createVideoGeneration } from '../video';
 
 const generationEngines = ['seedance-2.0', 'seedance-quality', 'veo', 'runway', 'mock', 'openai'] as const;
@@ -107,6 +112,12 @@ const generationRateLimit = createRateLimit({
 });
 
 generationsRouter.get('/jobs/:id', async (req, res) => {
+  const renderSuccessStatus = await getRenderSuccessJobStatus(req.params.id);
+  if (renderSuccessStatus) {
+    res.json(renderSuccessStatus);
+    return;
+  }
+
   const status = await getRenderJobStatus(req.params.id);
   if (!status) {
     res.status(404).json({ error: 'Render job not found.' });
@@ -129,6 +140,40 @@ generationsRouter.post('/seedance', generationRateLimit, async (req, res) => {
   const engine = quality === 'quality' ? 'seedance-quality' : 'seedance-2.0';
 
   try {
+    if (payload.renderPreference === 'success_first') {
+      const { job, duplicateOf, message } = await startRenderSuccessJob({
+        prompt,
+        userId: payload.userId ?? '',
+        title: payload.title ?? null,
+        characterId: payload.characterId ?? null,
+        characterName: payload.characterName ?? null,
+        characterAvatar: payload.characterAvatar ?? null,
+        isDefaultSelfCharacter: payload.isDefaultSelfCharacter ?? null,
+        referenceImages: seedanceReferenceImages(payload.referenceImages),
+        allowDemoFallback: false,
+        maxPaidAttempts: undefined,
+        maxTotalAttempts: undefined,
+      });
+      const status = formatRenderSuccessJobStatus(job);
+
+      res.status(202).json({
+        ...status,
+        characterId: payload.characterId ?? null,
+        characterName: payload.characterName ?? null,
+        characterAvatar: payload.characterAvatar ?? null,
+        isDefaultSelfCharacter: payload.isDefaultSelfCharacter ?? null,
+        displayEngine: 'Seedance Fast',
+        generationMode: (status.referenceCount ?? 0) > 0
+          ? 'seedance-multimodal-reference'
+          : 'seedance-text-to-video',
+        outputUrl: status.outputUrl ?? '',
+        videoUrl: status.videoUrl ?? '',
+        duplicateOf,
+        message,
+      });
+      return;
+    }
+
     const { job, duplicateOf, message } = await createAsyncSeedanceRenderJob({
       prompt,
       quality,
@@ -192,6 +237,36 @@ generationsRouter.post('/', generationRateLimit, async (req, res) => {
     if (payload.engine === 'seedance-2.0' || payload.engine === 'seedance-quality') {
       const quality = payload.engine === 'seedance-quality' ? 'quality' : 'fast';
       const references = seedanceReferenceImages(payload.referenceImages);
+      if (payload.renderPreference === 'success_first') {
+        const { job, duplicateOf, message } = await startRenderSuccessJob({
+          prompt,
+          userId: payload.userId ?? '',
+          title: payload.title ?? null,
+          characterId: payload.characterId ?? null,
+          characterName: payload.characterName ?? null,
+          characterAvatar: payload.characterAvatar ?? null,
+          isDefaultSelfCharacter: payload.isDefaultSelfCharacter ?? null,
+          referenceImages: references,
+          allowDemoFallback: false,
+        });
+        const status = formatRenderSuccessJobStatus(job);
+
+        res.status(202).json({
+          ...status,
+          characterId: payload.characterId ?? null,
+          characterName: payload.characterName ?? null,
+          characterAvatar: payload.characterAvatar ?? null,
+          isDefaultSelfCharacter: payload.isDefaultSelfCharacter ?? null,
+          displayEngine: 'Seedance Fast',
+          generationMode: (status.referenceCount ?? 0) > 0 ? 'seedance-multimodal-reference' : 'seedance-text-to-video',
+          outputUrl: status.outputUrl ?? '',
+          videoUrl: status.videoUrl ?? '',
+          duplicateOf,
+          message,
+        });
+        return;
+      }
+
       const { job, duplicateOf, message } = await createAsyncSeedanceRenderJob({
         prompt,
         quality,

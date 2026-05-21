@@ -655,6 +655,26 @@ export type ApiHealthDiagnostics = {
     warning?: string;
     error?: unknown;
   };
+  renderSuccessEngine?: {
+    ok: boolean;
+    enabled: boolean;
+    totalAttempts: number;
+    successRate: number | null;
+    mostSuccessfulProvider: string | null;
+    mostSuccessfulReferenceCount: number | null;
+    lastSuccessfulRecipe: Record<string, unknown> | null;
+    currentStuckJobs: number;
+    activeMasters: number;
+    paidAttemptsPrevented: number;
+    duplicateRenderPrevented: number;
+    moderationBlocksByTier: Record<string, number>;
+    rateLimitsByProvider: Record<string, number>;
+    providerOutputMissingCount: number;
+    maxPaidAttempts: number;
+    autoRetry: boolean;
+    probeEnabled: boolean;
+    error?: unknown;
+  };
   asyncRenderJobs?: {
     ok: boolean;
     pendingJobCount: number;

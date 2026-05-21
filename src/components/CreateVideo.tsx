@@ -64,6 +64,7 @@ import {
   creatorRenderStateCopy,
   sanitizeCreatorErrorMessage,
   successFirstOverrides,
+  ULTRA_SAFE_SCENE_PROMPT,
 } from '../lib/renderStateCopy';
 
 type CreateVideoProps = {
@@ -335,8 +336,8 @@ function asyncRenderStatusMessage(data: GenerateVideoApiResponse | GenerationRes
   if (data.status === 'rate_limited') {
     const seconds = retrySecondsForRender(data);
     return seconds > 0
-      ? `Resume available in ${seconds} seconds.`
-      : 'The render queue is ready. Resume when you are ready.';
+      ? `Render queue is cooling down. Lumora will resume automatically in about ${seconds} seconds.`
+      : 'Render queue is cooling down. Lumora will resume automatically.';
   }
   const status = typeof data.status === 'string' ? data.status : '';
   const progressLabel = typeof data.progressLabel === 'string' ? data.progressLabel : '';
@@ -1030,10 +1031,10 @@ export default function CreateVideo({
     setDraftTitle,
   } = useAppStore();
 
-  const [duration, setDuration] = useState(8);
-  const [aspectRatio, setAspectRatio] = useState<VideoAspectRatio>('9:16');
-  const [renderPreference, setRenderPreference] = useState<RenderSuccessMode>('balanced');
-  const [engine, setEngine] = useState<VideoEngine>('replicate');
+  const [duration, setDuration] = useState(4);
+  const [aspectRatio, setAspectRatio] = useState<VideoAspectRatio>('16:9');
+  const [renderPreference, setRenderPreference] = useState<RenderSuccessMode>('success_first');
+  const [engine, setEngine] = useState<VideoEngine>(SEEDANCE_ENGINE_ID);
   const [status, setStatus] = useState('');
   const [generationStatusState, setGenerationStatusState] = useState<GenerationStatusState>('idle');
   const [toast, setToast] = useState<ToastState>(null);
@@ -1099,6 +1100,21 @@ export default function CreateVideo({
     import.meta.env.DEV &&
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('mockBlocked') === '1'
+  );
+  const mockSuccessFirstUi = Boolean(
+    import.meta.env.DEV &&
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('mockSuccessFirst') === '1'
+  );
+  const mockRenderSuccessUi = Boolean(
+    import.meta.env.DEV &&
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('mockRenderSuccess') === '1'
+  );
+  const mockAllAttemptsBlockedUi = Boolean(
+    import.meta.env.DEV &&
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('mockAllAttemptsBlocked') === '1'
   );
   const primaryReferenceImage = pickReferenceImage({ referenceImageUrl, referenceImageUrls });
   const hasSelfCharacter = forceSelfMode || isDefaultSelfCharacter;
@@ -1254,7 +1270,9 @@ export default function CreateVideo({
   const sceneExecuteBusy = Boolean(sceneExecuteDisabledReason) || generationLoading || busy;
   const engineRoutingMessage =
     isSeedanceEngine
-      ? `${selectedProviderOption.label} uses ${seedanceReferenceCount} cast reference${seedanceReferenceCount === 1 ? '' : 's'} while keeping the scene fresh.`
+      ? renderPreference === 'success_first'
+        ? 'Success First starts with one short safe clip, then adds complexity after the first draft lands.'
+        : `${selectedProviderOption.label} uses ${seedanceReferenceCount} cast reference${seedanceReferenceCount === 1 ? '' : 's'} while keeping the scene fresh.`
     : engine === 'veo'
       ? 'Veo Experimental is ready for the next cinematic video route.'
     : engine === 'mock'
@@ -1302,11 +1320,13 @@ export default function CreateVideo({
     : generationStatusState === 'rate_limited'
       ? 'Resume render'
     : generationError && !activeReferenceRepair
-      ? 'Try this take'
+      ? 'Try ultra-safe scene'
     : activeRenderBlocksGenerate
       ? 'Rendering in Drafts'
     : generationLoading
-      ? 'Shaping cinematic beats...'
+      ? renderPreference === 'success_first'
+        ? 'Finding cleanest path...'
+        : 'Shaping cinematic beats...'
     : referenceLoading
       ? 'Preparing your cast...'
     : !hasPrompt
@@ -1456,7 +1476,7 @@ export default function CreateVideo({
             displayEngine,
             projectId: job.projectId ?? null,
             createdAt: job.createdAt ?? completedAt,
-            message: 'Your cinematic draft is saved.',
+            message: job.message ?? 'Your cinematic draft is saved.',
           });
           setActiveRenderJobId(null);
           finishGenerationProgress('completed');
@@ -1609,6 +1629,74 @@ export default function CreateVideo({
   }, [mockRateLimitUi]);
 
   useEffect(() => {
+    if (!mockSuccessFirstUi) return;
+
+    setRenderPreference('success_first');
+    setDuration(4);
+    setAspectRatio('16:9');
+    setEngine(SEEDANCE_ENGINE_ID);
+    setGenerationStatusState('processing');
+    setGenerationError('');
+    setStatus('Lumora is finding the cleanest render path...');
+  }, [mockSuccessFirstUi]);
+
+  useEffect(() => {
+    if (!mockRenderSuccessUi) return;
+
+    const now = new Date().toISOString();
+    setRenderPreference('success_first');
+    setDuration(4);
+    setAspectRatio('16:9');
+    setEngine(SEEDANCE_ENGINE_ID);
+    setGenerationStatusState('completed');
+    setGenerationError('');
+    setGeneratedVideoUrl(null);
+    setFinalGeneratedPrompt(ULTRA_SAFE_SCENE_PROMPT);
+    setGeneratedDisplayEngine('Seedance Fast');
+    setGeneratedMode('seedance-text-to-video');
+    setGenerationResult({
+      id: 'mock-render-success',
+      jobId: 'mock-render-success',
+      status: 'completed',
+      engine: SEEDANCE_ENGINE_ID,
+      provider: 'replicate',
+      characterId,
+      characterName,
+      characterAvatar,
+      isDefaultSelfCharacter,
+      prompt: activePrompt || ULTRA_SAFE_SCENE_PROMPT,
+      outputUrl: '',
+      videoUrl: '',
+      generationMode: 'seedance-text-to-video',
+      finalPrompt: ULTRA_SAFE_SCENE_PROMPT,
+      model: 'bytedance/seedance-2.0-fast',
+      displayEngine: 'Seedance Fast',
+      createdAt: now,
+      message: 'Cinematic draft ready.',
+    });
+    setStatus('Cinematic draft ready.');
+  }, [activePrompt, characterAvatar, characterId, characterName, isDefaultSelfCharacter, mockRenderSuccessUi]);
+
+  useEffect(() => {
+    if (!mockAllAttemptsBlockedUi) return;
+
+    setRenderPreference('success_first');
+    setDuration(4);
+    setAspectRatio('16:9');
+    setEngine(SEEDANCE_ENGINE_ID);
+    setGenerationStatusState('failed');
+    setGenerationError('This scene needs a simpler direction before rendering.');
+    setGenerationSafeRewrite(ULTRA_SAFE_SCENE_PROMPT);
+    setGenerationModerationDetail('Lumora tried the safe render ladder and preserved your draft.');
+    setGenerationModerationStages([
+      'Trying primary reference...',
+      'Trying storybook cinematic take...',
+      'Trying lighter cast guidance...',
+    ]);
+    setStatus('This scene needs a simpler direction before rendering.');
+  }, [mockAllAttemptsBlockedUi]);
+
+  useEffect(() => {
     if (!sceneExecutorUserId) {
       setContinuityMemory(null);
       setContinuityMemoryDraft(emptyContinuityMemoryState);
@@ -1683,11 +1771,11 @@ export default function CreateVideo({
   function beginGenerationProgress() {
     clearRenderCooldown();
     setGenerationStatusState('queued');
-    setStatus('Understanding your scene...');
+    setStatus('Lumora is finding the cleanest render path...');
     if (progressTimerRef.current) window.clearTimeout(progressTimerRef.current);
     progressTimerRef.current = window.setTimeout(() => {
       setGenerationStatusState('processing');
-      setStatus('Shaping cinematic beats and preserving Story Memory...');
+      setStatus('Trying primary reference...');
       progressTimerRef.current = null;
     }, 1400);
   }
@@ -2315,12 +2403,17 @@ export default function CreateVideo({
         setStatus('Preserving Story Memory...');
         await saveContinuityMemory({ silent: true });
       }
-      setStatus('Shaping cinematic beats...');
-      const invisiblePlan = await buildCinematicStructureForPrompt({ source: 'generate', promptOverride: currentPrompt });
-      if (invisiblePlan) {
+      let invisiblePlan: CreativeBrainScenePlan | null = null;
+      if (selectedRenderPreference === 'success_first') {
+        setStatus('Story Memory is guiding this scene.');
+      } else {
+        setStatus('Shaping cinematic beats...');
+        invisiblePlan = await buildCinematicStructureForPrompt({ source: 'generate', promptOverride: currentPrompt });
+      }
+      if (invisiblePlan && selectedRenderPreference !== 'success_first') {
         setStatus('Preparing your cast for the render...');
       } else {
-        setStatus('Preparing your cinematic render...');
+        setStatus('Lumora is finding the cleanest render path...');
       }
 
       const generationStylePrompt = selectedStylePrompt(selectedStyles, currentPrompt);
@@ -2897,6 +2990,32 @@ export default function CreateVideo({
     });
   }
 
+  async function handleTryUltraSafeScene() {
+    const overrides = successFirstOverrides(duration);
+
+    setActivePrompt(ULTRA_SAFE_SCENE_PROMPT);
+    setRenderPreference('success_first');
+    setEngine(SEEDANCE_ENGINE_ID);
+    setDuration(overrides.duration);
+    setGenerationSafeRewrite('');
+    setGenerationModerationDetail('');
+    setGenerationModerationStages([]);
+    setGenerationError('');
+    setStatus('Trying ultra-safe scene.');
+    void trackCreatorEvent('continue_story_clicked', {
+      source: 'create_ultra_safe_scene',
+      renderPreference: 'success_first',
+      shortenedDuration: overrides.duration !== duration,
+    }, authUser?.id ?? null);
+
+    await handleGenerate({
+      promptOverride: ULTRA_SAFE_SCENE_PROMPT,
+      renderPreferenceOverride: 'success_first',
+      durationOverride: overrides.duration,
+      forceNewTake: true,
+    });
+  }
+
   async function handleSaveDraft() {
     if (configured && sessionLoading && !authUser) {
       setStatus('Checking your account session. Try again in a moment.');
@@ -3348,6 +3467,9 @@ export default function CreateVideo({
               </button>
             ))}
           </div>
+          {renderPreference === 'success_first' ? (
+            <small className="muted">Success First helps Lumora land the first cinematic draft before adding complexity.</small>
+          ) : null}
         </div>
 
         <div className="field-block minimal-aspect-field">
@@ -3542,7 +3664,7 @@ export default function CreateVideo({
             type="button"
             className={`primary-btn cinematic-generate-btn state-${generationStatusState}`}
             onClick={() => {
-              void (generationError && !activeReferenceRepair ? handleTrySuggestedTake() : handleGenerate());
+              void (generationError && !activeReferenceRepair ? handleTryUltraSafeScene() : handleGenerate());
             }}
             disabled={generationError && !activeReferenceRepair ? tryTakeBusy : generateBusy}
             aria-busy={generateBusy}
@@ -3577,11 +3699,17 @@ export default function CreateVideo({
                 <span>Drafts autosave</span>
               ) : null}
             </div>
+            {(generationStatusState === 'queued' || generationStatusState === 'processing' || generationStatusState === 'rate_limited') ? (
+              <ol className="success-ladder-progress" aria-label="Render progress">
+                {['Preparing cast', 'Trying primary reference', 'Trying storybook cinematic take', 'Saving to Drafts'].map((step, index) => (
+                  <li key={step} className={index === 0 || generationStatusState === 'processing' ? 'active' : ''}>
+                    {step}
+                  </li>
+                ))}
+              </ol>
+            ) : null}
             {generationStatusState === 'rate_limited' ? (
               <div className="render-state-actions">
-                <button type="button" className="primary-btn" onClick={() => void handleGenerate()} disabled={renderCooldownActive || generationLoading}>
-                  {renderCooldownActive ? `Resume in ${renderCooldownSeconds}s` : 'Resume render'}
-                </button>
                 <button type="button" className="ghost-btn" onClick={() => void handleSaveDraft()} disabled={saveBusy}>
                   Save draft
                 </button>
@@ -3719,17 +3847,17 @@ export default function CreateVideo({
               </div>
               {!activeReferenceRepair ? (
                 <div className="focused-next-take">
-                  <strong>Suggested next take</strong>
-                  <p>A gentler cinematic version may render more smoothly.</p>
-                  <blockquote className="next-take-preview">{suggestedTakePreview}</blockquote>
+                  <strong>Ultra-safe scene</strong>
+                  <p>This scene uses the simplest render path before adding complexity.</p>
+                  <blockquote className="next-take-preview">{ULTRA_SAFE_SCENE_PROMPT}</blockquote>
                   <div className="next-take-actions">
                     <button
                       type="button"
                       className="primary-btn cinematic-generate-btn"
-                      onClick={() => void handleTrySuggestedTake()}
+                      onClick={() => void handleTryUltraSafeScene()}
                       disabled={tryTakeBusy}
                     >
-                      Try this take
+                      Try ultra-safe scene
                     </button>
                     <button
                       type="button"
@@ -3807,7 +3935,7 @@ export default function CreateVideo({
               }}
               style={{ flex: 'unset', width: '100%' }}
             >
-              View in Drafts
+              Publish
             </button>
             <button
               type="button"
@@ -3815,7 +3943,7 @@ export default function CreateVideo({
               onClick={handleRemixResult}
               style={{ flex: 'unset', width: '100%' }}
             >
-              Create another take
+              Continue Story
             </button>
           </div>
         ) : null}
@@ -3872,11 +4000,14 @@ export default function CreateVideo({
             />
           ) : null}
           <div className="button-row">
+            <button type="button" className="primary-btn" onClick={handleRemixResult}>
+              Continue Story
+            </button>
             <button type="button" className="ghost-btn" onClick={() => { window.location.href = '/drafts'; }}>
-              Open in Drafts
+              Publish
             </button>
             <button type="button" className="ghost-btn" onClick={handleRemixResult}>
-              Create another take
+              Try another take
             </button>
           </div>
           {selfReferenceMode && onLikenessFeedback ? (
