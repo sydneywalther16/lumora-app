@@ -2,6 +2,7 @@ import { query } from './db';
 import { env } from '../lib/env';
 import { parseProviderVideoOutput } from './providerOutputParser';
 import { serializeDiagnosticError } from './schemaDiagnostics';
+import { buildSeedanceCanarySummaryDiagnostics } from './seedanceCanary';
 
 type LatestRenderRow = {
   id: string;
@@ -135,13 +136,16 @@ export async function buildLastRenderDiagnostics() {
     );
     const row = latest.rows[0] ?? null;
     if (!row) {
+      const canarySummary = await buildSeedanceCanarySummaryDiagnostics();
       return {
         ok: true,
         latestGenerationJob: null,
+        seedanceCanary: canarySummary,
       };
     }
 
     const parsedOutput = parseProviderVideoOutput(row.outputUrl ?? row.resultAssetUrl);
+    const canarySummary = await buildSeedanceCanarySummaryDiagnostics();
     const attempts = row.renderSuccessGroupId
       ? await query<AttemptSummaryRow>(
           `select
@@ -236,6 +240,10 @@ export async function buildLastRenderDiagnostics() {
         whyNotCompleted: whyNotCompleted(row, parsedOutput.ok),
         whyPaused: whyPaused(row, attemptRow),
         nextAttemptPlanned: nextAttemptPlanned(row, attemptRow, attemptsSummary?.count ?? null),
+        canaryEverSucceeded: canarySummary.canaryEverSucceeded,
+        lastCanaryStatus: canarySummary.lastCanaryStatus,
+        lastReferenceCanaryStatus: canarySummary.lastReferenceCanaryStatus,
+        recommendedNextAction: canarySummary.recommendedNextAction,
         updatedAt: row.updatedAt,
         createdAt: row.createdAt,
       },

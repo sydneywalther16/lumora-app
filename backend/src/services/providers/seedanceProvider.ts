@@ -32,6 +32,7 @@ export const SEEDANCE_QUALITY_MODEL = 'bytedance/seedance-2.0';
 
 export type SeedanceQualityMode = 'fast' | 'quality';
 export type SeedanceAspectRatio = '9:16' | '16:9' | '1:1';
+export type SeedanceResolution = '480p' | '720p' | '1080p';
 
 const DEFAULT_SEEDANCE_SETTINGS = {
   duration: 5,
@@ -44,7 +45,8 @@ const DEFAULT_TIMEOUT_MS = 180_000;
 export type SeedanceSettings = {
   duration: number;
   aspect_ratio: SeedanceAspectRatio;
-  resolution: typeof DEFAULT_SEEDANCE_SETTINGS.resolution;
+  resolution: SeedanceResolution;
+  generate_audio?: boolean;
 };
 
 export type SeedanceVideoResult = {
@@ -138,9 +140,41 @@ type GenerateSeedanceVideoOptions = {
   providerFallbackStage?: string | null;
   durationSeconds?: number | null;
   aspectRatio?: SeedanceAspectRatio | string | null;
+  resolution?: SeedanceResolution | string | null;
+  generateAudio?: boolean | null;
   onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
   onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 };
+
+export type SeedanceProviderPayload = {
+  prompt: string;
+  duration: number;
+  aspect_ratio: SeedanceAspectRatio;
+  resolution: SeedanceResolution;
+  reference_images?: string[];
+  generate_audio?: boolean;
+};
+
+export type SeedancePayloadValidationIssue = {
+  field: string;
+  valueSummary: string;
+  expected: string;
+};
+
+export type SeedancePayloadValidationResult =
+  | { ok: true; issues: [] }
+  | { ok: false; issues: SeedancePayloadValidationIssue[] };
+
+export class SeedanceInputSchemaError extends Error {
+  readonly category = 'input_schema_invalid';
+  readonly issues: SeedancePayloadValidationIssue[];
+
+  constructor(issues: SeedancePayloadValidationIssue[]) {
+    super('Seedance provider payload is invalid.');
+    this.name = 'SeedanceInputSchemaError';
+    this.issues = issues;
+  }
+}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -576,7 +610,8 @@ async function pollPrediction(input: {
 
 function normalizedDurationSeconds(value?: number | null) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_SEEDANCE_SETTINGS.duration;
-  return Math.min(30, Math.max(2, Math.round(value)));
+  const rounded = Math.round(value);
+  return rounded <= 5 ? 5 : 10;
 }
 
 function normalizedAspectRatio(value?: string | null): SeedanceAspectRatio {
@@ -585,12 +620,21 @@ function normalizedAspectRatio(value?: string | null): SeedanceAspectRatio {
     : DEFAULT_SEEDANCE_SETTINGS.aspect_ratio;
 }
 
+function normalizedResolution(value?: string | null): SeedanceResolution {
+  return value === '480p' || value === '720p' || value === '1080p'
+    ? value
+    : DEFAULT_SEEDANCE_SETTINGS.resolution;
+}
+
 function settingsForOptions(options: GenerateSeedanceVideoOptions): SeedanceSettings {
-  return {
+  const settings: SeedanceSettings = {
     ...DEFAULT_SEEDANCE_SETTINGS,
     duration: normalizedDurationSeconds(options.durationSeconds),
     aspect_ratio: normalizedAspectRatio(options.aspectRatio),
+    resolution: normalizedResolution(options.resolution),
   };
+  if (typeof options.generateAudio === 'boolean') settings.generate_audio = options.generateAudio;
+  return settings;
 }
 
 function buildSeedanceRequestInput(
@@ -604,6 +648,129 @@ function buildSeedanceRequestInput(
       ? { reference_images: referenceImages.map((reference) => reference.url) }
       : {}),
     ...settings,
+  };
+}
+
+function payloadValueSummary(value: unknown) {
+  if (typeof value === 'string') {
+    if (/^https?:\/\//i.test(value)) {
+      try {
+        const url = new URL(value);
+        return `[url host=${url.host}]`;
+      } catch {
+        return '[url]';
+      }
+    }
+    return value.length > 80 ? `${value.slice(0, 77)}...` : value;
+  }
+  if (Array.isArray(value)) return `array(length=${value.length})`;
+  if (value == null) return String(value);
+  return typeof value === 'object' ? `object(keys=${Object.keys(value as Record<string, unknown>).join(',')})` : String(value);
+}
+
+export function validateSeedanceProviderPayload(payload: unknown): SeedancePayloadValidationResult {
+  const issues: SeedancePayloadValidationIssue[] = [];
+  const record = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : null;
+
+  if (!record) {
+    return {
+      ok: false,
+      issues: [{
+        field: '$',
+        valueSummary: payloadValueSummary(payload),
+        expected: 'object with prompt, duration, aspect_ratio, and resolution',
+      }],
+    };
+  }
+
+  const allowedKeys = new Set(['prompt', 'duration', 'aspect_ratio', 'resolution', 'reference_images', 'generate_audio']);
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      issues.push({
+        field: key,
+        valueSummary: payloadValueSummary(record[key]),
+        expected: 'known Seedance input field',
+      });
+    }
+  }
+
+  if (typeof record.prompt !== 'string' || !record.prompt.trim()) {
+    issues.push({
+      field: 'prompt',
+      valueSummary: payloadValueSummary(record.prompt),
+      expected: 'non-empty string',
+    });
+  }
+
+  if (record.duration !== 5 && record.duration !== 10) {
+    issues.push({
+      field: 'duration',
+      valueSummary: payloadValueSummary(record.duration),
+      expected: '5 or 10 seconds',
+    });
+  }
+
+  if (record.aspect_ratio !== '9:16' && record.aspect_ratio !== '16:9' && record.aspect_ratio !== '1:1') {
+    issues.push({
+      field: 'aspect_ratio',
+      valueSummary: payloadValueSummary(record.aspect_ratio),
+      expected: '9:16, 16:9, or 1:1',
+    });
+  }
+
+  if (record.resolution !== '480p' && record.resolution !== '720p' && record.resolution !== '1080p') {
+    issues.push({
+      field: 'resolution',
+      valueSummary: payloadValueSummary(record.resolution),
+      expected: '480p, 720p, or 1080p',
+    });
+  }
+
+  if ('generate_audio' in record && typeof record.generate_audio !== 'boolean') {
+    issues.push({
+      field: 'generate_audio',
+      valueSummary: payloadValueSummary(record.generate_audio),
+      expected: 'boolean when provided',
+    });
+  }
+
+  if ('reference_images' in record) {
+    if (!Array.isArray(record.reference_images)) {
+      issues.push({
+        field: 'reference_images',
+        valueSummary: payloadValueSummary(record.reference_images),
+        expected: 'array of http(s) image URLs',
+      });
+    } else {
+      record.reference_images.forEach((value, index) => {
+        if (typeof value !== 'string' || !/^https?:\/\//i.test(value)) {
+          issues.push({
+            field: `reference_images[${index}]`,
+            valueSummary: payloadValueSummary(value),
+            expected: 'http(s) image URL string',
+          });
+        }
+      });
+    }
+  }
+
+  return issues.length ? { ok: false, issues } : { ok: true, issues: [] };
+}
+
+export function seedancePayloadSummary(payload: SeedanceProviderPayload) {
+  return {
+    keys: Object.keys(payload),
+    promptLength: payload.prompt.length,
+    duration: payload.duration,
+    aspect_ratio: payload.aspect_ratio,
+    resolution: payload.resolution,
+    generate_audio: typeof payload.generate_audio === 'boolean' ? payload.generate_audio : 'omitted',
+    reference_images: payload.reference_images
+      ? payload.reference_images.map((url) => payloadValueSummary(url))
+      : [],
+    referenceCount: payload.reference_images?.length ?? 0,
   };
 }
 
@@ -681,6 +848,16 @@ async function runSeedanceAttempt(input: {
   onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 }) {
   const requestInput = buildSeedanceRequestInput(input.prompt, input.referenceImages, input.settings);
+  const validation = validateSeedanceProviderPayload(requestInput);
+  if (!validation.ok) {
+    console.warn('SEEDANCE PAYLOAD VALIDATION FAILED:', {
+      model: input.model,
+      quality: input.quality,
+      attempt: input.attemptLabel,
+      issues: validation.issues,
+    });
+    throw new SeedanceInputSchemaError(validation.issues);
+  }
 
   console.info('SEEDANCE PROVIDER REQUEST:', {
     model: input.model,

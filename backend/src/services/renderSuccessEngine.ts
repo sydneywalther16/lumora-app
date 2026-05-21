@@ -14,6 +14,7 @@ import {
   type SeedancePredictionEvent,
   type SeedanceAspectRatio,
   type SeedanceQualityMode,
+  type SeedanceResolution,
   type SeedanceReferenceImage,
 } from './providers/seedanceProvider';
 import { isProviderOutputError, parseProviderVideoOutput } from './providerOutputParser';
@@ -30,9 +31,11 @@ export const FIRST_VIDEO_RESCUE_PROVIDER_PROMPT =
 
 const RENDER_SUCCESS_ACTIVE_STATUSES = ['queued', 'rendering', 'processing', 'rate_limited'] as const;
 const RENDER_SUCCESS_TOTAL_ATTEMPTS = 5;
-const RENDER_SUCCESS_DURATION_SECONDS = 4;
+const RENDER_SUCCESS_DURATION_SECONDS = 5;
 const RENDER_SUCCESS_ASPECT_RATIO: SeedanceAspectRatio = '16:9';
 const FIRST_VIDEO_RESCUE_ASPECT_RATIO: SeedanceAspectRatio = '9:16';
+const RENDER_SUCCESS_RESOLUTION: SeedanceResolution = '480p';
+const RENDER_SUCCESS_GENERATE_AUDIO = false;
 const RENDER_SUCCESS_TIMEOUT_MS = 12 * 60 * 1000;
 const RENDER_SUCCESS_POLL_INTERVAL_MS = 4_000;
 const MAX_RATE_LIMIT_DELAY_MS = 10 * 60 * 1000;
@@ -50,6 +53,8 @@ export type RenderSuccessAttempt = {
   quality: SeedanceQualityMode | 'demo';
   durationSeconds: number;
   aspectRatio: SeedanceAspectRatio;
+  resolution: SeedanceResolution;
+  generateAudio: boolean;
   referenceImages: SeedanceReferenceImage[];
   referenceCount: number;
   prompt: string;
@@ -349,6 +354,8 @@ function makeAttempt(input: {
   paid?: boolean;
   durationSeconds?: number;
   aspectRatio?: SeedanceAspectRatio;
+  resolution?: SeedanceResolution;
+  generateAudio?: boolean;
 }): RenderSuccessAttempt {
   return {
     tier: input.tier,
@@ -357,6 +364,8 @@ function makeAttempt(input: {
     quality: input.quality,
     durationSeconds: input.durationSeconds ?? RENDER_SUCCESS_DURATION_SECONDS,
     aspectRatio: input.aspectRatio ?? RENDER_SUCCESS_ASPECT_RATIO,
+    resolution: input.resolution ?? RENDER_SUCCESS_RESOLUTION,
+    generateAudio: input.generateAudio ?? RENDER_SUCCESS_GENERATE_AUDIO,
     referenceImages: input.referenceImages,
     referenceCount: input.referenceImages.length,
     prompt: input.prompt,
@@ -1672,6 +1681,8 @@ async function runProviderAttempt(input: {
       providerFallbackStage: `render_success_attempt_${input.attempt.tier}`,
       durationSeconds: input.attempt.durationSeconds,
       aspectRatio: input.attempt.aspectRatio,
+      resolution: input.attempt.resolution,
+      generateAudio: input.attempt.generateAudio,
       timeoutMs: RENDER_SUCCESS_TIMEOUT_MS,
       pollIntervalMs: RENDER_SUCCESS_POLL_INTERVAL_MS,
       onPredictionCreated: onPredictionEvent,

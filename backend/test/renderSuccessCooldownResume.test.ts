@@ -54,8 +54,9 @@ const rescuePlan = buildRenderSuccessAttemptPlan({
 assert.equal(rescuePlan.length, 2);
 assert.deepEqual(rescuePlan.map((attempt) => attempt.provider), ['seedance-fast', 'seedance-fast']);
 assert.deepEqual(rescuePlan.map((attempt) => attempt.referenceCount), [1, 0]);
-assert.ok(rescuePlan.every((attempt) => attempt.durationSeconds === 4));
+assert.ok(rescuePlan.every((attempt) => attempt.durationSeconds === 5));
 assert.ok(rescuePlan.every((attempt) => attempt.aspectRatio === '9:16'));
+assert.ok(rescuePlan.every((attempt) => attempt.resolution === '480p'));
 assert.ok(rescuePlan.every((attempt) => !attempt.prompt.includes('Sydney')));
 
 console.log('render success cooldown/resume tests passed');

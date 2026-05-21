@@ -53,7 +53,7 @@ assert.deepEqual(plan.map((attempt) => attempt.provider), [
   'seedance-fast',
   'demo-mode',
 ]);
-assert.equal(plan[0].durationSeconds, 4);
+assert.equal(plan[0].durationSeconds, 5);
 assert.equal(plan[0].referenceCount, 1);
 assert.equal(plan[1].referenceCount, 2);
 assert.equal(plan[3].referenceCount, 0);
@@ -67,7 +67,9 @@ const firstVideoRescuePlan = buildRenderSuccessAttemptPlan({
 });
 assert.deepEqual(firstVideoRescuePlan.map((attempt) => attempt.tier), [1, 2]);
 assert.deepEqual(firstVideoRescuePlan.map((attempt) => attempt.provider), ['seedance-fast', 'seedance-fast']);
-assert.equal(firstVideoRescuePlan[0].durationSeconds, 4);
+assert.equal(firstVideoRescuePlan[0].durationSeconds, 5);
+assert.equal(firstVideoRescuePlan[0].resolution, '480p');
+assert.equal(firstVideoRescuePlan[0].generateAudio, false);
 assert.equal(firstVideoRescuePlan[0].aspectRatio, '9:16');
 assert.equal(firstVideoRescuePlan[0].referenceCount, 1);
 assert.equal(firstVideoRescuePlan[1].referenceCount, 0);
