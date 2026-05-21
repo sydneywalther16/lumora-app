@@ -7,6 +7,7 @@ import {
 import {
   type SeedanceModerationDiagnostics,
   type SeedancePredictionEvent,
+  type SeedanceAspectRatio,
   type SeedanceQualityMode,
   type SeedanceReferenceImage,
 } from './providers/seedanceProvider';
@@ -103,7 +104,7 @@ export type SeedanceGenerationRecord = {
   thumbnailUrl: string | null;
   posterUrl: string | null;
   durationSeconds: number;
-  aspectRatio: '16:9';
+  aspectRatio: SeedanceAspectRatio;
   resolution: '720p';
   message: string;
   createdAt: string;

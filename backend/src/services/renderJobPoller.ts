@@ -22,6 +22,7 @@ const activeRenderLocks = new Set<string>();
 let duplicateRenderPreventedCount = 0;
 const ACTIVE_STATUSES = ['queued', 'rendering', 'processing', 'rate_limited'] as const;
 const RENDER_TIMEOUT_MS = 30 * 60 * 1000;
+const RATE_LIMIT_SAFETY_BUFFER_MS = 2_000;
 
 export type AsyncRenderJobInput = {
   prompt: string;
@@ -506,47 +507,94 @@ async function markJobRateLimited(input: {
      where id = $1`,
     [input.jobId, input.message, input.retryAfterSeconds, input.retryAvailableAt],
   );
-  await updateProjectStatus(input.projectId, 'paused', input.message);
+  await updateProjectStatus(input.projectId, 'rendering', input.message);
 }
 
 async function resumeRateLimitedJob(job: AsyncRenderJobRecord) {
+  const nextStatus = job.providerPredictionId ? 'rendering' : 'queued';
   await query(
     `update generation_jobs
      set
-       status = 'queued',
-       provider_status = 'queued',
+       status = $2,
+       provider_status = case when $2 = 'queued' then 'queued' else coalesce(provider_status, 'processing') end,
        error_message = null,
        error_category = null,
        retry_after_seconds = null,
        retry_available_at = null,
        updated_at = now()
      where id = $1`,
-    [job.id],
+    [job.id, nextStatus],
   );
   await updateProjectStatus(job.projectId, 'rendering');
   return await getAsyncRenderJob(job.id) ?? job;
 }
 
+function rawResponseStatus(error: unknown) {
+  return (error as { response?: { status?: unknown } } | null)?.response?.status;
+}
+
+function rawRetryAfterMs(error: unknown) {
+  const headers = (error as { response?: { headers?: { get?: (name: string) => string | null } } } | null)
+    ?.response
+    ?.headers;
+  const retryAfter = headers?.get?.('retry-after') ?? headers?.get?.('Retry-After') ?? null;
+  if (!retryAfter) return null;
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const parsedDate = Date.parse(retryAfter);
+  return Number.isFinite(parsedDate) ? Math.max(0, parsedDate - Date.now()) : null;
+}
+
+function isRateLimitLike(error: unknown) {
+  if (isReplicateRateLimitError(error)) return true;
+  if (rawResponseStatus(error) === 429) return true;
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return message.includes('429') || message.includes('rate limit') || message.includes('too many requests');
+}
+
 function rateLimitDelaySeconds(error: unknown) {
-  if (!isReplicateRateLimitError(error)) return null;
-  return error.retryAfterSeconds ?? (
-    typeof error.retryAfterMs === 'number'
-      ? Math.max(1, Math.ceil(error.retryAfterMs / 1000))
-      : null
-  );
+  if (isReplicateRateLimitError(error)) {
+    return error.retryAfterSeconds ?? (
+      typeof error.retryAfterMs === 'number'
+        ? Math.max(1, Math.ceil(error.retryAfterMs / 1000))
+        : null
+    );
+  }
+  const retryAfterMs = rawRetryAfterMs(error);
+  return typeof retryAfterMs === 'number'
+    ? Math.max(1, Math.ceil(retryAfterMs / 1000))
+    : null;
+}
+
+function rateLimitRetryMs(error: unknown) {
+  if (isReplicateRateLimitError(error) && typeof error.retryAfterMs === 'number') return error.retryAfterMs;
+  const raw = rawRetryAfterMs(error);
+  return typeof raw === 'number' ? raw : 10_000;
 }
 
 function rateLimitAvailableAt(error: unknown) {
-  if (!isReplicateRateLimitError(error)) return null;
-  if (error.retryAvailableAt) return error.retryAvailableAt;
-  if (typeof error.retryAfterMs === 'number') {
-    return new Date(Date.now() + error.retryAfterMs).toISOString();
+  const retryMs = rateLimitRetryMs(error);
+  if (isReplicateRateLimitError(error) && error.retryAvailableAt) {
+    const parsed = Date.parse(error.retryAvailableAt);
+    if (Number.isFinite(parsed)) {
+      return new Date(parsed + RATE_LIMIT_SAFETY_BUFFER_MS).toISOString();
+    }
   }
-  return null;
+  return new Date(Date.now() + retryMs + RATE_LIMIT_SAFETY_BUFFER_MS).toISOString();
+}
+
+function cooldownExpired(job: AsyncRenderJobRecord) {
+  return job.status === 'rate_limited' &&
+    (!job.retryAvailableAt || Date.parse(job.retryAvailableAt) <= Date.now());
+}
+
+function cooldownActive(job: AsyncRenderJobRecord) {
+  return job.status === 'rate_limited' &&
+    Boolean(job.retryAvailableAt && Date.parse(job.retryAvailableAt) > Date.now());
 }
 
 function errorCategory(error: unknown) {
-  if (isReplicateRateLimitError(error)) return 'rate_limited';
+  if (isRateLimitLike(error)) return 'rate_limited';
   if (isProviderOutputError(error)) return error.category;
   if (isAssetPersistenceError(error)) return 'asset_persistence';
   if (isSeedanceModerationError(error) || providerFallbackDiagnosticsFromError(error)) return 'moderation';
@@ -562,11 +610,11 @@ function creatorErrorMessage(error: unknown) {
   if (isSeedanceModerationError(error) || providerFallbackDiagnosticsFromError(error)) {
     return 'This scene needs a simpler direction before rendering.';
   }
-  if (isReplicateRateLimitError(error)) {
+  if (isRateLimitLike(error)) {
     const seconds = rateLimitDelaySeconds(error);
     return seconds
-      ? `Render queue is cooling down. Try again in about ${seconds} seconds.`
-      : 'Render queue is cooling down. Try again in a moment.';
+      ? `Render queue is cooling down. Lumora will resume automatically in about ${seconds} seconds.`
+      : 'Render queue is cooling down. Lumora will resume automatically.';
   }
   if (isProviderOutputError(error)) {
     return 'Provider completed without a usable video output.';
@@ -683,7 +731,11 @@ export async function createAsyncSeedanceRenderJob(input: AsyncRenderJobInput) {
     const retryReady = activeJob.status === 'rate_limited' &&
       (!activeJob.retryAvailableAt || Date.parse(activeJob.retryAvailableAt) <= Date.now());
     const job = retryReady ? await resumeRateLimitedJob(activeJob) : activeJob;
-    if (job.status === 'queued' || job.status === 'rendering') processAsyncRenderJob(job.id);
+    if (job.providerPredictionId && job.status === 'rendering') {
+      void pollRenderJob(job);
+    } else if (job.status === 'queued' || job.status === 'rendering') {
+      processAsyncRenderJob(job.id);
+    }
     return {
       job,
       duplicateOf: job.id,
@@ -836,7 +888,20 @@ export async function pollRenderJob(job: AsyncRenderJobRecord) {
   const replicate = await replicateClient();
   if (!replicate) return job;
 
-  const prediction = await replicate.predictions.get(job.providerPredictionId);
+  let prediction: Prediction;
+  try {
+    prediction = await replicate.predictions.get(job.providerPredictionId);
+  } catch (error) {
+    if (!isRateLimitLike(error)) throw error;
+    await markJobRateLimited({
+      jobId: job.id,
+      projectId: job.projectId,
+      message: creatorErrorMessage(error),
+      retryAfterSeconds: rateLimitDelaySeconds(error),
+      retryAvailableAt: rateLimitAvailableAt(error),
+    });
+    return await getAsyncRenderJob(job.id) ?? job;
+  }
   await updateProviderState({
     jobId: job.id,
     prediction,
@@ -866,12 +931,58 @@ export async function getRenderJobStatus(jobId: string) {
   const job = await getAsyncRenderJob(jobId);
   if (!job) return null;
 
+  if (cooldownExpired(job)) {
+    const resumed = await resumeRateLimitedJob(job);
+    if (resumed.providerPredictionId) {
+      return formatRenderJobStatus(await pollRenderJob(resumed));
+    }
+    processAsyncRenderJob(resumed.id);
+    return formatRenderJobStatus(await getAsyncRenderJob(resumed.id) ?? resumed);
+  }
+
   if (job.status === 'queued' || (job.status === 'rendering' && !job.providerPredictionId)) {
     processAsyncRenderJob(job.id);
   }
 
   const refreshed = await pollRenderJob(job);
   return formatRenderJobStatus(refreshed);
+}
+
+export async function resumeAsyncRenderJob(jobId: string) {
+  const job = await getAsyncRenderJob(jobId);
+  if (!job) return null;
+
+  if (cooldownActive(job)) return formatRenderJobStatus(job);
+  if (job.status === 'completed' || job.status === 'failed' || job.status === 'paused') {
+    return formatRenderJobStatus(job);
+  }
+
+  const resumed = job.status === 'rate_limited' ? await resumeRateLimitedJob(job) : job;
+  if (resumed.providerPredictionId) {
+    return formatRenderJobStatus(await pollRenderJob(resumed));
+  }
+
+  if (resumed.status === 'queued' || resumed.status === 'rendering') {
+    processAsyncRenderJob(resumed.id);
+  }
+  return formatRenderJobStatus(await getAsyncRenderJob(resumed.id) ?? resumed);
+}
+
+export async function resumeExpiredAsyncRenderCooldowns(limit = 5) {
+  const result = await query<{ id: string }>(
+    `select id
+     from generation_jobs
+     where status = 'rate_limited'
+       and render_success_role is null
+       and (retry_available_at is null or retry_available_at <= now())
+     order by updated_at asc
+     limit $1`,
+    [Math.max(1, Math.min(20, Math.round(limit)))],
+  );
+  for (const row of result.rows) {
+    await resumeAsyncRenderJob(row.id).catch(() => null);
+  }
+  return result.rows.length;
 }
 
 export function formatRenderJobStatus(job: AsyncRenderJobRecord) {
@@ -891,8 +1002,8 @@ export function formatRenderJobStatus(job: AsyncRenderJobRecord) {
       ? 'Your cinematic draft is saved.'
       : status === 'rate_limited'
         ? retrySeconds && retrySeconds > 0
-          ? `Render queue is cooling down. Try again in about ${retrySeconds} seconds.`
-          : 'Render queue is ready. Resume render when you are ready.'
+          ? `Render queue is cooling down. Lumora will resume automatically in about ${retrySeconds} seconds.`
+          : 'Render queue is cooling down. Lumora will resume automatically.'
       : status === 'failed'
         ? 'Lumora paused this render.'
         : status === 'paused'
@@ -973,6 +1084,7 @@ export async function handleReplicateWebhookPayload(payload: unknown) {
 
 export async function buildAsyncRenderJobDiagnostics() {
   try {
+    await resumeExpiredAsyncRenderCooldowns().catch(() => 0);
     const result = await query<{
       pendingJobCount: number;
       renderingJobCount: number;

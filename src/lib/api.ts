@@ -1011,6 +1011,12 @@ export const api = {
       timeoutMs: 20_000,
     }),
 
+  resumeGenerationJob: (jobId: string) =>
+    request<GenerationResponse>(`/api/generations/jobs/${encodeURIComponent(jobId)}/resume`, {
+      method: 'POST',
+      timeoutMs: 20_000,
+    }),
+
   listGenerationJobs: () => request<{ jobs: GenerationJob[] }>('/api/generations'),
 
   healthDiagnostics: () => request<ApiHealthDiagnostics>('/api/health/diagnostics', {

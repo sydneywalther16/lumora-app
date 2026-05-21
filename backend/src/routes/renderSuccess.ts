@@ -5,7 +5,7 @@ import { env } from '../lib/env';
 import { createRateLimit } from '../middleware/rateLimit';
 import { getCinematicCharacterProfileForUser } from '../services/characterProfiles';
 import {
-  DEFAULT_SUCCESS_FIRST_PROVIDER_PROMPT,
+  FIRST_VIDEO_RESCUE_PROVIDER_PROMPT,
   formatRenderSuccessJobStatus,
   getRenderSuccessJobStatus,
   startRenderSuccessJob,
@@ -19,7 +19,7 @@ const probeSchema = z.object({
   usePrimaryReference: z.boolean().default(false),
   provider: z.enum(['seedance-fast']).default('seedance-fast'),
   duration: z.literal(4).default(4),
-  prompt: z.string().optional().default(DEFAULT_SUCCESS_FIRST_PROVIDER_PROMPT),
+  prompt: z.string().optional().default(FIRST_VIDEO_RESCUE_PROVIDER_PROMPT),
 });
 
 export const renderSuccessRouter = Router();
@@ -90,6 +90,7 @@ renderSuccessRouter.post('/api/render-success/probe', renderSuccessRateLimit, as
     maxPaidAttempts: 1,
     maxTotalAttempts: 1,
     forceProbe: true,
+    firstVideoRescue: true,
   };
   const { job } = await startRenderSuccessJob(input);
   const status = await getRenderSuccessJobStatus(job.id);

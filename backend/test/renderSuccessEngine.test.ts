@@ -1,14 +1,18 @@
 import assert from 'node:assert/strict';
 import {
   DEFAULT_SUCCESS_FIRST_PROVIDER_PROMPT,
+  FIRST_VIDEO_RESCUE_PROVIDER_PROMPT,
   buildRenderSuccessAttemptPlan,
   isUsableVideoOutput,
+  paidAttemptConsumesBudget,
   prioritizeAttemptsWithMemory,
+  rateLimitCountsAsFailedAttempt,
   rateLimitRetryDelayMs,
   recipeMemoryPayload,
   sanitizeSuccessProviderPrompt,
   selectAttemptsWithinBudget,
   shouldPreventDuplicateRender,
+  shouldResumeRateLimitedAttempt,
 } from '../src/services/renderSuccessEngine';
 import type { SeedanceReferenceImage } from '../src/services/providers/seedanceProvider';
 
@@ -56,6 +60,22 @@ assert.equal(plan[3].referenceCount, 0);
 assert.ok(plan.every((attempt) => !attempt.prompt.includes('Sydney')));
 assert.ok(plan.every((attempt) => !/photoshoot|influencer|superstar|model|public figure/i.test(attempt.prompt)));
 
+const firstVideoRescuePlan = buildRenderSuccessAttemptPlan({
+  referenceImages: savedReferences,
+  characterName: 'Sydney Rose',
+  firstVideoRescue: true,
+});
+assert.deepEqual(firstVideoRescuePlan.map((attempt) => attempt.tier), [1, 2]);
+assert.deepEqual(firstVideoRescuePlan.map((attempt) => attempt.provider), ['seedance-fast', 'seedance-fast']);
+assert.equal(firstVideoRescuePlan[0].durationSeconds, 4);
+assert.equal(firstVideoRescuePlan[0].aspectRatio, '9:16');
+assert.equal(firstVideoRescuePlan[0].referenceCount, 1);
+assert.equal(firstVideoRescuePlan[1].referenceCount, 0);
+assert.equal(firstVideoRescuePlan[0].prompt, FIRST_VIDEO_RESCUE_PROVIDER_PROMPT);
+assert.ok(firstVideoRescuePlan.every((attempt) => attempt.promptStyle === 'first_video_rescue'));
+assert.ok(firstVideoRescuePlan.every((attempt) => attempt.quality === 'fast'));
+assert.ok(firstVideoRescuePlan.every((attempt) => !attempt.prompt.includes('Sydney')));
+
 const sanitized = sanitizeSuccessProviderPrompt({
   prompt: 'Sydney Rose walks into a glamour model photoshoot as a superstar public figure.',
   characterName: 'Sydney Rose',
@@ -84,6 +104,17 @@ assert.equal(memoryPrioritized[0].tier, 3);
 
 assert.equal(rateLimitRetryDelayMs({ retryAfterMs: 5_000, retryCount: 0, jitterRatio: 0 }), 7_000);
 assert.equal(rateLimitRetryDelayMs({ retryAfterMs: null, retryCount: 1, jitterRatio: 0 }), 22_000);
+assert.equal(rateLimitCountsAsFailedAttempt(), false);
+assert.equal(paidAttemptConsumesBudget({ renderSuccessPaid: true, providerPredictionId: null }), false);
+assert.equal(paidAttemptConsumesBudget({ renderSuccessPaid: true, providerPredictionId: 'pred_123' }), true);
+assert.equal(shouldResumeRateLimitedAttempt({
+  status: 'rate_limited',
+  retryAvailableAt: new Date(Date.now() - 1000).toISOString(),
+}), true);
+assert.equal(shouldResumeRateLimitedAttempt({
+  status: 'rate_limited',
+  retryAvailableAt: new Date(Date.now() + 60_000).toISOString(),
+}), false);
 
 const recipe = recipeMemoryPayload({
   userId: '00000000-0000-4000-8000-000000000001',

@@ -12,6 +12,7 @@ import {
   isReplicateRateLimitError,
   isSeedanceModerationError,
   type SeedancePredictionEvent,
+  type SeedanceAspectRatio,
   type SeedanceQualityMode,
   type SeedanceReferenceImage,
 } from './providers/seedanceProvider';
@@ -24,20 +25,23 @@ export const DEFAULT_SUCCESS_FIRST_PROVIDER_PROMPT =
 export const ULTRA_SAFE_SCENE_PROVIDER_PROMPT =
   'the cast character walks through a peaceful sunlit garden, natural movement, fully clothed, soft storybook cinematic style, gentle camera motion';
 
+export const FIRST_VIDEO_RESCUE_PROVIDER_PROMPT =
+  'the cast character walks slowly through a peaceful sunlit garden, natural movement, fully clothed, soft storybook cinematic style, gentle camera motion';
+
 const RENDER_SUCCESS_ACTIVE_STATUSES = ['queued', 'rendering', 'processing', 'rate_limited'] as const;
 const RENDER_SUCCESS_TOTAL_ATTEMPTS = 5;
 const RENDER_SUCCESS_DURATION_SECONDS = 4;
-const RENDER_SUCCESS_ASPECT_RATIO = '16:9';
+const RENDER_SUCCESS_ASPECT_RATIO: SeedanceAspectRatio = '16:9';
+const FIRST_VIDEO_RESCUE_ASPECT_RATIO: SeedanceAspectRatio = '9:16';
 const RENDER_SUCCESS_TIMEOUT_MS = 12 * 60 * 1000;
 const RENDER_SUCCESS_POLL_INTERVAL_MS = 4_000;
-const MAX_RATE_LIMIT_RETRIES = 3;
 const MAX_RATE_LIMIT_DELAY_MS = 10 * 60 * 1000;
 const RATE_LIMIT_SAFETY_BUFFER_MS = 2_000;
 
 export type RenderSuccessProvider = 'seedance-fast' | 'seedance-quality' | 'demo-mode';
 export type RenderSuccessAttemptStatus = 'queued' | 'rendering' | 'completed' | 'failed' | 'rate_limited' | 'skipped';
-export type RenderSuccessPromptStyle = 'safe_garden' | 'storybook_cinematic' | 'identity_light' | 'demo';
-export type RenderSuccessStyleMode = 'storybook_cinematic' | 'ultra_safe' | 'demo';
+export type RenderSuccessPromptStyle = 'safe_garden' | 'storybook_cinematic' | 'identity_light' | 'first_video_rescue' | 'demo';
+export type RenderSuccessStyleMode = 'storybook_cinematic' | 'ultra_safe' | 'first_video_rescue' | 'demo';
 
 export type RenderSuccessAttempt = {
   tier: 1 | 2 | 3 | 4 | 5;
@@ -45,7 +49,7 @@ export type RenderSuccessAttempt = {
   providerModel: string;
   quality: SeedanceQualityMode | 'demo';
   durationSeconds: number;
-  aspectRatio: typeof RENDER_SUCCESS_ASPECT_RATIO;
+  aspectRatio: SeedanceAspectRatio;
   referenceImages: SeedanceReferenceImage[];
   referenceCount: number;
   prompt: string;
@@ -80,6 +84,7 @@ type RenderSuccessEngineMetadata = {
   allowDemoFallback?: boolean;
   maxPaidAttempts?: number;
   maxTotalAttempts?: number;
+  firstVideoRescue?: boolean;
   progressLabel?: string;
   createdAt?: string;
 };
@@ -138,6 +143,7 @@ export type StartRenderSuccessJobInput = {
   maxPaidAttempts?: number;
   maxTotalAttempts?: number;
   forceProbe?: boolean;
+  firstVideoRescue?: boolean;
 };
 
 const activeRenderSuccessProcessors = new Set<string>();
@@ -341,14 +347,16 @@ function makeAttempt(input: {
   progressLabel: string;
   lighterCastGuidance?: boolean;
   paid?: boolean;
+  durationSeconds?: number;
+  aspectRatio?: SeedanceAspectRatio;
 }): RenderSuccessAttempt {
   return {
     tier: input.tier,
     provider: providerForQuality(input.quality),
     providerModel: providerModelForQuality(input.quality),
     quality: input.quality,
-    durationSeconds: RENDER_SUCCESS_DURATION_SECONDS,
-    aspectRatio: RENDER_SUCCESS_ASPECT_RATIO,
+    durationSeconds: input.durationSeconds ?? RENDER_SUCCESS_DURATION_SECONDS,
+    aspectRatio: input.aspectRatio ?? RENDER_SUCCESS_ASPECT_RATIO,
     referenceImages: input.referenceImages,
     referenceCount: input.referenceImages.length,
     prompt: input.prompt,
@@ -365,10 +373,15 @@ export function buildRenderSuccessAttemptPlan(input: {
   referenceImages?: SeedanceReferenceImage[];
   characterName?: string | null;
   allowDemoFallback?: boolean;
+  firstVideoRescue?: boolean;
 }) {
   const strongestReferences = strongestSavedReferences(input.referenceImages ?? []);
   const primaryReference = strongestReferences.slice(0, 1);
   const twoStrongestReferences = strongestReferences.slice(0, 2);
+  const rescuePrompt = sanitizeSuccessProviderPrompt({
+    prompt: FIRST_VIDEO_RESCUE_PROVIDER_PROMPT,
+    characterName: input.characterName,
+  });
   const safePrompt = sanitizeSuccessProviderPrompt({
     prompt: DEFAULT_SUCCESS_FIRST_PROVIDER_PROMPT,
     characterName: input.characterName,
@@ -381,7 +394,32 @@ export function buildRenderSuccessAttemptPlan(input: {
     prompt: 'the cast character walks through a peaceful sunlit garden, fully clothed, natural movement, soft storybook cinematic style, calm mood',
     characterName: input.characterName,
   });
-  const attempts: RenderSuccessAttempt[] = [
+
+  const attempts: RenderSuccessAttempt[] = input.firstVideoRescue ? [
+    makeAttempt({
+      tier: 1,
+      quality: 'fast',
+      referenceImages: primaryReference,
+      prompt: rescuePrompt,
+      promptStyle: 'first_video_rescue',
+      styleMode: 'first_video_rescue',
+      aspectRatio: FIRST_VIDEO_RESCUE_ASPECT_RATIO,
+      label: 'First video rescue Seedance Fast primary reference',
+      progressLabel: primaryReference.length ? 'Trying primary reference...' : 'Trying the cleanest storybook render...',
+    }),
+    makeAttempt({
+      tier: 2,
+      quality: 'fast',
+      referenceImages: [],
+      prompt: rescuePrompt,
+      promptStyle: 'first_video_rescue',
+      styleMode: 'first_video_rescue',
+      aspectRatio: FIRST_VIDEO_RESCUE_ASPECT_RATIO,
+      label: 'First video rescue Seedance Fast text only',
+      progressLabel: 'Trying lighter cast guidance...',
+      lighterCastGuidance: true,
+    }),
+  ] : [
     makeAttempt({
       tier: 1,
       quality: 'fast',
@@ -538,6 +576,35 @@ export function shouldPreventDuplicateRender(input: {
   return Number.isFinite(ageMs) && ageMs < RENDER_SUCCESS_TIMEOUT_MS;
 }
 
+export function isRateLimitCooldownActive(input: {
+  retryAvailableAt?: string | null;
+  nowMs?: number;
+}) {
+  return Boolean(
+    input.retryAvailableAt &&
+    Date.parse(input.retryAvailableAt) > (input.nowMs ?? Date.now()),
+  );
+}
+
+export function shouldResumeRateLimitedAttempt(input: {
+  status?: string | null;
+  retryAvailableAt?: string | null;
+  nowMs?: number;
+}) {
+  return input.status === 'rate_limited' && !isRateLimitCooldownActive(input);
+}
+
+export function rateLimitCountsAsFailedAttempt() {
+  return false;
+}
+
+export function paidAttemptConsumesBudget(input: {
+  renderSuccessPaid?: boolean | null;
+  providerPredictionId?: string | null;
+}) {
+  return Boolean(input.renderSuccessPaid && input.providerPredictionId);
+}
+
 export function recipeMemoryPayload(input: {
   userId: string;
   characterId?: string | null;
@@ -632,6 +699,42 @@ function renderSuccessMetadata(row: RenderSuccessJobRow): RenderSuccessEngineMet
   return metadata as RenderSuccessEngineMetadata;
 }
 
+function effectiveAspectRatioForInput(input: Pick<StartRenderSuccessJobInput, 'firstVideoRescue'>) {
+  return input.firstVideoRescue ? FIRST_VIDEO_RESCUE_ASPECT_RATIO : RENDER_SUCCESS_ASPECT_RATIO;
+}
+
+function effectiveInitialPromptForInput(input: Pick<StartRenderSuccessJobInput, 'firstVideoRescue'>) {
+  return input.firstVideoRescue ? FIRST_VIDEO_RESCUE_PROVIDER_PROMPT : DEFAULT_SUCCESS_FIRST_PROVIDER_PROMPT;
+}
+
+async function hasVerifiedVideoForUserCharacter(input: {
+  userId: string;
+  characterId?: string | null;
+}) {
+  try {
+    const result = await query<{
+      videoUrl: string | null;
+      coverAssetUrl: string | null;
+    }>(
+      `select
+         video_url as "videoUrl",
+         cover_asset_url as "coverAssetUrl"
+       from projects
+       where user_id = $1
+         and status = 'completed'
+         and output_type = 'video'
+         and ($2::text is null or character_id = $2)
+       order by updated_at desc nulls last, created_at desc
+       limit 20`,
+      [input.userId, input.characterId ?? null],
+    );
+
+    return result.rows.some((row) => parseProviderVideoOutput(row.videoUrl ?? row.coverAssetUrl).ok);
+  } catch {
+    return false;
+  }
+}
+
 function firstReferenceThumbnail(references: SeedanceReferenceImage[], fallback?: string | null) {
   return references.map((reference) => reference.url).find(Boolean) ?? fallback ?? null;
 }
@@ -644,6 +747,8 @@ function predictionUrl(prediction: Prediction) {
 
 async function createRenderSuccessProject(input: StartRenderSuccessJobInput, groupId: string) {
   const thumbnailUrl = firstReferenceThumbnail(input.referenceImages ?? [], input.characterAvatar);
+  const initialPrompt = effectiveInitialPromptForInput(input);
+  const aspectRatio = effectiveAspectRatioForInput(input);
   const result = await query<{ id: string }>(
     `insert into projects (
        user_id,
@@ -679,7 +784,7 @@ async function createRenderSuccessProject(input: StartRenderSuccessJobInput, gro
       input.title || 'Lumora cinematic draft',
       input.prompt,
       input.prompt,
-      DEFAULT_SUCCESS_FIRST_PROVIDER_PROMPT,
+      initialPrompt,
       SEEDANCE_FAST_MODEL,
       thumbnailUrl,
       input.characterId ?? null,
@@ -687,7 +792,7 @@ async function createRenderSuccessProject(input: StartRenderSuccessJobInput, gro
       input.characterAvatar ?? null,
       Boolean(input.isDefaultSelfCharacter),
       RENDER_SUCCESS_DURATION_SECONDS,
-      RENDER_SUCCESS_ASPECT_RATIO,
+      aspectRatio,
     ],
   );
 
@@ -713,9 +818,11 @@ async function insertMasterJob(input: StartRenderSuccessJobInput, groupId: strin
     allowDemoFallback: Boolean(input.allowDemoFallback),
     maxPaidAttempts: input.maxPaidAttempts ?? env.RENDER_SUCCESS_MAX_PAID_ATTEMPTS,
     maxTotalAttempts: input.maxTotalAttempts ?? RENDER_SUCCESS_TOTAL_ATTEMPTS,
+    firstVideoRescue: Boolean(input.firstVideoRescue),
     progressLabel: 'Lumora is finding the cleanest render path.',
     createdAt: new Date().toISOString(),
   };
+  const aspectRatio = effectiveAspectRatioForInput(input);
   const result = await query<Record<string, unknown>>(
     `insert into generation_jobs (
        user_id,
@@ -753,7 +860,7 @@ async function insertMasterJob(input: StartRenderSuccessJobInput, groupId: strin
       input.prompt,
       input.characterId ?? null,
       RENDER_SUCCESS_DURATION_SECONDS,
-      RENDER_SUCCESS_ASPECT_RATIO,
+      aspectRatio,
       firstReferenceThumbnail(input.referenceImages ?? [], input.characterAvatar),
       JSON.stringify({ renderSuccessEngine: metadata }),
       new Date(Date.now() + RENDER_SUCCESS_TIMEOUT_MS).toISOString(),
@@ -1009,7 +1116,7 @@ async function markAttemptFailed(input: {
   attempt: RenderSuccessAttempt;
   message: string;
   category: string;
-  status?: 'failed' | 'rate_limited';
+  status?: 'failed' | 'rate_limited' | 'skipped';
   retryAfterSeconds?: number | null;
   retryAvailableAt?: string | null;
 }) {
@@ -1032,7 +1139,7 @@ async function markAttemptFailed(input: {
       input.category,
       input.retryAfterSeconds ?? null,
       input.retryAvailableAt ?? null,
-      input.status === 'rate_limited' ? 'rate_limited' : null,
+      input.status === 'rate_limited' ? 'rate_limited' : input.status === 'skipped' ? 'skipped' : null,
     ],
   );
   if ((input.status ?? 'failed') === 'failed') {
@@ -1564,6 +1671,7 @@ async function runProviderAttempt(input: {
       projectId: input.master.projectId,
       providerFallbackStage: `render_success_attempt_${input.attempt.tier}`,
       durationSeconds: input.attempt.durationSeconds,
+      aspectRatio: input.attempt.aspectRatio,
       timeoutMs: RENDER_SUCCESS_TIMEOUT_MS,
       pollIntervalMs: RENDER_SUCCESS_POLL_INTERVAL_MS,
       onPredictionCreated: onPredictionEvent,
@@ -1586,16 +1694,6 @@ async function runProviderAttempt(input: {
   } catch (error) {
     if (isRateLimitLike(error)) {
       recordMapValue(renderSuccessRuntimeStats.rateLimitsByProvider, input.attempt.provider);
-      if (input.attemptJob.retryCount >= MAX_RATE_LIMIT_RETRIES) {
-        await markAttemptFailed({
-          attemptJobId: input.attemptJob.id,
-          attempt: input.attempt,
-          message: 'Render queue stayed busy for too long.',
-          category: 'rate_limited',
-        });
-        return 'failed' as const;
-      }
-
       const retry = retryInfo(error, input.attemptJob.retryCount);
       await markAttemptFailed({
         attemptJobId: input.attemptJob.id,
@@ -1635,6 +1733,7 @@ async function runProviderAttempt(input: {
       attempt: input.attempt,
       message: safeErrorMessage(error),
       category,
+      status: category === 'moderation' && !input.attemptJob.providerPredictionId ? 'skipped' : 'failed',
     });
     await persistRecipe({
       userId: input.master.userId,
@@ -1667,7 +1766,16 @@ export async function startRenderSuccessJob(input: StartRenderSuccessJobInput) {
   const activeJob = input.forceProbe ? null : await findActiveMasterJob(input.userId);
   if (activeJob) {
     duplicateRenderPrevented += 1;
-    if (activeJob.status === 'queued' || activeJob.status === 'rendering') processRenderSuccessJob(activeJob.id);
+    if (
+      activeJob.status === 'queued' ||
+      activeJob.status === 'rendering' ||
+      shouldResumeRateLimitedAttempt({
+        status: activeJob.status,
+        retryAvailableAt: activeJob.retryAvailableAt,
+      })
+    ) {
+      processRenderSuccessJob(activeJob.id);
+    }
     return {
       job: activeJob,
       duplicateOf: activeJob.id,
@@ -1675,9 +1783,17 @@ export async function startRenderSuccessJob(input: StartRenderSuccessJobInput) {
     };
   }
 
+  const firstVideoRescue = input.firstVideoRescue ?? !(await hasVerifiedVideoForUserCharacter({
+    userId: input.userId,
+    characterId: input.characterId ?? null,
+  }));
+  const renderInput: StartRenderSuccessJobInput = {
+    ...input,
+    firstVideoRescue,
+  };
   const groupId = randomUUID();
-  const projectId = await createRenderSuccessProject(input, groupId);
-  const master = await insertMasterJob(input, groupId, projectId);
+  const projectId = await createRenderSuccessProject(renderInput, groupId);
+  const master = await insertMasterJob(renderInput, groupId, projectId);
   processRenderSuccessJob(master.id);
 
   return {
@@ -1707,8 +1823,8 @@ export function processRenderSuccessJob(masterJobId: string) {
         return;
       }
 
-      if (master.status === 'rate_limited' && master.retryAvailableAt && Date.parse(master.retryAvailableAt) > Date.now()) {
-        scheduleResume(master.id, Math.max(1_000, Date.parse(master.retryAvailableAt) - Date.now()));
+      if (master.status === 'rate_limited' && isRateLimitCooldownActive({ retryAvailableAt: master.retryAvailableAt })) {
+        scheduleResume(master.id, Math.max(1_000, Date.parse(master.retryAvailableAt ?? '') - Date.now()));
         return;
       }
 
@@ -1716,6 +1832,7 @@ export function processRenderSuccessJob(masterJobId: string) {
         referenceImages: metadata.referenceImages ?? [],
         characterName: metadata.characterName,
         allowDemoFallback: Boolean(metadata.allowDemoFallback || env.DEMO_MODE),
+        firstVideoRescue: Boolean(metadata.firstVideoRescue),
       });
       const preferredRecipe = await loadPreferredRecipe({
         userId: master.userId,
@@ -1764,16 +1881,16 @@ export function processRenderSuccessJob(masterJobId: string) {
           });
           continue;
         }
+        if (attemptJob?.status === 'rate_limited' && isRateLimitCooldownActive({ retryAvailableAt: attemptJob.retryAvailableAt })) {
+          scheduleResume(master.id, Math.max(1_000, Date.parse(attemptJob.retryAvailableAt ?? '') - Date.now()));
+          return;
+        }
         if (attemptJob?.providerPredictionId && (attemptJob.status === 'rendering' || attemptJob.status === 'rate_limited')) {
           const pollResult = await pollExistingPrediction({ master, metadata, attemptJob, attempt });
           if (pollResult === 'completed' || pollResult === 'pending') return;
           continue;
         }
-        if (attemptJob?.status === 'rate_limited' && attemptJob.retryAvailableAt && Date.parse(attemptJob.retryAvailableAt) > Date.now()) {
-          scheduleResume(master.id, Math.max(1_000, Date.parse(attemptJob.retryAvailableAt) - Date.now()));
-          return;
-        }
-        if (attemptJob?.status === 'failed') continue;
+        if (attemptJob?.status === 'failed' || attemptJob?.status === 'skipped') continue;
         if (!attemptJob) {
           attemptJob = await insertAttemptJob({ master, attempt, metadata });
           attemptJobsByTier.set(attempt.tier, attemptJob);
@@ -1850,8 +1967,8 @@ export function formatRenderSuccessJobStatus(job: RenderSuccessJobRow) {
     referenceCount: job.referenceCount ?? job.renderSuccessReferenceCount,
     retryAfterSeconds: retrySeconds ?? null,
     retryAvailableAt: job.retryAvailableAt,
-    durationSeconds: RENDER_SUCCESS_DURATION_SECONDS,
-    aspectRatio: RENDER_SUCCESS_ASPECT_RATIO,
+    durationSeconds: job.durationSeconds ?? RENDER_SUCCESS_DURATION_SECONDS,
+    aspectRatio: job.aspectRatio ?? (metadata?.firstVideoRescue ? FIRST_VIDEO_RESCUE_ASPECT_RATIO : RENDER_SUCCESS_ASPECT_RATIO),
     displayEngine: 'Seedance Fast',
     generationMode: (job.referenceCount ?? 0) > 0 ? 'seedance-multimodal-reference' : 'seedance-text-to-video',
     message: completedWithOutput
@@ -1884,18 +2001,52 @@ export async function getRenderSuccessJobStatus(jobId: string) {
   const job = await getRenderSuccessJob(jobId);
   if (!job) return null;
 
-  if (job.status === 'queued' || job.status === 'rendering' || (
-    job.status === 'rate_limited' &&
-    (!job.retryAvailableAt || Date.parse(job.retryAvailableAt) <= Date.now())
-  )) {
+  if (job.status === 'queued' || job.status === 'rendering' || shouldResumeRateLimitedAttempt({
+    status: job.status,
+    retryAvailableAt: job.retryAvailableAt,
+  })) {
     processRenderSuccessJob(job.id);
   }
 
   return formatRenderSuccessJobStatus(await getRenderSuccessJob(job.id) ?? job);
 }
 
+export async function resumeRenderSuccessJob(jobId: string) {
+  const job = await getRenderSuccessJob(jobId);
+  if (!job) return null;
+
+  if (job.status === 'completed' || job.status === 'failed' || job.status === 'paused') {
+    return formatRenderSuccessJobStatus(job);
+  }
+
+  if (job.status === 'rate_limited' && isRateLimitCooldownActive({ retryAvailableAt: job.retryAvailableAt })) {
+    return formatRenderSuccessJobStatus(job);
+  }
+
+  processRenderSuccessJob(job.id);
+  return formatRenderSuccessJobStatus(await getRenderSuccessJob(job.id) ?? job);
+}
+
+export async function resumeExpiredRenderSuccessCooldowns(limit = 5) {
+  const result = await query<{ id: string }>(
+    `select id
+     from generation_jobs
+     where render_success_role = 'master'
+       and status = 'rate_limited'
+       and (retry_available_at is null or retry_available_at <= now())
+     order by updated_at asc
+     limit $1`,
+    [Math.max(1, Math.min(20, Math.round(limit)))],
+  );
+  for (const row of result.rows) {
+    processRenderSuccessJob(row.id);
+  }
+  return result.rows.length;
+}
+
 export async function buildRenderSuccessDiagnostics() {
   try {
+    await resumeExpiredRenderSuccessCooldowns().catch(() => 0);
     const result = await query<{
       totalAttempts: number;
       successfulAttempts: number;

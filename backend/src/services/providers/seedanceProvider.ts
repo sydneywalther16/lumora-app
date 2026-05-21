@@ -31,6 +31,7 @@ export const SEEDANCE_FAST_MODEL = 'bytedance/seedance-2.0-fast';
 export const SEEDANCE_QUALITY_MODEL = 'bytedance/seedance-2.0';
 
 export type SeedanceQualityMode = 'fast' | 'quality';
+export type SeedanceAspectRatio = '9:16' | '16:9' | '1:1';
 
 const DEFAULT_SEEDANCE_SETTINGS = {
   duration: 5,
@@ -42,7 +43,7 @@ const DEFAULT_TIMEOUT_MS = 180_000;
 
 export type SeedanceSettings = {
   duration: number;
-  aspect_ratio: typeof DEFAULT_SEEDANCE_SETTINGS.aspect_ratio;
+  aspect_ratio: SeedanceAspectRatio;
   resolution: typeof DEFAULT_SEEDANCE_SETTINGS.resolution;
 };
 
@@ -136,6 +137,7 @@ type GenerateSeedanceVideoOptions = {
   projectId?: string | null;
   providerFallbackStage?: string | null;
   durationSeconds?: number | null;
+  aspectRatio?: SeedanceAspectRatio | string | null;
   onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
   onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 };
@@ -371,8 +373,8 @@ export class ReplicateRateLimitError extends Error {
       : null;
     super(input.message ?? (
       retryAfterSeconds
-        ? `Render queue is cooling down. Try again in about ${retryAfterSeconds} seconds.`
-        : 'Render queue is cooling down. Try again in a moment.'
+        ? `Render queue is cooling down. Lumora will resume automatically in about ${retryAfterSeconds} seconds.`
+        : 'Render queue is cooling down. Lumora will resume automatically.'
     ));
     this.name = 'ReplicateRateLimitError';
     this.retryAfterMs = retryAfterMs;
@@ -577,10 +579,17 @@ function normalizedDurationSeconds(value?: number | null) {
   return Math.min(30, Math.max(2, Math.round(value)));
 }
 
+function normalizedAspectRatio(value?: string | null): SeedanceAspectRatio {
+  return value === '9:16' || value === '1:1' || value === '16:9'
+    ? value
+    : DEFAULT_SEEDANCE_SETTINGS.aspect_ratio;
+}
+
 function settingsForOptions(options: GenerateSeedanceVideoOptions): SeedanceSettings {
   return {
     ...DEFAULT_SEEDANCE_SETTINGS,
     duration: normalizedDurationSeconds(options.durationSeconds),
+    aspect_ratio: normalizedAspectRatio(options.aspectRatio),
   };
 }
 

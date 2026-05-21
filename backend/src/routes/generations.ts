@@ -10,10 +10,12 @@ import {
   createAsyncSeedanceRenderJob,
   formatRenderJobStatus,
   getRenderJobStatus,
+  resumeAsyncRenderJob,
 } from '../services/renderJobPoller';
 import {
   formatRenderSuccessJobStatus,
   getRenderSuccessJobStatus,
+  resumeRenderSuccessJob,
   startRenderSuccessJob,
 } from '../services/renderSuccessEngine';
 import { createVideoGeneration } from '../video';
@@ -120,6 +122,22 @@ generationsRouter.get('/jobs/:id', async (req, res) => {
   }
 
   const status = await getRenderJobStatus(req.params.id);
+  if (!status) {
+    res.status(404).json({ error: 'Render job not found.' });
+    return;
+  }
+  res.json(status);
+});
+
+generationsRouter.post('/jobs/:id/resume', generationRateLimit, async (req, res) => {
+  const jobId = String(req.params.id);
+  const renderSuccessStatus = await resumeRenderSuccessJob(jobId);
+  if (renderSuccessStatus) {
+    res.json(renderSuccessStatus);
+    return;
+  }
+
+  const status = await resumeAsyncRenderJob(jobId);
   if (!status) {
     res.status(404).json({ error: 'Render job not found.' });
     return;

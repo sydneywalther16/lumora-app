@@ -995,7 +995,7 @@ function creatorFacingPausedDetail(value: unknown): string {
     return 'Try a simpler, softer cinematic direction. Your cast and Story Memory are preserved.';
   }
   if (isProviderQueueBusyError(raw)) {
-    return 'Your scene is saved and ready to resume when the queue cools down.';
+    return 'Render queue is cooling down. Lumora will resume automatically.';
   }
   return 'Your scene setup is saved. Resume when you are ready.';
 }
@@ -1652,7 +1652,7 @@ export default function CreateVideo({
     setGenerationModerationDetail('');
     setGenerationModerationStages([]);
     setGenerationSafeRewrite('');
-    setStatus('Your scene is saved and ready to resume.');
+    setStatus('Render queue is cooling down. Lumora will resume automatically.');
   }, [mockRateLimitUi]);
 
   useEffect(() => {
@@ -2333,6 +2333,29 @@ export default function CreateVideo({
       setGenerationLoading(false);
     };
 
+    if (activeRenderJobId && generationStatusState === 'rate_limited') {
+      generationInFlightRef.current = true;
+      setGenerationLoading(true);
+      try {
+        const resumed = await api.resumeGenerationJob(activeRenderJobId);
+        setActiveRenderJobId(asyncRenderJobId(resumed) ?? activeRenderJobId);
+        if (resumed.status === 'rate_limited') {
+          pauseGenerationProgressForCooldown(resumed);
+        } else {
+          clearRenderCooldown();
+          setGenerationStatusState(resumed.status === 'queued' ? 'queued' : 'processing');
+        }
+        setGenerationError('');
+        setStatus(asyncRenderStatusMessage(resumed));
+        showToast({ type: 'success', message: 'Lumora is resuming the saved render path.' });
+      } catch (error) {
+        setStatus(creatorFacingErrorMessage(error, 'Lumora could not resume this render yet. It remains saved in Drafts.'));
+      } finally {
+        releaseGenerateLock();
+      }
+      return;
+    }
+
     generationInFlightRef.current = true;
     setGenerationLoading(true);
 
@@ -2439,10 +2462,10 @@ export default function CreateVideo({
         retryAvailableAt: new Date(Date.now() + retryAfterSeconds * 1000).toISOString(),
       });
       setGenerationError('');
-      setStatus('Your scene is saved and ready to resume.');
+      setStatus('Render queue is cooling down. Lumora will resume automatically.');
       showToast({
         type: 'error',
-        message: 'Render queue is cooling down. Your scene is saved and ready to resume.',
+        message: 'Render queue is cooling down. Lumora will resume automatically.',
       });
       releaseGenerateLock();
       return;
@@ -2913,10 +2936,10 @@ export default function CreateVideo({
         setGenerationModerationDetail('');
         setGenerationModerationStages([]);
         setGenerationError('');
-        setStatus('Your scene is saved and ready to resume.');
+        setStatus('Render queue is cooling down. Lumora will resume automatically.');
         showToast({
           type: 'error',
-          message: `Render queue is cooling down. Resume available in ${retryAfterSeconds} seconds.`,
+          message: `Render queue is cooling down. Lumora will resume automatically in ${retryAfterSeconds} seconds.`,
         });
         return;
       }

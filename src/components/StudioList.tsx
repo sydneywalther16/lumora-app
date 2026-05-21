@@ -42,7 +42,7 @@ function formatStatus(status: string) {
 
 function draftStateCopy(job: GenerationJob) {
   const status = (job.status || '').toLowerCase();
-  if (status === 'rate_limited') return 'Your scene is saved and ready to resume.';
+  if (status === 'rate_limited') return 'Render queue is cooling down. Lumora will resume automatically.';
   if (status === 'queued') return 'Queued for rendering. Lumora will keep checking.';
   if (status === 'rendering' || status === 'processing') return 'Rendering your cinematic moment.';
   if (status === 'verifying_output') return 'Checking that a playable video URL was saved.';
