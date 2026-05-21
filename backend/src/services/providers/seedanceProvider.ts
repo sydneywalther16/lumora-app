@@ -20,6 +20,12 @@ import {
   sanitizeProviderPrompt,
   type ProviderPromptSanitizerResult,
 } from '../providerPromptSanitizer';
+import {
+  ProviderOutputError,
+  type ProviderOutputParseFailure,
+  extractProviderVideoUrl,
+  parseProviderVideoOutput,
+} from '../providerOutputParser';
 
 export const SEEDANCE_FAST_MODEL = 'bytedance/seedance-2.0-fast';
 export const SEEDANCE_QUALITY_MODEL = 'bytedance/seedance-2.0';
@@ -200,37 +206,7 @@ function stringifyUrl(value: unknown): string | null {
 }
 
 export function extractVideoUrl(output: unknown): string | null {
-  const directUrl = stringifyUrl(output);
-  if (directUrl) return directUrl;
-
-  if (Array.isArray(output)) {
-    for (const item of output) {
-      const url = extractVideoUrl(item);
-      if (url) return url;
-    }
-    return null;
-  }
-
-  if (!output || typeof output !== 'object') return null;
-
-  const record = output as Record<string, unknown>;
-  const preferredKeys = [
-    'video',
-    'video_url',
-    'videoUrl',
-    'output',
-    'url',
-    'uri',
-    'file',
-    'files',
-  ];
-
-  for (const key of preferredKeys) {
-    const url = extractVideoUrl(record[key]);
-    if (url) return url;
-  }
-
-  return null;
+  return extractProviderVideoUrl(output);
 }
 
 function normalizeReferenceImages(
@@ -793,15 +769,15 @@ async function runSeedanceAttempt(input: {
     );
   }
 
-  const videoUrl = extractVideoUrl(completedPrediction.output);
+  const outputParse = parseProviderVideoOutput(completedPrediction.output);
 
-  if (!videoUrl) {
-    throw new Error('Seedance generation completed without a usable video URL.');
+  if (!outputParse.ok) {
+    throw new ProviderOutputError(outputParse as ProviderOutputParseFailure);
   }
 
   return {
     completedPrediction,
-    videoUrl,
+    videoUrl: outputParse.videoUrl,
   };
 }
 

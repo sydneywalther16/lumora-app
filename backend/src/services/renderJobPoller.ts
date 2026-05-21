@@ -6,7 +6,6 @@ import { createSeedanceGeneration } from './generationService';
 import { isAssetPersistenceError } from './assetPersistence';
 import { providerFallbackDiagnosticsFromError } from './providerFallbackOrchestrator';
 import {
-  extractVideoUrl,
   isSeedanceModerationError,
   isReplicateRateLimitError,
   SEEDANCE_FAST_MODEL,
@@ -14,6 +13,7 @@ import {
   type SeedanceQualityMode,
   type SeedanceReferenceImage,
 } from './providers/seedanceProvider';
+import { isProviderOutputError, parseProviderVideoOutput } from './providerOutputParser';
 import { serializeDiagnosticError } from './schemaDiagnostics';
 import type { RenderSuccessMode } from './sceneOptimization';
 
@@ -547,6 +547,7 @@ function rateLimitAvailableAt(error: unknown) {
 
 function errorCategory(error: unknown) {
   if (isReplicateRateLimitError(error)) return 'rate_limited';
+  if (isProviderOutputError(error)) return error.category;
   if (isAssetPersistenceError(error)) return 'asset_persistence';
   if (isSeedanceModerationError(error) || providerFallbackDiagnosticsFromError(error)) return 'moderation';
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
@@ -567,9 +568,12 @@ function creatorErrorMessage(error: unknown) {
       ? `Render queue is cooling down. Try again in about ${seconds} seconds.`
       : 'Render queue is cooling down. Try again in a moment.';
   }
+  if (isProviderOutputError(error)) {
+    return 'Provider completed without a usable video output.';
+  }
   const message = error instanceof Error ? error.message : String(error);
   if (message.toLowerCase().includes('timeout') || message.toLowerCase().includes('timed out')) {
-    return 'This scene took longer than expected. Completed shots are saved in Drafts.';
+    return 'This scene is saved, but no video has completed yet.';
   }
   return message || 'Lumora paused this render.';
 }
@@ -708,10 +712,62 @@ async function replicateClient() {
   });
 }
 
+async function verifyOutputReachable(input: {
+  outputUrl: string;
+  storagePath?: string | null;
+}) {
+  if (input.storagePath) return true;
+  if (!/^https?:\/\//i.test(input.outputUrl)) return false;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const head = await fetch(input.outputUrl, { method: 'HEAD', signal: controller.signal });
+    if (head.ok) return true;
+    if (head.status !== 405 && head.status !== 403) return false;
+  } catch {
+    // Some signed video URLs reject HEAD; try a tiny GET before giving up.
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const getController = new AbortController();
+  const getTimeout = setTimeout(() => getController.abort(), 8_000);
+  try {
+    const response = await fetch(input.outputUrl, {
+      method: 'GET',
+      headers: { range: 'bytes=0-1' },
+      signal: getController.signal,
+    });
+    return response.ok || response.status === 206;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(getTimeout);
+  }
+}
+
 async function finalizePredictionJob(job: AsyncRenderJobRecord, prediction: Prediction) {
   const input = metadataInput(job);
-  const outputUrl = extractVideoUrl(prediction.output);
-  if (!input || !outputUrl) return job;
+  const outputParse = parseProviderVideoOutput(prediction.output);
+  if (!input) {
+    await markJobFailed({
+      jobId: job.id,
+      projectId: job.projectId,
+      message: 'Lumora could not resume this render job.',
+      category: 'metadata',
+    });
+    return await getAsyncRenderJob(job.id) ?? job;
+  }
+  if (!outputParse.ok) {
+    await markJobFailed({
+      jobId: job.id,
+      projectId: job.projectId,
+      message: 'Provider completed without a usable video output.',
+      category: outputParse.category,
+    });
+    return await getAsyncRenderJob(job.id) ?? job;
+  }
 
   const persistence = await persistCompletedGeneration({
     userId: job.userId,
@@ -724,7 +780,7 @@ async function finalizePredictionJob(job: AsyncRenderJobRecord, prediction: Pred
     engine: input.engine,
     model: job.providerModel ?? modelForQuality(input.quality),
     displayEngine: displayEngineForQuality(input.quality),
-    videoUrl: outputUrl,
+    videoUrl: outputParse.videoUrl,
     thumbnailUrl: firstReferenceThumbnail(input.referenceImages, input.characterAvatar),
     characterId: input.characterId,
     characterName: input.characterName,
@@ -735,12 +791,27 @@ async function finalizePredictionJob(job: AsyncRenderJobRecord, prediction: Pred
     privacy: 'private',
   });
 
+  const persistedOutputParse = parseProviderVideoOutput(persistence.videoUrl);
+  const outputVerified = persistedOutputParse.ok && await verifyOutputReachable({
+    outputUrl: persistedOutputParse.videoUrl,
+    storagePath: persistence.storagePath,
+  });
+  if (!outputVerified) {
+    await markJobFailed({
+      jobId: job.id,
+      projectId: job.projectId,
+      message: 'Provider completed without a usable video output.',
+      category: persistedOutputParse.ok ? 'provider_output_unreachable' : persistedOutputParse.category,
+    });
+    return await getAsyncRenderJob(job.id) ?? job;
+  }
+
   const completed = await markJobCompleted({
     jobId: job.id,
     projectId: job.projectId,
     providerJobId: prediction.id,
     providerStatus: prediction.status,
-    outputUrl: persistence.videoUrl,
+    outputUrl: persistedOutputParse.videoUrl,
     thumbnailUrl: firstReferenceThumbnail(input.referenceImages, input.characterAvatar),
     providerModel: job.providerModel ?? modelForQuality(input.quality),
   });
@@ -749,12 +820,13 @@ async function finalizePredictionJob(job: AsyncRenderJobRecord, prediction: Pred
 }
 
 export async function pollRenderJob(job: AsyncRenderJobRecord) {
-  if (job.status === 'rate_limited' || !job.providerPredictionId || job.status === 'completed' || job.status === 'failed') return job;
+  const completedWithOutput = job.status === 'completed' && parseProviderVideoOutput(job.outputUrl ?? job.resultAssetUrl).ok;
+  if (job.status === 'rate_limited' || !job.providerPredictionId || completedWithOutput || job.status === 'failed') return job;
   if (job.timeoutAt && Date.parse(job.timeoutAt) < Date.now()) {
     await markJobFailed({
       jobId: job.id,
       projectId: job.projectId,
-      message: 'This scene took longer than expected. Completed shots are saved in Drafts.',
+      message: 'This scene is saved, but no video has completed yet.',
       category: 'timeout',
       status: 'paused',
     });
@@ -803,13 +875,19 @@ export async function getRenderJobStatus(jobId: string) {
 }
 
 export function formatRenderJobStatus(job: AsyncRenderJobRecord) {
-  const status = job.status === 'processing' ? 'rendering' : job.status;
-  const outputUrl = job.outputUrl ?? job.resultAssetUrl;
+  const rawOutputUrl = job.outputUrl ?? job.resultAssetUrl;
+  const outputParse = parseProviderVideoOutput(rawOutputUrl);
+  const outputUrl = outputParse.ok ? outputParse.videoUrl : null;
+  const status = job.status === 'completed' && !outputUrl
+    ? 'failed'
+    : job.status === 'processing'
+      ? 'rendering'
+      : job.status;
   const retrySeconds = job.retryAvailableAt
     ? Math.max(0, Math.ceil((Date.parse(job.retryAvailableAt) - Date.now()) / 1000))
     : job.retryAfterSeconds;
   const progressLabel =
-    status === 'completed'
+    status === 'completed' && outputUrl
       ? 'Your cinematic draft is saved.'
       : status === 'rate_limited'
         ? retrySeconds && retrySeconds > 0
@@ -837,8 +915,8 @@ export function formatRenderJobStatus(job: AsyncRenderJobRecord) {
     providerPredictionId: job.providerPredictionId,
     providerPredictionUrl: job.providerPredictionUrl,
     prompt: job.prompt,
-    outputUrl,
-    videoUrl: outputUrl,
+    outputUrl: outputUrl ?? '',
+    videoUrl: outputUrl ?? '',
     thumbnailUrl: job.thumbnailUrl,
     error: job.errorMessage,
     errorMessage: job.errorMessage,

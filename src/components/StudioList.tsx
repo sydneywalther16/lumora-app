@@ -16,6 +16,7 @@ import { getBestPoster, getBestThumbnail } from '../lib/mediaThumbnail';
 import { openContinueStory } from '../lib/continueStory';
 import { trackCreatorEvent } from '../lib/creatorEvents';
 import { buildSafeTakePrompt, creatorRenderStateCopy } from '../lib/renderStateCopy';
+import { getVerifiedVideoOutputUrl, hasVerifiedVideoOutput } from '../lib/renderCompletion';
 
 type Props = {
   jobs: GenerationJob[];
@@ -30,6 +31,7 @@ function formatStatus(status: string) {
   if (status === 'queued') return 'Queued';
   if (status === 'rendering') return 'Rendering';
   if (status === 'processing') return 'Rendering';
+  if (status === 'verifying_output') return 'Verifying';
   if (status === 'paused') return 'Paused';
   if (status === 'rate_limited') return 'Cooling down';
   if (status === 'completed') return 'Completed';
@@ -43,14 +45,15 @@ function draftStateCopy(job: GenerationJob) {
   if (status === 'rate_limited') return 'Your scene is saved and ready to resume.';
   if (status === 'queued') return 'Queued for rendering. Lumora will keep checking.';
   if (status === 'rendering' || status === 'processing') return 'Rendering your cinematic moment.';
-  if (status === 'paused' || status === 'failed') return 'Your scene is saved. Try a gentler cinematic direction or continue the story.';
-  if (job.resultAssetUrl) return 'Scene ready for its next move.';
+  if (status === 'verifying_output') return 'Checking that a playable video URL was saved.';
+  if (status === 'paused' || status === 'failed') return 'Your scene is saved. Try a gentler cinematic direction.';
+  if (hasVerifiedVideoOutput(job as unknown as Record<string, unknown>)) return 'Scene ready for its next move.';
   return 'Lumora is still shaping this scene.';
 }
 
 function primaryDraftAction(job: GenerationJob) {
   const status = (job.status || '').toLowerCase();
-  if (job.resultAssetUrl) return 'Continue Story';
+  if (hasVerifiedVideoOutput(job as unknown as Record<string, unknown>)) return 'Continue Story';
   if (status === 'rate_limited') return 'Resume render';
   if (status === 'queued' || status === 'rendering' || status === 'processing') return 'Continue checking';
   if (status === 'paused' || status === 'failed') return creatorRenderStateCopy('paused').primaryActionLabel ?? 'Try this take';
@@ -100,6 +103,10 @@ function getJobCharacterLabel(job: GenerationJob) {
   
   // Default fallback
   return '';
+}
+
+function verifiedJobVideoUrl(job: GenerationJob | null) {
+  return getVerifiedVideoOutputUrl(job as unknown as Record<string, unknown> | null);
 }
 
 function friendlyPublishError(error: unknown) {
@@ -186,6 +193,12 @@ export default function StudioList({ jobs, onPublished }: Props) {
   async function postToFeed(job: GenerationJob, captionText: string) {
     setPublishMessage(null);
     setPublishError(null);
+    const verifiedVideoUrl = verifiedJobVideoUrl(job);
+
+    if (!verifiedVideoUrl) {
+      setPublishError('A video has to finish before this scene can be published.');
+      return;
+    }
 
     if (configured && loading && !authUser) {
       setPublishError('Checking your account session. Try posting again in a moment.');
@@ -241,7 +254,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
       title: job.title || null,
       caption: captionText,
       prompt: job.prompt || '',
-      videoUrl: job.resultAssetUrl || '/demo-video.mp4',
+      videoUrl: verifiedVideoUrl,
       characterId: isDefaultSelfCharacter ? CREATOR_SELF_CHARACTER_ID : job.characterId || null,
       characterName,
       characterAvatar,
@@ -306,14 +319,15 @@ export default function StudioList({ jobs, onPublished }: Props) {
   }
 
   async function shareAsset(job: GenerationJob) {
-    if (!job.resultAssetUrl) return;
+    const verifiedVideoUrl = verifiedJobVideoUrl(job);
+    if (!verifiedVideoUrl) return;
 
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         await navigator.share({
           title: job.title || 'Lumora concept',
           text: job.prompt || undefined,
-          url: job.resultAssetUrl,
+          url: verifiedVideoUrl,
         });
         return;
       } catch {
@@ -322,12 +336,12 @@ export default function StudioList({ jobs, onPublished }: Props) {
     }
 
     if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(job.resultAssetUrl);
+      await navigator.clipboard.writeText(verifiedVideoUrl);
       alert('Asset URL copied to clipboard.');
       return;
     }
 
-    alert(job.resultAssetUrl);
+    alert(verifiedVideoUrl);
   }
 
   function remixJob(job: GenerationJob, mode: 'edit' | 'safe_take' = 'edit') {
@@ -389,6 +403,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
       {publishError || publishMessage}
     </div>
   ) : null;
+  const selectedVideoUrl = verifiedJobVideoUrl(selectedJob);
 
   if (!jobs.length || !visibleJobs.length) {
     return (
@@ -422,7 +437,9 @@ export default function StudioList({ jobs, onPublished }: Props) {
 
       <section className="list-stack">
         {visibleJobs.map((job) => {
-          const statusLabel = formatStatus(job.status);
+          const verifiedVideoUrl = verifiedJobVideoUrl(job);
+          const effectiveStatus = job.status === 'completed' && !verifiedVideoUrl ? 'verifying_output' : job.status;
+          const statusLabel = formatStatus(effectiveStatus);
           const statusValue = (job.status || '').toLowerCase();
           const showProviderDetail = false;
           const videoFailed = failedVideoIds.has(job.id);
@@ -467,7 +484,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
                   cursor: 'pointer',
                 }}
               >
-                {job.resultAssetUrl ? (
+                {verifiedVideoUrl ? (
                   !videoFailed ? (
                     <video
                       controls
@@ -488,7 +505,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
                         backgroundColor: 'var(--media-background)',
                       }}
                     >
-                      <source src={job.resultAssetUrl} type="video/mp4" />
+                      <source src={verifiedVideoUrl} type="video/mp4" />
                       Your browser does not support the video tag.
                     </video>
                   ) : (
@@ -585,7 +602,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
 
               <div className="draft-card-footer">
                 <div className="draft-action-row focused-draft-actions">
-                  {job.resultAssetUrl ? (
+                  {verifiedVideoUrl ? (
                     <>
                       <button
                         type="button"
@@ -692,7 +709,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
               </button>
             </div>
 
-            {selectedJob.resultAssetUrl ? (
+            {selectedVideoUrl ? (
               <video
                 controls
                 autoPlay
@@ -709,10 +726,24 @@ export default function StudioList({ jobs, onPublished }: Props) {
                   background: 'var(--media-background)',
                 }}
               >
-                <source src={selectedJob.resultAssetUrl} type="video/mp4" />
+                <source src={selectedVideoUrl} type="video/mp4" />
                 Your browser does not support the video tag.
               </video>
-            ) : null}
+            ) : (
+              <div className="draft-render-placeholder cinematic-shimmer" style={{
+                minHeight: '220px',
+                borderRadius: '18px',
+                display: 'grid',
+                placeItems: 'center',
+                padding: '18px',
+                textAlign: 'center',
+              }}>
+                <div>
+                  <strong>{formatStatus(selectedJob.status === 'completed' ? 'verifying_output' : selectedJob.status)}</strong>
+                  <p className="muted" style={{ margin: '10px 0 0' }}>{draftStateCopy(selectedJob)}</p>
+                </div>
+              </div>
+            )}
 
             <label className="field-block" style={{ marginTop: '14px' }}>
               <span>Post caption</span>
@@ -740,27 +771,39 @@ export default function StudioList({ jobs, onPublished }: Props) {
                 </select>
               </label>
 
-              <button
-                type="button"
-                className="primary-btn"
-                onClick={() => {
-                  void postToFeed(selectedJob, captionDraft);
-                }}
-                disabled={isPosted(selectedJob.id) || !selectedJob.resultAssetUrl}
-              >
-                {isPosted(selectedJob.id) ? 'Posted' : selectedJob.resultAssetUrl ? 'Publish' : 'Video still rendering'}
-              </button>
+              {selectedVideoUrl ? (
+                <button
+                  type="button"
+                  className="primary-btn"
+                  onClick={() => {
+                    void postToFeed(selectedJob, captionDraft);
+                  }}
+                  disabled={isPosted(selectedJob.id)}
+                >
+                  {isPosted(selectedJob.id) ? 'Posted' : 'Publish'}
+                </button>
+              ) : null}
 
               <button type="button" className="ghost-btn" onClick={() => remixJob(selectedJob)}>
                 Edit scene
               </button>
 
-              <button type="button" className="ghost-btn" onClick={() => continueStory(selectedJob)}>
-                Continue Story
-              </button>
+              {selectedVideoUrl ? (
+                <button type="button" className="ghost-btn" onClick={() => continueStory(selectedJob)}>
+                  Continue Story
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => remixJob(selectedJob, (selectedJob.status || '').toLowerCase() === 'paused' || (selectedJob.status || '').toLowerCase() === 'failed' ? 'safe_take' : 'edit')}
+                >
+                  {primaryDraftAction(selectedJob)}
+                </button>
+              )}
 
-              {selectedJob.resultAssetUrl ? (
-                <a href={selectedJob.resultAssetUrl} download className="ghost-btn">
+              {selectedVideoUrl ? (
+                <a href={selectedVideoUrl} download className="ghost-btn">
                   Download
                 </a>
               ) : (
@@ -775,9 +818,9 @@ export default function StudioList({ jobs, onPublished }: Props) {
                 onClick={() => {
                   void shareAsset(selectedJob);
                 }}
-                disabled={!selectedJob.resultAssetUrl}
+                disabled={!selectedVideoUrl}
               >
-                {selectedJob.resultAssetUrl ? 'Share' : 'Share when ready'}
+                {selectedVideoUrl ? 'Share' : 'Share when ready'}
               </button>
             </div>
 

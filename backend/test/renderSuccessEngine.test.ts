@@ -99,6 +99,7 @@ assert.equal(recipe.failureCount, 0);
 
 assert.equal(isUsableVideoOutput({ providerStatus: 'succeeded', outputUrl: 'https://video.example/render.mp4' }), true);
 assert.equal(isUsableVideoOutput({ providerStatus: 'succeeded', outputUrl: '' }), false);
+assert.equal(isUsableVideoOutput({ providerStatus: 'succeeded', outputUrl: 'https://video.example/render.jpg' }), false);
 assert.equal(isUsableVideoOutput({ providerStatus: 'failed', outputUrl: 'https://video.example/render.mp4' }), false);
 assert.equal(isUsableVideoOutput({ providerStatus: 'succeeded', outputUrl: 'https://video.example/render.mp4', storagePath: 'user/generations/render.mp4' }), true);
 

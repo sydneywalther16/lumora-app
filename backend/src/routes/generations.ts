@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createRateLimit } from '../middleware/rateLimit';
 import { persistCompletedGeneration } from '../services/generationPersistence';
 import { isAssetPersistenceError } from '../services/assetPersistence';
+import { parseProviderVideoOutput } from '../services/providerOutputParser';
 import { isSeedanceModerationError } from '../services/providers/seedanceProvider';
 import { providerFallbackDiagnosticsFromError } from '../services/providerFallbackOrchestrator';
 import {
@@ -326,6 +327,25 @@ generationsRouter.post('/', generationRateLimit, async (req, res) => {
       return;
     }
 
+    const providerOutput = parseProviderVideoOutput(providerResult.resultAssetUrl);
+    if (!providerOutput.ok) {
+      res.status(202).json({
+        id: providerResult.providerJobId,
+        jobId: providerResult.providerJobId,
+        status: 'failed',
+        engine: payload.engine,
+        characterId: payload.characterId ?? null,
+        characterName: payload.characterName ?? null,
+        prompt,
+        outputUrl: '',
+        videoUrl: '',
+        message: 'Provider completed without a usable video output.',
+        errorCategory: providerOutput.category,
+        createdAt: new Date().toISOString(),
+      });
+      return;
+    }
+
     const persistence = await persistCompletedGeneration({
       userId: payload.userId ?? null,
       id: providerResult.providerJobId,
@@ -334,7 +354,7 @@ generationsRouter.post('/', generationRateLimit, async (req, res) => {
       finalPrompt: providerResult.prompt,
       provider: payload.engine,
       engine: payload.engine,
-      videoUrl: providerResult.resultAssetUrl,
+      videoUrl: providerOutput.videoUrl,
       thumbnailUrl: firstReferenceThumbnail(payload.referenceImages, payload.characterAvatar),
       characterId: payload.characterId ?? null,
       characterName: payload.characterName ?? null,

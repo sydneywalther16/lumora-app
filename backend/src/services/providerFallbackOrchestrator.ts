@@ -629,7 +629,7 @@ export async function generateSeedanceWithProviderFallback(input: {
   stages.push({
     stage: 'paused',
     provider: providerForQuality(requestedQuality === 'quality' ? 'fast' : requestedQuality),
-    message: 'This renderer paused the scene. Your completed shots are saved in Drafts.',
+    message: 'This renderer paused the scene. Your scene is saved, but no new video has completed yet.',
     status: 'paused',
     blockedReasonCategory: moderationCategory(lastModerationError),
     quality: requestedQuality === 'quality' ? 'fast' : requestedQuality,

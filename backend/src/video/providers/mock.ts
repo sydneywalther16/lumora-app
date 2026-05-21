@@ -6,14 +6,11 @@ export class MockVideoProvider implements VideoProvider {
 
   async createGeneration(input: VideoGenerationRequest): Promise<VideoProviderResult> {
     return {
-      status: 'completed',
+      status: 'failed',
       provider: this.engine,
       providerJobId: randomUUID(),
-      resultAssetUrl: '/demo-video.mp4',
-      message: 'Mock video generated successfully for local development.',
-      prompt: input.prompt,
-      characterId: input.characterId ?? null,
-      characterName: input.characterName ?? null,
+      message: 'Demo Mode is preview-only and did not create provider video output.',
+      errorMessage: 'Demo Mode did not create provider video output.',
     };
   }
 }

@@ -1,34 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import { env } from '../../lib/env';
+import { extractProviderVideoUrl } from '../../services/providerOutputParser';
 import type { VideoGenerationRequest, VideoProvider, VideoProviderResult } from './types';
 
 const VIDEO_MODEL = 'veo-3.1-generate-preview';
-const MOCK_OUTPUT_URL = '/demo-video.mp4';
 
-function createMockResult(input: VideoGenerationRequest, message: string): VideoProviderResult {
+function createUnavailableResult(message: string): VideoProviderResult {
   return {
-    status: 'completed',
+    status: 'failed',
     provider: 'veo',
-    providerJobId: 'veo-mock-fallback',
-    resultAssetUrl: MOCK_OUTPUT_URL,
+    providerJobId: randomUUID(),
     message,
-    prompt: input.prompt,
-    characterId: input.characterId ?? null,
-    characterName: input.characterName ?? null,
+    errorMessage: message,
   };
 }
 
 function extractVideoUrl(operationResult: any): string | null {
   if (!operationResult) return null;
   const response = operationResult.response ?? operationResult;
-  return (
-    response?.output?.[0]?.uri ||
-    response?.artifacts?.[0]?.uri ||
-    response?.video?.uri ||
-    response?.videoUri ||
-    response?.output?.[0]?.video?.uri ||
-    null
-  );
+  return extractProviderVideoUrl(response);
 }
 
 export class VeoVideoProvider implements VideoProvider {
@@ -36,7 +26,7 @@ export class VeoVideoProvider implements VideoProvider {
 
   async createGeneration(input: VideoGenerationRequest): Promise<VideoProviderResult> {
     if (!env.GOOGLE_API_KEY) {
-      return createMockResult(input, 'Veo unavailable, showing mock output instead');
+      return createUnavailableResult('Veo provider is not configured. Choose Seedance Fast or explicit Demo Mode.');
     }
 
     try {
@@ -60,11 +50,14 @@ export class VeoVideoProvider implements VideoProvider {
 
       if (operation.done) {
         const outputUrl = extractVideoUrl(operation.result ?? operation.response ?? operation);
+        if (!outputUrl) {
+          return createUnavailableResult('Veo completed without a usable video output.');
+        }
         return {
           status: 'completed',
           provider: this.engine,
           providerJobId,
-          resultAssetUrl: outputUrl || MOCK_OUTPUT_URL,
+          resultAssetUrl: outputUrl,
           message: 'Veo generation started',
           prompt: input.prompt,
           characterId: input.characterId ?? null,
@@ -90,7 +83,10 @@ export class VeoVideoProvider implements VideoProvider {
           : [finalOperation];
 
       const completedOperation = operationResponse ?? finalOperation;
-      const outputUrl = extractVideoUrl(completedOperation) ?? MOCK_OUTPUT_URL;
+      const outputUrl = extractVideoUrl(completedOperation);
+      if (!outputUrl) {
+        return createUnavailableResult('Veo completed without a usable video output.');
+      }
 
       return {
         status: 'completed',
@@ -104,8 +100,8 @@ export class VeoVideoProvider implements VideoProvider {
         rawResponse: completedOperation,
       };
     } catch (error) {
-      console.info('Veo unavailable, showing mock output instead', error);
-      return createMockResult(input, 'Veo unavailable, showing mock output instead');
+      console.info('Veo unavailable', error);
+      return createUnavailableResult('Veo provider is unavailable. Choose Seedance Fast or explicit Demo Mode.');
     }
   }
 }

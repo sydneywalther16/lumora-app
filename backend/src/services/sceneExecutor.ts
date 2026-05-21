@@ -481,7 +481,7 @@ export async function executeScenePlan(input: ExecuteScenePlanInput): Promise<Sc
       const moderationDiagnostics = isSeedanceModerationError(error) ? error.diagnostics : null;
       const providerFallbackDiagnostics = providerFallbackDiagnosticsFromError(error);
       const message = providerFallbackDiagnostics
-        ? 'This renderer paused the scene. Your completed shots are saved in Drafts.'
+        ? 'This renderer paused the scene. Your scene is saved, but no new video has completed yet.'
         : error instanceof Error ? error.message : 'Scene clip generation failed.';
       const failedJob = await updateGenerationJobStatus({
         jobId: clip.jobId ?? clip.id,

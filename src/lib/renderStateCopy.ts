@@ -7,6 +7,7 @@ export type CreatorRenderStatus =
   | 'queued'
   | 'rendering'
   | 'processing'
+  | 'verifying_output'
   | 'rate_limited'
   | 'paused'
   | 'blocked'
@@ -205,6 +206,13 @@ export function creatorRenderStateCopy(status: CreatorRenderStatus, cooldownSeco
         body: 'Trying the simplest safe cinematic route first and saving successful drafts as they complete.',
         tone: 'rendering',
       };
+    case 'verifying_output':
+      return {
+        label: 'Verifying',
+        title: 'Lumora is checking the video output.',
+        body: 'The draft is not marked ready until a playable video URL is saved.',
+        tone: 'rendering',
+      };
     case 'completed':
     case 'saved':
       return {
@@ -234,7 +242,7 @@ export function creatorRenderStateCopy(status: CreatorRenderStatus, cooldownSeco
       return {
         label: 'Still checking',
         title: 'Your cinematic moment is still processing.',
-        body: 'Lumora will keep checking and save completed work to Drafts.',
+        body: 'Lumora will keep checking and save the video to Drafts only after output is verified.',
         tertiaryActionLabel: 'Save draft',
         tone: 'paused',
       };

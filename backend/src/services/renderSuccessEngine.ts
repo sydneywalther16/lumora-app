@@ -8,7 +8,6 @@ import { createVideoGeneration } from '../video';
 import {
   SEEDANCE_FAST_MODEL,
   SEEDANCE_QUALITY_MODEL,
-  extractVideoUrl,
   generateSeedanceVideo,
   isReplicateRateLimitError,
   isSeedanceModerationError,
@@ -16,6 +15,7 @@ import {
   type SeedanceQualityMode,
   type SeedanceReferenceImage,
 } from './providers/seedanceProvider';
+import { isProviderOutputError, parseProviderVideoOutput } from './providerOutputParser';
 import { scoreReferenceConfidence } from './sceneOptimization';
 
 export const DEFAULT_SUCCESS_FIRST_PROVIDER_PROMPT =
@@ -223,6 +223,9 @@ function safeErrorMessage(error: unknown) {
   }
   if (isSeedanceModerationError(error)) {
     return 'This scene needs a simpler direction before rendering.';
+  }
+  if (isProviderOutputError(error)) {
+    return 'Provider completed without a usable video output.';
   }
   const message = error instanceof Error ? error.message : String(error);
   const lower = message.toLowerCase();
@@ -514,9 +517,10 @@ export function isUsableVideoOutput(input: {
   outputUrl?: string | null;
   storagePath?: string | null;
 }) {
+  const parsed = parseProviderVideoOutput(input.outputUrl);
   return (
     (input.providerStatus === 'succeeded' || input.providerStatus === 'completed' || !input.providerStatus) &&
-    Boolean(input.outputUrl && input.outputUrl.trim()) &&
+    parsed.ok &&
     (Boolean(input.storagePath) || /^https?:\/\//i.test(input.outputUrl ?? '') || /^\/[^/]/.test(input.outputUrl ?? ''))
   );
 }
@@ -1258,6 +1262,25 @@ async function finalizeSuccessfulAttempt(input: {
   model: string;
   warnings?: string[];
 }) {
+  const providerOutputParse = parseProviderVideoOutput(input.providerOutputUrl);
+  if (!providerOutputParse.ok) {
+    providerOutputMissingCount += 1;
+    await markAttemptFailed({
+      attemptJobId: input.attemptJob.id,
+      attempt: input.attempt,
+      message: 'Provider completed without a usable video output.',
+      category: providerOutputParse.category,
+    });
+    await persistRecipe({
+      userId: input.master.userId,
+      characterId: input.metadata.characterId,
+      attempt: input.attempt,
+      success: false,
+      failureCategory: providerOutputParse.category,
+    });
+    return false;
+  }
+
   const persistence = await persistCompletedGeneration({
     userId: input.master.userId,
     id: input.providerJobId ?? input.attemptJob.id,
@@ -1273,7 +1296,7 @@ async function finalizeSuccessfulAttempt(input: {
       : input.attempt.quality === 'fast'
         ? 'Seedance Fast'
         : 'Demo Mode',
-    videoUrl: input.providerOutputUrl,
+    videoUrl: providerOutputParse.videoUrl,
     thumbnailUrl: firstReferenceThumbnail(input.attempt.referenceImages, input.metadata.characterAvatar),
     characterId: input.metadata.characterId ?? null,
     characterName: input.metadata.characterName ?? null,
@@ -1398,8 +1421,24 @@ async function pollExistingPrediction(input: {
   });
 
   if (prediction.status === 'succeeded') {
-    const outputUrl = extractVideoUrl(prediction.output);
-    if (!outputUrl) return 'failed' as const;
+    const outputParse = parseProviderVideoOutput(prediction.output);
+    if (!outputParse.ok) {
+      providerOutputMissingCount += 1;
+      await markAttemptFailed({
+        attemptJobId: input.attemptJob.id,
+        attempt: input.attempt,
+        message: 'Provider completed without a usable video output.',
+        category: outputParse.category,
+      });
+      await persistRecipe({
+        userId: input.master.userId,
+        characterId: input.metadata.characterId,
+        attempt: input.attempt,
+        success: false,
+        failureCategory: outputParse.category,
+      });
+      return 'failed' as const;
+    }
     const completed = await finalizeSuccessfulAttempt({
       master: input.master,
       metadata: input.metadata,
@@ -1407,7 +1446,7 @@ async function pollExistingPrediction(input: {
       attempt: input.attempt,
       providerJobId: prediction.id,
       providerStatus: prediction.status,
-      providerOutputUrl: outputUrl,
+      providerOutputUrl: outputParse.videoUrl,
       finalPrompt: input.attempt.prompt,
       model: input.attempt.providerModel,
     });
@@ -1452,7 +1491,15 @@ async function runDemoAttempt(input: {
     characterId: input.metadata.characterId ?? null,
     characterName: input.metadata.characterName ?? null,
   });
-  if (result.status !== 'completed' || !result.resultAssetUrl) return false;
+  if (result.status !== 'completed' || !result.resultAssetUrl) {
+    await markAttemptFailed({
+      attemptJobId: input.attemptJob.id,
+      attempt: input.attempt,
+      message: 'Demo Mode did not create provider video output.',
+      category: 'demo_output_missing',
+    });
+    return false;
+  }
   return finalizeSuccessfulAttempt({
     master: input.master,
     metadata: input.metadata,
@@ -1577,7 +1624,11 @@ async function runProviderAttempt(input: {
       return 'pending' as const;
     }
 
-    const category = isSeedanceModerationError(error) ? 'moderation' : 'provider';
+    const category = isProviderOutputError(error)
+      ? error.category
+      : isSeedanceModerationError(error)
+        ? 'moderation'
+        : 'provider';
     if (category === 'moderation') recordMapValue(renderSuccessRuntimeStats.moderationBlocksByTier, input.attempt.tier);
     await markAttemptFailed({
       attemptJobId: input.attemptJob.id,
@@ -1686,18 +1737,32 @@ export function processRenderSuccessJob(masterJobId: string) {
 
       for (const attempt of budgetedAttempts) {
         let attemptJob = attemptJobsByTier.get(attempt.tier) ?? null;
-        if (attemptJob?.status === 'completed' && (attemptJob.outputUrl || attemptJob.resultAssetUrl)) {
+        const attemptOutputUrl = attemptJob?.outputUrl ?? attemptJob?.resultAssetUrl ?? null;
+        const attemptOutputParse = parseProviderVideoOutput(attemptOutputUrl);
+        if (attemptJob?.status === 'completed' && isUsableVideoOutput({
+          providerStatus: attemptJob.providerStatus ?? 'succeeded',
+          outputUrl: attemptOutputUrl,
+        })) {
           await markMasterStatus({
             masterId: master.id,
             status: 'completed',
             providerStatus: 'succeeded',
             progressLabel: 'Cinematic draft ready.',
-            outputUrl: attemptJob.outputUrl ?? attemptJob.resultAssetUrl,
+            outputUrl: attemptOutputUrl,
             providerModel: attempt.providerModel,
             referenceCount: attempt.referenceCount,
             attemptTier: attempt.tier,
           });
           return;
+        }
+        if (attemptJob?.status === 'completed' && !attemptOutputParse.ok) {
+          await markAttemptFailed({
+            attemptJobId: attemptJob.id,
+            attempt,
+            message: 'Provider completed without a usable video output.',
+            category: attemptOutputParse.category,
+          });
+          continue;
         }
         if (attemptJob?.providerPredictionId && (attemptJob.status === 'rendering' || attemptJob.status === 'rate_limited')) {
           const pollResult = await pollExistingPrediction({ master, metadata, attemptJob, attempt });
@@ -1736,8 +1801,15 @@ export function processRenderSuccessJob(masterJobId: string) {
 
 export function formatRenderSuccessJobStatus(job: RenderSuccessJobRow) {
   const metadata = renderSuccessMetadata(job);
-  const outputUrl = job.outputUrl ?? job.resultAssetUrl ?? '';
-  const renderedWithLighterCastGuidance = job.status === 'completed' && (
+  const outputParse = parseProviderVideoOutput(job.outputUrl ?? job.resultAssetUrl ?? null);
+  const outputUrl = outputParse.ok ? outputParse.videoUrl : '';
+  const completedWithOutput = job.status === 'completed' && Boolean(outputUrl);
+  const status = job.status === 'completed' && !outputUrl
+    ? 'failed'
+    : job.status === 'processing'
+      ? 'rendering'
+      : job.status;
+  const renderedWithLighterCastGuidance = completedWithOutput && (
     job.renderSuccessAttemptTier === 4 ||
     job.referenceCount === 0 ||
     job.renderSuccessReferenceCount === 0
@@ -1745,11 +1817,11 @@ export function formatRenderSuccessJobStatus(job: RenderSuccessJobRow) {
   const retrySeconds = job.retryAvailableAt
     ? Math.max(0, Math.ceil((Date.parse(job.retryAvailableAt) - Date.now()) / 1000))
     : job.retryAfterSeconds;
-  const progressLabel = job.status === 'completed'
+  const progressLabel = completedWithOutput
     ? 'Cinematic draft ready.'
-    : job.status === 'rate_limited'
+    : status === 'rate_limited'
       ? 'Render queue is cooling down. Lumora will resume automatically.'
-      : job.status === 'paused' || job.status === 'failed'
+      : status === 'paused' || status === 'failed'
         ? 'This scene needs a simpler direction before rendering.'
         : metadata?.progressLabel || 'Lumora is finding the cleanest render path.';
 
@@ -1757,7 +1829,7 @@ export function formatRenderSuccessJobStatus(job: RenderSuccessJobRow) {
     id: job.id,
     jobId: job.id,
     projectId: job.projectId,
-    status: job.status === 'processing' ? 'rendering' : job.status,
+    status,
     providerStatus: job.providerStatus,
     progressLabel,
     engine: 'seedance-2.0',
@@ -1782,12 +1854,14 @@ export function formatRenderSuccessJobStatus(job: RenderSuccessJobRow) {
     aspectRatio: RENDER_SUCCESS_ASPECT_RATIO,
     displayEngine: 'Seedance Fast',
     generationMode: (job.referenceCount ?? 0) > 0 ? 'seedance-multimodal-reference' : 'seedance-text-to-video',
-    message: job.status === 'completed'
+    message: completedWithOutput
       ? renderedWithLighterCastGuidance
         ? 'Rendered with lighter cast guidance.'
         : 'Cinematic draft ready.'
-      : job.status === 'rate_limited'
+      : status === 'rate_limited'
         ? 'Render queue is cooling down. Lumora will resume automatically.'
+      : status === 'paused' || status === 'failed'
+        ? 'This scene needs a simpler direction before rendering.'
         : 'Lumora is finding the cleanest render path.',
     warnings: renderedWithLighterCastGuidance ? ['Rendered with lighter cast guidance.'] : [],
     renderSuccess: {
@@ -1842,7 +1916,7 @@ export async function buildRenderSuccessDiagnostics() {
              and status in ('queued', 'rendering', 'processing')
              and updated_at < now() - interval '30 minutes'
          )::int as "currentStuckJobs",
-         count(*) filter (where error_category = 'provider_output_missing')::int as "outputMissingCount",
+         count(*) filter (where error_category in ('provider_output_missing', 'provider_output_unreachable', 'output_missing', 'unsupported_output_shape', 'image_output', 'non_video_output', 'error_output', 'demo_output_missing'))::int as "outputMissingCount",
          (
            select provider
            from render_success_memory

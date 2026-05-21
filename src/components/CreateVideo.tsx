@@ -66,6 +66,10 @@ import {
   successFirstOverrides,
   ULTRA_SAFE_SCENE_PROMPT,
 } from '../lib/renderStateCopy';
+import {
+  getVerifiedVideoOutputUrl,
+  normalizeVerifiedVideoOutputUrl,
+} from '../lib/renderCompletion';
 
 type CreateVideoProps = {
   refreshKey?: number;
@@ -278,7 +282,7 @@ type GenerateVideoApiResponse = {
   retryAvailableAt?: string | null;
 };
 
-type GenerationStatusState = 'idle' | 'queued' | 'processing' | 'rate_limited' | 'completed' | 'failed';
+type GenerationStatusState = 'idle' | 'queued' | 'processing' | 'verifying_output' | 'rate_limited' | 'completed' | 'failed';
 type ToastState = {
   type: 'success' | 'error';
   message: string;
@@ -287,6 +291,7 @@ type ToastState = {
 const generationStatusLabels: Record<Exclude<GenerationStatusState, 'idle'>, string> = {
   queued: 'Queued',
   processing: 'Rendering',
+  verifying_output: 'Verifying',
   rate_limited: 'Cooling down',
   completed: 'Saved',
   failed: 'Paused',
@@ -303,7 +308,7 @@ function asyncRenderJobId(data: GenerateVideoApiResponse | GenerationResponse | 
 
 function isAsyncRenderResponse(data: GenerateVideoApiResponse | GenerationResponse | null | undefined) {
   const status = typeof data?.status === 'string' ? data.status : '';
-  const outputUrl = normalizeVideoUrl(data?.videoUrl ?? data?.outputUrl);
+  const outputUrl = getVerifiedVideoOutputUrl(data as Record<string, unknown> | null | undefined);
   return Boolean(asyncRenderJobId(data) && asyncRenderStatuses.has(status) && !outputUrl);
 }
 
@@ -345,7 +350,8 @@ function asyncRenderStatusMessage(data: GenerateVideoApiResponse | GenerationRes
   const visibleMessage = progressLabel || message;
   if (visibleMessage && !isProviderTechnicalText(visibleMessage)) return visibleMessage;
   if (status === 'queued') return 'Render queued. Lumora is preparing your scene.';
-  if (status === 'paused') return 'This scene took longer than expected. Completed shots are saved in Drafts.';
+  if (status === 'paused') return 'This scene is saved, but no video has completed yet.';
+  if (status === 'verifying_output') return 'Lumora is checking the video output before marking this draft ready.';
   return 'Rendering your cinematic take...';
 }
 
@@ -393,6 +399,8 @@ function creatorSceneStatusLabel(status: string) {
       return 'Paused';
     case 'processing':
       return 'Rendering';
+    case 'verifying_output':
+      return 'Verifying';
     case 'queued':
       return 'Queued';
     default:
@@ -458,6 +466,14 @@ function normalizeVideoUrl(video: unknown): string | null {
     return normalizeVideoUrl(firstUrl);
   }
   return null;
+}
+
+function localMockQueryEnabled(flag: string) {
+  if (typeof window === 'undefined') return false;
+  const params = new URLSearchParams(window.location.search);
+  const host = window.location.hostname;
+  const localHost = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+  return params.get(flag) === '1' && (import.meta.env.DEV || localHost);
 }
 
 function cleanReferenceUrl(value?: string | null): string | null {
@@ -981,7 +997,7 @@ function creatorFacingPausedDetail(value: unknown): string {
   if (isProviderQueueBusyError(raw)) {
     return 'Your scene is saved and ready to resume when the queue cools down.';
   }
-  return 'Your cinematic work is preserved. Resume when you are ready.';
+  return 'Your scene setup is saved. Resume when you are ready.';
 }
 
 function creatorFacingWarningMessage(value: string): string | null {
@@ -1087,34 +1103,25 @@ export default function CreateVideo({
   const repairFileInputRef = useRef<HTMLInputElement | null>(null);
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const mockRateLimitUi = Boolean(
-    import.meta.env.DEV &&
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('mockRateLimit') === '1'
+    localMockQueryEnabled('mockRateLimit')
   );
   const mockPausedUi = Boolean(
-    import.meta.env.DEV &&
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('mockPaused') === '1'
+    localMockQueryEnabled('mockPaused')
   );
   const mockBlockedUi = Boolean(
-    import.meta.env.DEV &&
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('mockBlocked') === '1'
+    localMockQueryEnabled('mockBlocked')
   );
   const mockSuccessFirstUi = Boolean(
-    import.meta.env.DEV &&
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('mockSuccessFirst') === '1'
+    localMockQueryEnabled('mockSuccessFirst') || localMockQueryEnabled('mockRenderingNoOutput')
   );
   const mockRenderSuccessUi = Boolean(
-    import.meta.env.DEV &&
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('mockRenderSuccess') === '1'
+    localMockQueryEnabled('mockRenderSuccess') || localMockQueryEnabled('mockVerifiedOutput')
+  );
+  const mockOutputMissingUi = Boolean(
+    localMockQueryEnabled('mockOutputMissing')
   );
   const mockAllAttemptsBlockedUi = Boolean(
-    import.meta.env.DEV &&
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('mockAllAttemptsBlocked') === '1'
+    localMockQueryEnabled('mockAllAttemptsBlocked') || localMockQueryEnabled('mockAttemptsExhausted')
   );
   const primaryReferenceImage = pickReferenceImage({ referenceImageUrl, referenceImageUrls });
   const hasSelfCharacter = forceSelfMode || isDefaultSelfCharacter;
@@ -1299,7 +1306,16 @@ export default function CreateVideo({
       : continuityMemoryDraft.emotionalTone
         ? 'Emotional pacing matched your prior scene.'
         : 'Lumora will remember your world as you create.';
-  const visibleRenderState = generationStatusState === 'idle' ? null : {
+  const generationResultVideoUrl = getVerifiedVideoOutputUrl(generationResult as unknown as Record<string, unknown> | null);
+  const verifiedGeneratedVideoUrl = normalizeVerifiedVideoOutputUrl(generatedVideoUrl);
+  const hasVerifiedGenerationOutput = Boolean(generationResultVideoUrl);
+  const activeSuccessFirstWithoutOutput = renderPreference === 'success_first' && !hasVerifiedGenerationOutput && (
+    generationStatusState === 'queued' ||
+    generationStatusState === 'processing' ||
+    generationStatusState === 'verifying_output' ||
+    generationStatusState === 'rate_limited'
+  );
+  const visibleRenderState = generationStatusState === 'idle' || hasVerifiedGenerationOutput ? null : {
     label: generationStatusLabels[generationStatusState],
     tone: renderStateTone(generationStatusState),
     headline: renderStateHeadline(generationStatusState),
@@ -1335,14 +1351,16 @@ export default function CreateVideo({
       ? 'Add reference before generating'
     : 'Generate Cinematic Scene';
   const showCinematicStructure = Boolean(
-    creativePlanLoading ||
-    creativePlan ||
-    sceneExecutionPlan ||
-    sceneExecutionResult ||
-    creativePlanStatus ||
-    creativePlanError ||
-    sceneExecutionStatus ||
-    sceneExecutionError,
+    !activeSuccessFirstWithoutOutput && (
+      creativePlanLoading ||
+      creativePlan ||
+      sceneExecutionPlan ||
+      sceneExecutionResult ||
+      creativePlanStatus ||
+      creativePlanError ||
+      sceneExecutionStatus ||
+      sceneExecutionError
+    ),
   );
   const cinematicStructureStatusLabel = creativePlanLoading
     ? 'Shaping'
@@ -1423,7 +1441,7 @@ export default function CreateVideo({
         const job = await api.getGenerationJob(renderJobId);
         if (!active) return;
 
-        const outputUrl = normalizeVideoUrl(job.videoUrl ?? job.outputUrl);
+        const outputUrl = getVerifiedVideoOutputUrl(job as unknown as Record<string, unknown>);
         const statusValue = typeof job.status === 'string' ? job.status : '';
         const progressLabel = asyncRenderStatusMessage(job);
 
@@ -1485,6 +1503,15 @@ export default function CreateVideo({
           return;
         }
 
+        if (statusValue === 'completed' && !outputUrl) {
+          setGenerationResult(null);
+          setGeneratedVideoUrl(null);
+          setGenerationStatusState('verifying_output');
+          setStatus('Lumora is checking the video output before marking this draft ready.');
+          pollTimer = window.setTimeout(pollJob, 4000);
+          return;
+        }
+
         if (statusValue === 'rate_limited') {
           pauseGenerationProgressForCooldown(job);
           setGenerationError('');
@@ -1502,8 +1529,8 @@ export default function CreateVideo({
           setActiveRenderJobId(null);
           finishGenerationProgress('failed');
           setGenerationError(pausedMessage);
-          setStatus('Your cinematic work is preserved in Drafts.');
-          showToast({ type: 'error', message: 'Lumora paused this scene. Completed work is saved in Drafts.' });
+          setStatus('Your scene is saved, but no video has completed yet.');
+          showToast({ type: 'error', message: 'Lumora paused this scene before a verified video was returned.' });
           return;
         }
 
@@ -1609,7 +1636,7 @@ export default function CreateVideo({
         },
       ],
     });
-    setStatus('Your cinematic work is preserved in Drafts.');
+    setStatus('Your scene setup is saved in Drafts.');
   }, [activePrompt, characterName, mockBlockedUi, mockPausedUi]);
 
   useEffect(() => {
@@ -1637,6 +1664,8 @@ export default function CreateVideo({
     setEngine(SEEDANCE_ENGINE_ID);
     setGenerationStatusState('processing');
     setGenerationError('');
+    setGenerationResult(null);
+    setGeneratedVideoUrl(null);
     setStatus('Lumora is finding the cleanest render path...');
   }, [mockSuccessFirstUi]);
 
@@ -1644,13 +1673,14 @@ export default function CreateVideo({
     if (!mockRenderSuccessUi) return;
 
     const now = new Date().toISOString();
+    const mockVideoUrl = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
     setRenderPreference('success_first');
     setDuration(4);
     setAspectRatio('16:9');
     setEngine(SEEDANCE_ENGINE_ID);
     setGenerationStatusState('completed');
     setGenerationError('');
-    setGeneratedVideoUrl(null);
+    setGeneratedVideoUrl(mockVideoUrl);
     setFinalGeneratedPrompt(ULTRA_SAFE_SCENE_PROMPT);
     setGeneratedDisplayEngine('Seedance Fast');
     setGeneratedMode('seedance-text-to-video');
@@ -1665,17 +1695,35 @@ export default function CreateVideo({
       characterAvatar,
       isDefaultSelfCharacter,
       prompt: activePrompt || ULTRA_SAFE_SCENE_PROMPT,
-      outputUrl: '',
-      videoUrl: '',
+      outputUrl: mockVideoUrl,
+      videoUrl: mockVideoUrl,
       generationMode: 'seedance-text-to-video',
       finalPrompt: ULTRA_SAFE_SCENE_PROMPT,
       model: 'bytedance/seedance-2.0-fast',
       displayEngine: 'Seedance Fast',
       createdAt: now,
-      message: 'Cinematic draft ready.',
+      message: 'Mock verified output for QA only.',
     });
     setStatus('Cinematic draft ready.');
   }, [activePrompt, characterAvatar, characterId, characterName, isDefaultSelfCharacter, mockRenderSuccessUi]);
+
+  useEffect(() => {
+    if (!mockOutputMissingUi) return;
+
+    setRenderPreference('success_first');
+    setDuration(4);
+    setAspectRatio('16:9');
+    setEngine(SEEDANCE_ENGINE_ID);
+    setGenerationStatusState('verifying_output');
+    setGenerationError('');
+    setGeneratedVideoUrl(null);
+    setGenerationResult(null);
+    setGenerationModerationStages([
+      'Provider reported success, but Lumora did not find a usable video URL.',
+      'Trying the next safe render path...',
+    ]);
+    setStatus('Lumora is checking the video output before marking this draft ready.');
+  }, [mockOutputMissingUi]);
 
   useEffect(() => {
     if (!mockAllAttemptsBlockedUi) return;
@@ -1687,6 +1735,8 @@ export default function CreateVideo({
     setGenerationStatusState('failed');
     setGenerationError('This scene needs a simpler direction before rendering.');
     setGenerationSafeRewrite(ULTRA_SAFE_SCENE_PROMPT);
+    setGenerationResult(null);
+    setGeneratedVideoUrl(null);
     setGenerationModerationDetail('Lumora tried the safe render ladder and preserved your draft.');
     setGenerationModerationStages([
       'Trying primary reference...',
@@ -2033,12 +2083,12 @@ export default function CreateVideo({
         setContinuityMemory(result.continuityMemory);
         setContinuityMemoryDraft(normalizeContinuityMemoryState(result.continuityMemory.state));
         setContinuityMemoryLocks(result.continuityMemory.lockedFields);
-        setContinuityMemoryStatus('Story Memory updated from completed shots.');
+        setContinuityMemoryStatus('Story Memory updated from scene progress.');
       }
       setSceneExecutionStatus(
         result.status === 'completed'
           ? `Scene continuity preserved across ${result.clips.length} cinematic shot${result.clips.length === 1 ? '' : 's'}.`
-          : 'Lumora saved the completed shots and paused the scene for another take.',
+          : 'Your scene is saved, but no new video has completed yet.',
       );
       if (result.status === 'completed') {
         showToast({ type: 'success', message: 'Scene continuity preserved and saved to Drafts.' });
@@ -2590,38 +2640,8 @@ export default function CreateVideo({
           setGenerationStatusState(data.status === 'queued' ? 'queued' : 'processing');
         }
         setStatus(asyncRenderStatusMessage(data));
-        setGenerationResult({
-          id: typeof data.id === 'string' ? data.id : jobId,
-          jobId,
-          status: typeof data.status === 'string' ? data.status : 'rendering',
-          engine: selectedEngine,
-          provider: data.provider ?? 'replicate',
-          characterId,
-          characterName,
-          characterAvatar,
-          isDefaultSelfCharacter,
-          prompt: currentPrompt,
-          outputUrl: '',
-          thumbnailUrl: getBestThumbnail({
-            thumbnailUrl: data.thumbnailUrl,
-            posterUrl: data.posterUrl,
-            previewImageUrl: data.previewImageUrl,
-            characterAvatar,
-          }),
-          generationMode: data.generationMode ?? videoGenerationMode,
-          model: data.model ?? null,
-          displayEngine: data.displayEngine ?? (selectedEngine === SEEDANCE_QUALITY_ENGINE_ID ? 'Seedance Quality' : 'Seedance Fast'),
-          projectId: null,
-          createdAt: new Date().toISOString(),
-          message: data.message || 'Lumora is rendering your scene.',
-          providerStatus: data.providerStatus ?? null,
-          providerPredictionId: data.providerPredictionId ?? null,
-          providerPredictionUrl: data.providerPredictionUrl ?? null,
-          providerFallbackStage: data.providerFallbackStage ?? null,
-          renderMode: data.renderMode ?? null,
-          retryAfterSeconds: data.retryAfterSeconds ?? null,
-          retryAvailableAt: data.retryAvailableAt ?? null,
-        });
+        setGenerationResult(null);
+        setGeneratedVideoUrl(null);
         showToast({
           type: data.status === 'rate_limited' ? 'error' : 'success',
           message: data.status === 'rate_limited'
@@ -2633,7 +2653,11 @@ export default function CreateVideo({
         return;
       }
 
-      const nextVideoUrl = normalizeVideoUrl(data.videoUrl ?? data.outputUrl ?? data.video);
+      const nextVideoUrl = getVerifiedVideoOutputUrl({
+        videoUrl: data.videoUrl,
+        outputUrl: data.outputUrl,
+        resultAssetUrl: data.video,
+      });
       const generationProvider = (typeof data.provider === 'string' && data.provider
         ? data.provider
         : selectedEngine) as VideoEngine;
@@ -2701,6 +2725,8 @@ export default function CreateVideo({
       if (!nextVideoUrl) {
         console.error('No video returned', data);
         setGenerationError('Lumora did not receive a playable scene yet.');
+        setGenerationResult(null);
+        setGeneratedVideoUrl(null);
         finishGenerationProgress('failed');
         showToast({ type: 'error', message: 'Lumora paused this scene before a video was returned.' });
         return;
@@ -3684,7 +3710,7 @@ export default function CreateVideo({
             <div className="render-state-topline">
               <span className="tiny-pill">{visibleRenderState.label}</span>
               {activeRenderJobId || generationStatusState === 'rate_limited' ? (
-                <span className="render-state-safe-note">Saved safely</span>
+                <span className="render-state-safe-note">Scene saved</span>
               ) : null}
             </div>
             <div className="render-state-copy">
@@ -3917,10 +3943,10 @@ export default function CreateVideo({
           </div>
         ) : null}
         {status && !visibleRenderState ? <p className="muted create-status-copy">{status}</p> : null}
-        {generatedVideoUrl && !generationResult ? (
+        {verifiedGeneratedVideoUrl && !generationResult ? (
           <div style={{ display: 'grid', gap: '12px', marginTop: '14px' }}>
             <video
-              src={generatedVideoUrl}
+              src={verifiedGeneratedVideoUrl}
               controls
               autoPlay
               loop
@@ -3949,7 +3975,7 @@ export default function CreateVideo({
         ) : null}
       </section>
 
-      {generationResult ? (
+      {generationResult && hasVerifiedGenerationOutput ? (
         <section className="editor-card lumora-card video-result-card">
           <div className="row-between">
             <div>
@@ -3988,9 +4014,9 @@ export default function CreateVideo({
               <span className="muted">Scene reference used for cast consistency</span>
             </div>
           ) : null}
-          {generatedVideoUrl ? (
+          {generationResultVideoUrl ? (
             <video
-              src={generatedVideoUrl}
+              src={generationResultVideoUrl}
               controls
               autoPlay
               loop

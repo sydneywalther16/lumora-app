@@ -12,15 +12,12 @@ export class OpenAIVideoProvider implements VideoProvider {
     // OpenAI video support remains a placeholder until a stable replacement is available.
     if (!env.OPENAI_API_KEY || !env.OPENAI_VIDEO_MODEL) {
       return {
-        status: 'completed',
+        status: 'failed',
         provider: this.engine,
         providerJobId: randomUUID(),
-        resultAssetUrl: '/demo-video.mp4',
         message:
-          'OpenAI video provider is not configured. Using mock response for local development.',
-        prompt: input.prompt,
-        characterId: input.characterId ?? null,
-        characterName: input.characterName ?? null,
+          'OpenAI video provider is not configured. Choose Seedance Fast or explicit Demo Mode.',
+        errorMessage: 'OpenAI video provider is not configured.',
       };
     }
 
@@ -28,15 +25,12 @@ export class OpenAIVideoProvider implements VideoProvider {
     // The implementation should send prompt, character metadata, and any reference media
     // to the OpenAI video API, then return a completed or queued result.
     return {
-      status: 'completed',
+      status: 'failed',
       provider: this.engine,
       providerJobId: randomUUID(),
-      resultAssetUrl: '/demo-video.mp4',
       message:
         'OpenAI video provider is configured, but the real adapter is not implemented yet.',
-      prompt: input.prompt,
-      characterId: input.characterId ?? null,
-      characterName: input.characterName ?? null,
+      errorMessage: 'OpenAI video adapter is not implemented.',
     };
   }
 }
