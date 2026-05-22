@@ -99,12 +99,17 @@ try {
 Write-Host "canaryJobId: $($start.canaryJobId)"
 Write-Host "prediction created: $($start.providerPredictionIdExists)"
 Write-Host "provider status: $($start.providerStatus)"
+Write-Host "variant: $($start.canaryVariant)"
 if ($start.selectedReference) {
   Write-Host "selected reference label: $($start.selectedReference.label)"
   Write-Host "selected reference role: $($start.selectedReference.role)"
   Write-Host "selected reference host: $($start.selectedReference.host)"
   Write-Host "selected reference savedToLumora: $($start.selectedReference.savedToLumora)"
+  Write-Host "selected reference reachable: $($start.selectedReference.reachable)"
+  Write-Host "selected reference content type: $($start.selectedReference.contentType)"
 }
+if ($start.providerErrorSummary) { Write-Host "provider error summary: $($start.providerErrorSummary)" }
+Write-Host "recommended next action: $($start.nextAction)"
 Write-Host (Canary-Summary $start)
 
 $statusUrl = Join-ApiUrl $ApiBaseUrl ("/api/diagnostics/seedance-canary/{0}" -f $start.canaryJobId)
@@ -131,6 +136,7 @@ while ((Get-Date) -lt $deadline) {
   }
 
   Write-Host "status: $($status.lifecycleStatus), provider: $($status.providerStatus), next: $($status.nextAction)"
+  if ($status.providerErrorSummary) { Write-Host "provider error summary: $($status.providerErrorSummary)" }
   Write-Host (Canary-Summary $status)
 }
 
@@ -139,11 +145,17 @@ Write-Host "Final summary"
 Write-Host "canaryJobId: $($status.canaryJobId)"
 Write-Host "prediction created: $($status.providerPredictionIdExists)"
 Write-Host "provider status: $($status.providerStatus)"
+Write-Host "variant: $($status.canaryVariant)"
 Write-Host "selected reference label: $($status.selectedReference.label)"
 Write-Host "selected reference role: $($status.selectedReference.role)"
+Write-Host "selected reference reachable: $($status.selectedReference.reachable)"
+Write-Host "selected reference content type: $($status.selectedReference.contentType)"
 Write-Host "output present: $($status.outputUrlPresent)"
 Write-Host "parsed video URL present: $($status.parsedOutputUrlPresent)"
 Write-Host "failure category: $($status.errorCategory)"
+Write-Host "provider error category: $($status.providerErrorCategory)"
+Write-Host "provider error summary: $($status.providerErrorSummary)"
+if ($status.providerLogsExcerpt) { Write-Host "provider logs excerpt: $($status.providerLogsExcerpt)" }
 Write-Host "recommended next action: $($status.nextAction)"
 Write-Host (Canary-Summary $status)
 

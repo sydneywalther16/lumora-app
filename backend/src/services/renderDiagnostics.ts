@@ -18,6 +18,7 @@ type LatestRenderRow = {
   errorMessage: string | null;
   retryAfterSeconds: number | null;
   retryAvailableAt: string | null;
+  sceneMetadata: Record<string, unknown> | null;
   renderSuccessGroupId: string | null;
   renderSuccessRole: string | null;
   renderSuccessAttemptTier: number | null;
@@ -39,6 +40,20 @@ function redactMessage(value: string | null) {
     .replace(/https?:\/\/\S+/gi, '[redacted-url]')
     .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [redacted]')
     .slice(0, 220);
+}
+
+function canaryProviderFailure(row: LatestRenderRow | null) {
+  const metadata = row?.sceneMetadata?.seedanceCanary;
+  if (!metadata || typeof metadata !== 'object') return null;
+  const providerFailure = (metadata as Record<string, unknown>).providerFailure;
+  if (!providerFailure || typeof providerFailure !== 'object') return null;
+  const record = providerFailure as Record<string, unknown>;
+  return {
+    providerErrorCategory: typeof record.providerErrorCategory === 'string' ? record.providerErrorCategory : row?.errorCategory ?? null,
+    providerErrorSummary: typeof record.providerErrorSummary === 'string' ? redactMessage(record.providerErrorSummary) : null,
+    providerLogsExcerpt: typeof record.providerLogsExcerpt === 'string' ? redactMessage(record.providerLogsExcerpt) : null,
+    predictionGetUrlHost: typeof record.predictionGetUrlHost === 'string' ? record.predictionGetUrlHost : null,
+  };
 }
 
 function publishable(row: LatestRenderRow) {
@@ -123,6 +138,7 @@ export async function buildLastRenderDiagnostics() {
          error_message as "errorMessage",
          retry_after_seconds as "retryAfterSeconds",
          retry_available_at as "retryAvailableAt",
+         scene_metadata as "sceneMetadata",
          render_success_group_id as "renderSuccessGroupId",
          render_success_role as "renderSuccessRole",
          render_success_attempt_tier as "renderSuccessAttemptTier",
@@ -174,6 +190,7 @@ export async function buildLastRenderDiagnostics() {
              error_message as "errorMessage",
              retry_after_seconds as "retryAfterSeconds",
              retry_available_at as "retryAvailableAt",
+             scene_metadata as "sceneMetadata",
              render_success_group_id as "renderSuccessGroupId",
              render_success_role as "renderSuccessRole",
              render_success_attempt_tier as "renderSuccessAttemptTier",
@@ -197,6 +214,7 @@ export async function buildLastRenderDiagnostics() {
       ? parseProviderVideoOutput(attemptRow.outputUrl ?? attemptRow.resultAssetUrl)
       : null;
     const cooldownRow = activeRow.status === 'rate_limited' ? activeRow : row.status === 'rate_limited' ? row : null;
+    const providerFailure = canaryProviderFailure(activeRow) ?? canaryProviderFailure(row);
 
     return {
       ok: true,
@@ -234,6 +252,10 @@ export async function buildLastRenderDiagnostics() {
         currentAttemptTier: attemptRow?.renderSuccessAttemptTier ?? null,
         failureCategory: row.errorCategory ?? attemptRow?.errorCategory ?? null,
         failureMessageRedacted: redactMessage(row.errorMessage ?? attemptRow?.errorMessage ?? null),
+        providerErrorCategory: providerFailure?.providerErrorCategory ?? row.errorCategory ?? attemptRow?.errorCategory ?? null,
+        providerErrorSummary: providerFailure?.providerErrorSummary ?? null,
+        providerLogsExcerpt: providerFailure?.providerLogsExcerpt ?? null,
+        predictionGetUrlHost: providerFailure?.predictionGetUrlHost ?? null,
         publishable: publishableValue,
         continueStoryEligible: publishableValue,
         hasVerifiedVideoOutput: publishableValue,

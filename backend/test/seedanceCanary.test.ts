@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import {
   buildSeedanceCanaryPayload,
+  buildReferenceImagePrompt,
   canaryRateLimitStatus,
   classifyReferenceCanaryFailure,
   noSavedSelfReferencePayloadForTest,
+  providerFailureDiagnostics,
   redactRenderPathCompareValue,
   resolveSelfReferenceCanarySourceForTest,
   selectStrongestCanaryReference,
@@ -46,11 +48,18 @@ assert.equal(references.length, 1);
 const referencePayload = buildSeedanceCanaryPayload({ referenceImages: references });
 assert.deepEqual(referencePayload.reference_images, ['https://assets.example.com/front.jpg']);
 assert.equal(referencePayload.prompt, SEEDANCE_REFERENCE_CANARY_PROMPT);
+assert.equal(referencePayload.prompt.includes('[Image1]'), true);
 assert.equal(referencePayload.duration, textPayload.duration);
 assert.equal(referencePayload.aspect_ratio, textPayload.aspect_ratio);
 assert.equal(referencePayload.resolution, textPayload.resolution);
 assert.equal(referencePayload.generate_audio, textPayload.generate_audio);
 assert.equal(/Sydney|photoshoot|model|glamour|influencer|celebrity|public figure/i.test(referencePayload.prompt), false);
+const multipleReferencePrompt = buildReferenceImagePrompt([
+  { url: 'https://assets.example.com/front.jpg', role: 'front_angle', label: 'Front', token: '[Image1]' },
+  { url: 'https://assets.example.com/left.jpg', role: 'side_angle', label: 'Left', token: '[Image2]' },
+]);
+assert.equal(multipleReferencePrompt.includes('[Image1]'), true);
+assert.equal(multipleReferencePrompt.includes('[Image2]'), true);
 
 const strongest = selectStrongestCanaryReference({
   referenceImageUrls: {
@@ -136,7 +145,24 @@ assert.equal(missingReferencePayload.recommendedNextAction.includes('re-save'), 
 assert.equal(classifyReferenceCanaryFailure('moderation safety policy blocked'), 'reference_moderation');
 assert.equal(classifyReferenceCanaryFailure('invalid input reference_images'), 'reference_input_schema');
 assert.equal(classifyReferenceCanaryFailure('403 asset access denied'), 'reference_asset_access');
-assert.equal(classifyReferenceCanaryFailure('provider succeeded but output missing'), 'reference_output_missing');
+assert.equal(classifyReferenceCanaryFailure('Prediction failed.', 'failed'), 'reference_unknown_provider_failure');
+assert.equal(classifyReferenceCanaryFailure('seedance backend failed with no video', 'failed'), 'reference_provider_failed');
+assert.equal(classifyReferenceCanaryFailure('provider succeeded but output missing', 'succeeded'), 'reference_output_missing');
+
+const providerFailure = providerFailureDiagnostics({
+  category: 'reference_provider_failed',
+  prediction: {
+    id: 'pred_123',
+    status: 'failed',
+    error: 'provider failed while reading https://signed.example.com/private.jpg?token=secret',
+    logs: 'download failed for https://signed.example.com/private.jpg?token=secret',
+    urls: { get: 'https://api.replicate.com/v1/predictions/pred_123' },
+    metrics: { predict_time: 1.23 },
+  } as never,
+});
+assert.equal(providerFailure.providerErrorSummary?.includes('token=secret'), false);
+assert.equal(providerFailure.providerLogsExcerpt?.includes('private.jpg'), false);
+assert.equal(providerFailure.predictionGetUrlHost, 'api.replicate.com');
 
 const redacted = redactRenderPathCompareValue({
   referenceUrl: 'https://signed.example.com/private.jpg?token=secret',

@@ -19,7 +19,7 @@ import {
 export const SEEDANCE_CANARY_PROMPT =
   'A peaceful sunlit garden path with flowers swaying gently in the breeze, soft storybook cinematic style, calm natural motion.';
 export const SEEDANCE_REFERENCE_CANARY_PROMPT =
-  'the cast character walks slowly through a peaceful sunlit garden, natural movement, fully clothed, soft storybook cinematic style, gentle camera motion';
+  'The character from [Image1] walks slowly through a peaceful sunlit garden, natural movement, fully clothed, soft storybook cinematic style, gentle camera motion.';
 export const SEEDANCE_CANARY_DURATION_SECONDS = 5;
 export const SEEDANCE_CANARY_ASPECT_RATIO = '9:16';
 export const SEEDANCE_CANARY_RESOLUTION = '480p';
@@ -28,16 +28,29 @@ export const SEEDANCE_CANARY_GENERATE_AUDIO = false;
 const CANARY_USER_ID = '00000000-0000-4000-8000-000000000000';
 const CANARY_TIMEOUT_MS = 4 * 60 * 1000;
 const RATE_LIMIT_SAFETY_BUFFER_MS = 2_000;
+const REFERENCE_CANARY_MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const activeCanaryProcessors = new Set<string>();
 
 type CanaryKind = 'text' | 'reference';
 type CanaryLifecycleStatus = 'queued' | 'rendering' | 'rate_limited' | 'completed' | 'failed' | 'canceled';
+type CanaryVariant = 'text_only' | 'reference_images';
+
+type ProviderFailureDiagnostics = {
+  providerErrorCategory: string;
+  providerErrorSummary: string | null;
+  providerLogsExcerpt: string | null;
+  predictionGetUrlHost: string | null;
+  providerStatus: string | null;
+  metricsSummary: string | null;
+};
 
 type CanaryMetadata = {
   kind: CanaryKind;
+  canaryVariant: CanaryVariant;
   providerInput: SeedanceProviderPayload;
   payloadSummary: ReturnType<typeof seedancePayloadSummary>;
   selectedReference?: CanaryReferenceDiagnostics | null;
+  providerFailure?: ProviderFailureDiagnostics | null;
   saveAsDraft: boolean;
   userId: string | null;
   characterId: string | null;
@@ -101,6 +114,11 @@ export type CanaryReferenceDiagnostics = {
   whySelected: string;
   source: string | null;
   sourcesChecked?: string[];
+  reachable?: boolean | null;
+  contentType?: string | null;
+  contentLength?: number | null;
+  accessStatus?: number | null;
+  accessError?: string | null;
 };
 
 export type CanaryReferenceSelection = {
@@ -334,22 +352,43 @@ function classifyProviderFailure(value: unknown) {
   return 'provider';
 }
 
-export function classifyReferenceCanaryFailure(value: unknown) {
+export function classifyReferenceCanaryFailure(value: unknown, providerStatus?: string | null) {
   const raw = typeof value === 'string' ? value : errorText(value);
   const lower = raw.toLowerCase();
   if (lower.includes('moderation') || lower.includes('safety') || lower.includes('policy') || lower.includes('nsfw')) return 'reference_moderation';
   if (lower.includes('schema') || lower.includes('validation') || lower.includes('invalid input') || lower.includes('reference_images')) return 'reference_input_schema';
-  if (lower.includes('403') || lower.includes('404') || lower.includes('asset') || lower.includes('download') || lower.includes('access') || lower.includes('url')) return 'reference_asset_access';
+  if (lower.includes('403') || lower.includes('404') || lower.includes('asset') || lower.includes('download') || lower.includes('access')) return 'reference_asset_access';
+  const normalizedStatus = (providerStatus ?? '').toLowerCase();
+  if (normalizedStatus === 'failed' || normalizedStatus === 'canceled') {
+    if (!raw.trim() || /^prediction\s+(failed|canceled)\.?$/i.test(raw.trim())) return 'reference_unknown_provider_failure';
+    return 'reference_provider_failed';
+  }
   if (lower.includes('output') || lower.includes('video url')) return 'reference_output_missing';
-  return 'provider_unknown';
+  return 'reference_unknown_provider_failure';
 }
 
-function classifyCanaryFailure(kind: CanaryKind, value: unknown) {
-  return kind === 'reference' ? classifyReferenceCanaryFailure(value) : classifyProviderFailure(value);
+function classifyCanaryFailure(kind: CanaryKind, value: unknown, providerStatus?: string | null) {
+  return kind === 'reference' ? classifyReferenceCanaryFailure(value, providerStatus) : classifyProviderFailure(value);
 }
 
 export function canaryRateLimitStatus() {
   return 'rate_limited' as const;
+}
+
+function imageTokens(referenceCount: number) {
+  return Array.from({ length: referenceCount }, (_item, index) => `[Image${index + 1}]`);
+}
+
+export function buildReferenceImagePrompt(referenceImages: SeedanceReferenceImage[]) {
+  const tokens = imageTokens(referenceImages.length);
+  if (!tokens.length) return SEEDANCE_CANARY_PROMPT;
+  const tokenText = tokens.join(', ');
+  return `The character from ${tokenText} walks slowly through a peaceful sunlit garden, natural movement, fully clothed, soft storybook cinematic style, gentle camera motion.`;
+}
+
+function promptContainsAllImageTokens(prompt: string, referenceCount: number) {
+  if (referenceCount <= 0) return false;
+  return imageTokens(referenceCount).every((token) => prompt.includes(token));
 }
 
 export function buildSeedanceCanaryPayload(input: {
@@ -357,7 +396,7 @@ export function buildSeedanceCanaryPayload(input: {
 } = {}): SeedanceProviderPayload {
   const references = selectPrimaryCanaryReference(input.referenceImages ?? []);
   const sanitizer = sanitizeProviderPrompt({
-    prompt: references.length ? SEEDANCE_REFERENCE_CANARY_PROMPT : SEEDANCE_CANARY_PROMPT,
+    prompt: references.length ? buildReferenceImagePrompt(references) : SEEDANCE_CANARY_PROMPT,
   });
   const payload: SeedanceProviderPayload = {
     prompt: sanitizer.prompt,
@@ -536,6 +575,139 @@ function outputShapeSummary(output: unknown) {
   return typeof output;
 }
 
+function safeJsonSummary(value: unknown, maxLength = 500) {
+  if (value == null) return null;
+  let text: string;
+  try {
+    text = typeof value === 'string' ? value : JSON.stringify(value);
+  } catch {
+    text = String(value);
+  }
+  return redactMessage(text)?.slice(0, maxLength) ?? null;
+}
+
+function logsExcerpt(logs: unknown) {
+  return safeJsonSummary(logs, 500);
+}
+
+function providerErrorSummary(error: unknown) {
+  return safeJsonSummary(error, 360);
+}
+
+function urlHost(value: string | null | undefined) {
+  if (!value) return null;
+  try {
+    return new URL(value).host;
+  } catch {
+    return null;
+  }
+}
+
+function metricsSummary(metrics: unknown) {
+  if (!metrics || typeof metrics !== 'object') return null;
+  return safeJsonSummary(metrics, 260);
+}
+
+export function providerFailureDiagnostics(input: {
+  prediction: Prediction;
+  category: string;
+}): ProviderFailureDiagnostics {
+  return {
+    providerErrorCategory: input.category,
+    providerErrorSummary: providerErrorSummary(input.prediction.error),
+    providerLogsExcerpt: logsExcerpt(input.prediction.logs),
+    predictionGetUrlHost: urlHost(predictionUrl(input.prediction)),
+    providerStatus: input.prediction.status,
+    metricsSummary: metricsSummary(input.prediction.metrics),
+  };
+}
+
+type ReferenceAssetAccessDiagnostics = {
+  reachable: boolean;
+  status: number | null;
+  contentType: string | null;
+  contentLength: number | null;
+  host: string | null;
+  error: string | null;
+};
+
+function referenceAssetErrorMessage(diagnostics: ReferenceAssetAccessDiagnostics) {
+  if (diagnostics.reachable) return null;
+  if (diagnostics.status) return `Selected reference was not publicly reachable (${diagnostics.status}).`;
+  return diagnostics.error ?? 'Selected reference was not publicly reachable.';
+}
+
+async function verifyReferenceAssetAccess(url: string): Promise<ReferenceAssetAccessDiagnostics> {
+  const host = redactedHost(url);
+  const inspectResponse = async (response: Response) => {
+    const contentType = response.headers.get('content-type');
+    const contentLengthText = response.headers.get('content-length');
+    const contentLength = contentLengthText ? Number(contentLengthText) : null;
+    const imageContentType = Boolean(contentType?.toLowerCase().startsWith('image/'));
+    const oversized = Number.isFinite(contentLength) && contentLength !== null && contentLength > REFERENCE_CANARY_MAX_IMAGE_BYTES;
+    return {
+      reachable: response.ok && imageContentType && !oversized,
+      status: response.status,
+      contentType,
+      contentLength: Number.isFinite(contentLength) ? contentLength : null,
+      host,
+      error: response.ok && !imageContentType
+        ? 'Reference URL did not return image content.'
+        : oversized
+          ? 'Reference image is larger than the canary safety limit.'
+          : null,
+    };
+  };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const head = await fetch(url, { method: 'HEAD', signal: controller.signal });
+    const diagnostics = await inspectResponse(head);
+    if (diagnostics.reachable || (head.status !== 403 && head.status !== 405)) return diagnostics;
+  } catch {
+    // Some storage/CDN frontends reject HEAD; a small GET below is the provider-relevant check.
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const getController = new AbortController();
+  const getTimeout = setTimeout(() => getController.abort(), 8_000);
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { range: 'bytes=0-1' },
+      signal: getController.signal,
+    });
+    return inspectResponse(response);
+  } catch (error) {
+    return {
+      reachable: false,
+      status: null,
+      contentType: null,
+      contentLength: null,
+      host,
+      error: redactMessage(errorText(error)),
+    };
+  } finally {
+    clearTimeout(getTimeout);
+  }
+}
+
+function withReferenceAccessDiagnostics(
+  diagnostics: CanaryReferenceDiagnostics,
+  access: ReferenceAssetAccessDiagnostics,
+): CanaryReferenceDiagnostics {
+  return {
+    ...diagnostics,
+    reachable: access.reachable,
+    contentType: access.contentType,
+    contentLength: access.contentLength,
+    accessStatus: access.status,
+    accessError: access.error,
+  };
+}
+
 async function verifyOutputReachable(outputUrl: string) {
   if (/^\/[^/]/.test(outputUrl)) return true;
   if (!/^https?:\/\//i.test(outputUrl)) return false;
@@ -598,9 +770,11 @@ async function insertCanaryJob(input: {
   const userId = isUuidLike(input.userId) ? input.userId as string : CANARY_USER_ID;
   const metadata: CanaryMetadata = {
     kind: input.kind,
+    canaryVariant: references.length ? 'reference_images' : 'text_only',
     providerInput,
     payloadSummary: seedancePayloadSummary(providerInput),
     selectedReference: input.selectedReference ?? null,
+    providerFailure: null,
     saveAsDraft: Boolean(input.saveAsDraft),
     userId: isUuidLike(input.userId) ? input.userId as string : null,
     characterId: input.characterId ?? null,
@@ -658,6 +832,7 @@ async function updateCanaryJob(jobId: string, values: {
   retryAfterSeconds?: number | null;
   retryAvailableAt?: string | null;
   outputShapeSummaryValue?: string | null;
+  providerFailure?: ProviderFailureDiagnostics | null;
 }) {
   const result = await query<Record<string, unknown>>(
     `update generation_jobs
@@ -674,10 +849,15 @@ async function updateCanaryJob(jobId: string, values: {
        error_category = $9,
        retry_after_seconds = $10,
        retry_available_at = $11,
-       scene_metadata = case
-         when $12::text is null then scene_metadata
-         else jsonb_set(coalesce(scene_metadata, '{}'::jsonb), '{seedanceCanary,outputShapeSummary}', to_jsonb($12::text), true)
-       end,
+       scene_metadata = jsonb_set(
+         case
+           when $12::text is null then coalesce(scene_metadata, '{}'::jsonb)
+           else jsonb_set(coalesce(scene_metadata, '{}'::jsonb), '{seedanceCanary,outputShapeSummary}', to_jsonb($12::text), true)
+         end,
+         '{seedanceCanary,providerFailure}',
+         coalesce($13::jsonb, coalesce(scene_metadata, '{}'::jsonb)#>'{seedanceCanary,providerFailure}', 'null'::jsonb),
+         true
+       ),
        updated_at = now()
      where id = $1
      returning ${canaryJobSelect}`,
@@ -694,6 +874,7 @@ async function updateCanaryJob(jobId: string, values: {
       values.retryAfterSeconds ?? null,
       values.retryAvailableAt ?? null,
       values.outputShapeSummaryValue ?? null,
+      values.providerFailure === undefined ? null : JSON.stringify(values.providerFailure),
     ],
   );
   return result.rows[0] ? mapCanaryRow(result.rows[0]) : null;
@@ -857,12 +1038,14 @@ async function processSeedanceCanaryJob(jobId: string, options: { pollUntilTermi
         const detail = typeof prediction.error === 'string'
           ? prediction.error
           : prediction.logs ?? `Prediction ${prediction.status}.`;
+        const category = classifyCanaryFailure(metadata.kind, detail, prediction.status);
         return updateCanaryJob(job.id, {
           status: prediction.status === 'canceled' ? 'canceled' : 'failed',
           providerStatus: prediction.status,
           errorMessage: redactMessage(detail),
-          errorCategory: classifyCanaryFailure(metadata.kind, detail),
+          errorCategory: category,
           outputShapeSummaryValue: outputShapeSummary(prediction.output),
+          providerFailure: providerFailureDiagnostics({ prediction, category }),
         });
       }
 
@@ -915,14 +1098,25 @@ export async function startSeedanceReferenceCanary(input: {
   if (!selection.reference) {
     throw new Error('Reference canary requires one saved Lumora reference for this character.');
   }
+  const referenceAccess = await verifyReferenceAssetAccess(selection.reference.url);
+  const selectedReference = withReferenceAccessDiagnostics(selection.diagnostics, referenceAccess);
   const job = await insertCanaryJob({
     kind: 'reference',
     saveAsDraft: input.saveAsDraft,
     userId: input.userId,
     characterId: input.characterId,
     referenceImages: [selection.reference],
-    selectedReference: selection.diagnostics,
+    selectedReference,
   });
+  if (!referenceAccess.reachable) {
+    const failed = await updateCanaryJob(job.id, {
+      status: 'failed',
+      providerStatus: 'reference_asset_access',
+      errorMessage: referenceAssetErrorMessage(referenceAccess),
+      errorCategory: 'reference_asset_access',
+    });
+    return formatSeedanceCanaryStatus(failed ?? job);
+  }
   const processed = await processSeedanceCanaryJob(job.id, { pollUntilTerminal: false });
   return formatSeedanceCanaryStatus(processed ?? job);
 }
@@ -1223,6 +1417,8 @@ export async function startSeedanceSelfReferenceCanary(input: {
   const candidate = resolution.candidate;
   const selection = resolution.selection;
   if (!candidate || !selection.reference) throw noSavedSelfReferenceError(resolution);
+  const referenceAccess = await verifyReferenceAssetAccess(selection.reference.url);
+  const selectedReference = withReferenceAccessDiagnostics(selection.diagnostics, referenceAccess);
 
   const job = await insertCanaryJob({
     kind: 'reference',
@@ -1230,8 +1426,17 @@ export async function startSeedanceSelfReferenceCanary(input: {
     userId: candidate.ownerUserId,
     characterId: candidate.characterId,
     referenceImages: [selection.reference],
-    selectedReference: selection.diagnostics,
+    selectedReference,
   });
+  if (!referenceAccess.reachable) {
+    const failed = await updateCanaryJob(job.id, {
+      status: 'failed',
+      providerStatus: 'reference_asset_access',
+      errorMessage: referenceAssetErrorMessage(referenceAccess),
+      errorCategory: 'reference_asset_access',
+    });
+    return formatSeedanceCanaryStatus(failed ?? job);
+  }
   const processed = await processSeedanceCanaryJob(job.id, { pollUntilTerminal: false });
   return formatSeedanceCanaryStatus(processed ?? job);
 }
@@ -1254,6 +1459,7 @@ export async function getSeedanceCanaryStatus(jobId: string) {
 
 export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
   const metadata = canaryMetadata(job);
+  const providerFailure = metadata?.providerFailure ?? null;
   const outputParse = parseProviderVideoOutput(job.outputUrl ?? job.resultAssetUrl);
   const outputShape = typeof metadata?.payloadSummary === 'object'
     ? (job.sceneMetadata?.seedanceCanary as Record<string, unknown> | undefined)?.outputShapeSummary
@@ -1262,22 +1468,23 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
     ? Math.max(0, Math.ceil((Date.parse(job.retryAvailableAt) - Date.now()) / 1000))
     : job.retryAfterSeconds;
   const status = job.status === 'completed' && !outputParse.ok ? 'failed' : job.status;
-  const nextAction =
-    status === 'completed' && outputParse.ok
-      ? 'canary_succeeded'
-      : status === 'rate_limited'
-        ? retryAfter && retryAfter > 0 ? 'wait_for_retry_after' : 'retry_same_canary'
-        : status === 'rendering'
-          ? job.providerPredictionId ? 'poll_provider_prediction' : 'create_provider_prediction'
-          : status === 'queued'
-            ? 'create_provider_prediction'
-            : status === 'failed'
-              ? job.errorCategory === 'input_schema_invalid'
-                ? 'fix_provider_payload_schema'
-                : job.errorCategory?.includes('output')
-                  ? 'fix_output_parser_or_storage'
-                  : 'inspect_provider_error'
-              : 'none';
+  const nextAction = (() => {
+    if (status === 'completed' && outputParse.ok) return 'canary_succeeded';
+    if (status === 'rate_limited') return retryAfter && retryAfter > 0 ? 'wait_for_retry_after' : 'retry_same_canary';
+    if (status === 'rendering') return job.providerPredictionId ? 'poll_provider_prediction' : 'create_provider_prediction';
+    if (status === 'queued') return 'create_provider_prediction';
+    if (status === 'failed') {
+      if (job.errorCategory === 'input_schema_invalid') return 'fix_provider_payload_schema';
+      if (job.errorCategory === 'reference_asset_access') return 'fix_reference_asset_access';
+      if (job.errorCategory === 'reference_moderation') return 'reference_path_blocked_try_text_only';
+      if (job.errorCategory === 'reference_provider_failed' || job.errorCategory === 'reference_unknown_provider_failure') {
+        return 'inspect_provider_error_or_try_text_only';
+      }
+      if (job.errorCategory?.includes('output')) return 'fix_output_parser_or_storage';
+      return 'inspect_provider_error';
+    }
+    return 'none';
+  })();
 
   return {
     canaryJobId: job.id,
@@ -1294,11 +1501,25 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
     parsedOutputUrlPresent: outputParse.ok,
     outputShapeSummary: typeof outputShape === 'string' ? outputShape : null,
     errorCategory: job.errorCategory,
+    providerErrorCategory: providerFailure?.providerErrorCategory ?? job.errorCategory,
+    providerErrorSummary: providerFailure?.providerErrorSummary ?? null,
+    providerLogsExcerpt: providerFailure?.providerLogsExcerpt ?? null,
+    predictionGetUrlHost: providerFailure?.predictionGetUrlHost ?? null,
+    providerMetricsSummary: providerFailure?.metricsSummary ?? null,
     redactedErrorDetail: redactMessage(job.errorMessage),
     retryAfterSeconds: retryAfter ?? null,
     retryAvailableAt: job.retryAvailableAt,
     nextAction,
     payloadSummary: metadata?.payloadSummary ?? null,
+    canaryVariant: metadata?.canaryVariant ?? null,
+    promptContainsImageToken: metadata?.providerInput
+      ? promptContainsAllImageTokens(metadata.providerInput.prompt, metadata.providerInput.reference_images?.length ?? 0)
+      : false,
+    referenceFieldName: metadata?.providerInput?.reference_images?.length ? 'reference_images' : 'omitted',
+    referenceAssetReachable: metadata?.selectedReference?.reachable ?? null,
+    selectedReferenceContentType: metadata?.selectedReference?.contentType ?? null,
+    selectedReferenceHost: metadata?.selectedReference?.host ?? null,
+    selectedReferenceSource: metadata?.selectedReference?.source ?? null,
     selectedReference: metadata?.selectedReference ?? null,
     message: status === 'completed' && outputParse.ok
       ? 'Seedance canary succeeded with a verified video URL.'
@@ -1429,11 +1650,15 @@ export async function buildRenderPathCompareDiagnostics() {
       providerModel: SEEDANCE_FAST_MODEL,
       references: true,
       referenceCount: referencePayload.reference_images?.length ?? 0,
+      referenceFieldName: referencePayload.reference_images?.length ? 'reference_images' : 'omitted',
+      referenceAssetReachable: referenceCanaryMetadata?.selectedReference?.reachable ?? null,
+      selectedReferenceContentType: referenceCanaryMetadata?.selectedReference?.contentType ?? null,
       duration: referencePayload.duration,
       resolution: referencePayload.resolution,
       aspect_ratio: referencePayload.aspect_ratio,
       generate_audio: referencePayload.generate_audio ?? 'omitted',
       promptLength: referencePayload.prompt.length,
+      promptContainsImageToken: promptContainsAllImageTokens(referencePayload.prompt, referencePayload.reference_images?.length ?? 0),
       promptRiskTerms: promptRiskTerms(referencePayload.prompt),
       displayNamePresent: false,
       storyMemoryIncluded: false,
@@ -1442,6 +1667,8 @@ export async function buildRenderPathCompareDiagnostics() {
       externalUrlsIncluded: hasExternalUrlText(referencePayload.reference_images ?? []),
       referenceFieldShape: payloadReferenceFieldShape(referencePayload),
       selectedReference: referenceCanaryMetadata?.selectedReference ?? null,
+      providerErrorSummary: referenceCanaryMetadata?.providerFailure?.providerErrorSummary ?? redactMessage(referenceCanaryRow?.errorMessage ?? null),
+      canaryVariant: referenceCanaryMetadata?.canaryVariant ?? null,
       payloadFields: Object.keys(referencePayload),
       status: referenceCanaryRow?.status ?? null,
       errorCategory: referenceCanaryRow?.errorCategory ?? null,
@@ -1452,11 +1679,15 @@ export async function buildRenderPathCompareDiagnostics() {
       providerModel: real.providerModel,
       references: (real.referenceCount ?? 0) > 0,
       referenceCount: real.referenceCount ?? 0,
+      referenceFieldName: (real.referenceCount ?? 0) > 0 ? 'reference_images' : 'omitted',
+      referenceAssetReachable: null,
+      selectedReferenceContentType: null,
       duration: real.durationSeconds,
       resolution: (real.sceneMetadata?.seedanceCanary as Record<string, unknown> | undefined)?.resolution ?? 'unknown',
       aspect_ratio: real.aspectRatio,
       generate_audio: 'unknown',
       promptLength: realPrompt.length,
+      promptContainsImageToken: promptContainsAllImageTokens(realPrompt, real.referenceCount ?? 0),
       promptRiskTerms: promptRiskTerms(realPrompt),
       displayNamePresent: Boolean(real.characterName && realPrompt.toLowerCase().includes(real.characterName.toLowerCase())),
       storyMemoryIncluded: metadataHasText(real.sceneMetadata, /story|continuity|memory/),
@@ -1464,6 +1695,9 @@ export async function buildRenderPathCompareDiagnostics() {
       manualOverrideIncluded: hasManualOverrideText(real.sceneMetadata),
       externalUrlsIncluded: hasExternalUrlText(real.sceneMetadata),
       referenceFieldShape: (real.referenceCount ?? 0) > 0 ? 'unknown_create_path' : 'omitted',
+      providerErrorSummary: null,
+      canaryVariant: null,
+      createVariant: (real.referenceCount ?? 0) > 0 ? 'reference_images' : 'text_only',
       renderMode: real.renderMode,
       providerFallbackStage: real.providerFallbackStage,
       renderSuccessRole: real.renderSuccessRole,
@@ -1495,6 +1729,8 @@ export async function buildRenderPathCompareDiagnostics() {
         manualOverrideIncluded: realPath.manualOverrideIncluded,
         externalUrlsIncluded: realPath.externalUrlsIncluded,
         referenceFieldShape: realPath.referenceFieldShape,
+        promptContainsImageToken: realPath.promptContainsImageToken,
+        referenceFieldName: realPath.referenceFieldName,
       } : null,
     };
   } catch (error) {
@@ -1538,6 +1774,8 @@ export async function buildSeedanceCanarySummaryDiagnostics() {
                   ? 'Fix Asset Persistence or selected reference URL'
                   : lastReference?.errorCategory === 'reference_output_missing'
                     ? 'Fix reference output parser'
+                    : lastReference?.errorCategory === 'reference_provider_failed' || lastReference?.errorCategory === 'reference_unknown_provider_failure'
+                      ? 'Inspect Seedance reference provider error or use text-only first'
                     : `Reference canary failed: ${lastReference?.errorCategory ?? 'provider_unknown'}`
             : 'Align Create Success First with reference canary payload';
 

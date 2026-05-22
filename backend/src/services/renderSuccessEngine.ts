@@ -19,7 +19,7 @@ import {
 } from './providers/seedanceProvider';
 import { isProviderOutputError, parseProviderVideoOutput } from './providerOutputParser';
 import { scoreReferenceConfidence } from './sceneOptimization';
-import { getReferenceCanaryReadiness } from './seedanceCanary';
+import { buildReferenceImagePrompt, getReferenceCanaryReadiness } from './seedanceCanary';
 
 export const DEFAULT_SUCCESS_FIRST_PROVIDER_PROMPT =
   'the cast character gently moves through a peaceful sunlit garden, natural movement, fully clothed, soft storybook cinematic style, calm mood, gentle camera motion';
@@ -330,6 +330,13 @@ function strongestSavedReferences(references: SeedanceReferenceImage[]) {
     }));
 }
 
+function promptWithReferenceTokens(prompt: string, references: SeedanceReferenceImage[]) {
+  if (!references.length) return prompt;
+  const tokens = references.map((reference, index) => reference.token ?? `[Image${index + 1}]`);
+  if (tokens.every((token) => prompt.includes(token))) return prompt;
+  return collapseWhitespace(`The character from ${tokens.join(', ')}. ${prompt}`);
+}
+
 function providerModelForQuality(quality: SeedanceQualityMode | 'demo') {
   if (quality === 'quality') return SEEDANCE_QUALITY_MODEL;
   if (quality === 'fast') return SEEDANCE_FAST_MODEL;
@@ -407,12 +414,16 @@ export function buildRenderSuccessAttemptPlan(input: {
   });
 
   const firstVideoReferences = input.referenceCanaryState === 'succeeded' ? primaryReference : [];
+  const rescueReferencePrompt = sanitizeSuccessProviderPrompt({
+    prompt: firstVideoReferences.length ? buildReferenceImagePrompt(firstVideoReferences) : FIRST_VIDEO_RESCUE_PROVIDER_PROMPT,
+    characterName: input.characterName,
+  });
   const attempts: RenderSuccessAttempt[] = input.firstVideoRescue ? [
     makeAttempt({
       tier: 1,
       quality: 'fast',
       referenceImages: firstVideoReferences,
-      prompt: rescuePrompt,
+      prompt: firstVideoReferences.length ? rescueReferencePrompt : rescuePrompt,
       promptStyle: 'first_video_rescue',
       styleMode: 'first_video_rescue',
       aspectRatio: FIRST_VIDEO_RESCUE_ASPECT_RATIO,
@@ -439,7 +450,7 @@ export function buildRenderSuccessAttemptPlan(input: {
       tier: 1,
       quality: 'fast',
       referenceImages: primaryReference,
-      prompt: safePrompt,
+      prompt: promptWithReferenceTokens(safePrompt, primaryReference),
       promptStyle: 'safe_garden',
       styleMode: 'storybook_cinematic',
       label: 'Seedance Fast primary reference',
@@ -449,7 +460,7 @@ export function buildRenderSuccessAttemptPlan(input: {
       tier: 2,
       quality: 'fast',
       referenceImages: twoStrongestReferences,
-      prompt: storybookPrompt,
+      prompt: promptWithReferenceTokens(storybookPrompt, twoStrongestReferences),
       promptStyle: 'storybook_cinematic',
       styleMode: 'storybook_cinematic',
       label: 'Seedance Fast two strongest references',
@@ -459,7 +470,7 @@ export function buildRenderSuccessAttemptPlan(input: {
       tier: 3,
       quality: 'quality',
       referenceImages: primaryReference,
-      prompt: storybookPrompt,
+      prompt: promptWithReferenceTokens(storybookPrompt, primaryReference),
       promptStyle: 'storybook_cinematic',
       styleMode: 'storybook_cinematic',
       label: 'Seedance Quality primary reference',

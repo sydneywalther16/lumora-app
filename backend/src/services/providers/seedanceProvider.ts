@@ -274,14 +274,16 @@ function buildMultimodalSeedancePrompt(
 ) {
   if (!referenceImages.length) return prompt;
 
-  const tokens = referenceImages.map((reference, index) => reference.token ?? `[Image${index + 1}]`).join('');
+  const tokens = referenceImages.map((reference, index) => reference.token ?? `[Image${index + 1}]`);
+  const tokenText = tokens.join(', ');
+  const promptAlreadyUsesTokens = tokens.every((token) => prompt.includes(token));
   return [
-    `The cinematic character from ${tokens}.`,
+    promptAlreadyUsesTokens ? null : `The cinematic character from ${tokenText}.`,
     'Use all provided images as visual continuity references for face, side angles, full body, expressions, and outfit details.',
     'Do not use any reference image as the first frame. Do not animate, copy, or recreate a single source photo.',
     `Generate a fresh ${renderingMode} scene with consistent visual continuity across shots.`,
     prompt,
-  ].join(' ');
+  ].filter(Boolean).join(' ');
 }
 
 function collapseWhitespace(value: string) {
