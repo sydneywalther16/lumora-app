@@ -126,11 +126,13 @@ function nextAttemptPlanned(row: LatestRenderRow, attemptRow: LatestRenderRow | 
 function referenceRouteRecommendation(input: {
   publishable: boolean;
   canaryEverSucceeded: boolean;
+  seedanceReferenceRoutesBlocked?: boolean;
   successfulRoutes: unknown[];
   blockedRoutes: Array<{ failureCategory?: string | null }>;
   referenceCount: number | null;
 }) {
   if (input.publishable) return 'none_video_verified';
+  if (input.seedanceReferenceRoutesBlocked && input.canaryEverSucceeded) return 'configure alternate likeness provider';
   if (!input.canaryEverSucceeded) return 'Run text canary';
   if (input.successfulRoutes.length > 0 && (input.referenceCount ?? 0) > 0) {
     return 'Align Create Success First with successful reference route';
@@ -182,7 +184,13 @@ export async function buildLastRenderDiagnostics() {
         ok: true,
         latestGenerationJob: null,
         seedanceCanary: canarySummary,
+        textOnlyCanarySucceeded: canarySummary.canaryEverSucceeded,
         referenceRouteState: referenceRouteSummary.state,
+        seedanceReferenceRoutesBlocked: referenceRouteSummary.seedanceReferenceRoutesBlocked,
+        chosenCreateRoute: referenceRouteSummary.seedanceReferenceRoutesBlocked ? 'text_only_success_first' : 'none',
+        whyChosen: referenceRouteSummary.seedanceReferenceRoutesBlocked ? 'all Seedance self reference routes blocked' : 'No recent Create render found.',
+        publishRequiresVerifiedOutput: true,
+        continueStoryRequiresVerifiedOutput: true,
         knownSuccessfulReferenceRoutes: referenceRouteSummary.knownSuccessfulReferenceRoutes,
         knownBlockedReferenceRoutes: referenceRouteSummary.knownBlockedReferenceRoutes,
         referenceMatrixRecommendedNextAction: referenceRouteRecommendation({
@@ -190,6 +198,7 @@ export async function buildLastRenderDiagnostics() {
           canaryEverSucceeded: canarySummary.canaryEverSucceeded,
           successfulRoutes: referenceRouteSummary.knownSuccessfulReferenceRoutes,
           blockedRoutes: referenceRouteSummary.knownBlockedReferenceRoutes,
+          seedanceReferenceRoutesBlocked: referenceRouteSummary.seedanceReferenceRoutesBlocked,
           referenceCount: 0,
         }),
       };
@@ -261,6 +270,7 @@ export async function buildLastRenderDiagnostics() {
       canaryEverSucceeded: canarySummary.canaryEverSucceeded,
       successfulRoutes: referenceRouteSummary.knownSuccessfulReferenceRoutes,
       blockedRoutes: referenceRouteSummary.knownBlockedReferenceRoutes,
+      seedanceReferenceRoutesBlocked: referenceRouteSummary.seedanceReferenceRoutesBlocked,
       referenceCount: activeRow.renderSuccessReferenceCount ?? row.renderSuccessReferenceCount,
     });
 
@@ -311,9 +321,19 @@ export async function buildLastRenderDiagnostics() {
         whyPaused: whyPaused(row, attemptRow),
         nextAttemptPlanned: nextAttemptPlanned(row, attemptRow, attemptsSummary?.count ?? null),
         canaryEverSucceeded: canarySummary.canaryEverSucceeded,
+        textOnlyCanarySucceeded: canarySummary.canaryEverSucceeded,
         lastCanaryStatus: canarySummary.lastCanaryStatus,
         lastReferenceCanaryStatus: canarySummary.lastReferenceCanaryStatus,
         referenceRouteState: referenceRouteSummary.state,
+        seedanceReferenceRoutesBlocked: referenceRouteSummary.seedanceReferenceRoutesBlocked,
+        chosenCreateRoute: referenceRouteSummary.seedanceReferenceRoutesBlocked ? 'text_only_success_first' : activeRow.renderSuccessReferenceCount && activeRow.renderSuccessReferenceCount > 0 ? 'reference_images' : 'text_only_success_first',
+        whyChosen: referenceRouteSummary.seedanceReferenceRoutesBlocked
+          ? 'all Seedance self reference routes blocked'
+          : activeRow.renderSuccessReferenceCount && activeRow.renderSuccessReferenceCount > 0
+            ? 'Create used reference guidance after a successful route was available.'
+            : 'No successful reference route exists, so Success First uses the proven text-only path.',
+        publishRequiresVerifiedOutput: true,
+        continueStoryRequiresVerifiedOutput: true,
         knownSuccessfulReferenceRoutes: referenceRouteSummary.knownSuccessfulReferenceRoutes,
         knownBlockedReferenceRoutes: referenceRouteSummary.knownBlockedReferenceRoutes,
         lastReferenceRouteFailureCategory: referenceRouteSummary.failureCategory,

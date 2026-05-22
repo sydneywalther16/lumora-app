@@ -1,7 +1,7 @@
 import type { RenderSuccessMode } from './api';
 
 export const ULTRA_SAFE_SCENE_PROMPT =
-  'the cast character walks through a peaceful sunlit garden, natural movement, fully clothed, soft storybook cinematic style, gentle camera motion';
+  'A character walks slowly through a peaceful sunlit garden, natural movement, fully clothed, soft storybook cinematic style, gentle camera motion';
 
 export type CreatorRenderStatus =
   | 'queued'

@@ -50,3 +50,18 @@ export function isPublishEligible(record: Record<string, unknown> | null | undef
 export function isContinueStoryEligible(record: Record<string, unknown> | null | undefined) {
   return hasVerifiedVideoOutput(record);
 }
+
+export function shouldShowLighterCastGuidance(record: Record<string, unknown> | null | undefined) {
+  if (!record || !hasVerifiedVideoOutput(record)) return false;
+  const mode = typeof record.generationMode === 'string'
+    ? record.generationMode
+    : typeof record.generation_mode === 'string'
+      ? record.generation_mode
+      : '';
+  const hasCastContext = Boolean(record.isDefaultSelfCharacter || record.is_default_self_character || record.characterId || record.character_id || record.characterName || record.character_name);
+  return hasCastContext && (mode === 'seedance-text-to-video' || mode === 'text-to-video-fallback');
+}
+
+export function lighterCastGuidanceMessage(record: Record<string, unknown> | null | undefined) {
+  return shouldShowLighterCastGuidance(record) ? 'Rendered with lighter cast guidance.' : null;
+}

@@ -1,6 +1,17 @@
 import { useEffect, useState } from 'react';
 import { api, type ApiHealthDiagnostics } from '../lib/api';
 
+const referenceRoleLabels: Record<string, string> = {
+  front_angle: 'Front reference',
+  full_body: 'Full-body reference',
+  side_angle_left: 'Left reference',
+  side_angle_right: 'Right reference',
+};
+
+function referenceRouteLabel(role: string) {
+  return referenceRoleLabels[role] ?? role;
+}
+
 export default function DiagnosticsPage() {
   const [diagnostics, setDiagnostics] = useState<ApiHealthDiagnostics | null>(null);
   const [error, setError] = useState('');
@@ -220,6 +231,28 @@ export default function DiagnosticsPage() {
                 </p>
                 {diagnostics.referenceCleanup.warning ? (
                   <p className="muted">{diagnostics.referenceCleanup.warning}</p>
+                ) : null}
+              </div>
+            ) : null}
+            {diagnostics.referenceRouteStatus ? (
+              <div>
+                <span className="eyebrow">likeness routes</span>
+                <p className="diagnostic-row">
+                  <span>Text-only</span>
+                  <strong>{diagnostics.referenceRouteStatus.seedanceReferenceRoutesBlocked ? 'succeeded' : 'available'}</strong>
+                </p>
+                {diagnostics.referenceRouteStatus.requiredReferenceRoles.map((role) => {
+                  const blocked = diagnostics.referenceRouteStatus?.blockedReferenceRoles.includes(role);
+                  const succeeded = diagnostics.referenceRouteStatus?.knownSuccessfulReferenceRoutes.some((route) => route.referenceRole === role);
+                  return (
+                    <p key={role} className="diagnostic-row">
+                      <span>{referenceRouteLabel(role)}</span>
+                      <strong>{succeeded ? 'succeeded' : blocked ? 'blocked' : 'untested'}</strong>
+                    </p>
+                  );
+                })}
+                {diagnostics.referenceRouteStatus.seedanceReferenceRoutesBlocked ? (
+                  <p className="muted">Seedance reference routes are blocked for this character path. Configure an alternate likeness provider before enabling automatic likeness passes.</p>
                 ) : null}
               </div>
             ) : null}

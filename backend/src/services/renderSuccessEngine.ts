@@ -19,16 +19,19 @@ import {
 } from './providers/seedanceProvider';
 import { isProviderOutputError, parseProviderVideoOutput } from './providerOutputParser';
 import { scoreReferenceConfidence } from './sceneOptimization';
-import { buildReferenceImagePrompt, getReferenceCanaryReadiness, getReferenceRouteReadiness } from './seedanceCanary';
+import { buildReferenceImagePrompt, getReferenceRouteReadiness } from './seedanceCanary';
 
 export const DEFAULT_SUCCESS_FIRST_PROVIDER_PROMPT =
   'the cast character gently moves through a peaceful sunlit garden, natural movement, fully clothed, soft storybook cinematic style, calm mood, gentle camera motion';
+
+export const TEXT_ONLY_SUCCESS_FIRST_PROVIDER_PROMPT =
+  'A character walks slowly through a peaceful sunlit garden, natural movement, fully clothed, soft storybook cinematic style, gentle camera motion';
 
 export const ULTRA_SAFE_SCENE_PROVIDER_PROMPT =
   'the cast character walks through a peaceful sunlit garden, natural movement, fully clothed, soft storybook cinematic style, gentle camera motion';
 
 export const FIRST_VIDEO_RESCUE_PROVIDER_PROMPT =
-  'the cast character walks slowly through a peaceful sunlit garden, natural movement, fully clothed, soft storybook cinematic style, gentle camera motion';
+  TEXT_ONLY_SUCCESS_FIRST_PROVIDER_PROMPT;
 
 const RENDER_SUCCESS_ACTIVE_STATUSES = ['queued', 'rendering', 'processing', 'rate_limited'] as const;
 const RENDER_SUCCESS_TOTAL_ATTEMPTS = 5;
@@ -425,7 +428,11 @@ export function buildRenderSuccessAttemptPlan(input: {
     characterName: input.characterName,
   });
   const identityLightPrompt = sanitizeSuccessProviderPrompt({
-    prompt: 'the cast character walks through a peaceful sunlit garden, fully clothed, natural movement, soft storybook cinematic style, calm mood',
+    prompt: TEXT_ONLY_SUCCESS_FIRST_PROVIDER_PROMPT,
+    characterName: input.characterName,
+  });
+  const textFirstPrompt = sanitizeSuccessProviderPrompt({
+    prompt: TEXT_ONLY_SUCCESS_FIRST_PROVIDER_PROMPT,
     characterName: input.characterName,
   });
 
@@ -434,7 +441,22 @@ export function buildRenderSuccessAttemptPlan(input: {
     prompt: firstVideoReferences.length ? buildReferenceImagePrompt(firstVideoReferences) : FIRST_VIDEO_RESCUE_PROVIDER_PROMPT,
     characterName: input.characterName,
   });
-  const attempts: RenderSuccessAttempt[] = input.firstVideoRescue ? [
+  const textFirstAttempts = [
+    makeAttempt({
+      tier: 1,
+      quality: 'fast',
+      referenceImages: [],
+      prompt: textFirstPrompt,
+      promptStyle: 'first_video_rescue',
+      styleMode: 'first_video_rescue',
+      aspectRatio: FIRST_VIDEO_RESCUE_ASPECT_RATIO,
+      label: 'Seedance Fast text-only success first',
+      progressLabel: 'Creating first draft with lighter cast guidance.',
+      lighterCastGuidance: true,
+    }),
+  ] satisfies RenderSuccessAttempt[];
+
+  const attempts: RenderSuccessAttempt[] = !referenceRouteSucceeded ? textFirstAttempts : input.firstVideoRescue ? [
     makeAttempt({
       tier: 1,
       quality: 'fast',
@@ -446,7 +468,7 @@ export function buildRenderSuccessAttemptPlan(input: {
       label: firstVideoReferences.length
         ? 'First video rescue Seedance Fast primary reference'
         : 'First video rescue Seedance Fast text only',
-      progressLabel: firstVideoReferences.length ? 'Trying primary reference...' : 'Trying the cleanest storybook render...',
+      progressLabel: firstVideoReferences.length ? 'Trying primary reference...' : 'Creating first draft with lighter cast guidance.',
       lighterCastGuidance: firstVideoReferences.length === 0,
     }),
     ...(firstVideoReferences.length ? [makeAttempt({
@@ -861,7 +883,7 @@ async function insertMasterJob(input: StartRenderSuccessJobInput, groupId: strin
     maxPaidAttempts: input.maxPaidAttempts ?? env.RENDER_SUCCESS_MAX_PAID_ATTEMPTS,
     maxTotalAttempts: input.maxTotalAttempts ?? RENDER_SUCCESS_TOTAL_ATTEMPTS,
     firstVideoRescue: Boolean(input.firstVideoRescue),
-    progressLabel: 'Lumora is finding the cleanest render path.',
+    progressLabel: 'Creating first draft with lighter cast guidance.',
     createdAt: new Date().toISOString(),
   };
   const aspectRatio = effectiveAspectRatioForInput(input);
@@ -906,7 +928,7 @@ async function insertMasterJob(input: StartRenderSuccessJobInput, groupId: strin
       firstReferenceThumbnail(input.referenceImages ?? [], input.characterAvatar),
       JSON.stringify({ renderSuccessEngine: metadata }),
       new Date(Date.now() + RENDER_SUCCESS_TIMEOUT_MS).toISOString(),
-      input.referenceImages?.length ?? 0,
+      0,
       groupId,
     ],
   );
@@ -1843,7 +1865,7 @@ export async function startRenderSuccessJob(input: StartRenderSuccessJobInput) {
   return {
     job: master,
     duplicateOf: null,
-    message: 'Lumora is finding the cleanest render path.',
+    message: 'Creating first draft with lighter cast guidance.',
   };
 }
 
@@ -1876,18 +1898,12 @@ export function processRenderSuccessJob(masterJobId: string) {
         userId: master.userId,
         characterId: metadata.characterId,
       });
-      const legacyReferenceCanary = referenceCanary.state === 'unknown' && metadata.firstVideoRescue
-        ? await getReferenceCanaryReadiness({
-            userId: master.userId,
-            characterId: metadata.characterId,
-          })
-        : referenceCanary;
       const baseAttempts = buildRenderSuccessAttemptPlan({
         referenceImages: metadata.referenceImages ?? [],
         characterName: metadata.characterName,
         allowDemoFallback: Boolean(metadata.allowDemoFallback || env.DEMO_MODE),
         firstVideoRescue: Boolean(metadata.firstVideoRescue),
-        referenceCanaryState: referenceCanary.state === 'succeeded' ? referenceCanary.state : legacyReferenceCanary.state,
+        referenceCanaryState: referenceCanary.state,
         preferredReferenceRole: referenceCanary.referenceRole,
       });
       const preferredRecipe = await loadPreferredRecipe({
@@ -2035,7 +2051,7 @@ export function formatRenderSuccessJobStatus(job: RenderSuccessJobRow) {
         ? 'Render queue is cooling down. Lumora will resume automatically.'
       : status === 'paused' || status === 'failed'
         ? 'This scene needs a simpler direction before rendering.'
-        : 'Lumora is finding the cleanest render path.',
+        : progressLabel,
     warnings: renderedWithLighterCastGuidance ? ['Rendered with lighter cast guidance.'] : [],
     renderSuccess: {
       enabled: true,
@@ -2043,8 +2059,7 @@ export function formatRenderSuccessJobStatus(job: RenderSuccessJobRow) {
       promptStyle: job.renderSuccessPromptStyle,
       progressSteps: [
         'Preparing cast',
-        'Trying primary reference',
-        'Trying storybook cinematic take',
+        (job.referenceCount ?? job.renderSuccessReferenceCount ?? 0) > 0 ? 'Trying proven reference route' : 'Creating lighter cast draft',
         'Saving to Drafts',
       ],
     },

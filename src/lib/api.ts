@@ -675,6 +675,18 @@ export type ApiHealthDiagnostics = {
     probeEnabled: boolean;
     error?: unknown;
   };
+  referenceRouteStatus?: {
+    state: 'succeeded' | 'failed' | 'unknown';
+    referenceRole: string | null;
+    variant: string | null;
+    failureCategory: string | null;
+    seedanceReferenceRoutesBlocked: boolean;
+    blockedReferenceRoles: string[];
+    requiredReferenceRoles: string[];
+    knownSuccessfulReferenceRoutes: Array<Record<string, unknown>>;
+    knownBlockedReferenceRoutes: Array<Record<string, unknown>>;
+    allReferenceRouteResults: Array<Record<string, unknown>>;
+  };
   asyncRenderJobs?: {
     ok: boolean;
     pendingJobCount: number;

@@ -10,6 +10,7 @@ import { getCinematicCharacterProfileForUser, type CharacterReferenceImageUrls }
 import { scoreReferenceConfidence } from './sceneOptimization';
 import {
   SEEDANCE_FAST_MODEL,
+  SEEDANCE_QUALITY_MODEL,
   isReplicateRateLimitError,
   seedancePayloadSummary,
   validateSeedanceProviderPayload,
@@ -51,6 +52,7 @@ export type ReferenceRouteReadiness = {
   referenceRole: string | null;
   variant: SeedanceReferenceMatrixVariant | null;
   failureCategory: string | null;
+  seedanceReferenceRoutesBlocked?: boolean;
 };
 
 type CanaryMetadata = {
@@ -1051,6 +1053,19 @@ export async function persistReferenceRouteResult(input: {
       error: error instanceof Error ? error.message : String(error),
     });
   }
+
+  if (provider === 'seedance-fast' && input.failureCategory === 'reference_moderation_block') {
+    await persistReferenceRouteResult({
+      ...input,
+      provider: 'seedance-quality',
+      providerModel: SEEDANCE_QUALITY_MODEL,
+      notes: {
+        ...(input.notes ?? {}),
+        inferredFromProvider: 'seedance-fast',
+        inferredReason: 'Seedance reference route moderation block applies to automatic Seedance likeness routing.',
+      },
+    });
+  }
 }
 
 async function replicateClient() {
@@ -2016,6 +2031,11 @@ export async function buildRenderPathCompareDiagnostics() {
       status: referenceCanaryRow?.status ?? null,
       errorCategory: referenceCanaryRow?.errorCategory ?? null,
     } : null;
+    const routeChoice = chooseCreateRouteFromReferenceSummary({
+      referenceCount: real?.referenceCount ?? 0,
+      seedanceReferenceRoutesBlocked: referenceRouteSummary.seedanceReferenceRoutesBlocked,
+      hasSuccessfulReferenceRoute: referenceRouteSummary.knownSuccessfulReferenceRoutes.length > 0,
+    });
     const realPath = real ? {
       id: real.id,
       provider: real.providerName ?? real.provider,
@@ -2041,12 +2061,8 @@ export async function buildRenderPathCompareDiagnostics() {
       providerErrorSummary: null,
       canaryVariant: null,
       createVariant: (real.referenceCount ?? 0) > 0 ? 'reference_images' : 'text_only',
-      chosenCreateRoute: (real.referenceCount ?? 0) > 0 ? 'reference_images' : 'text_only',
-      whyChosen: (real.referenceCount ?? 0) > 0
-        ? referenceRouteSummary.knownSuccessfulReferenceRoutes.length
-          ? 'Create used a reference route after at least one reference route succeeded.'
-          : 'Create used reference guidance without a known successful reference route.'
-        : 'Create used text-only or lighter cast guidance.',
+      chosenCreateRoute: routeChoice.chosenCreateRoute,
+      whyChosen: routeChoice.whyChosen,
       renderMode: real.renderMode,
       providerFallbackStage: real.providerFallbackStage,
       renderSuccessRole: real.renderSuccessRole,
@@ -2064,11 +2080,15 @@ export async function buildRenderPathCompareDiagnostics() {
       selfReferenceCandidateCount: selfReferenceDiagnostics.selfReferenceCandidateCount,
       selfReferenceSourceErrors: selfReferenceDiagnostics.selfReferenceSourceErrors,
       textCanarySucceeded: canarySummary.canaryEverSucceeded,
+      textOnlyCanarySucceeded: canarySummary.canaryEverSucceeded,
+      seedanceReferenceRoutesBlocked: referenceRouteSummary.seedanceReferenceRoutesBlocked,
       frontReferenceCanaryResult: referenceRouteSummary.allReferenceRouteResults.find((route) => route.referenceRole === 'front_angle') ?? null,
       sideReferenceCanaryResult: referenceRouteSummary.allReferenceRouteResults.find((route) => route.referenceRole === 'side_angle_left' || route.referenceRole === 'side_angle_right') ?? null,
       fullBodyReferenceCanaryResult: referenceRouteSummary.allReferenceRouteResults.find((route) => route.referenceRole === 'full_body') ?? null,
-      chosenCreateRoute: realPath?.chosenCreateRoute ?? 'none',
-      whyChosen: realPath?.whyChosen ?? 'No recent Create render found.',
+      chosenCreateRoute: realPath?.chosenCreateRoute ?? (referenceRouteSummary.seedanceReferenceRoutesBlocked ? 'text_only_success_first' : 'none'),
+      whyChosen: realPath?.whyChosen ?? (referenceRouteSummary.seedanceReferenceRoutesBlocked ? 'all Seedance self reference routes blocked' : 'No recent Create render found.'),
+      publishRequiresVerifiedOutput: true,
+      continueStoryRequiresVerifiedOutput: true,
       knownBlockedReferenceRoutes: referenceRouteSummary.knownBlockedReferenceRoutes,
       knownSuccessfulReferenceRoutes: referenceRouteSummary.knownSuccessfulReferenceRoutes,
       createAttemptsKnownBlockedRoute: Boolean(realPath?.references && !referenceRouteSummary.knownSuccessfulReferenceRoutes.length && referenceRouteSummary.knownBlockedReferenceRoutes.length),
@@ -2127,6 +2147,7 @@ export async function buildRenderPathCompareDiagnostics() {
 
 export async function buildSeedanceCanarySummaryDiagnostics() {
   try {
+    const referenceRouteSummary = await getReferenceRouteSummary({});
     const result = await query<CanaryJobRow>(
       `select ${canaryJobSelect}
        from generation_jobs
@@ -2141,7 +2162,9 @@ export async function buildSeedanceCanarySummaryDiagnostics() {
     const referenceSucceeded = referenceCanaries.some((row) => row.status === 'completed' && parseProviderVideoOutput(row.outputUrl ?? row.resultAssetUrl).ok);
     const lastText = textCanaries[0] ?? null;
     const lastReference = referenceCanaries[0] ?? null;
-    const recommendedNextAction = !textCanaries.length
+    const recommendedNextAction = referenceRouteSummary.seedanceReferenceRoutesBlocked && textSucceeded
+      ? 'configure alternate likeness provider'
+      : !textCanaries.length
       ? 'Run text canary'
       : !textSucceeded
         ? lastText?.errorCategory?.includes('output')
@@ -2169,6 +2192,9 @@ export async function buildSeedanceCanarySummaryDiagnostics() {
       canaryEverSucceeded: textSucceeded,
       lastCanaryStatus: lastText?.status ?? null,
       lastReferenceCanaryStatus: lastReference?.status ?? null,
+      seedanceReferenceRoutesBlocked: referenceRouteSummary.seedanceReferenceRoutesBlocked,
+      knownBlockedReferenceRoutes: referenceRouteSummary.knownBlockedReferenceRoutes,
+      knownSuccessfulReferenceRoutes: referenceRouteSummary.knownSuccessfulReferenceRoutes,
       recommendedNextAction,
     };
   } catch {
@@ -2176,6 +2202,9 @@ export async function buildSeedanceCanarySummaryDiagnostics() {
       canaryEverSucceeded: false,
       lastCanaryStatus: null,
       lastReferenceCanaryStatus: null,
+      seedanceReferenceRoutesBlocked: false,
+      knownBlockedReferenceRoutes: [],
+      knownSuccessfulReferenceRoutes: [],
       recommendedNextAction: 'Run text canary',
     };
   }
@@ -2217,6 +2246,8 @@ export async function getReferenceCanaryReadiness(input: {
 }
 
 type ReferenceRouteMemoryRow = {
+  userId: string | null;
+  characterId: string | null;
   referenceRole: string | null;
   referenceLabel: string | null;
   provider: string | null;
@@ -2230,8 +2261,12 @@ type ReferenceRouteMemoryRow = {
   outputUrlPresent: boolean | null;
 };
 
+const seedanceSelfReferenceRoles = ['front_angle', 'full_body', 'side_angle_left', 'side_angle_right'] as const;
+
 function routeMemoryFromRow(row: ReferenceRouteMemoryRow) {
   return {
+    userId: row.userId,
+    characterId: row.characterId,
     referenceRole: row.referenceRole,
     referenceLabel: row.referenceLabel,
     provider: row.provider,
@@ -2245,6 +2280,97 @@ function routeMemoryFromRow(row: ReferenceRouteMemoryRow) {
   };
 }
 
+async function persistInferredSeedanceQualityBlocks(rows: ReferenceRouteMemoryRow[]) {
+  const qualityKeys = new Set(
+    rows
+      .filter((row) => row.provider === 'seedance-quality')
+      .map((row) => `${row.userId ?? ''}|${row.characterId ?? ''}|${row.referenceRole ?? ''}`),
+  );
+  const fastBlocks = rows.filter((row) => (
+    row.provider === 'seedance-fast' &&
+    row.failureCategory === 'reference_moderation_block' &&
+    row.referenceRole &&
+    !qualityKeys.has(`${row.userId ?? ''}|${row.characterId ?? ''}|${row.referenceRole ?? ''}`)
+  ));
+
+  for (const row of fastBlocks) {
+    await persistReferenceRouteResult({
+      userId: row.userId,
+      characterId: row.characterId,
+      referenceRole: row.referenceRole,
+      referenceLabel: row.referenceLabel,
+      provider: 'seedance-quality',
+      providerModel: SEEDANCE_QUALITY_MODEL,
+      variant: (row.variant as SeedanceReferenceMatrixVariant | null) ?? 'reference_images',
+      succeeded: false,
+      failureCategory: 'reference_moderation_block',
+      providerErrorCategory: row.providerErrorCategory ?? 'reference_moderation_block',
+      outputUrlPresent: false,
+      notes: {
+        inferredFromProvider: 'seedance-fast',
+        inferredReason: 'Seedance Fast reference moderation block disables automatic Seedance Quality likeness routing.',
+      },
+    });
+  }
+}
+
+export function buildReferenceRouteSummaryFromRows(rows: ReferenceRouteMemoryRow[]) {
+  const routes = rows.map(routeMemoryFromRow);
+  const knownSuccessfulReferenceRoutes = routes.filter((route) => route.succeeded);
+  const knownBlockedReferenceRoutes = routes.filter((route) => !route.succeeded);
+  const best = knownSuccessfulReferenceRoutes[0] ?? null;
+  const blockedRoles = new Set(
+    knownBlockedReferenceRoutes
+      .filter((route) => route.provider === 'seedance-fast' || route.provider === 'seedance-quality')
+      .map((route) => route.referenceRole)
+      .filter((role): role is string => Boolean(role)),
+  );
+  const seedanceReferenceRoutesBlocked = knownSuccessfulReferenceRoutes.length === 0 &&
+    seedanceSelfReferenceRoles.every((role) => blockedRoles.has(role));
+
+  return {
+    state: best ? 'succeeded' as const : knownBlockedReferenceRoutes.length ? 'failed' as const : 'unknown' as const,
+    referenceRole: best?.referenceRole ?? null,
+    variant: (best?.variant as SeedanceReferenceMatrixVariant | null) ?? null,
+    failureCategory: knownBlockedReferenceRoutes[0]?.failureCategory ?? null,
+    seedanceReferenceRoutesBlocked,
+    blockedReferenceRoles: Array.from(blockedRoles),
+    requiredReferenceRoles: [...seedanceSelfReferenceRoles],
+    knownSuccessfulReferenceRoutes,
+    knownBlockedReferenceRoutes,
+    allReferenceRouteResults: routes,
+  };
+}
+
+export function chooseCreateRouteFromReferenceSummary(input: {
+  referenceCount?: number | null;
+  seedanceReferenceRoutesBlocked?: boolean;
+  hasSuccessfulReferenceRoute?: boolean;
+}) {
+  if (input.hasSuccessfulReferenceRoute && (input.referenceCount ?? 0) > 0) {
+    return {
+      chosenCreateRoute: 'reference_images',
+      whyChosen: 'Create used a reference route after at least one reference route succeeded.',
+    };
+  }
+  if (input.seedanceReferenceRoutesBlocked) {
+    return {
+      chosenCreateRoute: 'text_only_success_first',
+      whyChosen: 'all Seedance self reference routes blocked',
+    };
+  }
+  if ((input.referenceCount ?? 0) > 0) {
+    return {
+      chosenCreateRoute: 'reference_images',
+      whyChosen: 'Create used reference guidance without a known successful reference route.',
+    };
+  }
+  return {
+    chosenCreateRoute: 'text_only_success_first',
+    whyChosen: 'No successful reference route exists, so Success First uses the proven text-only path.',
+  };
+}
+
 export async function getReferenceRouteSummary(input: {
   userId?: string | null;
   characterId?: string | null;
@@ -2252,6 +2378,8 @@ export async function getReferenceRouteSummary(input: {
   try {
     const result = await query<ReferenceRouteMemoryRow>(
       `select
+         user_id as "userId",
+         character_id as "characterId",
          reference_strategy as "referenceRole",
          notes->>'referenceLabel' as "referenceLabel",
          provider,
@@ -2274,25 +2402,17 @@ export async function getReferenceRouteSummary(input: {
         input.characterId ?? null,
       ],
     );
-    const routes = result.rows.map(routeMemoryFromRow);
-    const knownSuccessfulReferenceRoutes = routes.filter((route) => route.succeeded);
-    const knownBlockedReferenceRoutes = routes.filter((route) => !route.succeeded);
-    const best = knownSuccessfulReferenceRoutes[0] ?? null;
-    return {
-      state: best ? 'succeeded' as const : knownBlockedReferenceRoutes.length ? 'failed' as const : 'unknown' as const,
-      referenceRole: best?.referenceRole ?? null,
-      variant: (best?.variant as SeedanceReferenceMatrixVariant | null) ?? null,
-      failureCategory: knownBlockedReferenceRoutes[0]?.failureCategory ?? null,
-      knownSuccessfulReferenceRoutes,
-      knownBlockedReferenceRoutes,
-      allReferenceRouteResults: routes,
-    };
+    await persistInferredSeedanceQualityBlocks(result.rows);
+    return buildReferenceRouteSummaryFromRows(result.rows);
   } catch {
     return {
       state: 'unknown' as const,
       referenceRole: null,
       variant: null,
       failureCategory: null,
+      seedanceReferenceRoutesBlocked: false,
+      blockedReferenceRoles: [],
+      requiredReferenceRoles: [...seedanceSelfReferenceRoles],
       knownSuccessfulReferenceRoutes: [],
       knownBlockedReferenceRoutes: [],
       allReferenceRouteResults: [],
@@ -2310,5 +2430,6 @@ export async function getReferenceRouteReadiness(input: {
     referenceRole: summary.referenceRole,
     variant: summary.variant,
     failureCategory: summary.failureCategory,
+    seedanceReferenceRoutesBlocked: summary.seedanceReferenceRoutesBlocked,
   };
 }

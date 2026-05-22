@@ -409,7 +409,7 @@ function creatorSceneStatusLabel(status: string) {
 }
 
 const likenessFeedbackOptions: Array<{ value: LumoraIdentityFeedbackChoice; label: string }> = [
-  { value: 'looks_like_me', label: 'looks like me' },
+  { value: 'looks_like_me', label: 'likeness feels right' },
   { value: 'hair_wrong', label: 'hair wrong' },
   { value: 'face_shape_wrong', label: 'face shape wrong' },
   { value: 'skin_tone_wrong', label: 'skin tone wrong' },
@@ -1171,8 +1171,9 @@ export default function CreateVideo({
   const sceneExecutorUserId = authUser?.id ?? identityProfile?.userId ?? null;
   const seedanceMultimodalActive = isSeedanceEngine && seedanceReferenceCount > 1;
   const seedanceSingleReferenceWarning = isSeedanceEngine && seedanceReferenceCount === 1;
+  const successFirstLighterReferencePath = isSeedanceEngine && renderPreference === 'success_first' && seedanceReferenceCount > 0;
   const selectedGenerationMode: GenerationMode = isSeedanceEngine
-    ? (seedanceReferenceCount > 0 ? 'seedance-multimodal-reference' : 'seedance-text-to-video')
+    ? (renderPreference === 'success_first' ? 'seedance-text-to-video' : seedanceReferenceCount > 0 ? 'seedance-multimodal-reference' : 'seedance-text-to-video')
     : engine !== 'replicate'
       ? 'text-to-video-fallback'
       : selfReferenceMode
@@ -1278,7 +1279,7 @@ export default function CreateVideo({
   const engineRoutingMessage =
     isSeedanceEngine
       ? renderPreference === 'success_first'
-        ? 'Success First starts with one short safe clip, then adds complexity after the first draft lands.'
+        ? 'Success First starts with the proven text-only path, then adds likeness only after a reference route works.'
         : `${selectedProviderOption.label} uses ${seedanceReferenceCount} cast reference${seedanceReferenceCount === 1 ? '' : 's'} while keeping the scene fresh.`
     : engine === 'veo'
       ? 'Veo Experimental is ready for the next cinematic video route.'
@@ -1319,7 +1320,9 @@ export default function CreateVideo({
     label: generationStatusLabels[generationStatusState],
     tone: renderStateTone(generationStatusState),
     headline: renderStateHeadline(generationStatusState),
-    body: renderStateBody(generationStatusState, renderCooldownSeconds),
+    body: status && !isProviderTechnicalText(status)
+      ? status
+      : renderStateBody(generationStatusState, renderCooldownSeconds),
   };
   const pausedRenderCopy = creatorRenderStateCopy('paused');
   const suggestedTakePrompt = buildSafeTakePrompt(
@@ -3604,6 +3607,11 @@ export default function CreateVideo({
                 Only one image uploaded. Add side, full-body, expression, or outfit references for stronger cast consistency.
               </span>
             ) : null}
+            {successFirstLighterReferencePath ? (
+              <span className="muted">
+                Likeness guidance is saved, but Lumora will render the first draft with a lighter path.
+              </span>
+            ) : null}
             {isSeedanceEngine && seedanceReferenceCount > 0 ? (
               <details className="compact-reference-details">
                 <summary>
@@ -3750,7 +3758,11 @@ export default function CreateVideo({
             </div>
             {(generationStatusState === 'queued' || generationStatusState === 'processing' || generationStatusState === 'rate_limited') ? (
               <ol className="success-ladder-progress" aria-label="Render progress">
-                {['Preparing cast', 'Trying primary reference', 'Trying storybook cinematic take', 'Saving to Drafts'].map((step, index) => (
+                {[
+                  'Preparing cast',
+                  successFirstLighterReferencePath ? 'Creating lighter cast draft' : 'Trying storybook cinematic take',
+                  'Saving to Drafts',
+                ].map((step, index) => (
                   <li key={step} className={index === 0 || generationStatusState === 'processing' ? 'active' : ''}>
                     {step}
                   </li>

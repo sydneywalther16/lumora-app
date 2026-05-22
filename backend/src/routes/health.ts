@@ -14,6 +14,7 @@ import { buildRenderReliabilityDiagnostics } from '../services/sceneOptimization
 import {
   buildRenderPathCompareDiagnostics,
   getSeedanceCanaryStatus,
+  getReferenceRouteSummary,
   SelfReferenceCanarySelectionError,
   startSeedanceCanary,
   startSeedanceReferenceCanary,
@@ -57,6 +58,7 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
     referenceCleanup: await buildReferenceCleanupDiagnostics(),
     providerFallback: await buildProviderFallbackDiagnostics(),
     renderSuccessEngine: await buildRenderSuccessDiagnostics(),
+    referenceRouteStatus: await getReferenceRouteSummary({}),
     renderReliability: await buildRenderReliabilityDiagnostics(),
     asyncRenderJobs: await buildAsyncRenderJobDiagnostics(),
   });

@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import {
   buildSeedanceCanaryPayload,
+  buildReferenceRouteSummaryFromRows,
   buildReferenceImagePrompt,
   canaryRateLimitStatus,
+  chooseCreateRouteFromReferenceSummary,
   classifyReferenceCanaryFailure,
   matrixCandidatesFromSelfCandidates,
   noSavedSelfReferencePayloadForTest,
@@ -215,6 +217,32 @@ const matrixFrontOnly = matrixCandidatesFromSelfCandidates({
   }],
 });
 assert.deepEqual(matrixFrontOnly.map((candidate) => candidate.referenceRole), ['front_angle']);
+
+const blockedRouteSummary = buildReferenceRouteSummaryFromRows([
+  { userId: null, characterId: 'creator-self', referenceRole: 'front_angle', referenceLabel: 'Primary front face', provider: 'seedance-fast', providerModel: 'fast', variant: 'reference_images', successCount: 0, failureCount: 1, failureCategory: 'reference_moderation_block', providerErrorCategory: 'reference_moderation_block', lastTestedAt: new Date().toISOString(), outputUrlPresent: false },
+  { userId: null, characterId: 'creator-self', referenceRole: 'full_body', referenceLabel: 'Full body', provider: 'seedance-fast', providerModel: 'fast', variant: 'reference_images', successCount: 0, failureCount: 1, failureCategory: 'reference_moderation_block', providerErrorCategory: 'reference_moderation_block', lastTestedAt: new Date().toISOString(), outputUrlPresent: false },
+  { userId: null, characterId: 'creator-self', referenceRole: 'side_angle_left', referenceLabel: 'Left angle', provider: 'seedance-fast', providerModel: 'fast', variant: 'reference_images', successCount: 0, failureCount: 1, failureCategory: 'reference_moderation_block', providerErrorCategory: 'reference_moderation_block', lastTestedAt: new Date().toISOString(), outputUrlPresent: false },
+  { userId: null, characterId: 'creator-self', referenceRole: 'side_angle_right', referenceLabel: 'Right angle', provider: 'seedance-fast', providerModel: 'fast', variant: 'reference_images', successCount: 0, failureCount: 1, failureCategory: 'reference_moderation_block', providerErrorCategory: 'reference_moderation_block', lastTestedAt: new Date().toISOString(), outputUrlPresent: false },
+]);
+assert.equal(blockedRouteSummary.seedanceReferenceRoutesBlocked, true);
+assert.equal(blockedRouteSummary.state, 'failed');
+assert.deepEqual(
+  chooseCreateRouteFromReferenceSummary({
+    referenceCount: 0,
+    seedanceReferenceRoutesBlocked: blockedRouteSummary.seedanceReferenceRoutesBlocked,
+    hasSuccessfulReferenceRoute: blockedRouteSummary.knownSuccessfulReferenceRoutes.length > 0,
+  }),
+  {
+    chosenCreateRoute: 'text_only_success_first',
+    whyChosen: 'all Seedance self reference routes blocked',
+  },
+);
+
+const successfulRouteSummary = buildReferenceRouteSummaryFromRows([
+  { userId: null, characterId: 'creator-self', referenceRole: 'side_angle_left', referenceLabel: 'Left angle', provider: 'seedance-fast', providerModel: 'fast', variant: 'reference_images', successCount: 1, failureCount: 0, failureCategory: null, providerErrorCategory: null, lastTestedAt: new Date().toISOString(), outputUrlPresent: true },
+]);
+assert.equal(successfulRouteSummary.state, 'succeeded');
+assert.equal(successfulRouteSummary.referenceRole, 'side_angle_left');
 
 const redacted = redactRenderPathCompareValue({
   referenceUrl: 'https://signed.example.com/private.jpg?token=secret',

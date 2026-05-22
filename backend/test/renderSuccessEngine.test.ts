@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_SUCCESS_FIRST_PROVIDER_PROMPT,
   FIRST_VIDEO_RESCUE_PROVIDER_PROMPT,
+  TEXT_ONLY_SUCCESS_FIRST_PROVIDER_PROMPT,
   buildRenderSuccessAttemptPlan,
   isUsableVideoOutput,
   paidAttemptConsumesBudget,
@@ -90,16 +91,26 @@ const firstVideoUnprovenReferencePlan = buildRenderSuccessAttemptPlan({
   firstVideoRescue: true,
   referenceCanaryState: 'unknown',
 });
+assert.deepEqual(firstVideoUnprovenReferencePlan.map((attempt) => attempt.tier), [1]);
 assert.equal(firstVideoUnprovenReferencePlan[0].referenceCount, 0);
 assert.equal(firstVideoUnprovenReferencePlan[0].lighterCastGuidance, true);
+assert.equal(firstVideoUnprovenReferencePlan[0].prompt, TEXT_ONLY_SUCCESS_FIRST_PROVIDER_PROMPT);
+assert.equal(firstVideoUnprovenReferencePlan[0].prompt.includes('[Image1]'), false);
+assert.equal(firstVideoUnprovenReferencePlan[0].aspectRatio, '9:16');
+assert.equal(firstVideoUnprovenReferencePlan[0].resolution, '480p');
 
 const successFirstNoKnownRoutePlan = buildRenderSuccessAttemptPlan({
   referenceImages: savedReferences,
   characterName: 'Sydney Rose',
   referenceCanaryState: 'failed',
 });
+assert.deepEqual(successFirstNoKnownRoutePlan.map((attempt) => attempt.tier), [1]);
 assert.equal(successFirstNoKnownRoutePlan[0].referenceCount, 0);
 assert.equal(successFirstNoKnownRoutePlan[0].lighterCastGuidance, true);
+assert.equal(successFirstNoKnownRoutePlan[0].provider, 'seedance-fast');
+assert.equal(successFirstNoKnownRoutePlan[0].prompt, TEXT_ONLY_SUCCESS_FIRST_PROVIDER_PROMPT);
+assert.equal(successFirstNoKnownRoutePlan[0].prompt.includes('Sydney'), false);
+assert.equal(successFirstNoKnownRoutePlan[0].prompt.includes('[Image1]'), false);
 
 const sideRoutePlan = buildRenderSuccessAttemptPlan({
   referenceImages: savedReferences.map((reference) => (

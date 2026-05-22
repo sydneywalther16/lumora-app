@@ -16,7 +16,7 @@ import { getBestPoster, getBestThumbnail } from '../lib/mediaThumbnail';
 import { openContinueStory } from '../lib/continueStory';
 import { trackCreatorEvent } from '../lib/creatorEvents';
 import { buildSafeTakePrompt, creatorRenderStateCopy } from '../lib/renderStateCopy';
-import { getVerifiedVideoOutputUrl, hasVerifiedVideoOutput } from '../lib/renderCompletion';
+import { getVerifiedVideoOutputUrl, hasVerifiedVideoOutput, lighterCastGuidanceMessage } from '../lib/renderCompletion';
 
 type Props = {
   jobs: GenerationJob[];
@@ -599,6 +599,9 @@ export default function StudioList({ jobs, onPublished }: Props) {
                     : 'Story Memory can carry this mood forward.'}
                 </p>
               </div>
+              {lighterCastGuidanceMessage(job as unknown as Record<string, unknown>) ? (
+                <p className="muted">{lighterCastGuidanceMessage(job as unknown as Record<string, unknown>)}</p>
+              ) : null}
 
               <div className="draft-card-footer">
                 <div className="draft-action-row focused-draft-actions">
