@@ -3,7 +3,9 @@ import {
   buildSeedanceCanaryPayload,
   canaryRateLimitStatus,
   classifyReferenceCanaryFailure,
+  noSavedSelfReferencePayloadForTest,
   redactRenderPathCompareValue,
+  resolveSelfReferenceCanarySourceForTest,
   selectStrongestCanaryReference,
   selectPrimaryCanaryReference,
   SEEDANCE_CANARY_PROMPT,
@@ -76,6 +78,60 @@ const noExternal = selectStrongestCanaryReference({
 });
 assert.equal(noExternal.reference, null);
 assert.equal(noExternal.diagnostics.selected, false);
+
+const legacyProfileResolution = resolveSelfReferenceCanarySourceForTest({
+  sourcesChecked: ['profiles.self_reference_image_urls', 'character_profiles.reference_image_urls'],
+  candidates: [{
+    id: 'profile-self',
+    characterId: 'creator-self',
+    ownerUserId: '10000000-1000-4000-8000-100000000001',
+    name: 'Creator Self',
+    displayName: 'Creator Self',
+    isSelf: true,
+    referenceImageUrls: {
+      manualReferenceImageUrl: 'https://demo.supabase.co/storage/v1/object/public/lumora-assets/user/manual.jpg',
+      frontFace: 'https://demo.supabase.co/storage/v1/object/public/lumora-assets/user/front.jpg',
+      frontFaceUrl: 'https://demo.supabase.co/storage/v1/object/public/lumora-assets/user/front.jpg',
+      leftAngle: '',
+      rightAngle: '',
+    },
+    referenceImages: {},
+    source: 'profiles.self_reference_image_urls',
+    sourcePriority: 1,
+    updatedAt: new Date().toISOString(),
+  }],
+});
+assert.equal(legacyProfileResolution.selection.reference?.url, 'https://demo.supabase.co/storage/v1/object/public/lumora-assets/user/front.jpg');
+assert.equal(legacyProfileResolution.selection.diagnostics.source, 'profiles.self_reference_image_urls');
+
+const manualOnlyResolution = resolveSelfReferenceCanarySourceForTest({
+  sourcesChecked: ['self_characters.reference_image_urls'],
+  candidates: [{
+    id: 'self-character',
+    characterId: 'creator-self',
+    ownerUserId: '10000000-1000-4000-8000-100000000001',
+    name: 'Creator Self',
+    displayName: 'Creator Self',
+    isSelf: true,
+    referenceImageUrls: {
+      manualReferenceImageUrl: 'https://demo.supabase.co/storage/v1/object/public/lumora-assets/user/manual.jpg',
+      frontFace: '',
+      leftAngle: '',
+      rightAngle: '',
+    },
+    referenceImages: {},
+    source: 'self_characters.reference_image_urls',
+    sourcePriority: 0,
+    updatedAt: new Date().toISOString(),
+  }],
+});
+assert.equal(manualOnlyResolution.selection.reference, null);
+
+const missingReferencePayload = noSavedSelfReferencePayloadForTest(manualOnlyResolution);
+assert.equal(missingReferencePayload.error, 'no_saved_self_reference');
+assert.equal(missingReferencePayload.message, 'No saved Lumora self reference found.');
+assert.deepEqual(missingReferencePayload.sourcesChecked, ['self_characters.reference_image_urls']);
+assert.equal(missingReferencePayload.recommendedNextAction.includes('re-save'), true);
 
 assert.equal(classifyReferenceCanaryFailure('moderation safety policy blocked'), 'reference_moderation');
 assert.equal(classifyReferenceCanaryFailure('invalid input reference_images'), 'reference_input_schema');

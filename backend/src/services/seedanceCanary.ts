@@ -74,6 +74,8 @@ type CanaryJobRow = {
 
 type LatestRealPathRow = {
   id: string;
+  userId: string | null;
+  characterId: string | null;
   provider: string | null;
   providerName: string | null;
   providerModel: string | null;
@@ -97,6 +99,8 @@ export type CanaryReferenceDiagnostics = {
   host: string | null;
   savedToLumora: boolean;
   whySelected: string;
+  source: string | null;
+  sourcesChecked?: string[];
 };
 
 export type CanaryReferenceSelection = {
@@ -104,7 +108,7 @@ export type CanaryReferenceSelection = {
   diagnostics: CanaryReferenceDiagnostics;
 };
 
-type SelfCharacterCandidate = {
+export type SelfCharacterCandidate = {
   id: string;
   characterId: string;
   ownerUserId: string;
@@ -113,7 +117,28 @@ type SelfCharacterCandidate = {
   isSelf: boolean;
   referenceImageUrls: Partial<CharacterReferenceImageUrls>;
   referenceImages: Record<string, unknown>;
+  source: SelfReferenceSourceName;
+  sourcePriority: number;
   updatedAt: string;
+};
+
+export type SelfReferenceSourceName =
+  | 'self_characters.reference_image_urls'
+  | 'profiles.self_reference_image_urls'
+  | 'character_profiles.reference_image_urls';
+
+type SelfReferenceSourceResult = {
+  candidates: SelfCharacterCandidate[];
+  sourcesChecked: string[];
+  sourceErrors: string[];
+};
+
+export type SelfReferenceResolution = {
+  candidate: SelfCharacterCandidate | null;
+  selection: CanaryReferenceSelection;
+  candidates: SelfCharacterCandidate[];
+  sourcesChecked: string[];
+  sourceErrors: string[];
 };
 
 export class SelfReferenceCanarySelectionError extends Error {
@@ -373,43 +398,55 @@ function isManualReference(reference: SeedanceReferenceImage) {
 
 function canaryReferenceCandidates(character: {
   referenceImageUrls?: Partial<CharacterReferenceImageUrls> | null;
+  referenceImages?: Record<string, unknown> | null;
+  source?: string | null;
 }) {
-  const urls = character.referenceImageUrls ?? {};
+  const urls = {
+    ...referenceUrlsValue(character.referenceImages),
+    ...(character.referenceImageUrls ?? {}),
+  };
+  const source = character.source ?? null;
   return [
     {
       url: urls.frontFaceUrl ?? urls.frontFacePath ?? urls.frontFace ?? null,
       label: 'Primary front face',
       role: 'front_angle',
+      source,
       whySelected: 'Primary saved Lumora front reference has the strongest identity signal.',
     },
     {
       url: urls.expressiveUrl ?? urls.expressivePath ?? urls.expressive ?? null,
       label: 'Clean face reference',
       role: 'face_upper_body',
+      source,
       whySelected: 'Clean face or upper-body saved Lumora reference is the strongest available option.',
     },
     {
       url: urls.leftAngleUrl ?? urls.leftAnglePath ?? urls.leftAngle ?? null,
       label: 'Left angle',
       role: 'side_angle',
+      source,
       whySelected: 'Side saved Lumora reference is used because primary/face references are unavailable.',
     },
     {
       url: urls.rightAngleUrl ?? urls.rightAnglePath ?? urls.rightAngle ?? null,
       label: 'Right angle',
       role: 'side_angle',
+      source,
       whySelected: 'Side saved Lumora reference is used because primary/face references are unavailable.',
     },
     {
       url: urls.fullBodyUrl ?? urls.fullBodyPath ?? urls.fullBody ?? null,
       label: 'Full body',
       role: 'full_body',
+      source,
       whySelected: 'Full-body saved Lumora reference is used because face references are unavailable.',
     },
     {
       url: urls.manualReferenceImageUrl ?? null,
       label: 'Manual reference override',
       role: 'manual_reference_override',
+      source,
       whySelected: 'Manual reference override is never selected for canary.',
     },
   ];
@@ -417,6 +454,9 @@ function canaryReferenceCandidates(character: {
 
 export function selectStrongestCanaryReference(character: {
   referenceImageUrls?: Partial<CharacterReferenceImageUrls> | null;
+  referenceImages?: Record<string, unknown> | null;
+  source?: string | null;
+  sourcesChecked?: string[];
 }): CanaryReferenceSelection {
   const candidates = canaryReferenceCandidates(character);
   for (const candidate of candidates) {
@@ -439,6 +479,8 @@ export function selectStrongestCanaryReference(character: {
         host: redactedHost(url),
         savedToLumora: confidence.savedToLumora,
         whySelected: candidate.whySelected,
+        source: candidate.source,
+        sourcesChecked: character.sourcesChecked,
       },
     };
   }
@@ -452,8 +494,28 @@ export function selectStrongestCanaryReference(character: {
       host: null,
       savedToLumora: false,
       whySelected: 'No saved Lumora reference was available after excluding manual overrides and protected/external URLs.',
+      source: null,
+      sourcesChecked: character.sourcesChecked,
     },
   };
+}
+
+function createPathSelfReferenceCount(candidate: Pick<SelfCharacterCandidate, 'referenceImageUrls' | 'referenceImages' | 'source'>) {
+  return canaryReferenceCandidates(candidate)
+    .filter((entry) => {
+      const url = textValue(entry.url);
+      if (!url) return false;
+      const reference: SeedanceReferenceImage = {
+        url,
+        label: entry.label,
+        role: entry.role,
+        token: '[Image1]',
+      };
+      if (isManualReference(reference)) return false;
+      const confidence = scoreReferenceConfidence(reference);
+      return confidence.savedToLumora && !confidence.reasons.includes('Protected or temporary source');
+    })
+    .length;
 }
 
 function outputShapeSummary(output: unknown) {
@@ -865,23 +927,104 @@ export async function startSeedanceReferenceCanary(input: {
   return formatSeedanceCanaryStatus(processed ?? job);
 }
 
-function mapSelfCandidate(row: Record<string, unknown>): SelfCharacterCandidate {
+function mapSelfCandidate(row: Record<string, unknown>, source: SelfReferenceSourceName, sourcePriority: number): SelfCharacterCandidate {
   return {
     id: String(row.id),
     characterId: textValue(row.characterId) || String(row.id),
-    ownerUserId: String(row.ownerUserId),
+    ownerUserId: textValue(row.ownerUserId) || textValue(row.userId) || String(row.id),
     name: textValue(row.name),
     displayName: textValue(row.displayName) || textValue(row.name),
     isSelf: row.isSelf === true,
     referenceImageUrls: referenceUrlsValue(row.referenceImageUrls),
     referenceImages: recordValue(row.referenceImages),
+    source,
+    sourcePriority,
     updatedAt: String(row.updatedAt ?? new Date().toISOString()),
   };
 }
 
-async function listSelfCharacterCandidates(userId?: string | null) {
-  const result = await query<Record<string, unknown>>(
-    `select
+function redactedSourceError(error: unknown) {
+  return redactMessage(errorText(error)) ?? 'unavailable';
+}
+
+async function safeSourceQuery(input: {
+  source: SelfReferenceSourceName;
+  sourcePriority: number;
+  sourcesChecked: string[];
+  sourceErrors: string[];
+  sql: string;
+  params: unknown[];
+}) {
+  input.sourcesChecked.push(input.source);
+  try {
+    const result = await query<Record<string, unknown>>(input.sql, input.params);
+    return result.rows.map((row) => mapSelfCandidate(row, input.source, input.sourcePriority));
+  } catch (error) {
+    input.sourceErrors.push(`${input.source}: ${redactedSourceError(error)}`);
+    return [];
+  }
+}
+
+function sortSelfCandidates(candidates: SelfCharacterCandidate[]) {
+  return [...candidates].sort((a, b) => {
+    if (a.sourcePriority !== b.sourcePriority) return a.sourcePriority - b.sourcePriority;
+    return Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
+  });
+}
+
+async function listSelfCharacterCandidates(userId?: string | null): Promise<SelfReferenceSourceResult> {
+  const uuidUserId = isUuidLike(userId) ? userId : null;
+  const sourcesChecked: string[] = [];
+  const sourceErrors: string[] = [];
+  const selfCharacterCandidates = await safeSourceQuery({
+    source: 'self_characters.reference_image_urls',
+    sourcePriority: 0,
+    sourcesChecked,
+    sourceErrors,
+    sql: `select
+       coalesce(id::text, 'creator-self') as id,
+       'creator-self' as "characterId",
+       user_id as "ownerUserId",
+       coalesce(name, 'Creator Self') as name,
+       coalesce(name, 'Creator Self') as "displayName",
+       true as "isSelf",
+       reference_image_urls as "referenceImageUrls",
+       coalesce(style_preferences->'identityProfile', '{}'::jsonb) as "referenceImages",
+       updated_at as "updatedAt"
+     from self_characters
+     where ($1::uuid is null or user_id = $1)
+     order by updated_at desc nulls last, created_at desc nulls last
+     limit 20`,
+    params: [uuidUserId],
+  });
+  const profileCandidates = await safeSourceQuery({
+    source: 'profiles.self_reference_image_urls',
+    sourcePriority: 1,
+    sourcesChecked,
+    sourceErrors,
+    sql: `select
+       coalesce(id::text, user_id::text, 'creator-self') as id,
+       coalesce(default_self_character_id, 'creator-self') as "characterId",
+       coalesce(user_id, id) as "ownerUserId",
+       coalesce(default_self_character_name, display_name, 'Creator Self') as name,
+       coalesce(default_self_character_name, display_name, 'Creator Self') as "displayName",
+       true as "isSelf",
+       self_reference_image_urls as "referenceImageUrls",
+       coalesce(self_character_editor_draft, '{}'::jsonb) as "referenceImages",
+       updated_at as "updatedAt"
+     from profiles
+     where ($1::uuid is null or user_id = $1 or id = $1)
+       and self_reference_image_urls is not null
+     order by updated_at desc nulls last
+     limit 20`,
+    params: [uuidUserId],
+  });
+  const profileSelfCandidates = await safeSourceQuery({
+    source: 'character_profiles.reference_image_urls',
+    sourcePriority: 2,
+    sourcesChecked,
+    sourceErrors,
+    sql: `select
        id,
        character_id as "characterId",
        owner_user_id as "ownerUserId",
@@ -899,10 +1042,19 @@ async function listSelfCharacterCandidates(userId?: string | null) {
          or lower(coalesce(name, '')) in ('self', 'creator self', 'my self', 'me')
        )
      order by updated_at desc nulls last, created_at desc
-     limit 10`,
-    [isUuidLike(userId) ? userId : null],
-  );
-  return result.rows.map(mapSelfCandidate);
+     limit 20`,
+    params: [uuidUserId],
+  });
+
+  return {
+    candidates: sortSelfCandidates([
+      ...selfCharacterCandidates,
+      ...profileCandidates,
+      ...profileSelfCandidates,
+    ]),
+    sourcesChecked,
+    sourceErrors,
+  };
 }
 
 function redactedCandidate(candidate: SelfCharacterCandidate) {
@@ -911,39 +1063,166 @@ function redactedCandidate(candidate: SelfCharacterCandidate) {
     characterId: redactedId(candidate.characterId),
     ownerUserId: redactedId(candidate.ownerUserId),
     name: redactedName(candidate.displayName || candidate.name),
+    source: candidate.source,
+    savedReferenceCount: createPathSelfReferenceCount(candidate),
     updatedAt: candidate.updatedAt,
   };
 }
 
-async function findSelfReferenceCanaryCandidate(userId?: string | null) {
-  const candidates = await listSelfCharacterCandidates(userId);
-  if (!candidates.length) {
-    throw new SelfReferenceCanarySelectionError('No saved self character found.', {}, 404);
+function noSavedSelfReferencePayload(resolution: SelfReferenceResolution) {
+  return {
+    error: 'no_saved_self_reference',
+    message: 'No saved Lumora self reference found.',
+    sourcesChecked: resolution.sourcesChecked,
+    sourceErrors: resolution.sourceErrors,
+    candidates: resolution.candidates.map(redactedCandidate),
+    selectedReference: resolution.selection.diagnostics,
+    recommendedNextAction: 'Open Create or Characters and re-save the self reference photos to Lumora storage, then rerun the self reference canary.',
+  };
+}
+
+export function noSavedSelfReferencePayloadForTest(resolution: SelfReferenceResolution) {
+  return noSavedSelfReferencePayload(resolution);
+}
+
+function noSavedSelfReferenceError(resolution: SelfReferenceResolution) {
+  return new SelfReferenceCanarySelectionError('No saved Lumora self reference found.', noSavedSelfReferencePayload(resolution), 404);
+}
+
+function pickBestSelfReferenceResolution(input: {
+  candidates: SelfCharacterCandidate[];
+  sourcesChecked: string[];
+  sourceErrors: string[];
+  userId?: string | null;
+}): SelfReferenceResolution {
+  const candidates = sortSelfCandidates(input.candidates);
+  const selections = candidates.map((candidate) => ({
+    candidate,
+    selection: selectStrongestCanaryReference({
+      referenceImageUrls: candidate.referenceImageUrls,
+      referenceImages: candidate.referenceImages,
+      source: candidate.source,
+      sourcesChecked: input.sourcesChecked,
+    }),
+  }));
+  const usable = selections.filter((entry) => Boolean(entry.selection.reference));
+  const emptySelection = selectStrongestCanaryReference({
+    referenceImageUrls: null,
+    source: null,
+    sourcesChecked: input.sourcesChecked,
+  });
+
+  if (!usable.length) {
+    return {
+      candidate: null,
+      selection: selections[0]?.selection ?? emptySelection,
+      candidates,
+      sourcesChecked: input.sourcesChecked,
+      sourceErrors: input.sourceErrors,
+    };
   }
 
-  if (isUuidLike(userId)) {
-    return candidates[0];
+  if (isUuidLike(input.userId)) {
+    const chosen = usable[0];
+    return {
+      candidate: chosen.candidate,
+      selection: chosen.selection,
+      candidates,
+      sourcesChecked: input.sourcesChecked,
+      sourceErrors: input.sourceErrors,
+    };
   }
 
-  if (candidates.length === 1) return candidates[0];
+  const ownerIds = Array.from(new Set(usable.map((entry) => entry.candidate.ownerUserId).filter(Boolean)));
+  if (ownerIds.length <= 1) {
+    const chosen = usable[0];
+    return {
+      candidate: chosen.candidate,
+      selection: chosen.selection,
+      candidates,
+      sourcesChecked: input.sourcesChecked,
+      sourceErrors: input.sourceErrors,
+    };
+  }
 
-  throw new SelfReferenceCanarySelectionError('Multiple possible self characters found. Provide a userId or characterId.', {
-    candidates: candidates.map(redactedCandidate),
-  }, 409);
+  return {
+    candidate: null,
+    selection: usable[0].selection,
+    candidates: usable.map((entry) => entry.candidate),
+    sourcesChecked: input.sourcesChecked,
+    sourceErrors: input.sourceErrors,
+  };
+}
+
+export function resolveSelfReferenceCanarySourceForTest(input: {
+  candidates: SelfCharacterCandidate[];
+  sourcesChecked?: string[];
+  sourceErrors?: string[];
+  userId?: string | null;
+}) {
+  return pickBestSelfReferenceResolution({
+    candidates: input.candidates,
+    sourcesChecked: input.sourcesChecked ?? [],
+    sourceErrors: input.sourceErrors ?? [],
+    userId: input.userId,
+  });
+}
+
+function selfReferenceDiagnosticsFromResolution(resolution: SelfReferenceResolution) {
+  const candidate = resolution.candidate ?? resolution.candidates[0] ?? null;
+  return {
+    createSelfReferenceCount: candidate ? createPathSelfReferenceCount(candidate) : 0,
+    canarySelfReferenceCount: resolution.selection.reference ? 1 : 0,
+    referenceSourcesChecked: resolution.sourcesChecked,
+    strongestReferenceSource: resolution.selection.diagnostics.source,
+    selfReferenceCandidateCount: resolution.candidates.length,
+    selfReferenceSourceErrors: resolution.sourceErrors,
+  };
+}
+
+async function buildCreateSelfReferenceDiagnostics(userId?: string | null) {
+  const sourceResult = await listSelfCharacterCandidates(userId);
+  const resolution = pickBestSelfReferenceResolution({
+    ...sourceResult,
+    userId,
+  });
+  return selfReferenceDiagnosticsFromResolution(resolution);
+}
+
+async function findSelfReferenceCanaryCandidate(userId?: string | null): Promise<SelfReferenceResolution> {
+  const sourceResult = await listSelfCharacterCandidates(userId);
+  const resolution = pickBestSelfReferenceResolution({
+    ...sourceResult,
+    userId,
+  });
+
+  if (!resolution.candidate || !resolution.selection.reference) {
+    const ownerIds = Array.from(new Set(resolution.candidates.map((candidate) => candidate.ownerUserId).filter(Boolean)));
+    if (!isUuidLike(userId) && ownerIds.length > 1 && resolution.candidates.some((candidate) => createPathSelfReferenceCount(candidate) > 0)) {
+      throw new SelfReferenceCanarySelectionError('Multiple possible self characters found. Provide a userId.', {
+        error: 'multiple_self_reference_candidates',
+        message: 'Multiple possible saved self references were found. Provide a userId.',
+        sourcesChecked: resolution.sourcesChecked,
+        sourceErrors: resolution.sourceErrors,
+        candidates: resolution.candidates.map(redactedCandidate),
+        recommendedNextAction: 'Rerun the script with -UserId for the owner shown in Create diagnostics.',
+      }, 409);
+    }
+
+    throw noSavedSelfReferenceError(resolution);
+  }
+
+  return resolution;
 }
 
 export async function startSeedanceSelfReferenceCanary(input: {
   userId?: string | null;
   saveAsDraft?: boolean;
 }) {
-  const candidate = await findSelfReferenceCanaryCandidate(input.userId);
-  const selection = selectStrongestCanaryReference(candidate);
-  if (!selection.reference) {
-    throw new SelfReferenceCanarySelectionError('No saved self character found with a usable saved Lumora reference.', {
-      character: redactedCandidate(candidate),
-      selectedReference: selection.diagnostics,
-    }, 404);
-  }
+  const resolution = await findSelfReferenceCanaryCandidate(input.userId);
+  const candidate = resolution.candidate;
+  const selection = resolution.selection;
+  if (!candidate || !selection.reference) throw noSavedSelfReferenceError(resolution);
 
   const job = await insertCanaryJob({
     kind: 'reference',
@@ -1101,6 +1380,8 @@ export async function buildRenderPathCompareDiagnostics() {
     const realResult = await query<LatestRealPathRow>(
       `select
          id,
+         user_id as "userId",
+         character_id as "characterId",
          provider,
          provider_name as "providerName",
          provider_model as "providerModel",
@@ -1123,6 +1404,7 @@ export async function buildRenderPathCompareDiagnostics() {
     );
     const real = realResult.rows[0] ?? null;
     const realPrompt = real?.prompt ?? '';
+    const selfReferenceDiagnostics = await buildCreateSelfReferenceDiagnostics(real?.userId ?? null);
     const canary = {
       provider: 'seedance-fast',
       providerModel: SEEDANCE_FAST_MODEL,
@@ -1192,6 +1474,12 @@ export async function buildRenderPathCompareDiagnostics() {
       textCanary: canary,
       referenceCanary: redactRenderPathCompareValue(referenceCanary),
       realCreate: redactRenderPathCompareValue(realPath),
+      createSelfReferenceCount: selfReferenceDiagnostics.createSelfReferenceCount,
+      canarySelfReferenceCount: selfReferenceDiagnostics.canarySelfReferenceCount,
+      referenceSourcesChecked: selfReferenceDiagnostics.referenceSourcesChecked,
+      strongestReferenceSource: selfReferenceDiagnostics.strongestReferenceSource,
+      selfReferenceCandidateCount: selfReferenceDiagnostics.selfReferenceCandidateCount,
+      selfReferenceSourceErrors: selfReferenceDiagnostics.selfReferenceSourceErrors,
       differences: realPath ? {
         references: realPath.references !== canary.references,
         duration: realPath.duration !== canary.duration,

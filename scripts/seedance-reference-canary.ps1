@@ -34,6 +34,52 @@ function Canary-Summary {
   return $Status.message
 }
 
+function Print-ErrorResponse {
+  param($ErrorRecord)
+
+  $statusCode = $null
+  if ($ErrorRecord.Exception.Response -and $ErrorRecord.Exception.Response.StatusCode) {
+    $statusCode = [int]$ErrorRecord.Exception.Response.StatusCode
+  }
+
+  $rawBody = $ErrorRecord.ErrorDetails.Message
+  $body = $null
+  if (-not [string]::IsNullOrWhiteSpace($rawBody)) {
+    try {
+      $body = $rawBody | ConvertFrom-Json
+    } catch {
+      $body = $null
+    }
+  }
+
+  Write-Host "Request failed."
+  if ($statusCode) { Write-Host "status code: $statusCode" }
+
+  if ($body) {
+    Write-Host "error category: $($body.error)"
+    if ($body.message) { Write-Host "message: $($body.message)" }
+    if ($body.sourcesChecked) {
+      Write-Host "sources checked:"
+      foreach ($source in $body.sourcesChecked) {
+        Write-Host "  - $source"
+      }
+    }
+    if ($body.recommendedNextAction) {
+      Write-Host "recommended next action: $($body.recommendedNextAction)"
+    }
+    if ($body.candidates) {
+      Write-Host "candidate count: $($body.candidates.Count)"
+    }
+    return
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($rawBody)) {
+    Write-Host $rawBody
+  } else {
+    Write-Host $ErrorRecord.Exception.Message
+  }
+}
+
 $referenceCanaryPath = "/api/diagnostics/seedance-reference-canary/self"
 $startUrl = Join-ApiUrl $ApiBaseUrl $referenceCanaryPath
 $body = @{ saveAsDraft = [bool]$SaveAsDraft }
@@ -46,11 +92,7 @@ Write-Host "Route: $referenceCanaryPath"
 try {
   $start = Invoke-RestMethod -Method Post -Uri $startUrl -ContentType "application/json" -Body ($body | ConvertTo-Json -Depth 5) -TimeoutSec 45
 } catch {
-  if ($_.ErrorDetails.Message) {
-    Write-Host $_.ErrorDetails.Message
-  } else {
-    Write-Host $_.Exception.Message
-  }
+  Print-ErrorResponse $_
   exit 1
 }
 
