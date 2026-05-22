@@ -286,6 +286,7 @@ export type GenerationResponse = {
   videoUrl?: string;
   thumbnailUrl?: string | null;
   posterUrl?: string | null;
+  thumbnailSource?: string | null;
   previewImageUrl?: string | null;
   error?: string;
   moderation?: boolean;
@@ -357,6 +358,7 @@ export type GenerationJob = {
   resultAssetUrl: string | null;
   thumbnailUrl?: string | null;
   posterUrl?: string | null;
+  thumbnailSource?: string | null;
   referenceImageUrl?: string | null;
   referenceImageUrls?: Partial<ReferenceImageUrls> | null;
   additionalReferenceImageUrls?: string[] | null;
@@ -970,6 +972,7 @@ export type LumoraPost = {
   videoUrl?: string | null;
   thumbnailUrl?: string | null;
   posterUrl?: string | null;
+  thumbnailSource?: string | null;
   sourceGenerationId?: string | null;
   createdAt: string;
   updatedAt?: string | null;

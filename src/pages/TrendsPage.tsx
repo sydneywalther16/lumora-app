@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import GeneratedVideoPreview from '../components/GeneratedVideoPreview';
 import { posts as demoPosts, type Post } from '../data/mockData';
 import type { LumoraPost } from '../lib/api';
-import { getBestPoster, getBestThumbnail } from '../lib/mediaThumbnail';
 import { loadPostedPublications } from '../lib/postStorage';
 import { listForYouFeed } from '../lib/supabaseAppData';
 import { useSession } from '../hooks/useSession';
@@ -168,8 +168,6 @@ function ForYouCard({
   preview?: boolean;
   onSelect: (post: FeedPost) => void;
 }) {
-  const thumbnailUrl = getBestThumbnail(post);
-  const posterUrl = getBestPoster(post);
   const title = post.title || post.caption || 'Lumora video';
   const caption = post.caption || post.prompt || 'Cinematic Lumora post';
   const creatorName = post.creatorName || post.displayName || post.username || 'Lumora Creator';
@@ -197,38 +195,15 @@ function ForYouCard({
         boxShadow: 'var(--surface-shadow)',
       }}
     >
-      {preview && post.videoUrl ? (
-        <video
-          src={post.videoUrl}
-          muted
-          loop
-          autoPlay
-          playsInline
-          preload="metadata"
-          poster={posterUrl ?? thumbnailUrl ?? undefined}
-          style={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover' }}
-        />
-      ) : thumbnailUrl ? (
-        <img
-          src={thumbnailUrl}
-          alt={title}
-          loading="lazy"
-          style={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover' }}
-        />
-      ) : (
-        <div
-          style={{
-            width: '100%',
-            height: '100%',
-            display: 'grid',
-            placeItems: 'center',
-            padding: '14px',
-            textAlign: 'center',
-          }}
-        >
-          <strong style={{ fontSize: '0.9rem', lineHeight: 1.2 }}>{post.stylePreset || title}</strong>
-        </div>
-      )}
+      <GeneratedVideoPreview
+        item={post}
+        title={title}
+        autoPlay={Boolean(preview && post.videoUrl)}
+        forceVideo={Boolean(preview && post.videoUrl)}
+        showCastBadge={false}
+        placeholderLabel={post.stylePreset || title}
+        style={{ width: '100%', height: '100%' }}
+      />
 
       <div
         style={{
@@ -299,8 +274,6 @@ function ForYouPreviewModal({
 }) {
   const title = post.title || post.caption || 'Lumora video';
   const bodyText = post.caption || post.prompt || '';
-  const posterUrl = getBestPoster(post);
-  const imageUrl = posterUrl || post.imageUrl || null;
   const creatorName = post.creatorName || post.displayName || post.username || 'Lumora Creator';
   const creatorUsername = post.creatorUsername || post.username || 'lumora.creator';
 
@@ -344,32 +317,23 @@ function ForYouPreviewModal({
           </button>
         </div>
 
-        {post.videoUrl ? (
-          <video
-            src={post.videoUrl}
-            controls
-            autoPlay
-            muted
-            loop
-            playsInline
-            poster={posterUrl ?? undefined}
-            style={{ width: '100%', maxHeight: '62vh', display: 'block', objectFit: 'contain', background: '#000' }}
-          />
-        ) : imageUrl ? (
-          <img src={imageUrl} alt={title} style={{ width: '100%', maxHeight: '62vh', display: 'block', objectFit: 'contain' }} />
-        ) : (
-          <div
-            style={{
-              minHeight: '340px',
-              display: 'grid',
-              placeItems: 'center',
-              background: 'var(--card-media-background)',
-              color: '#fff',
-            }}
-          >
-            <strong>{title}</strong>
-          </div>
-        )}
+        <GeneratedVideoPreview
+          item={post}
+          title={title}
+          controls={Boolean(post.videoUrl)}
+          autoPlay={Boolean(post.videoUrl)}
+          forceVideo={Boolean(post.videoUrl)}
+          fit="contain"
+          showCastBadge={false}
+          placeholderLabel={title}
+          style={{
+            width: '100%',
+            minHeight: '340px',
+            maxHeight: '62vh',
+            aspectRatio: '9 / 16',
+            background: 'var(--media-background)',
+          }}
+        />
 
         <div style={{ padding: '18px', display: 'grid', gap: '10px' }}>
           <h3 style={{ margin: 0 }}>{title}</h3>

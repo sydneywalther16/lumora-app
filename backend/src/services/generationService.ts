@@ -168,7 +168,6 @@ export async function createSeedanceGeneration(input: {
     onPredictionPolled: input.onPredictionPolled,
   });
   const createdAt = new Date().toISOString();
-  const referenceThumbnailUrl = persistedReferences.referenceImages.map((reference) => reference.url).find(Boolean) ?? input.characterAvatar ?? null;
   const persistence = await persistCompletedGeneration({
     userId: input.userId ?? null,
     id: result.id,
@@ -181,7 +180,7 @@ export async function createSeedanceGeneration(input: {
     model: result.model,
     displayEngine: input.quality === 'quality' ? 'Seedance Quality' : 'Seedance Fast',
     videoUrl: result.videoUrl,
-    thumbnailUrl: referenceThumbnailUrl,
+    thumbnailUrl: null,
     characterId: input.characterId ?? null,
     characterName: input.characterName ?? null,
     characterAvatar: input.characterAvatar ?? null,
@@ -201,8 +200,8 @@ export async function createSeedanceGeneration(input: {
     prompt: result.finalPrompt,
     outputUrl: persistence.videoUrl,
     videoUrl: persistence.videoUrl,
-    thumbnailUrl: referenceThumbnailUrl,
-    posterUrl: referenceThumbnailUrl,
+    thumbnailUrl: null,
+    posterUrl: null,
     durationSeconds: result.settings.duration,
     aspectRatio: result.settings.aspect_ratio,
     resolution: result.settings.resolution,

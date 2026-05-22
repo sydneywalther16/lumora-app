@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import BottomSheet from '../components/BottomSheet';
+import GeneratedVideoPreview from '../components/GeneratedVideoPreview';
 import SwipeFeed from '../components/SwipeFeed';
 import TopChips from '../components/TopChips';
 import { posts, topChips, type Post, type TopChip } from '../data/mockData';
@@ -9,7 +10,6 @@ import { loadLumoraProfile } from '../lib/profileStorage';
 import { loadLocalProfileAvatarUrl } from '../lib/localAvatarStorage';
 import { useSession } from '../hooks/useSession';
 import { loadSupabasePublicPosts } from '../lib/supabaseAppData';
-import { getBestPoster, getBestThumbnail } from '../lib/mediaThumbnail';
 
 function formatPostedDate(iso: string): string {
   const date = new Date(iso);
@@ -134,12 +134,8 @@ type HomeFeedCardProps = {
 };
 
 function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
-  const [videoFailed, setVideoFailed] = useState(false);
   const stats = getPostStats(post.id);
 
-  const thumbnailUrl = getBestThumbnail(post);
-  const posterUrl = getBestPoster(post);
-  const mediaUrl = thumbnailUrl || post.imageUrl;
   const title = post.title || post.caption || 'Untitled Lumora post';
   const bodyText = post.caption || post.prompt || 'Posted from Drafts';
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
@@ -147,7 +143,6 @@ function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
   const authorAvatar = post.creatorAvatar || post.avatar || fallbackAuthorAvatar;
   const featuring = !post.isDefaultSelfCharacter && post.characterName ? `Featuring ${post.characterName}` : undefined;
   const defaultSelfLabel = post.isDefaultSelfCharacter ? 'Cinematic self' : undefined;
-  const hasVideo = Boolean(post.videoUrl);
 
   return (
     <article
@@ -163,61 +158,20 @@ function HomeFeedCard({ post, fallbackAuthorAvatar }: HomeFeedCardProps) {
         boxShadow: stats.likes > 700 ? '0 0 42px rgba(255,105,212,0.18)' : 'var(--modal-shadow)',
       }}
     >
-      {hasVideo && !videoFailed && post.videoUrl ? (
-        <video
-          src={post.videoUrl}
-          controls
-          muted
-          loop
-          playsInline
-          poster={posterUrl ?? undefined}
-          onError={() => setVideoFailed(true)}
-          style={{
-            width: '100%',
-            minHeight: '560px',
-            maxHeight: '680px',
-            aspectRatio: '9 / 16',
-            objectFit: 'cover',
-            display: 'block',
-            background: 'var(--media-background)',
-          }}
-        />
-      ) : mediaUrl && !videoFailed ? (
-        <img
-          src={mediaUrl}
-          alt={title}
-          style={{
-            width: '100%',
-            minHeight: '560px',
-            maxHeight: '680px',
-            aspectRatio: '9 / 16',
-            objectFit: 'cover',
-            display: 'block',
-          }}
-        />
-      ) : (
-        <div
-          style={{
-            width: '100%',
-            minHeight: '560px',
-            aspectRatio: '9 / 16',
-            background: 'var(--card-media-background)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'var(--soft-text)',
-            padding: '16px',
-            textAlign: 'center',
-          }}
-        >
-          <div>
-            <strong>Preview unavailable</strong>
-            <p style={{ marginTop: '10px', opacity: 0.9 }}>
-              This post video cannot be loaded right now.
-            </p>
-          </div>
-        </div>
-      )}
+      <GeneratedVideoPreview
+        item={post}
+        title={title}
+        controls={Boolean(post.videoUrl)}
+        forceVideo={Boolean(post.videoUrl)}
+        showCastBadge={false}
+        placeholderLabel="Preview unavailable"
+        style={{
+          width: '100%',
+          minHeight: '560px',
+          maxHeight: '680px',
+          aspectRatio: '9 / 16',
+        }}
+      />
 
       <div
         style={{

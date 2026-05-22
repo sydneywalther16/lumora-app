@@ -1,5 +1,5 @@
 import type { LumoraPost } from './api';
-import { getBestPoster, getBestThumbnail } from './mediaThumbnail';
+import { getBestPoster, getBestThumbnail, resolveGeneratedVideoMedia } from './mediaThumbnail';
 
 const STORAGE_KEY = 'lumora_posts';
 
@@ -28,14 +28,18 @@ export function loadPostedPublications(): LumoraPost[] {
           (typeof item.videoUrl === 'string' || typeof item.imageUrl === 'string')
         );
       })
-      .map((post) => ({
-        ...post,
-        status: post.status ?? 'published',
-        privacy: post.privacy ?? 'public',
-        publishedAt: post.publishedAt ?? post.createdAt,
-        thumbnailUrl: getBestThumbnail(post),
-        posterUrl: getBestPoster(post),
-      }))
+      .map((post) => {
+        const generatedMedia = resolveGeneratedVideoMedia(post);
+        return {
+          ...post,
+          status: post.status ?? 'published',
+          privacy: post.privacy ?? 'public',
+          publishedAt: post.publishedAt ?? post.createdAt,
+          thumbnailUrl: generatedMedia.hasVerifiedVideo ? generatedMedia.thumbnailUrl : getBestThumbnail(post),
+          posterUrl: generatedMedia.hasVerifiedVideo ? generatedMedia.posterUrl : getBestPoster(post),
+          thumbnailSource: generatedMedia.thumbnailSource,
+        };
+      })
       .filter((post) => post.status === 'published' && post.privacy !== 'private')
       .sort((a, b) => new Date(b.publishedAt ?? b.createdAt).getTime() - new Date(a.publishedAt ?? a.createdAt).getTime());
   } catch {
@@ -51,10 +55,16 @@ export function savePostedItem(post: LumoraPost) {
     ...existing,
     {
       ...post,
+      ...(() => {
+        const generatedMedia = resolveGeneratedVideoMedia(post);
+        return {
+          thumbnailUrl: cleanMediaUrl(generatedMedia.hasVerifiedVideo ? generatedMedia.thumbnailUrl : getBestThumbnail(post)),
+          posterUrl: cleanMediaUrl(generatedMedia.hasVerifiedVideo ? generatedMedia.posterUrl : getBestPoster(post)),
+          thumbnailSource: generatedMedia.thumbnailSource,
+        };
+      })(),
       imageUrl: cleanMediaUrl(post.imageUrl),
       videoUrl: cleanMediaUrl(post.videoUrl),
-      thumbnailUrl: cleanMediaUrl(getBestThumbnail(post)),
-      posterUrl: cleanMediaUrl(getBestPoster(post)),
       characterAvatar: cleanMediaUrl(post.characterAvatar),
       creatorAvatar: cleanMediaUrl(post.creatorAvatar),
       avatar: cleanMediaUrl(post.avatar),

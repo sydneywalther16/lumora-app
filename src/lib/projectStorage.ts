@@ -1,5 +1,5 @@
 import type { GenerationMode, LumoraIdentityFeedback, ReferenceImageUrls, VideoEngine } from './api';
-import { getBestPoster, getBestThumbnail } from './mediaThumbnail';
+import { getBestPoster, getBestThumbnail, resolveGeneratedVideoMedia } from './mediaThumbnail';
 
 export type StudioProject = {
   id: string;
@@ -10,6 +10,7 @@ export type StudioProject = {
   videoUrl: string;
   thumbnailUrl?: string | null;
   posterUrl?: string | null;
+  thumbnailSource?: string | null;
   status: string;
   publishedAt?: string | null;
   postedAt?: string | null;
@@ -91,55 +92,59 @@ export function loadStudioProjects(): StudioProject[] {
     });
 
     return projects
-      .map((project) => ({
-        ...project,
-        title: typeof project.title === 'string' ? project.title : null,
-        caption: typeof project.caption === 'string' ? project.caption : null,
-        finalPrompt: typeof project.finalPrompt === 'string' ? project.finalPrompt : null,
-        thumbnailUrl: getBestThumbnail(project),
-        posterUrl: getBestPoster(project),
-        publishedAt: typeof project.publishedAt === 'string' ? project.publishedAt : null,
-        postedAt: typeof project.postedAt === 'string' ? project.postedAt : null,
-        isPosted: typeof project.isPosted === 'boolean' ? project.isPosted : false,
-        privacy: typeof project.privacy === 'string' ? project.privacy : null,
-        visibility: typeof project.visibility === 'string' ? project.visibility : null,
-        viewCount: numberValue(project.viewCount),
-        likeCount: numberValue(project.likeCount),
-        commentCount: numberValue(project.commentCount),
-        shareCount: numberValue(project.shareCount),
-        engine: typeof project.engine === 'string' ? project.engine as VideoEngine : null,
-        displayEngine: typeof project.displayEngine === 'string' ? project.displayEngine : null,
-        aspectRatio: typeof project.aspectRatio === 'string' ? project.aspectRatio : null,
-        model: typeof project.model === 'string' ? project.model : null,
-        generationMode: typeof project.generationMode === 'string' ? project.generationMode as GenerationMode : null,
-        identityId: typeof project.identityId === 'string' ? project.identityId : null,
-        identityPrompt: typeof project.identityPrompt === 'string' ? project.identityPrompt : null,
-        consistencyPrompt: typeof project.consistencyPrompt === 'string' ? project.consistencyPrompt : null,
-        canonicalReferenceSet: Array.isArray(project.canonicalReferenceSet)
-          ? project.canonicalReferenceSet.filter((item): item is string => typeof item === 'string')
-          : null,
-        keyframeUrl: typeof project.keyframeUrl === 'string' ? project.keyframeUrl : null,
-        referenceImageUrl: typeof project.referenceImageUrl === 'string' ? project.referenceImageUrl : null,
-        referenceImageUrls:
-          project.referenceImageUrls && typeof project.referenceImageUrls === 'object'
-            ? project.referenceImageUrls as Partial<ReferenceImageUrls>
+      .map((project) => {
+        const generatedMedia = resolveGeneratedVideoMedia(project);
+        return {
+          ...project,
+          title: typeof project.title === 'string' ? project.title : null,
+          caption: typeof project.caption === 'string' ? project.caption : null,
+          finalPrompt: typeof project.finalPrompt === 'string' ? project.finalPrompt : null,
+          thumbnailUrl: generatedMedia.hasVerifiedVideo ? generatedMedia.thumbnailUrl : getBestThumbnail(project),
+          posterUrl: generatedMedia.hasVerifiedVideo ? generatedMedia.posterUrl : getBestPoster(project),
+          thumbnailSource: typeof project.thumbnailSource === 'string' ? project.thumbnailSource : null,
+          publishedAt: typeof project.publishedAt === 'string' ? project.publishedAt : null,
+          postedAt: typeof project.postedAt === 'string' ? project.postedAt : null,
+          isPosted: typeof project.isPosted === 'boolean' ? project.isPosted : false,
+          privacy: typeof project.privacy === 'string' ? project.privacy : null,
+          visibility: typeof project.visibility === 'string' ? project.visibility : null,
+          viewCount: numberValue(project.viewCount),
+          likeCount: numberValue(project.likeCount),
+          commentCount: numberValue(project.commentCount),
+          shareCount: numberValue(project.shareCount),
+          engine: typeof project.engine === 'string' ? project.engine as VideoEngine : null,
+          displayEngine: typeof project.displayEngine === 'string' ? project.displayEngine : null,
+          aspectRatio: typeof project.aspectRatio === 'string' ? project.aspectRatio : null,
+          model: typeof project.model === 'string' ? project.model : null,
+          generationMode: typeof project.generationMode === 'string' ? project.generationMode as GenerationMode : null,
+          identityId: typeof project.identityId === 'string' ? project.identityId : null,
+          identityPrompt: typeof project.identityPrompt === 'string' ? project.identityPrompt : null,
+          consistencyPrompt: typeof project.consistencyPrompt === 'string' ? project.consistencyPrompt : null,
+          canonicalReferenceSet: Array.isArray(project.canonicalReferenceSet)
+            ? project.canonicalReferenceSet.filter((item): item is string => typeof item === 'string')
             : null,
-        additionalReferenceImageUrls: Array.isArray(project.additionalReferenceImageUrls)
-          ? project.additionalReferenceImageUrls.filter((item): item is string => typeof item === 'string')
-          : null,
-        likenessFeedback:
-          project.likenessFeedback && typeof project.likenessFeedback === 'object'
-            ? project.likenessFeedback as LumoraIdentityFeedback
+          keyframeUrl: typeof project.keyframeUrl === 'string' ? project.keyframeUrl : null,
+          referenceImageUrl: typeof project.referenceImageUrl === 'string' ? project.referenceImageUrl : null,
+          referenceImageUrls:
+            project.referenceImageUrls && typeof project.referenceImageUrls === 'object'
+              ? project.referenceImageUrls as Partial<ReferenceImageUrls>
+              : null,
+          additionalReferenceImageUrls: Array.isArray(project.additionalReferenceImageUrls)
+            ? project.additionalReferenceImageUrls.filter((item): item is string => typeof item === 'string')
             : null,
-        characterId: typeof project.characterId === 'string' ? project.characterId : null,
-        characterAvatar: typeof project.characterAvatar === 'string' ? project.characterAvatar : null,
-        isDefaultSelfCharacter:
-          typeof project.isDefaultSelfCharacter === 'boolean' ? project.isDefaultSelfCharacter : false,
-        creatorName: typeof project.creatorName === 'string' ? project.creatorName : null,
-        creatorUsername: typeof project.creatorUsername === 'string' ? project.creatorUsername : null,
-        creatorAvatar: typeof project.creatorAvatar === 'string' ? project.creatorAvatar : null,
-        updatedAt: typeof project.updatedAt === 'string' ? project.updatedAt : project.createdAt,
-      }))
+          likenessFeedback:
+            project.likenessFeedback && typeof project.likenessFeedback === 'object'
+              ? project.likenessFeedback as LumoraIdentityFeedback
+              : null,
+          characterId: typeof project.characterId === 'string' ? project.characterId : null,
+          characterAvatar: typeof project.characterAvatar === 'string' ? project.characterAvatar : null,
+          isDefaultSelfCharacter:
+            typeof project.isDefaultSelfCharacter === 'boolean' ? project.isDefaultSelfCharacter : false,
+          creatorName: typeof project.creatorName === 'string' ? project.creatorName : null,
+          creatorUsername: typeof project.creatorUsername === 'string' ? project.creatorUsername : null,
+          creatorAvatar: typeof project.creatorAvatar === 'string' ? project.creatorAvatar : null,
+          updatedAt: typeof project.updatedAt === 'string' ? project.updatedAt : project.createdAt,
+        };
+      })
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   } catch {
     return [];
@@ -150,12 +155,14 @@ export function saveStudioProject(project: StudioProject) {
   if (typeof window === 'undefined') return;
 
   const existing = loadStudioProjects().filter((item) => item.id !== project.id);
+  const generatedMedia = resolveGeneratedVideoMedia(project);
   const nextProjects = [
     {
       ...project,
       videoUrl: cleanMediaUrl(project.videoUrl),
-      thumbnailUrl: cleanOptionalMediaUrl(getBestThumbnail(project)),
-      posterUrl: cleanOptionalMediaUrl(getBestPoster(project)),
+      thumbnailUrl: cleanOptionalMediaUrl(generatedMedia.hasVerifiedVideo ? generatedMedia.thumbnailUrl : getBestThumbnail(project)),
+      posterUrl: cleanOptionalMediaUrl(generatedMedia.hasVerifiedVideo ? generatedMedia.posterUrl : getBestPoster(project)),
+      thumbnailSource: generatedMedia.thumbnailSource,
       keyframeUrl: cleanOptionalMediaUrl(project.keyframeUrl),
       referenceImageUrl: cleanOptionalMediaUrl(project.referenceImageUrl),
       additionalReferenceImageUrls:

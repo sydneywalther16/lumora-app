@@ -98,10 +98,6 @@ function predictionUrl(prediction: Prediction) {
   return getUrl ?? (prediction.id ? `https://replicate.com/p/${prediction.id}` : null);
 }
 
-function firstReferenceThumbnail(references: SeedanceReferenceImage[], fallback?: string | null) {
-  return references.map((reference) => reference.url).find(Boolean) ?? fallback ?? null;
-}
-
 function asyncMetadata(input: AsyncRenderJobInput) {
   return {
     asyncRender: {
@@ -246,7 +242,7 @@ const asyncRenderJobSelect = `
 `;
 
 async function createRenderingProject(input: AsyncRenderJobInput) {
-  const thumbnailUrl = firstReferenceThumbnail(input.referenceImages, input.characterAvatar);
+  const thumbnailUrl: string | null = null;
   const result = await query<{ id: string }>(
     `insert into projects (
        user_id,
@@ -331,7 +327,7 @@ async function insertRenderJob(input: AsyncRenderJobInput, projectId: string | n
       modelForQuality(input.quality),
       input.prompt,
       input.characterId ?? null,
-      firstReferenceThumbnail(input.referenceImages, input.characterAvatar),
+      null,
       JSON.stringify(asyncMetadata(input)),
       timeoutAt,
       input.referenceImages.length,
@@ -441,7 +437,7 @@ async function markJobCompleted(input: {
        provider_model = coalesce($7, provider_model),
        result_asset_url = $4,
        output_url = $4,
-       thumbnail_url = coalesce($6, thumbnail_url),
+       thumbnail_url = $6,
        error_message = null,
        error_category = null,
        completed_at = now(),
@@ -833,7 +829,7 @@ async function finalizePredictionJob(job: AsyncRenderJobRecord, prediction: Pred
     model: job.providerModel ?? modelForQuality(input.quality),
     displayEngine: displayEngineForQuality(input.quality),
     videoUrl: outputParse.videoUrl,
-    thumbnailUrl: firstReferenceThumbnail(input.referenceImages, input.characterAvatar),
+    thumbnailUrl: null,
     characterId: input.characterId,
     characterName: input.characterName,
     characterAvatar: input.characterAvatar,
@@ -864,7 +860,7 @@ async function finalizePredictionJob(job: AsyncRenderJobRecord, prediction: Pred
     providerJobId: prediction.id,
     providerStatus: prediction.status,
     outputUrl: persistedOutputParse.videoUrl,
-    thumbnailUrl: firstReferenceThumbnail(input.referenceImages, input.characterAvatar),
+    thumbnailUrl: null,
     providerModel: job.providerModel ?? modelForQuality(input.quality),
   });
   await updateProjectStatus(job.projectId, 'completed');

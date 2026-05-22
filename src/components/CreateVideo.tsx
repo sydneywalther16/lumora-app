@@ -42,10 +42,11 @@ import {
   SEEDANCE_ENGINE_ID,
   SEEDANCE_QUALITY_ENGINE_ID,
 } from '../lib/providers/seedance';
-import { getBestPoster, getBestThumbnail } from '../lib/mediaThumbnail';
+import { resolveGeneratedVideoMedia } from '../lib/mediaThumbnail';
 import { useSession } from '../hooks/useSession';
 import { useAppStore } from '../store/useAppStore';
 import SelfReferencePreview, { normalizeReference } from './SelfReferencePreview';
+import GeneratedVideoPreview from './GeneratedVideoPreview';
 import { STYLE_PRESETS, selectedStylePrompt } from '../lib/stylePresets';
 import { trackCreatorEvent } from '../lib/creatorEvents';
 import {
@@ -1450,12 +1451,14 @@ export default function CreateVideo({
 
         if (statusValue === 'completed' && outputUrl) {
           clearRenderCooldown();
-          const thumbnailUrl = getBestThumbnail({
-            thumbnailUrl: job.thumbnailUrl,
-            posterUrl: job.posterUrl,
-            previewImageUrl: job.previewImageUrl,
+          const generatedMedia = resolveGeneratedVideoMedia({
+            ...job,
+            outputUrl,
+            videoUrl: outputUrl,
             characterAvatar,
           });
+          const thumbnailUrl = generatedMedia.thumbnailUrl;
+          const posterUrl = generatedMedia.posterUrl;
           const displayEngine = job.displayEngine ?? (
             engine === SEEDANCE_QUALITY_ENGINE_ID
               ? 'Seedance Quality'
@@ -1463,12 +1466,6 @@ export default function CreateVideo({
                 ? 'Seedance Fast'
                 : engineLabels[engine] ?? engine
           );
-          const posterUrl = getBestPoster({
-            thumbnailUrl,
-            posterUrl: job.posterUrl,
-            previewImageUrl: job.previewImageUrl,
-            characterAvatar,
-          });
           const completedAt = new Date().toISOString();
           setGeneratedVideoUrl(outputUrl);
           setFinalGeneratedPrompt(job.finalPrompt ?? job.prompt ?? activePrompt);
@@ -1491,6 +1488,7 @@ export default function CreateVideo({
             videoUrl: outputUrl,
             thumbnailUrl,
             posterUrl,
+            thumbnailSource: generatedMedia.thumbnailSource,
             generationMode: job.generationMode ?? selectedGenerationMode,
             finalPrompt: job.finalPrompt ?? job.prompt ?? activePrompt,
             model: job.model ?? null,
@@ -2716,22 +2714,20 @@ export default function CreateVideo({
         : formatUrlList(data.additionalReferenceImageUrls).length
           ? formatUrlList(data.additionalReferenceImageUrls)
           : additionalReferenceImageUrls;
-      const nextThumbnailUrl = getBestThumbnail({
+      const generatedMedia = resolveGeneratedVideoMedia({
+        videoUrl: nextVideoUrl,
+        outputUrl: nextVideoUrl,
         thumbnailUrl: data.thumbnailUrl,
         posterUrl: data.posterUrl,
         previewImageUrl: data.previewImageUrl,
         referenceImageUrl: nextReferenceImageUrl,
         referenceImageUrls: referencePayload,
+        referenceImages: effectiveSeedanceReferences,
+        additionalReferenceImageUrls: nextAdditionalReferenceImageUrls,
         characterAvatar,
       });
-      const nextPosterUrl = getBestPoster({
-        thumbnailUrl: nextThumbnailUrl,
-        posterUrl: data.posterUrl,
-        previewImageUrl: data.previewImageUrl,
-        referenceImageUrl: nextReferenceImageUrl,
-        referenceImageUrls: referencePayload,
-        characterAvatar,
-      });
+      const nextThumbnailUrl = generatedMedia.thumbnailUrl;
+      const nextPosterUrl = generatedMedia.posterUrl;
       const nextWarnings = formatCreatorWarnings([
         ...formatWarnings(data.warnings),
         ...(data.renderReliability?.creatorMessage ? [data.renderReliability.creatorMessage] : []),
@@ -2793,6 +2789,7 @@ export default function CreateVideo({
         outputUrl: nextVideoUrl,
         thumbnailUrl: nextThumbnailUrl,
         posterUrl: nextPosterUrl,
+        thumbnailSource: generatedMedia.thumbnailSource,
         previewImageUrl: typeof data.previewImageUrl === 'string' ? data.previewImageUrl : null,
         generationMode: nextGenerationMode,
         moderationDiagnostics: isProviderModerationDiagnostics(data.moderationDiagnostics)
@@ -2837,6 +2834,7 @@ export default function CreateVideo({
           videoUrl: result.outputUrl,
           thumbnailUrl: nextThumbnailUrl,
           posterUrl: nextPosterUrl,
+          thumbnailSource: generatedMedia.thumbnailSource,
           status: 'draft',
           provider: generationProvider,
           engine: selectedEngine,
@@ -3980,13 +3978,14 @@ export default function CreateVideo({
         {status && !visibleRenderState ? <p className="muted create-status-copy">{status}</p> : null}
         {verifiedGeneratedVideoUrl && !generationResult ? (
           <div style={{ display: 'grid', gap: '12px', marginTop: '14px' }}>
-            <video
-              src={verifiedGeneratedVideoUrl}
+            <GeneratedVideoPreview
+              item={{ videoUrl: verifiedGeneratedVideoUrl, outputUrl: verifiedGeneratedVideoUrl }}
+              title="Generated video"
               controls
               autoPlay
-              loop
-              playsInline
-              style={{ width: '100%', borderRadius: 12 }}
+              forceVideo
+              showCastBadge={false}
+              style={{ width: '100%', aspectRatio: '9 / 16', borderRadius: 12 }}
             />
             <button
               type="button"
@@ -4050,14 +4049,13 @@ export default function CreateVideo({
             </div>
           ) : null}
           {generationResultVideoUrl ? (
-            <video
-              src={generationResultVideoUrl}
+            <GeneratedVideoPreview
+              item={generationResult}
+              title={generationResult.prompt || 'Generated video'}
               controls
               autoPlay
-              loop
-              playsInline
-              poster={getBestPoster(generationResult) ?? undefined}
-              style={{ width: '100%', borderRadius: 12 }}
+              forceVideo
+              style={{ width: '100%', aspectRatio: '9 / 16', borderRadius: 12 }}
             />
           ) : null}
           <div className="button-row">

@@ -799,10 +799,6 @@ async function hasVerifiedVideoForUserCharacter(input: {
   }
 }
 
-function firstReferenceThumbnail(references: SeedanceReferenceImage[], fallback?: string | null) {
-  return references.map((reference) => reference.url).find(Boolean) ?? fallback ?? null;
-}
-
 function predictionUrl(prediction: Prediction) {
   const urls = prediction.urls as Record<string, unknown> | undefined;
   const getUrl = typeof urls?.get === 'string' ? urls.get : null;
@@ -810,7 +806,7 @@ function predictionUrl(prediction: Prediction) {
 }
 
 async function createRenderSuccessProject(input: StartRenderSuccessJobInput, groupId: string) {
-  const thumbnailUrl = firstReferenceThumbnail(input.referenceImages ?? [], input.characterAvatar);
+  const thumbnailUrl: string | null = null;
   const initialPrompt = effectiveInitialPromptForInput(input);
   const aspectRatio = effectiveAspectRatioForInput(input);
   const result = await query<{ id: string }>(
@@ -925,7 +921,7 @@ async function insertMasterJob(input: StartRenderSuccessJobInput, groupId: strin
       input.characterId ?? null,
       RENDER_SUCCESS_DURATION_SECONDS,
       aspectRatio,
-      firstReferenceThumbnail(input.referenceImages ?? [], input.characterAvatar),
+      null,
       JSON.stringify({ renderSuccessEngine: metadata }),
       new Date(Date.now() + RENDER_SUCCESS_TIMEOUT_MS).toISOString(),
       0,
@@ -992,7 +988,7 @@ async function insertAttemptJob(input: {
       input.metadata.characterId ?? null,
       input.attempt.durationSeconds,
       input.attempt.aspectRatio,
-      firstReferenceThumbnail(input.attempt.referenceImages, input.metadata.characterAvatar),
+      null,
       JSON.stringify({ renderSuccessEngine: attemptMetadata }),
       new Date(Date.now() + RENDER_SUCCESS_TIMEOUT_MS).toISOString(),
       input.attempt.referenceCount,
@@ -1085,6 +1081,7 @@ async function markMasterStatus(input: {
        provider_status = coalesce($3, provider_status),
        result_asset_url = coalesce($4, result_asset_url),
        output_url = coalesce($4, output_url),
+       thumbnail_url = case when $4::text is null then thumbnail_url else null end,
        project_id = coalesce($5, project_id),
        error_message = $6,
        error_category = $7,
@@ -1164,6 +1161,7 @@ async function markAttemptCompleted(input: {
        provider_prediction_id = coalesce($2, provider_prediction_id),
        result_asset_url = $3,
        output_url = $3,
+       thumbnail_url = null,
        project_id = coalesce($4, project_id),
        error_message = null,
        error_category = null,
@@ -1468,7 +1466,7 @@ async function finalizeSuccessfulAttempt(input: {
         ? 'Seedance Fast'
         : 'Demo Mode',
     videoUrl: providerOutputParse.videoUrl,
-    thumbnailUrl: firstReferenceThumbnail(input.attempt.referenceImages, input.metadata.characterAvatar),
+    thumbnailUrl: null,
     characterId: input.metadata.characterId ?? null,
     characterName: input.metadata.characterName ?? null,
     characterAvatar: input.metadata.characterAvatar ?? null,

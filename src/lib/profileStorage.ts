@@ -1,5 +1,5 @@
 import type { CreatorSelfStylePreferences, LumoraPost } from './api';
-import { getBestPoster, getBestThumbnail } from './mediaThumbnail';
+import { getBestPoster, getBestThumbnail, resolveGeneratedVideoMedia } from './mediaThumbnail';
 import type { StudioProject } from './projectStorage';
 
 type SelfReferenceImageUrls = {
@@ -258,15 +258,19 @@ export function loadProfilePosts(): LumoraPost[] {
         typeof item.createdAt === 'string'
       );
     })
-      .map((post) => ({
-        ...post,
-        status: post.status ?? 'published',
-        privacy: post.privacy ?? 'public',
-        visibility: post.visibility ?? post.privacy ?? 'public',
-        publishedAt: post.publishedAt ?? post.createdAt,
-        thumbnailUrl: post.thumbnailUrl ?? getBestThumbnail(post),
-        posterUrl: post.posterUrl ?? getBestPoster(post),
-      }))
+      .map((post) => {
+        const generatedMedia = resolveGeneratedVideoMedia(post);
+        return {
+          ...post,
+          status: post.status ?? 'published',
+          privacy: post.privacy ?? 'public',
+          visibility: post.visibility ?? post.privacy ?? 'public',
+          publishedAt: post.publishedAt ?? post.createdAt,
+          thumbnailUrl: generatedMedia.hasVerifiedVideo ? generatedMedia.thumbnailUrl : post.thumbnailUrl ?? getBestThumbnail(post),
+          posterUrl: generatedMedia.hasVerifiedVideo ? generatedMedia.posterUrl : post.posterUrl ?? getBestPoster(post),
+          thumbnailSource: generatedMedia.thumbnailSource,
+        };
+      })
       .filter((post) => {
         const status = (post.status || 'published').toLowerCase();
         const visibility = (post.visibility || post.privacy || 'public').toLowerCase();

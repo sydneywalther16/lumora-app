@@ -4,17 +4,24 @@ import { type GenerationJob, type VideoEngine } from '../lib/api';
 import { isUnpublishedDraftProject, loadStudioProjects, type StudioProject } from '../lib/projectStorage';
 import { useSession } from '../hooks/useSession';
 import { listDrafts } from '../lib/supabaseAppData';
-import { getBestPoster, getBestThumbnail } from '../lib/mediaThumbnail';
+import { resolveGeneratedVideoMedia } from '../lib/mediaThumbnail';
 
 const characterProfilesMigrationWarning = 'Cast needs the latest Lumora update.';
 
 function shouldShowMockDraftStates() {
   if (typeof window === 'undefined') return false;
-  return new URLSearchParams(window.location.search).get('mockStates') === '1';
+  const params = new URLSearchParams(window.location.search);
+  return params.get('mockStates') === '1' || params.get('mockVideoNoPoster') === '1';
 }
 
 function mockDraftJobs(): GenerationJob[] {
   const now = new Date().toISOString();
+  const params = typeof window === 'undefined' ? new URLSearchParams() : new URLSearchParams(window.location.search);
+  const mockVideoNoPoster = params.get('mockVideoNoPoster') === '1';
+  const videoUrl = mockVideoNoPoster
+    ? 'https://replicate.delivery/pbxt/generated-garden.mp4'
+    : '/demo-placeholder.jpg';
+  const referenceUrl = '/demo-placeholder.jpg';
   return [
     {
       id: 'mock-focused-completed-draft',
@@ -36,10 +43,10 @@ function mockDraftJobs(): GenerationJob[] {
       durationSeconds: 4,
       aspectRatio: '9:16',
       privacy: 'private',
-      resultAssetUrl: '/demo-placeholder.jpg',
-      thumbnailUrl: '/demo-placeholder.jpg',
-      posterUrl: '/demo-placeholder.jpg',
-      referenceImageUrl: '/demo-placeholder.jpg',
+      resultAssetUrl: videoUrl,
+      thumbnailUrl: mockVideoNoPoster ? referenceUrl : '/demo-placeholder.jpg',
+      posterUrl: mockVideoNoPoster ? null : '/demo-placeholder.jpg',
+      referenceImageUrl: referenceUrl,
       referenceImageUrls: null,
       additionalReferenceImageUrls: null,
       generationMode: 'seedance-multimodal-reference',
@@ -130,43 +137,47 @@ export default function StudioPage() {
   }
 
   function mapProjectsToJobs(projects: StudioProject[]): GenerationJob[] {
-    return projects.map((project) => ({
-      id: project.id,
-      projectId: project.id,
-      characterId: project.characterId,
-      characterName: project.characterName,
-      characterAvatar: project.characterAvatar ?? null,
-      isDefaultSelfCharacter: Boolean(project.isDefaultSelfCharacter),
-      creatorName: project.creatorName ?? null,
-      creatorUsername: project.creatorUsername ?? null,
-      creatorAvatar: project.creatorAvatar ?? null,
-      title:
-        project.title ||
-        (project.isDefaultSelfCharacter
-          ? 'Cinematic self selected'
-          : project.characterName
-            ? `Character: ${project.characterName}`
-            : 'Generated video'),
-      caption: project.caption || project.prompt || '',
-      prompt: project.prompt,
-      status: project.status,
-      outputType: 'video',
-      provider: project.provider,
-      displayEngine: project.displayEngine ?? null,
-      durationSeconds: null,
-      aspectRatio: project.aspectRatio ?? null,
-      privacy: 'private',
-      resultAssetUrl: project.videoUrl,
-      thumbnailUrl: getBestThumbnail(project),
-      posterUrl: getBestPoster(project),
-      referenceImageUrl: project.referenceImageUrl ?? null,
-      referenceImageUrls: project.referenceImageUrls ?? null,
-      additionalReferenceImageUrls: project.additionalReferenceImageUrls ?? null,
-      generationMode: project.generationMode ?? null,
-      errorMessage: null,
-      createdAt: project.createdAt,
-      updatedAt: project.updatedAt ?? project.createdAt,
-    }));
+    return projects.map((project) => {
+      const generatedMedia = resolveGeneratedVideoMedia(project);
+      return {
+        id: project.id,
+        projectId: project.id,
+        characterId: project.characterId,
+        characterName: project.characterName,
+        characterAvatar: project.characterAvatar ?? null,
+        isDefaultSelfCharacter: Boolean(project.isDefaultSelfCharacter),
+        creatorName: project.creatorName ?? null,
+        creatorUsername: project.creatorUsername ?? null,
+        creatorAvatar: project.creatorAvatar ?? null,
+        title:
+          project.title ||
+          (project.isDefaultSelfCharacter
+            ? 'Cinematic self selected'
+            : project.characterName
+              ? `Character: ${project.characterName}`
+              : 'Generated video'),
+        caption: project.caption || project.prompt || '',
+        prompt: project.prompt,
+        status: project.status,
+        outputType: 'video',
+        provider: project.provider,
+        displayEngine: project.displayEngine ?? null,
+        durationSeconds: null,
+        aspectRatio: project.aspectRatio ?? null,
+        privacy: 'private',
+        resultAssetUrl: project.videoUrl,
+        thumbnailUrl: generatedMedia.thumbnailUrl,
+        posterUrl: generatedMedia.posterUrl,
+        thumbnailSource: generatedMedia.thumbnailSource,
+        referenceImageUrl: project.referenceImageUrl ?? null,
+        referenceImageUrls: project.referenceImageUrls ?? null,
+        additionalReferenceImageUrls: project.additionalReferenceImageUrls ?? null,
+        generationMode: project.generationMode ?? null,
+        errorMessage: null,
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt ?? project.createdAt,
+      };
+    });
   }
 
   return (

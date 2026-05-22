@@ -11,6 +11,7 @@ import { buildReferenceCleanupDiagnostics } from '../services/referenceCleanup';
 import { startSeedanceReferenceMatrixCanary } from '../services/referenceMatrixCanary';
 import { buildRenderSuccessDiagnostics } from '../services/renderSuccessEngine';
 import { buildRenderReliabilityDiagnostics } from '../services/sceneOptimization';
+import { buildVideoThumbnailDiagnostics, repairVideoThumbnails } from '../services/videoThumbnailRepair';
 import {
   buildRenderPathCompareDiagnostics,
   getSeedanceCanaryStatus,
@@ -61,11 +62,27 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
     referenceRouteStatus: await getReferenceRouteSummary({}),
     renderReliability: await buildRenderReliabilityDiagnostics(),
     asyncRenderJobs: await buildAsyncRenderJobDiagnostics(),
+    videoThumbnails: await buildVideoThumbnailDiagnostics(),
   });
 });
 
 healthRouter.get('/api/diagnostics/render-last', async (_req, res) => {
   res.json(await buildLastRenderDiagnostics());
+});
+
+healthRouter.get('/api/diagnostics/media-thumbnails', async (_req, res) => {
+  res.json(await buildVideoThumbnailDiagnostics());
+});
+
+healthRouter.post('/api/diagnostics/repair-video-thumbnails', async (_req, res) => {
+  if (!env.ENABLE_RENDER_PROBE) {
+    res.status(403).json({
+      error: 'Media thumbnail repair disabled. Set ENABLE_RENDER_PROBE=true to run the diagnostic repair.',
+    });
+    return;
+  }
+
+  res.json(await repairVideoThumbnails());
 });
 
 healthRouter.get('/api/diagnostics/canary-routes', (_req, res) => {

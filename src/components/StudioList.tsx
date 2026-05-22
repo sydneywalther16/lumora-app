@@ -12,7 +12,8 @@ import {
   publishDraft,
 } from '../lib/supabaseAppData';
 import type { GenerationJob, LumoraPost, PrivacySetting } from '../lib/api';
-import { getBestPoster, getBestThumbnail } from '../lib/mediaThumbnail';
+import GeneratedVideoPreview from './GeneratedVideoPreview';
+import { resolveGeneratedVideoMedia } from '../lib/mediaThumbnail';
 import { openContinueStory } from '../lib/continueStory';
 import { trackCreatorEvent } from '../lib/creatorEvents';
 import { buildSafeTakePrompt, creatorRenderStateCopy } from '../lib/renderStateCopy';
@@ -136,7 +137,6 @@ export default function StudioList({ jobs, onPublished }: Props) {
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishPrivacy, setPublishPrivacy] = useState<PrivacySetting>('public');
   const [captionDraft, setCaptionDraft] = useState('');
-  const [failedVideoIds, setFailedVideoIds] = useState<Set<string>>(new Set());
   const [hiddenJobIds, setHiddenJobIds] = useState<Set<string>>(new Set());
   const visibleJobs = jobs.filter((job) => !hiddenJobIds.has(job.id));
 
@@ -238,14 +238,14 @@ export default function StudioList({ jobs, onPublished }: Props) {
       currentCharacter?.referenceImageUrls.frontFaceUrl ||
       currentCharacter?.referenceImageUrls.frontFace ||
       (isDefaultSelfCharacter ? profile.defaultSelfCharacterAvatar : null);
-    const thumbnailUrl = getBestThumbnail({
+    const generatedMedia = resolveGeneratedVideoMedia({
       ...job,
+      videoUrl: verifiedVideoUrl,
+      outputUrl: verifiedVideoUrl,
       characterAvatar,
     });
-    const posterUrl = getBestPoster({
-      ...job,
-      characterAvatar,
-    });
+    const thumbnailUrl = generatedMedia.thumbnailUrl;
+    const posterUrl = generatedMedia.posterUrl;
     const publishedAt = new Date().toISOString();
 
     const post: LumoraPost = {
@@ -270,6 +270,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
       isDefaultSelfCharacter,
       thumbnailUrl,
       posterUrl,
+      thumbnailSource: generatedMedia.thumbnailSource,
       status: 'published',
       visibility: publishPrivacy,
       publishedAt,
@@ -442,9 +443,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
           const statusLabel = formatStatus(effectiveStatus);
           const statusValue = (job.status || '').toLowerCase();
           const showProviderDetail = false;
-          const videoFailed = failedVideoIds.has(job.id);
-          const thumbnailUrl = getBestThumbnail(job);
-          const posterUrl = getBestPoster(job);
+          const previewItem = verifiedVideoUrl ? { ...job, videoUrl: verifiedVideoUrl, outputUrl: verifiedVideoUrl } : job;
 
           return (
             <article
@@ -484,96 +483,17 @@ export default function StudioList({ jobs, onPublished }: Props) {
                   cursor: 'pointer',
                 }}
               >
-                {verifiedVideoUrl ? (
-                  !videoFailed ? (
-                    <video
-                      controls
-                      muted
-                      loop
-                      playsInline
-                      preload="metadata"
-                      poster={posterUrl ?? undefined}
-                      onError={() => {
-                        setFailedVideoIds((current) => new Set(current).add(job.id));
-                      }}
-                      style={{
-                        width: '100%',
-                        height: '260px',
-                        objectFit: 'cover',
-                        borderRadius: '16px',
-                        display: 'block',
-                        backgroundColor: 'var(--media-background)',
-                      }}
-                    >
-                      <source src={verifiedVideoUrl} type="video/mp4" />
-                      Your browser does not support the video tag.
-                    </video>
-                  ) : (
-                    <div
-                      style={{
-                        width: '100%',
-                        height: '260px',
-                        borderRadius: '16px',
-                        overflow: 'hidden',
-                        background: 'var(--panel-background)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      {thumbnailUrl ? (
-                        <img
-                          src={thumbnailUrl}
-                          alt="Video thumbnail"
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'cover',
-                          }}
-                        />
-                      ) : (
-                        <strong>Preview unavailable</strong>
-                      )}
-                    </div>
-                  )
-                ) : thumbnailUrl ? (
-                  <img
-                    src={thumbnailUrl}
-                    alt={job.title}
-                    style={{
-                      width: '100%',
-                      height: '260px',
-                      objectFit: 'cover',
-                      borderRadius: '16px',
-                      display: 'block',
-                    }}
-                  />
-                ) : (
-                  <div
-                    className="draft-render-placeholder cinematic-shimmer"
-                    style={{
-                      width: '100%',
-                      height: '260px',
-                      borderRadius: '16px',
-                      overflow: 'hidden',
-                      background: 'var(--card-media-background)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'var(--soft-text)',
-                      fontSize: '1rem',
-                      textAlign: 'center',
-                      padding: '12px',
-                    }}
-                  >
-                    <div>
-                      <strong>{statusLabel}</strong>
-                      <p style={{ margin: '10px 0 0', color: 'var(--muted-text)' }}>
-                        {draftStateCopy(job)}
-                      </p>
-                    </div>
-                  </div>
-                )}
+                <GeneratedVideoPreview
+                  item={previewItem}
+                  title={job.title}
+                  controls={Boolean(verifiedVideoUrl)}
+                  placeholderLabel={statusLabel}
+                  style={{
+                    width: '100%',
+                    height: '260px',
+                    borderRadius: '16px',
+                  }}
+                />
                 <span className="draft-media-overlay">
                   <span>{statusLabel}</span>
                 </span>
@@ -713,25 +633,21 @@ export default function StudioList({ jobs, onPublished }: Props) {
             </div>
 
             {selectedVideoUrl ? (
-              <video
+              <GeneratedVideoPreview
+                item={{ ...selectedJob, videoUrl: selectedVideoUrl, outputUrl: selectedVideoUrl }}
+                title={selectedJob.title}
                 controls
                 autoPlay
-                muted
-                loop
-                playsInline
-                poster={getBestPoster(selectedJob) ?? undefined}
+                forceVideo
+                fit="contain"
                 style={{
                   width: '100%',
+                  aspectRatio: '9 / 16',
                   maxHeight: '62vh',
-                  objectFit: 'contain',
                   borderRadius: '18px',
-                  display: 'block',
                   background: 'var(--media-background)',
                 }}
-              >
-                <source src={selectedVideoUrl} type="video/mp4" />
-                Your browser does not support the video tag.
-              </video>
+              />
             ) : (
               <div className="draft-render-placeholder cinematic-shimmer" style={{
                 minHeight: '220px',

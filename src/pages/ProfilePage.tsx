@@ -45,7 +45,7 @@ import {
   buildLumoraIdentityProfile,
   identityProfileToStylePreferences,
 } from '../lib/identityCharacter';
-import { getBestPoster, getBestThumbnail } from '../lib/mediaThumbnail';
+import GeneratedVideoPreview from '../components/GeneratedVideoPreview';
 import { resolveRenderableReferenceUrl } from '../lib/selfCharacterReference';
 import SelfReferencePreview, { normalizeReference } from '../components/SelfReferencePreview';
 import { openContinueStory } from '../lib/continueStory';
@@ -121,6 +121,38 @@ type SelfCharacterFormSource = Partial<Omit<SelfCharacterForm, 'features' | 'sty
 const SELF_VOICE_SAMPLE_SCRIPT =
   'Today I am creating my Lumora self character. My voice should sound natural, expressive, and accurate.';
 const SELF_CHARACTER_EDITOR_DRAFT_KEY = 'lumora_self_character_editor_draft';
+const MOCK_GENERATED_VIDEO_URL = 'https://replicate.delivery/pbxt/generated-garden.mp4';
+const MOCK_REFERENCE_IMAGE_URL = '/demo-placeholder.jpg';
+
+function mockProfileVideoNoPosterEnabled() {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('mockVideoNoPoster') === '1';
+}
+
+function mockProfileVideoPosts(): LumoraPost[] {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: 'mock-profile-video-no-poster',
+      title: 'Published garden video',
+      caption: 'Published garden preview smoke',
+      prompt: 'A woman walks through a garden.',
+      videoUrl: MOCK_GENERATED_VIDEO_URL,
+      thumbnailUrl: MOCK_REFERENCE_IMAGE_URL,
+      posterUrl: MOCK_REFERENCE_IMAGE_URL,
+      characterAvatar: MOCK_REFERENCE_IMAGE_URL,
+      creatorName: 'Lumora Creator',
+      creatorUsername: 'lumora.creator',
+      status: 'published',
+      privacy: 'public',
+      visibility: 'public',
+      isDefaultSelfCharacter: true,
+      createdAt: now,
+      publishedAt: now,
+      updatedAt: now,
+    },
+  ];
+}
 
 const referencePhotoNameFields: Record<ReferencePhotoField, ReferencePhotoNameField> = {
   frontFace: 'frontFaceName',
@@ -991,8 +1023,6 @@ function ProfilePostTile({
 }) {
   const title = post.title || post.caption || 'Untitled post';
   const bodyText = post.caption || post.prompt || 'No prompt available';
-  const thumbnailUrl = getBestThumbnail(post);
-  const mediaUrl = thumbnailUrl || post.imageUrl;
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
   const characterLabel = post.isDefaultSelfCharacter
     ? 'Cinematic self'
@@ -1019,27 +1049,13 @@ function ProfilePostTile({
         border: '1px solid var(--surface-border)',
       }}
     >
-      {mediaUrl ? (
-        <img
-          src={mediaUrl}
-          alt={title}
-          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-        />
-      ) : (
-        <div
-          style={{
-            width: '100%',
-            height: '100%',
-            display: 'grid',
-            placeItems: 'center',
-            padding: '12px',
-            background:
-              'var(--card-media-background)',
-          }}
-        >
-          <span style={{ color: 'var(--soft-text)', fontWeight: 700 }}>Lumora</span>
-        </div>
-      )}
+      <GeneratedVideoPreview
+        item={post}
+        title={title}
+        showCastBadge={false}
+        placeholderLabel="Lumora"
+        style={{ width: '100%', height: '100%' }}
+      />
       <div
         style={{
           position: 'absolute',
@@ -1096,9 +1112,6 @@ function ProfilePostPreviewModal({
 }) {
   const title = post.title || post.caption || 'Untitled post';
   const bodyText = post.caption || post.prompt || 'No prompt available';
-  const thumbnailUrl = getBestThumbnail(post);
-  const posterUrl = getBestPoster(post);
-  const mediaUrl = thumbnailUrl || post.imageUrl;
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
   const authorUsername = post.creatorUsername || post.username || 'lumora.creator';
   const authorAvatar = post.creatorAvatar || post.avatar || fallbackAvatar;
@@ -1165,31 +1178,22 @@ function ProfilePostPreviewModal({
           </button>
         </div>
 
-        {post.videoUrl ? (
-          <video
-            src={post.videoUrl}
-            controls
-            autoPlay
-            muted
-            loop
-            playsInline
-            poster={posterUrl ?? undefined}
-            style={{ width: '100%', maxHeight: '62vh', objectFit: 'contain', display: 'block', background: '#000' }}
-          />
-        ) : mediaUrl ? (
-          <img src={mediaUrl} alt={title} style={{ width: '100%', maxHeight: '62vh', objectFit: 'contain', display: 'block' }} />
-        ) : (
-          <div
-            style={{
-              minHeight: '340px',
-              display: 'grid',
-              placeItems: 'center',
-              background: 'var(--card-media-background)',
-            }}
-          >
-            <strong>Preview unavailable</strong>
-          </div>
-        )}
+        <GeneratedVideoPreview
+          item={post}
+          title={title}
+          controls={Boolean(post.videoUrl)}
+          autoPlay={Boolean(post.videoUrl)}
+          forceVideo={Boolean(post.videoUrl)}
+          fit="contain"
+          showCastBadge={false}
+          style={{
+            width: '100%',
+            minHeight: '340px',
+            maxHeight: '62vh',
+            aspectRatio: '9 / 16',
+            background: 'var(--media-background)',
+          }}
+        />
 
         <div style={{ padding: '18px', display: 'grid', gap: '10px' }}>
           <div className="row-between" style={{ gap: '10px', alignItems: 'flex-start' }}>
@@ -1578,8 +1582,6 @@ function ProfileMenuSidebar({
 }
 
 function ProjectCard({ project, onOpen }: { project: StudioProject; onOpen: () => void }) {
-  const thumbnailUrl = getBestThumbnail(project);
-  const posterUrl = getBestPoster(project);
   const characterLabel = project.isDefaultSelfCharacter
     ? 'Cinematic self'
     : project.characterName
@@ -1612,27 +1614,20 @@ function ProjectCard({ project, onOpen }: { project: StudioProject; onOpen: () =
           {project.status}
         </span>
       </div>
-      {project.videoUrl ? (
-        <video
-          src={project.videoUrl}
-          controls
-          muted
-          loop
-          playsInline
-          poster={posterUrl ?? undefined}
-          onClick={(event) => event.stopPropagation()}
-          style={{ width: '100%', borderRadius: '20px', objectFit: 'cover', background: '#000', marginTop: '14px' }}
-          onError={(event) => {
-            event.currentTarget.style.display = 'none';
-          }}
-        />
-      ) : thumbnailUrl ? (
-        <img
-          src={thumbnailUrl}
-          alt={project.title || project.prompt || 'Cast video'}
-          style={{ width: '100%', borderRadius: '20px', objectFit: 'cover', background: '#000', marginTop: '14px' }}
-        />
-      ) : null}
+      <GeneratedVideoPreview
+        item={project}
+        title={project.title || project.prompt || 'Cast video'}
+        controls={Boolean(project.videoUrl)}
+        forceVideo={Boolean(project.videoUrl)}
+        fit="cover"
+        style={{
+          width: '100%',
+          height: '320px',
+          borderRadius: '20px',
+          background: 'var(--media-background)',
+          marginTop: '14px',
+        }}
+      />
     </article>
   );
 }
@@ -1784,6 +1779,35 @@ export default function ProfilePage() {
       characterCount: 0,
       followsTableAvailable: false,
     });
+
+    if (mockProfileVideoNoPosterEnabled()) {
+      const mockProfile: LumoraProfile = {
+        displayName: 'Lumora Creator',
+        username: 'lumora.creator',
+        bio: '',
+        avatar: undefined,
+      };
+      const mockPosts = mockProfileVideoPosts();
+      setProfile(mockProfile);
+      setProfileDraft(mockProfile);
+      setPosts(mockPosts);
+      setProfileStats({
+        totalLikesReceived: 0,
+        followersCount: 0,
+        characterCount: 0,
+        followsTableAvailable: false,
+      });
+      setDebugInfo({
+        authUserId: null,
+        loadedProfileId: null,
+        profileAvatarUrlExists: false,
+        selfCharacterLoaded: false,
+        selfCharacterUserId: null,
+        source: 'default',
+      });
+      setIsHydrated(true);
+      return;
+    }
 
     if (supabaseConfigured && (!authReady || sessionLoading)) {
       setDebugInfo((current) => ({

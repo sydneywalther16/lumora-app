@@ -88,8 +88,8 @@ async function insertCompletedProject(input: CompletedGenerationPersistenceInput
     output_type: 'video',
     video_url: input.videoUrl,
     cover_asset_url: input.videoUrl,
-    thumbnail_url: input.thumbnailUrl ?? input.characterAvatar ?? null,
-    poster_url: input.posterUrl ?? input.thumbnailUrl ?? input.characterAvatar ?? null,
+    thumbnail_url: input.thumbnailUrl ?? null,
+    poster_url: input.posterUrl ?? input.thumbnailUrl ?? null,
     character_id: input.characterId ?? null,
     character_name: input.characterName ?? null,
     character_avatar: input.characterAvatar ?? null,
@@ -148,8 +148,8 @@ export async function persistCompletedGeneration(
 
   let videoUrl = input.videoUrl;
   let storagePath: string | null = null;
-  let thumbnailUrl = input.thumbnailUrl ?? input.characterAvatar ?? null;
-  let posterUrl = input.posterUrl ?? input.thumbnailUrl ?? input.characterAvatar ?? null;
+  let thumbnailUrl = input.thumbnailUrl ?? null;
+  let posterUrl = input.posterUrl ?? input.thumbnailUrl ?? null;
 
   if (/^https?:\/\//i.test(input.videoUrl)) {
     try {

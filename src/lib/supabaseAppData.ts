@@ -15,8 +15,8 @@ import type {
 import {
   getBestPoster,
   getBestThumbnail,
-  normalizeMediaCard,
   repairMissingThumbnailIfNeeded,
+  resolveGeneratedVideoMedia,
 } from './mediaThumbnail';
 import type { LumoraProfile } from './profileStorage';
 import type { StudioProject } from './projectStorage';
@@ -1551,8 +1551,9 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
   let payload: Record<string, unknown>;
 
   try {
-    const thumbnailUrl = getBestThumbnail(project);
-    const posterUrl = getBestPoster(project);
+    const generatedMedia = resolveGeneratedVideoMedia(project);
+    const thumbnailUrl = generatedMedia.hasVerifiedVideo ? generatedMedia.thumbnailUrl : getBestThumbnail(project);
+    const posterUrl = generatedMedia.hasVerifiedVideo ? generatedMedia.posterUrl : getBestPoster(project);
     payload = {
       id: project.id,
       user_id: userId,
@@ -1734,6 +1735,7 @@ function mapProjectRow(row: DbRow): StudioProject {
     ...row,
     thumbnailUrl: nullableString(row.thumbnail_url),
     posterUrl: nullableString(row.poster_url),
+    thumbnailSource: nullableString(row.thumbnail_source),
     coverAssetUrl: nullableString(row.cover_asset_url),
     imageUrl: nullableString(row.image_url),
     videoUrl: nullableString(row.video_url) || nullableString(row.cover_asset_url),
@@ -1742,6 +1744,7 @@ function mapProjectRow(row: DbRow): StudioProject {
     referenceImageUrls: jsonRecord(row.reference_image_urls),
     characterAvatar: nullableString(row.character_avatar),
   };
+  const generatedMedia = resolveGeneratedVideoMedia(rawProject);
 
   return {
     id: stringValue(row.id),
@@ -1749,8 +1752,9 @@ function mapProjectRow(row: DbRow): StudioProject {
     caption: nullableString(row.caption),
     prompt: stringValue(row.prompt),
     finalPrompt: nullableString(row.final_prompt),
-    thumbnailUrl: getBestThumbnail(rawProject),
-    posterUrl: getBestPoster(rawProject),
+    thumbnailUrl: generatedMedia.hasVerifiedVideo ? generatedMedia.thumbnailUrl : getBestThumbnail(rawProject),
+    posterUrl: generatedMedia.hasVerifiedVideo ? generatedMedia.posterUrl : getBestPoster(rawProject),
+    thumbnailSource: generatedMedia.thumbnailSource,
     videoUrl: stringValue(row.video_url) || stringValue(row.cover_asset_url),
     status: stringValue(row.status) || 'draft',
     publishedAt: nullableString(row.published_at),
@@ -2073,10 +2077,10 @@ export { repairMissingThumbnailIfNeeded };
 
 export async function saveSupabasePost(userId: string, post: LumoraPost): Promise<LumoraPost> {
   const client = getClient();
-  const normalized = normalizeMediaCard(post);
   const publishedAt = post.publishedAt ?? new Date().toISOString();
-  const thumbnailUrl = getBestThumbnail(post);
-  const posterUrl = getBestPoster(post);
+  const generatedMedia = resolveGeneratedVideoMedia(post);
+  const thumbnailUrl = generatedMedia.hasVerifiedVideo ? generatedMedia.thumbnailUrl : getBestThumbnail(post);
+  const posterUrl = generatedMedia.hasVerifiedVideo ? generatedMedia.posterUrl : getBestPoster(post);
   const payload = {
     user_id: userId,
     title: post.title || post.caption || 'Lumora post',
@@ -2145,8 +2149,8 @@ export async function saveSupabasePost(userId: string, post: LumoraPost): Promis
         posted_at: publishedAt,
         privacy: payload.privacy,
         visibility: payload.visibility,
-        thumbnail_url: storageUrl(thumbnailUrl ?? normalized.thumbnailUrl, 'Published project thumbnail'),
-        poster_url: storageUrl(posterUrl ?? normalized.posterUrl, 'Published project poster'),
+        thumbnail_url: storageUrl(thumbnailUrl, 'Published project thumbnail'),
+        poster_url: storageUrl(posterUrl, 'Published project poster'),
         updated_at: new Date().toISOString(),
       })
       .eq('id', post.sourceGenerationId)
@@ -2166,11 +2170,13 @@ function mapPostRow(row: DbRow): LumoraPost {
     videoUrl: nullableString(row.video_url),
     thumbnailUrl: nullableString(row.thumbnail_url),
     posterUrl: nullableString(row.poster_url),
+    thumbnailSource: nullableString(row.thumbnail_source),
     characterAvatar: nullableString(row.character_avatar),
     creatorAvatar: nullableString(row.creator_avatar),
   });
-  const thumbnailUrl = getBestThumbnail(rawPost);
-  const posterUrl = getBestPoster(rawPost);
+  const generatedMedia = resolveGeneratedVideoMedia(rawPost);
+  const thumbnailUrl = generatedMedia.hasVerifiedVideo ? generatedMedia.thumbnailUrl : getBestThumbnail(rawPost);
+  const posterUrl = generatedMedia.hasVerifiedVideo ? generatedMedia.posterUrl : getBestPoster(rawPost);
 
   return {
     id: stringValue(row.id),
@@ -2182,6 +2188,7 @@ function mapPostRow(row: DbRow): LumoraPost {
     videoUrl: nullableString(row.video_url),
     thumbnailUrl,
     posterUrl,
+    thumbnailSource: generatedMedia.thumbnailSource,
     sourceGenerationId: nullableString(row.source_generation_id),
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),

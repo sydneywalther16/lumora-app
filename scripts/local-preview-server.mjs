@@ -23,7 +23,9 @@ function sendJson(res, statusCode, payload) {
 
 function getFilePath(pathname) {
   const requestedPath = pathname === '/' ? '/index.html' : pathname;
-  const normalizedPath = normalize(requestedPath).replace(/^([.][.][\\/])+/, '');
+  const normalizedPath = normalize(requestedPath)
+    .replace(/^([.][.][\\/])+/g, '')
+    .replace(/^[\\/]+/, '');
   const filePath = join(root, normalizedPath);
 
   if (!filePath.startsWith(root)) return join(root, 'index.html');
