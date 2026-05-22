@@ -28,6 +28,13 @@ const referenceCanarySchema = canarySchema.extend({
   characterId: z.string().min(1),
 });
 
+const canaryRouteInventory = {
+  textCanaryRouteMounted: true,
+  referenceCanaryRouteMounted: true,
+  renderLastRouteMounted: true,
+  renderPathCompareRouteMounted: true,
+};
+
 healthRouter.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'lumora-api' });
 });
@@ -49,6 +56,20 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
 
 healthRouter.get('/api/diagnostics/render-last', async (_req, res) => {
   res.json(await buildLastRenderDiagnostics());
+});
+
+healthRouter.get('/api/diagnostics/canary-routes', (_req, res) => {
+  res.json({
+    ok: true,
+    basePath: '/api/diagnostics',
+    routes: {
+      textCanary: 'POST /api/diagnostics/seedance-canary',
+      referenceCanary: 'POST /api/diagnostics/seedance-reference-canary/self',
+      renderLast: 'GET /api/diagnostics/render-last',
+      renderPathCompare: 'GET /api/diagnostics/render-path-compare',
+    },
+    ...canaryRouteInventory,
+  });
 });
 
 healthRouter.post('/api/diagnostics/seedance-canary', async (req, res) => {

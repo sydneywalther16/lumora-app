@@ -34,12 +34,14 @@ function Canary-Summary {
   return $Status.message
 }
 
-$startUrl = Join-ApiUrl $ApiBaseUrl "/api/diagnostics/seedance-reference-canary/self"
+$referenceCanaryPath = "/api/diagnostics/seedance-reference-canary/self"
+$startUrl = Join-ApiUrl $ApiBaseUrl $referenceCanaryPath
 $body = @{ saveAsDraft = [bool]$SaveAsDraft }
 if (-not [string]::IsNullOrWhiteSpace($UserId)) { $body.userId = $UserId }
 
 Write-Host "Starting Seedance self-reference canary..."
 Write-Host "API: $ApiBaseUrl"
+Write-Host "Route: $referenceCanaryPath"
 
 try {
   $start = Invoke-RestMethod -Method Post -Uri $startUrl -ContentType "application/json" -Body ($body | ConvertTo-Json -Depth 5) -TimeoutSec 45
