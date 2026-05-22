@@ -24,6 +24,7 @@ function Canary-Summary {
   if ($Status.lifecycleStatus -eq "failed") {
     switch ($Status.errorCategory) {
       "reference_moderation" { return "Failed because provider moderation blocked the reference path." }
+      "reference_moderation_block" { return "Failed because provider moderation blocked this reference path." }
       "reference_input_schema" { return "Failed because reference input schema was invalid." }
       "reference_asset_access" { return "Failed because selected reference asset was not accessible." }
       "reference_output_missing" { return "Failed because provider output was missing." }

@@ -27,6 +27,14 @@ try {
   assert.equal(referenceCanary.status, 403);
   assert.match((await referenceCanary.json()).error, /Render probe disabled/);
 
+  const matrixCanary = await request('/api/diagnostics/seedance-reference-matrix/self', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  assert.equal(matrixCanary.status, 403);
+  assert.match((await matrixCanary.json()).error, /Render probe disabled/);
+
   const textCanary = await request('/api/diagnostics/seedance-canary', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -44,9 +52,11 @@ try {
   assert.equal(inventoryBody.basePath, '/api/diagnostics');
   assert.equal(inventoryBody.textCanaryRouteMounted, true);
   assert.equal(inventoryBody.referenceCanaryRouteMounted, true);
+  assert.equal(inventoryBody.referenceMatrixRouteMounted, true);
   assert.equal(inventoryBody.renderLastRouteMounted, true);
   assert.equal(inventoryBody.renderPathCompareRouteMounted, true);
   assert.equal(inventoryBody.routes.referenceCanary, 'POST /api/diagnostics/seedance-reference-canary/self');
+  assert.equal(inventoryBody.routes.referenceMatrix, 'POST /api/diagnostics/seedance-reference-matrix/self');
 
   console.log('diagnostics route smoke tests passed');
 } finally {

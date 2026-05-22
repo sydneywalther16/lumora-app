@@ -43,6 +43,7 @@ const plan = buildRenderSuccessAttemptPlan({
   referenceImages: savedReferences,
   characterName: 'Sydney Rose',
   allowDemoFallback: true,
+  referenceCanaryState: 'succeeded',
 });
 
 assert.deepEqual(plan.map((attempt) => attempt.tier), [1, 2, 3, 4, 5]);
@@ -91,6 +92,24 @@ const firstVideoUnprovenReferencePlan = buildRenderSuccessAttemptPlan({
 });
 assert.equal(firstVideoUnprovenReferencePlan[0].referenceCount, 0);
 assert.equal(firstVideoUnprovenReferencePlan[0].lighterCastGuidance, true);
+
+const successFirstNoKnownRoutePlan = buildRenderSuccessAttemptPlan({
+  referenceImages: savedReferences,
+  characterName: 'Sydney Rose',
+  referenceCanaryState: 'failed',
+});
+assert.equal(successFirstNoKnownRoutePlan[0].referenceCount, 0);
+assert.equal(successFirstNoKnownRoutePlan[0].lighterCastGuidance, true);
+
+const sideRoutePlan = buildRenderSuccessAttemptPlan({
+  referenceImages: savedReferences.map((reference) => (
+    reference.label === 'Side angle' ? { ...reference, role: 'side_angle_left' } : reference
+  )),
+  characterName: 'Sydney Rose',
+  referenceCanaryState: 'succeeded',
+  preferredReferenceRole: 'side_angle_left',
+});
+assert.equal(sideRoutePlan[0].referenceImages[0]?.role, 'side_angle_left');
 
 const sanitized = sanitizeSuccessProviderPrompt({
   prompt: 'Sydney Rose walks into a glamour model photoshoot as a superstar public figure.',

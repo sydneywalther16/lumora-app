@@ -2,11 +2,13 @@ import { query } from './db';
 import { env } from '../lib/env';
 import { parseProviderVideoOutput } from './providerOutputParser';
 import { serializeDiagnosticError } from './schemaDiagnostics';
-import { buildSeedanceCanarySummaryDiagnostics } from './seedanceCanary';
+import { buildSeedanceCanarySummaryDiagnostics, getReferenceRouteSummary } from './seedanceCanary';
 
 type LatestRenderRow = {
   id: string;
+  userId: string | null;
   projectId: string | null;
+  characterId: string | null;
   status: string;
   provider: string | null;
   providerPredictionId: string | null;
@@ -121,12 +123,34 @@ function nextAttemptPlanned(row: LatestRenderRow, attemptRow: LatestRenderRow | 
   return nextTier > attemptsCount ? `tier ${nextTier} if within safe budget` : null;
 }
 
+function referenceRouteRecommendation(input: {
+  publishable: boolean;
+  canaryEverSucceeded: boolean;
+  successfulRoutes: unknown[];
+  blockedRoutes: Array<{ failureCategory?: string | null }>;
+  referenceCount: number | null;
+}) {
+  if (input.publishable) return 'none_video_verified';
+  if (!input.canaryEverSucceeded) return 'Run text canary';
+  if (input.successfulRoutes.length > 0 && (input.referenceCount ?? 0) > 0) {
+    return 'Align Create Success First with successful reference route';
+  }
+  if (input.successfulRoutes.length > 0) return 'Use successful reference route';
+  if (input.blockedRoutes.length > 0) {
+    const category = input.blockedRoutes[0]?.failureCategory ?? 'reference_unknown_provider_failure';
+    return `Reference route blocked: ${category}. Start text-only and test the next saved reference route.`;
+  }
+  return 'Run reference matrix canary';
+}
+
 export async function buildLastRenderDiagnostics() {
   try {
     const latest = await query<LatestRenderRow>(
       `select
          id,
+         user_id as "userId",
          project_id as "projectId",
+         character_id as "characterId",
          status,
          provider,
          provider_prediction_id as "providerPredictionId",
@@ -153,10 +177,21 @@ export async function buildLastRenderDiagnostics() {
     const row = latest.rows[0] ?? null;
     if (!row) {
       const canarySummary = await buildSeedanceCanarySummaryDiagnostics();
+      const referenceRouteSummary = await getReferenceRouteSummary({});
       return {
         ok: true,
         latestGenerationJob: null,
         seedanceCanary: canarySummary,
+        referenceRouteState: referenceRouteSummary.state,
+        knownSuccessfulReferenceRoutes: referenceRouteSummary.knownSuccessfulReferenceRoutes,
+        knownBlockedReferenceRoutes: referenceRouteSummary.knownBlockedReferenceRoutes,
+        referenceMatrixRecommendedNextAction: referenceRouteRecommendation({
+          publishable: false,
+          canaryEverSucceeded: canarySummary.canaryEverSucceeded,
+          successfulRoutes: referenceRouteSummary.knownSuccessfulReferenceRoutes,
+          blockedRoutes: referenceRouteSummary.knownBlockedReferenceRoutes,
+          referenceCount: 0,
+        }),
       };
     }
 
@@ -178,7 +213,9 @@ export async function buildLastRenderDiagnostics() {
       ? await query<LatestRenderRow>(
           `select
              id,
+             user_id as "userId",
              project_id as "projectId",
+             character_id as "characterId",
              status,
              provider,
              provider_prediction_id as "providerPredictionId",
@@ -215,6 +252,17 @@ export async function buildLastRenderDiagnostics() {
       : null;
     const cooldownRow = activeRow.status === 'rate_limited' ? activeRow : row.status === 'rate_limited' ? row : null;
     const providerFailure = canaryProviderFailure(activeRow) ?? canaryProviderFailure(row);
+    const referenceRouteSummary = await getReferenceRouteSummary({
+      userId: row.userId,
+      characterId: row.characterId,
+    });
+    const referenceRouteNextAction = referenceRouteRecommendation({
+      publishable: publishableValue,
+      canaryEverSucceeded: canarySummary.canaryEverSucceeded,
+      successfulRoutes: referenceRouteSummary.knownSuccessfulReferenceRoutes,
+      blockedRoutes: referenceRouteSummary.knownBlockedReferenceRoutes,
+      referenceCount: activeRow.renderSuccessReferenceCount ?? row.renderSuccessReferenceCount,
+    });
 
     return {
       ok: true,
@@ -265,6 +313,11 @@ export async function buildLastRenderDiagnostics() {
         canaryEverSucceeded: canarySummary.canaryEverSucceeded,
         lastCanaryStatus: canarySummary.lastCanaryStatus,
         lastReferenceCanaryStatus: canarySummary.lastReferenceCanaryStatus,
+        referenceRouteState: referenceRouteSummary.state,
+        knownSuccessfulReferenceRoutes: referenceRouteSummary.knownSuccessfulReferenceRoutes,
+        knownBlockedReferenceRoutes: referenceRouteSummary.knownBlockedReferenceRoutes,
+        lastReferenceRouteFailureCategory: referenceRouteSummary.failureCategory,
+        referenceMatrixRecommendedNextAction: referenceRouteNextAction,
         recommendedNextAction: canarySummary.recommendedNextAction,
         updatedAt: row.updatedAt,
         createdAt: row.createdAt,

@@ -4,6 +4,7 @@ import {
   buildReferenceImagePrompt,
   canaryRateLimitStatus,
   classifyReferenceCanaryFailure,
+  matrixCandidatesFromSelfCandidates,
   noSavedSelfReferencePayloadForTest,
   providerFailureDiagnostics,
   redactRenderPathCompareValue,
@@ -142,7 +143,8 @@ assert.equal(missingReferencePayload.message, 'No saved Lumora self reference fo
 assert.deepEqual(missingReferencePayload.sourcesChecked, ['self_characters.reference_image_urls']);
 assert.equal(missingReferencePayload.recommendedNextAction.includes('re-save'), true);
 
-assert.equal(classifyReferenceCanaryFailure('moderation safety policy blocked'), 'reference_moderation');
+assert.equal(classifyReferenceCanaryFailure('moderation safety policy blocked'), 'reference_moderation_block');
+assert.equal(classifyReferenceCanaryFailure('E005: input or output was flagged as sensitive', 'failed'), 'reference_moderation_block');
 assert.equal(classifyReferenceCanaryFailure('invalid input reference_images'), 'reference_input_schema');
 assert.equal(classifyReferenceCanaryFailure('403 asset access denied'), 'reference_asset_access');
 assert.equal(classifyReferenceCanaryFailure('Prediction failed.', 'failed'), 'reference_unknown_provider_failure');
@@ -163,6 +165,56 @@ const providerFailure = providerFailureDiagnostics({
 assert.equal(providerFailure.providerErrorSummary?.includes('token=secret'), false);
 assert.equal(providerFailure.providerLogsExcerpt?.includes('private.jpg'), false);
 assert.equal(providerFailure.predictionGetUrlHost, 'api.replicate.com');
+
+const matrixCandidates = matrixCandidatesFromSelfCandidates({
+  sourcesChecked: ['self_characters.reference_image_urls'],
+  candidates: [{
+    id: 'self-character',
+    characterId: 'creator-self',
+    ownerUserId: '10000000-1000-4000-8000-100000000001',
+    name: 'Creator Self',
+    displayName: 'Creator Self',
+    isSelf: true,
+    referenceImageUrls: {
+      manualReferenceImageUrl: 'https://demo.supabase.co/storage/v1/object/public/lumora-assets/user/manual.jpg',
+      frontFace: 'https://demo.supabase.co/storage/v1/object/public/lumora-assets/user/front.jpg',
+      frontFaceUrl: 'https://demo.supabase.co/storage/v1/object/public/lumora-assets/user/front.jpg',
+      leftAngle: 'https://demo.supabase.co/storage/v1/object/public/lumora-assets/user/left.jpg',
+      leftAngleUrl: 'https://demo.supabase.co/storage/v1/object/public/lumora-assets/user/left.jpg',
+      rightAngle: 'https://cdninstagram.com/protected.jpg',
+      rightAngleUrl: 'https://cdninstagram.com/protected.jpg',
+    },
+    referenceImages: {},
+    source: 'self_characters.reference_image_urls',
+    sourcePriority: 0,
+    updatedAt: new Date().toISOString(),
+  }],
+});
+assert.deepEqual(matrixCandidates.map((candidate) => candidate.referenceRole), ['front_angle', 'side_angle_left']);
+assert.equal(matrixCandidates.every((candidate) => candidate.reference.token === '[Image1]'), true);
+
+const matrixFrontOnly = matrixCandidatesFromSelfCandidates({
+  referenceRole: 'front_angle',
+  candidates: [{
+    id: 'self-character',
+    characterId: 'creator-self',
+    ownerUserId: '10000000-1000-4000-8000-100000000001',
+    name: 'Creator Self',
+    displayName: 'Creator Self',
+    isSelf: true,
+    referenceImageUrls: {
+      frontFace: 'https://demo.supabase.co/storage/v1/object/public/lumora-assets/user/front.jpg',
+      frontFaceUrl: 'https://demo.supabase.co/storage/v1/object/public/lumora-assets/user/front.jpg',
+      leftAngle: 'https://demo.supabase.co/storage/v1/object/public/lumora-assets/user/left.jpg',
+      leftAngleUrl: 'https://demo.supabase.co/storage/v1/object/public/lumora-assets/user/left.jpg',
+    },
+    referenceImages: {},
+    source: 'self_characters.reference_image_urls',
+    sourcePriority: 0,
+    updatedAt: new Date().toISOString(),
+  }],
+});
+assert.deepEqual(matrixFrontOnly.map((candidate) => candidate.referenceRole), ['front_angle']);
 
 const redacted = redactRenderPathCompareValue({
   referenceUrl: 'https://signed.example.com/private.jpg?token=secret',

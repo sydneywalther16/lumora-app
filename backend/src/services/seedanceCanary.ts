@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import Replicate, { type Prediction } from 'replicate';
 import { env } from '../lib/env';
 import { query } from './db';
@@ -34,6 +35,7 @@ const activeCanaryProcessors = new Set<string>();
 type CanaryKind = 'text' | 'reference';
 type CanaryLifecycleStatus = 'queued' | 'rendering' | 'rate_limited' | 'completed' | 'failed' | 'canceled';
 type CanaryVariant = 'text_only' | 'reference_images';
+export type SeedanceReferenceMatrixVariant = CanaryVariant | 'image_to_video';
 
 type ProviderFailureDiagnostics = {
   providerErrorCategory: string;
@@ -42,6 +44,13 @@ type ProviderFailureDiagnostics = {
   predictionGetUrlHost: string | null;
   providerStatus: string | null;
   metricsSummary: string | null;
+};
+
+export type ReferenceRouteReadiness = {
+  state: 'succeeded' | 'failed' | 'unknown';
+  referenceRole: string | null;
+  variant: SeedanceReferenceMatrixVariant | null;
+  failureCategory: string | null;
 };
 
 type CanaryMetadata = {
@@ -355,7 +364,8 @@ function classifyProviderFailure(value: unknown) {
 export function classifyReferenceCanaryFailure(value: unknown, providerStatus?: string | null) {
   const raw = typeof value === 'string' ? value : errorText(value);
   const lower = raw.toLowerCase();
-  if (lower.includes('moderation') || lower.includes('safety') || lower.includes('policy') || lower.includes('nsfw')) return 'reference_moderation';
+  if (lower.includes('flagged as sensitive') || lower.includes('input or output was flagged') || /\be005\b/i.test(raw)) return 'reference_moderation_block';
+  if (lower.includes('moderation') || lower.includes('safety') || lower.includes('policy') || lower.includes('nsfw')) return 'reference_moderation_block';
   if (lower.includes('schema') || lower.includes('validation') || lower.includes('invalid input') || lower.includes('reference_images')) return 'reference_input_schema';
   if (lower.includes('403') || lower.includes('404') || lower.includes('asset') || lower.includes('download') || lower.includes('access')) return 'reference_asset_access';
   const normalizedStatus = (providerStatus ?? '').toLowerCase();
@@ -463,14 +473,14 @@ function canaryReferenceCandidates(character: {
     {
       url: urls.leftAngleUrl ?? urls.leftAnglePath ?? urls.leftAngle ?? null,
       label: 'Left angle',
-      role: 'side_angle',
+      role: 'side_angle_left',
       source,
       whySelected: 'Side saved Lumora reference is used because primary/face references are unavailable.',
     },
     {
       url: urls.rightAngleUrl ?? urls.rightAnglePath ?? urls.rightAngle ?? null,
       label: 'Right angle',
-      role: 'side_angle',
+      role: 'side_angle_right',
       source,
       whySelected: 'Side saved Lumora reference is used because primary/face references are unavailable.',
     },
@@ -557,6 +567,73 @@ function createPathSelfReferenceCount(candidate: Pick<SelfCharacterCandidate, 'r
     .length;
 }
 
+export type SelfReferenceMatrixCandidate = {
+  userId: string;
+  characterId: string;
+  ownerSource: string;
+  referenceRole: string;
+  referenceLabel: string;
+  reference: SeedanceReferenceImage;
+  diagnostics: CanaryReferenceDiagnostics;
+};
+
+function matrixCandidateKey(candidate: SelfReferenceMatrixCandidate) {
+  return `${candidate.referenceRole}|${candidate.reference.url}`;
+}
+
+function matrixRoleMatches(role: string, requestedRole?: string | null) {
+  if (!requestedRole || requestedRole === 'all') return true;
+  return role === requestedRole;
+}
+
+export function matrixCandidatesFromSelfCandidates(input: {
+  candidates: SelfCharacterCandidate[];
+  sourcesChecked?: string[];
+  referenceRole?: string | null;
+}) {
+  const seen = new Set<string>();
+  const matrixCandidates: SelfReferenceMatrixCandidate[] = [];
+
+  for (const candidate of sortSelfCandidates(input.candidates)) {
+    for (const entry of canaryReferenceCandidates(candidate)) {
+      const url = textValue(entry.url);
+      const reference: SeedanceReferenceImage = {
+        url,
+        label: entry.label,
+        role: entry.role,
+        token: '[Image1]',
+      };
+      if (!url || isManualReference(reference) || !matrixRoleMatches(reference.role ?? '', input.referenceRole)) continue;
+      const confidence = scoreReferenceConfidence(reference);
+      if (!confidence.savedToLumora || confidence.reasons.includes('Protected or temporary source')) continue;
+      const next: SelfReferenceMatrixCandidate = {
+        userId: candidate.ownerUserId,
+        characterId: candidate.characterId,
+        ownerSource: candidate.source,
+        referenceRole: reference.role ?? 'reference',
+        referenceLabel: reference.label ?? 'Reference image',
+        reference,
+        diagnostics: {
+          selected: true,
+          role: reference.role ?? null,
+          label: reference.label ?? null,
+          host: redactedHost(url),
+          savedToLumora: true,
+          whySelected: entry.whySelected,
+          source: candidate.source,
+          sourcesChecked: input.sourcesChecked,
+        },
+      };
+      const key = matrixCandidateKey(next);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      matrixCandidates.push(next);
+    }
+  }
+
+  return matrixCandidates;
+}
+
 function outputShapeSummary(output: unknown) {
   if (output == null) return 'null';
   if (typeof output === 'string') {
@@ -622,7 +699,7 @@ export function providerFailureDiagnostics(input: {
   };
 }
 
-type ReferenceAssetAccessDiagnostics = {
+export type ReferenceAssetAccessDiagnostics = {
   reachable: boolean;
   status: number | null;
   contentType: string | null;
@@ -637,7 +714,7 @@ function referenceAssetErrorMessage(diagnostics: ReferenceAssetAccessDiagnostics
   return diagnostics.error ?? 'Selected reference was not publicly reachable.';
 }
 
-async function verifyReferenceAssetAccess(url: string): Promise<ReferenceAssetAccessDiagnostics> {
+export async function verifyReferenceAssetAccess(url: string): Promise<ReferenceAssetAccessDiagnostics> {
   const host = redactedHost(url);
   const inspectResponse = async (response: Response) => {
     const contentType = response.headers.get('content-type');
@@ -880,6 +957,102 @@ async function updateCanaryJob(jobId: string, values: {
   return result.rows[0] ? mapCanaryRow(result.rows[0]) : null;
 }
 
+function fingerprint(value: string) {
+  return createHash('sha256').update(value).digest('hex').slice(0, 24);
+}
+
+export async function persistReferenceRouteResult(input: {
+  userId?: string | null;
+  characterId?: string | null;
+  referenceRole?: string | null;
+  referenceLabel?: string | null;
+  provider?: string | null;
+  providerModel?: string | null;
+  variant?: SeedanceReferenceMatrixVariant | null;
+  succeeded: boolean;
+  failureCategory?: string | null;
+  providerErrorCategory?: string | null;
+  outputUrlPresent?: boolean | null;
+  notes?: Record<string, unknown>;
+}) {
+  if (!isUuidLike(input.userId)) return;
+  const provider = input.provider ?? 'seedance-fast';
+  const variant = input.variant ?? 'reference_images';
+  const referenceRole = input.referenceRole ?? 'unknown_reference';
+  const characterId = input.characterId ?? 'creator-self';
+  const memoryKey = `reference-route:${input.userId}:${characterId}:${provider}:${variant}:${referenceRole}`;
+  const notes = {
+    referenceRole,
+    referenceLabel: input.referenceLabel ?? null,
+    variant,
+    succeeded: input.succeeded,
+    failureCategory: input.failureCategory ?? null,
+    providerErrorCategory: input.providerErrorCategory ?? null,
+    outputUrlPresent: Boolean(input.outputUrlPresent),
+    ...(input.notes ?? {}),
+  };
+
+  try {
+    await query(
+      `insert into render_success_memory (
+         memory_key,
+         user_id,
+         character_id,
+         provider,
+         provider_model,
+         render_mode,
+         render_feel,
+         reference_strategy,
+         reference_count,
+         prompt_fingerprint,
+         success_count,
+         failure_count,
+         last_success_at,
+         last_failure_at,
+         last_failure_category,
+         notes,
+         metadata,
+         created_at,
+         updated_at
+       )
+       values ($1, $2, $3, $4, $5, 'reference_route_canary', 'likeness_route', $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $14::jsonb, now(), now())
+       on conflict (memory_key)
+       do update set
+         provider_model = excluded.provider_model,
+         reference_strategy = excluded.reference_strategy,
+         reference_count = excluded.reference_count,
+         success_count = excluded.success_count,
+         failure_count = excluded.failure_count,
+         last_success_at = excluded.last_success_at,
+         last_failure_at = excluded.last_failure_at,
+         last_failure_category = excluded.last_failure_category,
+         notes = excluded.notes,
+         metadata = excluded.metadata,
+         updated_at = now()`,
+      [
+        memoryKey,
+        input.userId,
+        input.characterId ?? null,
+        provider,
+        input.providerModel ?? SEEDANCE_FAST_MODEL,
+        referenceRole,
+        variant === 'text_only' ? 0 : 1,
+        fingerprint(memoryKey),
+        input.succeeded ? 1 : 0,
+        input.succeeded ? 0 : 1,
+        input.succeeded ? new Date().toISOString() : null,
+        input.succeeded ? null : new Date().toISOString(),
+        input.failureCategory ?? null,
+        JSON.stringify(notes),
+      ],
+    );
+  } catch (error) {
+    console.warn('REFERENCE ROUTE MEMORY PERSISTENCE SKIPPED:', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 async function replicateClient() {
   if (!env.REPLICATE_API_TOKEN) return null;
   return new Replicate({
@@ -897,6 +1070,21 @@ async function handleCanarySuccess(input: {
   const shape = outputShapeSummary(input.prediction.output);
   if (!outputParse.ok) {
     const category = input.metadata.kind === 'reference' ? 'reference_output_missing' : outputParse.category;
+    if (input.metadata.kind === 'reference') {
+      await persistReferenceRouteResult({
+        userId: input.metadata.userId,
+        characterId: input.metadata.characterId,
+        referenceRole: input.metadata.selectedReference?.role,
+        referenceLabel: input.metadata.selectedReference?.label,
+        provider: 'seedance-fast',
+        providerModel: SEEDANCE_FAST_MODEL,
+        variant: input.metadata.canaryVariant,
+        succeeded: false,
+        failureCategory: category,
+        providerErrorCategory: category,
+        outputUrlPresent: false,
+      });
+    }
     return updateCanaryJob(input.job.id, {
       status: 'failed',
       providerStatus: 'succeeded',
@@ -909,6 +1097,21 @@ async function handleCanarySuccess(input: {
   const reachable = await verifyOutputReachable(outputParse.videoUrl);
   const missingCategory = input.metadata.kind === 'reference' ? 'reference_output_missing' : 'provider_output_unreachable';
   if (!reachable) {
+    if (input.metadata.kind === 'reference') {
+      await persistReferenceRouteResult({
+        userId: input.metadata.userId,
+        characterId: input.metadata.characterId,
+        referenceRole: input.metadata.selectedReference?.role,
+        referenceLabel: input.metadata.selectedReference?.label,
+        provider: 'seedance-fast',
+        providerModel: SEEDANCE_FAST_MODEL,
+        variant: input.metadata.canaryVariant,
+        succeeded: false,
+        failureCategory: missingCategory,
+        providerErrorCategory: missingCategory,
+        outputUrlPresent: true,
+      });
+    }
     return updateCanaryJob(input.job.id, {
       status: 'failed',
       providerStatus: 'succeeded',
@@ -939,6 +1142,20 @@ async function handleCanarySuccess(input: {
     });
     outputUrl = persisted.videoUrl;
     projectId = persisted.projectId ?? projectId;
+  }
+
+  if (input.metadata.kind === 'reference') {
+    await persistReferenceRouteResult({
+      userId: input.metadata.userId,
+      characterId: input.metadata.characterId,
+      referenceRole: input.metadata.selectedReference?.role,
+      referenceLabel: input.metadata.selectedReference?.label,
+      provider: 'seedance-fast',
+      providerModel: SEEDANCE_FAST_MODEL,
+      variant: input.metadata.canaryVariant,
+      succeeded: true,
+      outputUrlPresent: true,
+    });
   }
 
   return updateCanaryJob(input.job.id, {
@@ -1039,6 +1256,21 @@ async function processSeedanceCanaryJob(jobId: string, options: { pollUntilTermi
           ? prediction.error
           : prediction.logs ?? `Prediction ${prediction.status}.`;
         const category = classifyCanaryFailure(metadata.kind, detail, prediction.status);
+        if (metadata.kind === 'reference') {
+          await persistReferenceRouteResult({
+            userId: metadata.userId,
+            characterId: metadata.characterId,
+            referenceRole: metadata.selectedReference?.role,
+            referenceLabel: metadata.selectedReference?.label,
+            provider: 'seedance-fast',
+            providerModel: SEEDANCE_FAST_MODEL,
+            variant: metadata.canaryVariant,
+            succeeded: false,
+            failureCategory: category,
+            providerErrorCategory: category,
+            outputUrlPresent: false,
+          });
+        }
         return updateCanaryJob(job.id, {
           status: prediction.status === 'canceled' ? 'canceled' : 'failed',
           providerStatus: prediction.status,
@@ -1062,10 +1294,26 @@ async function processSeedanceCanaryJob(jobId: string, options: { pollUntilTermi
           retryAvailableAt: retry.retryAvailableAt,
         });
       }
+      const category = classifyCanaryFailure(metadata.kind, error);
+      if (metadata.kind === 'reference') {
+        await persistReferenceRouteResult({
+          userId: metadata.userId,
+          characterId: metadata.characterId,
+          referenceRole: metadata.selectedReference?.role,
+          referenceLabel: metadata.selectedReference?.label,
+          provider: 'seedance-fast',
+          providerModel: SEEDANCE_FAST_MODEL,
+          variant: metadata.canaryVariant,
+          succeeded: false,
+          failureCategory: category,
+          providerErrorCategory: category,
+          outputUrlPresent: false,
+        });
+      }
       return updateCanaryJob(job.id, {
         status: 'failed',
         errorMessage: redactMessage(errorText(error)),
-        errorCategory: classifyCanaryFailure(metadata.kind, error),
+        errorCategory: category,
       });
     }
   } finally {
@@ -1109,6 +1357,20 @@ export async function startSeedanceReferenceCanary(input: {
     selectedReference,
   });
   if (!referenceAccess.reachable) {
+    await persistReferenceRouteResult({
+      userId: input.userId,
+      characterId: input.characterId,
+      referenceRole: selectedReference.role,
+      referenceLabel: selectedReference.label,
+      provider: 'seedance-fast',
+      providerModel: SEEDANCE_FAST_MODEL,
+      variant: 'reference_images',
+      succeeded: false,
+      failureCategory: 'reference_asset_access',
+      providerErrorCategory: 'reference_asset_access',
+      outputUrlPresent: false,
+      notes: { selectedReferenceReachable: false, selectedReferenceContentType: selectedReference.contentType },
+    });
     const failed = await updateCanaryJob(job.id, {
       status: 'failed',
       providerStatus: 'reference_asset_access',
@@ -1117,6 +1379,52 @@ export async function startSeedanceReferenceCanary(input: {
     });
     return formatSeedanceCanaryStatus(failed ?? job);
   }
+  const processed = await processSeedanceCanaryJob(job.id, { pollUntilTerminal: false });
+  return formatSeedanceCanaryStatus(processed ?? job);
+}
+
+export async function startSeedanceReferenceCanaryForMatrix(input: {
+  userId: string;
+  characterId: string;
+  reference: SeedanceReferenceImage;
+  selectedReference: CanaryReferenceDiagnostics;
+  saveAsDraft?: boolean;
+}) {
+  const referenceAccess = await verifyReferenceAssetAccess(input.reference.url);
+  const selectedReference = withReferenceAccessDiagnostics(input.selectedReference, referenceAccess);
+  const job = await insertCanaryJob({
+    kind: 'reference',
+    saveAsDraft: input.saveAsDraft,
+    userId: input.userId,
+    characterId: input.characterId,
+    referenceImages: [input.reference],
+    selectedReference,
+  });
+
+  if (!referenceAccess.reachable) {
+    await persistReferenceRouteResult({
+      userId: input.userId,
+      characterId: input.characterId,
+      referenceRole: selectedReference.role,
+      referenceLabel: selectedReference.label,
+      provider: 'seedance-fast',
+      providerModel: SEEDANCE_FAST_MODEL,
+      variant: 'reference_images',
+      succeeded: false,
+      failureCategory: 'reference_asset_access',
+      providerErrorCategory: 'reference_asset_access',
+      outputUrlPresent: false,
+      notes: { selectedReferenceReachable: false, selectedReferenceContentType: selectedReference.contentType },
+    });
+    const failed = await updateCanaryJob(job.id, {
+      status: 'failed',
+      providerStatus: 'reference_asset_access',
+      errorMessage: referenceAssetErrorMessage(referenceAccess),
+      errorCategory: 'reference_asset_access',
+    });
+    return formatSeedanceCanaryStatus(failed ?? job);
+  }
+
   const processed = await processSeedanceCanaryJob(job.id, { pollUntilTerminal: false });
   return formatSeedanceCanaryStatus(processed ?? job);
 }
@@ -1248,6 +1556,22 @@ async function listSelfCharacterCandidates(userId?: string | null): Promise<Self
     ]),
     sourcesChecked,
     sourceErrors,
+  };
+}
+
+export async function listSelfReferenceMatrixCandidates(input: {
+  userId?: string | null;
+  referenceRole?: string | null;
+}) {
+  const sourceResult = await listSelfCharacterCandidates(input.userId);
+  return {
+    candidates: matrixCandidatesFromSelfCandidates({
+      candidates: sourceResult.candidates,
+      sourcesChecked: sourceResult.sourcesChecked,
+      referenceRole: input.referenceRole,
+    }),
+    sourcesChecked: sourceResult.sourcesChecked,
+    sourceErrors: sourceResult.sourceErrors,
   };
 }
 
@@ -1429,6 +1753,20 @@ export async function startSeedanceSelfReferenceCanary(input: {
     selectedReference,
   });
   if (!referenceAccess.reachable) {
+    await persistReferenceRouteResult({
+      userId: candidate.ownerUserId,
+      characterId: candidate.characterId,
+      referenceRole: selectedReference.role,
+      referenceLabel: selectedReference.label,
+      provider: 'seedance-fast',
+      providerModel: SEEDANCE_FAST_MODEL,
+      variant: 'reference_images',
+      succeeded: false,
+      failureCategory: 'reference_asset_access',
+      providerErrorCategory: 'reference_asset_access',
+      outputUrlPresent: false,
+      notes: { selectedReferenceReachable: false, selectedReferenceContentType: selectedReference.contentType },
+    });
     const failed = await updateCanaryJob(job.id, {
       status: 'failed',
       providerStatus: 'reference_asset_access',
@@ -1476,7 +1814,7 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
     if (status === 'failed') {
       if (job.errorCategory === 'input_schema_invalid') return 'fix_provider_payload_schema';
       if (job.errorCategory === 'reference_asset_access') return 'fix_reference_asset_access';
-      if (job.errorCategory === 'reference_moderation') return 'reference_path_blocked_try_text_only';
+      if (job.errorCategory === 'reference_moderation' || job.errorCategory === 'reference_moderation_block') return 'reference_path_blocked_try_text_only';
       if (job.errorCategory === 'reference_provider_failed' || job.errorCategory === 'reference_unknown_provider_failure') {
         return 'inspect_provider_error_or_try_text_only';
       }
@@ -1626,6 +1964,11 @@ export async function buildRenderPathCompareDiagnostics() {
     const real = realResult.rows[0] ?? null;
     const realPrompt = real?.prompt ?? '';
     const selfReferenceDiagnostics = await buildCreateSelfReferenceDiagnostics(real?.userId ?? null);
+    const referenceRouteSummary = await getReferenceRouteSummary({
+      userId: real?.userId ?? null,
+      characterId: real?.characterId ?? null,
+    });
+    const canarySummary = await buildSeedanceCanarySummaryDiagnostics();
     const canary = {
       provider: 'seedance-fast',
       providerModel: SEEDANCE_FAST_MODEL,
@@ -1698,6 +2041,12 @@ export async function buildRenderPathCompareDiagnostics() {
       providerErrorSummary: null,
       canaryVariant: null,
       createVariant: (real.referenceCount ?? 0) > 0 ? 'reference_images' : 'text_only',
+      chosenCreateRoute: (real.referenceCount ?? 0) > 0 ? 'reference_images' : 'text_only',
+      whyChosen: (real.referenceCount ?? 0) > 0
+        ? referenceRouteSummary.knownSuccessfulReferenceRoutes.length
+          ? 'Create used a reference route after at least one reference route succeeded.'
+          : 'Create used reference guidance without a known successful reference route.'
+        : 'Create used text-only or lighter cast guidance.',
       renderMode: real.renderMode,
       providerFallbackStage: real.providerFallbackStage,
       renderSuccessRole: real.renderSuccessRole,
@@ -1714,6 +2063,41 @@ export async function buildRenderPathCompareDiagnostics() {
       strongestReferenceSource: selfReferenceDiagnostics.strongestReferenceSource,
       selfReferenceCandidateCount: selfReferenceDiagnostics.selfReferenceCandidateCount,
       selfReferenceSourceErrors: selfReferenceDiagnostics.selfReferenceSourceErrors,
+      textCanarySucceeded: canarySummary.canaryEverSucceeded,
+      frontReferenceCanaryResult: referenceRouteSummary.allReferenceRouteResults.find((route) => route.referenceRole === 'front_angle') ?? null,
+      sideReferenceCanaryResult: referenceRouteSummary.allReferenceRouteResults.find((route) => route.referenceRole === 'side_angle_left' || route.referenceRole === 'side_angle_right') ?? null,
+      fullBodyReferenceCanaryResult: referenceRouteSummary.allReferenceRouteResults.find((route) => route.referenceRole === 'full_body') ?? null,
+      chosenCreateRoute: realPath?.chosenCreateRoute ?? 'none',
+      whyChosen: realPath?.whyChosen ?? 'No recent Create render found.',
+      knownBlockedReferenceRoutes: referenceRouteSummary.knownBlockedReferenceRoutes,
+      knownSuccessfulReferenceRoutes: referenceRouteSummary.knownSuccessfulReferenceRoutes,
+      createAttemptsKnownBlockedRoute: Boolean(realPath?.references && !referenceRouteSummary.knownSuccessfulReferenceRoutes.length && referenceRouteSummary.knownBlockedReferenceRoutes.length),
+      providerReadiness: {
+        seedance: {
+          configured: Boolean(env.REPLICATE_API_TOKEN),
+          referenceCapable: true,
+          canaryTested: referenceRouteSummary.allReferenceRouteResults.length > 0,
+          lastReferenceResult: referenceRouteSummary.allReferenceRouteResults[0] ?? null,
+        },
+        veo: {
+          configured: Boolean(env.GOOGLE_API_KEY),
+          referenceCapable: false,
+          canaryTested: false,
+          lastReferenceResult: null,
+        },
+        runway: {
+          configured: Boolean(env.RUNWAY_API_KEY),
+          referenceCapable: false,
+          canaryTested: false,
+          lastReferenceResult: null,
+        },
+        klingReference: {
+          configured: false,
+          referenceCapable: false,
+          canaryTested: false,
+          lastReferenceResult: null,
+        },
+      },
       differences: realPath ? {
         references: realPath.references !== canary.references,
         duration: realPath.duration !== canary.duration,
@@ -1768,6 +2152,8 @@ export async function buildSeedanceCanarySummaryDiagnostics() {
         : !referenceSucceeded
             ? lastReference?.errorCategory === 'reference_moderation'
               ? 'Provider moderation blocks references'
+              : lastReference?.errorCategory === 'reference_moderation_block'
+                ? 'Provider moderation blocks this reference route'
               : lastReference?.errorCategory === 'reference_input_schema'
                 ? 'Fix Seedance reference_images payload shape'
                 : lastReference?.errorCategory === 'reference_asset_access'
@@ -1828,4 +2214,101 @@ export async function getReferenceCanaryReadiness(input: {
   } catch {
     return { state: 'unknown' as const, failureCategory: null as string | null };
   }
+}
+
+type ReferenceRouteMemoryRow = {
+  referenceRole: string | null;
+  referenceLabel: string | null;
+  provider: string | null;
+  providerModel: string | null;
+  variant: string | null;
+  successCount: number | null;
+  failureCount: number | null;
+  failureCategory: string | null;
+  providerErrorCategory: string | null;
+  lastTestedAt: string | null;
+  outputUrlPresent: boolean | null;
+};
+
+function routeMemoryFromRow(row: ReferenceRouteMemoryRow) {
+  return {
+    referenceRole: row.referenceRole,
+    referenceLabel: row.referenceLabel,
+    provider: row.provider,
+    providerModel: row.providerModel,
+    variant: row.variant,
+    succeeded: (row.successCount ?? 0) > 0 && (row.successCount ?? 0) >= (row.failureCount ?? 0),
+    failureCategory: row.failureCategory,
+    providerErrorCategory: row.providerErrorCategory,
+    lastTestedAt: row.lastTestedAt,
+    outputUrlPresent: Boolean(row.outputUrlPresent),
+  };
+}
+
+export async function getReferenceRouteSummary(input: {
+  userId?: string | null;
+  characterId?: string | null;
+}) {
+  try {
+    const result = await query<ReferenceRouteMemoryRow>(
+      `select
+         reference_strategy as "referenceRole",
+         notes->>'referenceLabel' as "referenceLabel",
+         provider,
+         provider_model as "providerModel",
+         notes->>'variant' as "variant",
+         success_count as "successCount",
+         failure_count as "failureCount",
+         last_failure_category as "failureCategory",
+         notes->>'providerErrorCategory' as "providerErrorCategory",
+         greatest(coalesce(last_success_at, '-infinity'::timestamptz), coalesce(last_failure_at, '-infinity'::timestamptz), updated_at) as "lastTestedAt",
+         coalesce((notes->>'outputUrlPresent')::boolean, false) as "outputUrlPresent"
+       from render_success_memory
+       where render_mode = 'reference_route_canary'
+         and ($1::uuid is null or user_id = $1)
+         and ($2::text is null or character_id = $2)
+       order by greatest(coalesce(last_success_at, '-infinity'::timestamptz), coalesce(last_failure_at, '-infinity'::timestamptz), updated_at) desc
+       limit 40`,
+      [
+        isUuidLike(input.userId) ? input.userId : null,
+        input.characterId ?? null,
+      ],
+    );
+    const routes = result.rows.map(routeMemoryFromRow);
+    const knownSuccessfulReferenceRoutes = routes.filter((route) => route.succeeded);
+    const knownBlockedReferenceRoutes = routes.filter((route) => !route.succeeded);
+    const best = knownSuccessfulReferenceRoutes[0] ?? null;
+    return {
+      state: best ? 'succeeded' as const : knownBlockedReferenceRoutes.length ? 'failed' as const : 'unknown' as const,
+      referenceRole: best?.referenceRole ?? null,
+      variant: (best?.variant as SeedanceReferenceMatrixVariant | null) ?? null,
+      failureCategory: knownBlockedReferenceRoutes[0]?.failureCategory ?? null,
+      knownSuccessfulReferenceRoutes,
+      knownBlockedReferenceRoutes,
+      allReferenceRouteResults: routes,
+    };
+  } catch {
+    return {
+      state: 'unknown' as const,
+      referenceRole: null,
+      variant: null,
+      failureCategory: null,
+      knownSuccessfulReferenceRoutes: [],
+      knownBlockedReferenceRoutes: [],
+      allReferenceRouteResults: [],
+    };
+  }
+}
+
+export async function getReferenceRouteReadiness(input: {
+  userId?: string | null;
+  characterId?: string | null;
+}): Promise<ReferenceRouteReadiness> {
+  const summary = await getReferenceRouteSummary(input);
+  return {
+    state: summary.state,
+    referenceRole: summary.referenceRole,
+    variant: summary.variant,
+    failureCategory: summary.failureCategory,
+  };
 }

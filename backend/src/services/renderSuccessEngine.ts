@@ -19,7 +19,7 @@ import {
 } from './providers/seedanceProvider';
 import { isProviderOutputError, parseProviderVideoOutput } from './providerOutputParser';
 import { scoreReferenceConfidence } from './sceneOptimization';
-import { buildReferenceImagePrompt, getReferenceCanaryReadiness } from './seedanceCanary';
+import { buildReferenceImagePrompt, getReferenceCanaryReadiness, getReferenceRouteReadiness } from './seedanceCanary';
 
 export const DEFAULT_SUCCESS_FIRST_PROVIDER_PROMPT =
   'the cast character gently moves through a peaceful sunlit garden, natural movement, fully clothed, soft storybook cinematic style, calm mood, gentle camera motion';
@@ -337,6 +337,17 @@ function promptWithReferenceTokens(prompt: string, references: SeedanceReference
   return collapseWhitespace(`The character from ${tokens.join(', ')}. ${prompt}`);
 }
 
+function referenceMatchesPreferredRole(reference: SeedanceReferenceImage, preferredRole: string | null | undefined) {
+  if (!preferredRole) return true;
+  if (reference.role === preferredRole) return true;
+  const text = `${reference.role ?? ''} ${reference.label ?? ''}`.toLowerCase();
+  if (preferredRole === 'side_angle_left') return text.includes('left') || text.includes('side');
+  if (preferredRole === 'side_angle_right') return text.includes('right') || text.includes('side');
+  if (preferredRole === 'front_angle') return text.includes('front') || text.includes('primary');
+  if (preferredRole === 'full_body') return text.includes('full') || text.includes('body');
+  return false;
+}
+
 function providerModelForQuality(quality: SeedanceQualityMode | 'demo') {
   if (quality === 'quality') return SEEDANCE_QUALITY_MODEL;
   if (quality === 'fast') return SEEDANCE_FAST_MODEL;
@@ -392,8 +403,13 @@ export function buildRenderSuccessAttemptPlan(input: {
   allowDemoFallback?: boolean;
   firstVideoRescue?: boolean;
   referenceCanaryState?: 'succeeded' | 'failed' | 'unknown';
+  preferredReferenceRole?: string | null;
 }) {
-  const strongestReferences = strongestSavedReferences(input.referenceImages ?? []);
+  const routeReferences = input.preferredReferenceRole
+    ? (input.referenceImages ?? []).filter((reference) => referenceMatchesPreferredRole(reference, input.preferredReferenceRole))
+    : (input.referenceImages ?? []);
+  const referenceRouteSucceeded = input.referenceCanaryState === 'succeeded';
+  const strongestReferences = referenceRouteSucceeded ? strongestSavedReferences(routeReferences) : [];
   const primaryReference = strongestReferences.slice(0, 1);
   const twoStrongestReferences = strongestReferences.slice(0, 2);
   const rescuePrompt = sanitizeSuccessProviderPrompt({
@@ -1856,18 +1872,23 @@ export function processRenderSuccessJob(masterJobId: string) {
         return;
       }
 
-      const referenceCanary = metadata.firstVideoRescue
+      const referenceCanary = await getReferenceRouteReadiness({
+        userId: master.userId,
+        characterId: metadata.characterId,
+      });
+      const legacyReferenceCanary = referenceCanary.state === 'unknown' && metadata.firstVideoRescue
         ? await getReferenceCanaryReadiness({
             userId: master.userId,
             characterId: metadata.characterId,
           })
-        : { state: 'unknown' as const };
+        : referenceCanary;
       const baseAttempts = buildRenderSuccessAttemptPlan({
         referenceImages: metadata.referenceImages ?? [],
         characterName: metadata.characterName,
         allowDemoFallback: Boolean(metadata.allowDemoFallback || env.DEMO_MODE),
         firstVideoRescue: Boolean(metadata.firstVideoRescue),
-        referenceCanaryState: referenceCanary.state,
+        referenceCanaryState: referenceCanary.state === 'succeeded' ? referenceCanary.state : legacyReferenceCanary.state,
+        preferredReferenceRole: referenceCanary.referenceRole,
       });
       const preferredRecipe = await loadPreferredRecipe({
         userId: master.userId,

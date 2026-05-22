@@ -8,6 +8,7 @@ import { buildLastRenderDiagnostics } from '../services/renderDiagnostics';
 import { buildAsyncRenderJobDiagnostics } from '../services/renderJobPoller';
 import { buildDatabaseDiagnostics } from '../services/schemaDiagnostics';
 import { buildReferenceCleanupDiagnostics } from '../services/referenceCleanup';
+import { startSeedanceReferenceMatrixCanary } from '../services/referenceMatrixCanary';
 import { buildRenderSuccessDiagnostics } from '../services/renderSuccessEngine';
 import { buildRenderReliabilityDiagnostics } from '../services/sceneOptimization';
 import {
@@ -27,10 +28,17 @@ const canarySchema = z.object({
 const referenceCanarySchema = canarySchema.extend({
   characterId: z.string().min(1),
 });
+const referenceMatrixSchema = canarySchema.extend({
+  referenceRole: z.enum(['front_angle', 'side_angle_left', 'side_angle_right', 'full_body', 'all']).optional().default('all'),
+  variant: z.enum(['reference_images', 'image_to_video', 'text_only']).optional().default('reference_images'),
+  maxPaidAttempts: z.coerce.number().int().min(1).max(5).optional().default(1),
+  confirmBroadTest: z.boolean().optional().default(false),
+});
 
 const canaryRouteInventory = {
   textCanaryRouteMounted: true,
   referenceCanaryRouteMounted: true,
+  referenceMatrixRouteMounted: true,
   renderLastRouteMounted: true,
   renderPathCompareRouteMounted: true,
 };
@@ -65,11 +73,39 @@ healthRouter.get('/api/diagnostics/canary-routes', (_req, res) => {
     routes: {
       textCanary: 'POST /api/diagnostics/seedance-canary',
       referenceCanary: 'POST /api/diagnostics/seedance-reference-canary/self',
+      referenceMatrix: 'POST /api/diagnostics/seedance-reference-matrix/self',
       renderLast: 'GET /api/diagnostics/render-last',
       renderPathCompare: 'GET /api/diagnostics/render-path-compare',
     },
     ...canaryRouteInventory,
   });
+});
+
+healthRouter.post('/api/diagnostics/seedance-reference-matrix/self', async (req, res) => {
+  if (!env.ENABLE_RENDER_PROBE) {
+    res.status(403).json({
+      error: 'Render probe disabled. Set ENABLE_RENDER_PROBE=true to run a paid canary.',
+    });
+    return;
+  }
+
+  const payload = referenceMatrixSchema.parse(req.body ?? {});
+  if (payload.maxPaidAttempts > 1 && !payload.confirmBroadTest) {
+    res.status(400).json({
+      error: 'broad_reference_matrix_requires_confirmation',
+      message: 'MaxPaidAttempts greater than 1 may consume multiple provider credits. Set confirmBroadTest=true to run a broader matrix.',
+    });
+    return;
+  }
+  const userId = payload.userId ?? req.header('x-lumora-user-id') ?? null;
+  const result = await startSeedanceReferenceMatrixCanary({
+    userId,
+    saveAsDraft: payload.saveAsDraft,
+    referenceRole: payload.referenceRole,
+    variant: payload.variant,
+    maxPaidAttempts: payload.maxPaidAttempts,
+  });
+  res.status(result.ok ? 202 : 404).json(result);
 });
 
 healthRouter.post('/api/diagnostics/seedance-canary', async (req, res) => {
