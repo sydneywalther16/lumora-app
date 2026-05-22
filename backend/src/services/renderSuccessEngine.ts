@@ -19,6 +19,7 @@ import {
 } from './providers/seedanceProvider';
 import { isProviderOutputError, parseProviderVideoOutput } from './providerOutputParser';
 import { scoreReferenceConfidence } from './sceneOptimization';
+import { getReferenceCanaryReadiness } from './seedanceCanary';
 
 export const DEFAULT_SUCCESS_FIRST_PROVIDER_PROMPT =
   'the cast character gently moves through a peaceful sunlit garden, natural movement, fully clothed, soft storybook cinematic style, calm mood, gentle camera motion';
@@ -383,6 +384,7 @@ export function buildRenderSuccessAttemptPlan(input: {
   characterName?: string | null;
   allowDemoFallback?: boolean;
   firstVideoRescue?: boolean;
+  referenceCanaryState?: 'succeeded' | 'failed' | 'unknown';
 }) {
   const strongestReferences = strongestSavedReferences(input.referenceImages ?? []);
   const primaryReference = strongestReferences.slice(0, 1);
@@ -404,19 +406,23 @@ export function buildRenderSuccessAttemptPlan(input: {
     characterName: input.characterName,
   });
 
+  const firstVideoReferences = input.referenceCanaryState === 'succeeded' ? primaryReference : [];
   const attempts: RenderSuccessAttempt[] = input.firstVideoRescue ? [
     makeAttempt({
       tier: 1,
       quality: 'fast',
-      referenceImages: primaryReference,
+      referenceImages: firstVideoReferences,
       prompt: rescuePrompt,
       promptStyle: 'first_video_rescue',
       styleMode: 'first_video_rescue',
       aspectRatio: FIRST_VIDEO_RESCUE_ASPECT_RATIO,
-      label: 'First video rescue Seedance Fast primary reference',
-      progressLabel: primaryReference.length ? 'Trying primary reference...' : 'Trying the cleanest storybook render...',
+      label: firstVideoReferences.length
+        ? 'First video rescue Seedance Fast primary reference'
+        : 'First video rescue Seedance Fast text only',
+      progressLabel: firstVideoReferences.length ? 'Trying primary reference...' : 'Trying the cleanest storybook render...',
+      lighterCastGuidance: firstVideoReferences.length === 0,
     }),
-    makeAttempt({
+    ...(firstVideoReferences.length ? [makeAttempt({
       tier: 2,
       quality: 'fast',
       referenceImages: [],
@@ -427,7 +433,7 @@ export function buildRenderSuccessAttemptPlan(input: {
       label: 'First video rescue Seedance Fast text only',
       progressLabel: 'Trying lighter cast guidance...',
       lighterCastGuidance: true,
-    }),
+    })] : []),
   ] : [
     makeAttempt({
       tier: 1,
@@ -1839,11 +1845,18 @@ export function processRenderSuccessJob(masterJobId: string) {
         return;
       }
 
+      const referenceCanary = metadata.firstVideoRescue
+        ? await getReferenceCanaryReadiness({
+            userId: master.userId,
+            characterId: metadata.characterId,
+          })
+        : { state: 'unknown' as const };
       const baseAttempts = buildRenderSuccessAttemptPlan({
         referenceImages: metadata.referenceImages ?? [],
         characterName: metadata.characterName,
         allowDemoFallback: Boolean(metadata.allowDemoFallback || env.DEMO_MODE),
         firstVideoRescue: Boolean(metadata.firstVideoRescue),
+        referenceCanaryState: referenceCanary.state,
       });
       const preferredRecipe = await loadPreferredRecipe({
         userId: master.userId,

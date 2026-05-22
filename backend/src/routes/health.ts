@@ -13,8 +13,10 @@ import { buildRenderReliabilityDiagnostics } from '../services/sceneOptimization
 import {
   buildRenderPathCompareDiagnostics,
   getSeedanceCanaryStatus,
+  SelfReferenceCanarySelectionError,
   startSeedanceCanary,
   startSeedanceReferenceCanary,
+  startSeedanceSelfReferenceCanary,
 } from '../services/seedanceCanary';
 
 export const healthRouter = Router();
@@ -84,6 +86,34 @@ healthRouter.post('/api/diagnostics/seedance-reference-canary', async (req, res)
     saveAsDraft: payload.saveAsDraft,
   });
   res.status(202).json(status);
+});
+
+healthRouter.post('/api/diagnostics/seedance-reference-canary/self', async (req, res) => {
+  if (!env.ENABLE_RENDER_PROBE) {
+    res.status(403).json({
+      error: 'Render probe disabled. Set ENABLE_RENDER_PROBE=true to run a paid canary.',
+    });
+    return;
+  }
+
+  const payload = canarySchema.parse(req.body ?? {});
+  const userId = payload.userId ?? req.header('x-lumora-user-id') ?? null;
+  try {
+    const status = await startSeedanceSelfReferenceCanary({
+      userId,
+      saveAsDraft: payload.saveAsDraft,
+    });
+    res.status(202).json(status);
+  } catch (error) {
+    if (error instanceof SelfReferenceCanarySelectionError) {
+      res.status(error.statusCode).json({
+        error: error.message,
+        ...error.payload,
+      });
+      return;
+    }
+    throw error;
+  }
 });
 
 healthRouter.get('/api/diagnostics/seedance-canary/:id', async (req, res) => {

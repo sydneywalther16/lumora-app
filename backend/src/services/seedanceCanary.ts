@@ -5,7 +5,8 @@ import { persistCompletedGeneration } from './generationPersistence';
 import { parseProviderVideoOutput } from './providerOutputParser';
 import { serializeDiagnosticError } from './schemaDiagnostics';
 import { sanitizeProviderPrompt } from './providerPromptSanitizer';
-import { getCinematicCharacterProfileForUser } from './characterProfiles';
+import { getCinematicCharacterProfileForUser, type CharacterReferenceImageUrls } from './characterProfiles';
+import { scoreReferenceConfidence } from './sceneOptimization';
 import {
   SEEDANCE_FAST_MODEL,
   isReplicateRateLimitError,
@@ -17,6 +18,8 @@ import {
 
 export const SEEDANCE_CANARY_PROMPT =
   'A peaceful sunlit garden path with flowers swaying gently in the breeze, soft storybook cinematic style, calm natural motion.';
+export const SEEDANCE_REFERENCE_CANARY_PROMPT =
+  'the cast character walks slowly through a peaceful sunlit garden, natural movement, fully clothed, soft storybook cinematic style, gentle camera motion';
 export const SEEDANCE_CANARY_DURATION_SECONDS = 5;
 export const SEEDANCE_CANARY_ASPECT_RATIO = '9:16';
 export const SEEDANCE_CANARY_RESOLUTION = '480p';
@@ -34,6 +37,7 @@ type CanaryMetadata = {
   kind: CanaryKind;
   providerInput: SeedanceProviderPayload;
   payloadSummary: ReturnType<typeof seedancePayloadSummary>;
+  selectedReference?: CanaryReferenceDiagnostics | null;
   saveAsDraft: boolean;
   userId: string | null;
   characterId: string | null;
@@ -85,6 +89,44 @@ type LatestRealPathRow = {
   renderSuccessRole: string | null;
   createdAt: string;
 };
+
+export type CanaryReferenceDiagnostics = {
+  selected: boolean;
+  role: string | null;
+  label: string | null;
+  host: string | null;
+  savedToLumora: boolean;
+  whySelected: string;
+};
+
+export type CanaryReferenceSelection = {
+  reference: SeedanceReferenceImage | null;
+  diagnostics: CanaryReferenceDiagnostics;
+};
+
+type SelfCharacterCandidate = {
+  id: string;
+  characterId: string;
+  ownerUserId: string;
+  name: string;
+  displayName: string;
+  isSelf: boolean;
+  referenceImageUrls: Partial<CharacterReferenceImageUrls>;
+  referenceImages: Record<string, unknown>;
+  updatedAt: string;
+};
+
+export class SelfReferenceCanarySelectionError extends Error {
+  readonly statusCode: number;
+  readonly payload: Record<string, unknown>;
+
+  constructor(message: string, payload: Record<string, unknown> = {}, statusCode = 400) {
+    super(message);
+    this.name = 'SelfReferenceCanarySelectionError';
+    this.statusCode = statusCode;
+    this.payload = payload;
+  }
+}
 
 const canaryJobSelect = `
   id,
@@ -168,6 +210,57 @@ function redactMessage(value: string | null | undefined) {
     .slice(0, 360);
 }
 
+function textValue(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function referenceUrlsValue(value: unknown): Partial<CharacterReferenceImageUrls> {
+  const record = recordValue(value);
+  return {
+    manualReferenceImageUrl: textValue(record.manualReferenceImageUrl) || null,
+    frontFace: textValue(record.frontFace),
+    frontFaceUrl: textValue(record.frontFaceUrl) || null,
+    frontFacePath: textValue(record.frontFacePath) || null,
+    leftAngle: textValue(record.leftAngle),
+    leftAngleUrl: textValue(record.leftAngleUrl) || null,
+    leftAnglePath: textValue(record.leftAnglePath) || null,
+    rightAngle: textValue(record.rightAngle),
+    rightAngleUrl: textValue(record.rightAngleUrl) || null,
+    rightAnglePath: textValue(record.rightAnglePath) || null,
+    fullBody: textValue(record.fullBody) || null,
+    fullBodyUrl: textValue(record.fullBodyUrl) || null,
+    fullBodyPath: textValue(record.fullBodyPath) || null,
+    expressive: textValue(record.expressive) || null,
+    expressiveUrl: textValue(record.expressiveUrl) || null,
+    expressivePath: textValue(record.expressivePath) || null,
+  };
+}
+
+function redactedId(value: string | null | undefined) {
+  if (!value) return null;
+  return value.length <= 10 ? `${value.slice(0, 2)}...` : `${value.slice(0, 8)}...${value.slice(-4)}`;
+}
+
+function redactedName(value: string | null | undefined) {
+  const text = textValue(value);
+  if (!text) return null;
+  return `${text.slice(0, 1)}${'*'.repeat(Math.max(2, Math.min(8, text.length - 1)))}`;
+}
+
+function redactedHost(url: string) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
+  }
+}
+
 function rawResponseStatus(error: unknown) {
   return (error as { response?: { status?: unknown } } | null)?.response?.status;
 }
@@ -216,6 +309,20 @@ function classifyProviderFailure(value: unknown) {
   return 'provider';
 }
 
+export function classifyReferenceCanaryFailure(value: unknown) {
+  const raw = typeof value === 'string' ? value : errorText(value);
+  const lower = raw.toLowerCase();
+  if (lower.includes('moderation') || lower.includes('safety') || lower.includes('policy') || lower.includes('nsfw')) return 'reference_moderation';
+  if (lower.includes('schema') || lower.includes('validation') || lower.includes('invalid input') || lower.includes('reference_images')) return 'reference_input_schema';
+  if (lower.includes('403') || lower.includes('404') || lower.includes('asset') || lower.includes('download') || lower.includes('access') || lower.includes('url')) return 'reference_asset_access';
+  if (lower.includes('output') || lower.includes('video url')) return 'reference_output_missing';
+  return 'provider_unknown';
+}
+
+function classifyCanaryFailure(kind: CanaryKind, value: unknown) {
+  return kind === 'reference' ? classifyReferenceCanaryFailure(value) : classifyProviderFailure(value);
+}
+
 export function canaryRateLimitStatus() {
   return 'rate_limited' as const;
 }
@@ -223,7 +330,10 @@ export function canaryRateLimitStatus() {
 export function buildSeedanceCanaryPayload(input: {
   referenceImages?: SeedanceReferenceImage[];
 } = {}): SeedanceProviderPayload {
-  const sanitizer = sanitizeProviderPrompt({ prompt: SEEDANCE_CANARY_PROMPT });
+  const references = selectPrimaryCanaryReference(input.referenceImages ?? []);
+  const sanitizer = sanitizeProviderPrompt({
+    prompt: references.length ? SEEDANCE_REFERENCE_CANARY_PROMPT : SEEDANCE_CANARY_PROMPT,
+  });
   const payload: SeedanceProviderPayload = {
     prompt: sanitizer.prompt,
     duration: SEEDANCE_CANARY_DURATION_SECONDS,
@@ -231,7 +341,6 @@ export function buildSeedanceCanaryPayload(input: {
     resolution: SEEDANCE_CANARY_RESOLUTION,
     generate_audio: SEEDANCE_CANARY_GENERATE_AUDIO,
   };
-  const references = selectPrimaryCanaryReference(input.referenceImages ?? []);
   if (references.length) payload.reference_images = references.map((reference) => reference.url);
   return payload;
 }
@@ -249,6 +358,102 @@ export function selectPrimaryCanaryReference(references: SeedanceReferenceImage[
       token: '[Image1]',
     }];
   }).slice(0, 1);
+}
+
+function referenceText(reference: SeedanceReferenceImage) {
+  return `${reference.label ?? ''} ${reference.role ?? ''} ${reference.token ?? ''}`.toLowerCase();
+}
+
+function isManualReference(reference: SeedanceReferenceImage) {
+  const text = referenceText(reference);
+  return text.includes('manual_reference_override') ||
+    text.includes('manual reference') ||
+    text.includes('manual override');
+}
+
+function canaryReferenceCandidates(character: {
+  referenceImageUrls?: Partial<CharacterReferenceImageUrls> | null;
+}) {
+  const urls = character.referenceImageUrls ?? {};
+  return [
+    {
+      url: urls.frontFaceUrl ?? urls.frontFacePath ?? urls.frontFace ?? null,
+      label: 'Primary front face',
+      role: 'front_angle',
+      whySelected: 'Primary saved Lumora front reference has the strongest identity signal.',
+    },
+    {
+      url: urls.expressiveUrl ?? urls.expressivePath ?? urls.expressive ?? null,
+      label: 'Clean face reference',
+      role: 'face_upper_body',
+      whySelected: 'Clean face or upper-body saved Lumora reference is the strongest available option.',
+    },
+    {
+      url: urls.leftAngleUrl ?? urls.leftAnglePath ?? urls.leftAngle ?? null,
+      label: 'Left angle',
+      role: 'side_angle',
+      whySelected: 'Side saved Lumora reference is used because primary/face references are unavailable.',
+    },
+    {
+      url: urls.rightAngleUrl ?? urls.rightAnglePath ?? urls.rightAngle ?? null,
+      label: 'Right angle',
+      role: 'side_angle',
+      whySelected: 'Side saved Lumora reference is used because primary/face references are unavailable.',
+    },
+    {
+      url: urls.fullBodyUrl ?? urls.fullBodyPath ?? urls.fullBody ?? null,
+      label: 'Full body',
+      role: 'full_body',
+      whySelected: 'Full-body saved Lumora reference is used because face references are unavailable.',
+    },
+    {
+      url: urls.manualReferenceImageUrl ?? null,
+      label: 'Manual reference override',
+      role: 'manual_reference_override',
+      whySelected: 'Manual reference override is never selected for canary.',
+    },
+  ];
+}
+
+export function selectStrongestCanaryReference(character: {
+  referenceImageUrls?: Partial<CharacterReferenceImageUrls> | null;
+}): CanaryReferenceSelection {
+  const candidates = canaryReferenceCandidates(character);
+  for (const candidate of candidates) {
+    const url = textValue(candidate.url);
+    const reference: SeedanceReferenceImage = {
+      url,
+      label: candidate.label,
+      role: candidate.role,
+      token: '[Image1]',
+    };
+    if (!url || isManualReference(reference)) continue;
+    const confidence = scoreReferenceConfidence(reference);
+    if (!confidence.savedToLumora || confidence.reasons.includes('Protected or temporary source')) continue;
+    return {
+      reference,
+      diagnostics: {
+        selected: true,
+        role: reference.role ?? null,
+        label: reference.label ?? null,
+        host: redactedHost(url),
+        savedToLumora: confidence.savedToLumora,
+        whySelected: candidate.whySelected,
+      },
+    };
+  }
+
+  return {
+    reference: null,
+    diagnostics: {
+      selected: false,
+      role: null,
+      label: null,
+      host: null,
+      savedToLumora: false,
+      whySelected: 'No saved Lumora reference was available after excluding manual overrides and protected/external URLs.',
+    },
+  };
 }
 
 function outputShapeSummary(output: unknown) {
@@ -317,6 +522,7 @@ async function insertCanaryJob(input: {
   userId?: string | null;
   characterId?: string | null;
   referenceImages?: SeedanceReferenceImage[];
+  selectedReference?: CanaryReferenceDiagnostics | null;
   saveAsDraft?: boolean;
 }) {
   const references = input.kind === 'reference'
@@ -332,6 +538,7 @@ async function insertCanaryJob(input: {
     kind: input.kind,
     providerInput,
     payloadSummary: seedancePayloadSummary(providerInput),
+    selectedReference: input.selectedReference ?? null,
     saveAsDraft: Boolean(input.saveAsDraft),
     userId: isUuidLike(input.userId) ? input.userId as string : null,
     characterId: input.characterId ?? null,
@@ -446,22 +653,24 @@ async function handleCanarySuccess(input: {
   const outputParse = parseProviderVideoOutput(input.prediction.output);
   const shape = outputShapeSummary(input.prediction.output);
   if (!outputParse.ok) {
+    const category = input.metadata.kind === 'reference' ? 'reference_output_missing' : outputParse.category;
     return updateCanaryJob(input.job.id, {
       status: 'failed',
       providerStatus: 'succeeded',
       errorMessage: 'Provider succeeded but did not return a usable video URL.',
-      errorCategory: outputParse.category,
+      errorCategory: category,
       outputShapeSummaryValue: shape,
     });
   }
 
   const reachable = await verifyOutputReachable(outputParse.videoUrl);
+  const missingCategory = input.metadata.kind === 'reference' ? 'reference_output_missing' : 'provider_output_unreachable';
   if (!reachable) {
     return updateCanaryJob(input.job.id, {
       status: 'failed',
       providerStatus: 'succeeded',
       errorMessage: 'Provider returned a video URL, but Lumora could not verify it was reachable.',
-      errorCategory: 'provider_output_unreachable',
+      errorCategory: missingCategory,
       outputShapeSummaryValue: shape,
     });
   }
@@ -590,7 +799,7 @@ async function processSeedanceCanaryJob(jobId: string, options: { pollUntilTermi
           status: prediction.status === 'canceled' ? 'canceled' : 'failed',
           providerStatus: prediction.status,
           errorMessage: redactMessage(detail),
-          errorCategory: classifyProviderFailure(detail),
+          errorCategory: classifyCanaryFailure(metadata.kind, detail),
           outputShapeSummaryValue: outputShapeSummary(prediction.output),
         });
       }
@@ -611,7 +820,7 @@ async function processSeedanceCanaryJob(jobId: string, options: { pollUntilTermi
       return updateCanaryJob(job.id, {
         status: 'failed',
         errorMessage: redactMessage(errorText(error)),
-        errorCategory: classifyProviderFailure(error),
+        errorCategory: classifyCanaryFailure(metadata.kind, error),
       });
     }
   } finally {
@@ -632,30 +841,16 @@ export async function startSeedanceCanary(input: {
   return formatSeedanceCanaryStatus(processed ?? job);
 }
 
-function firstProfileReference(profile: Awaited<ReturnType<typeof getCinematicCharacterProfileForUser>> | null): SeedanceReferenceImage[] {
-  if (!profile) return [];
-  const urls = profile.referenceImageUrls;
-  const candidates: Array<{ url?: string | null; label: string; role: string }> = [
-    { url: urls.frontFaceUrl ?? urls.frontFacePath ?? urls.frontFace, label: 'Primary front face', role: 'front_angle' },
-    { url: urls.leftAngleUrl ?? urls.leftAnglePath ?? urls.leftAngle, label: 'Left angle', role: 'side_angle' },
-    { url: urls.rightAngleUrl ?? urls.rightAnglePath ?? urls.rightAngle, label: 'Right angle', role: 'side_angle' },
-    { url: urls.fullBodyUrl ?? urls.fullBodyPath ?? urls.fullBody, label: 'Full body', role: 'full_body' },
-  ];
-  return candidates.flatMap((candidate) => (
-    candidate.url && /^https?:\/\//i.test(candidate.url)
-      ? [{ url: candidate.url, label: candidate.label, role: candidate.role, token: '[Image1]' }]
-      : []
-  ));
-}
-
 export async function startSeedanceReferenceCanary(input: {
   userId: string;
   characterId: string;
   saveAsDraft?: boolean;
 }) {
   const profile = await getCinematicCharacterProfileForUser(input.userId, input.characterId).catch(() => null);
-  const references = selectPrimaryCanaryReference(firstProfileReference(profile));
-  if (!references.length) {
+  const selection = selectStrongestCanaryReference({
+    referenceImageUrls: profile?.referenceImageUrls ?? null,
+  });
+  if (!selection.reference) {
     throw new Error('Reference canary requires one saved Lumora reference for this character.');
   }
   const job = await insertCanaryJob({
@@ -663,7 +858,100 @@ export async function startSeedanceReferenceCanary(input: {
     saveAsDraft: input.saveAsDraft,
     userId: input.userId,
     characterId: input.characterId,
-    referenceImages: references,
+    referenceImages: [selection.reference],
+    selectedReference: selection.diagnostics,
+  });
+  const processed = await processSeedanceCanaryJob(job.id, { pollUntilTerminal: false });
+  return formatSeedanceCanaryStatus(processed ?? job);
+}
+
+function mapSelfCandidate(row: Record<string, unknown>): SelfCharacterCandidate {
+  return {
+    id: String(row.id),
+    characterId: textValue(row.characterId) || String(row.id),
+    ownerUserId: String(row.ownerUserId),
+    name: textValue(row.name),
+    displayName: textValue(row.displayName) || textValue(row.name),
+    isSelf: row.isSelf === true,
+    referenceImageUrls: referenceUrlsValue(row.referenceImageUrls),
+    referenceImages: recordValue(row.referenceImages),
+    updatedAt: String(row.updatedAt ?? new Date().toISOString()),
+  };
+}
+
+async function listSelfCharacterCandidates(userId?: string | null) {
+  const result = await query<Record<string, unknown>>(
+    `select
+       id,
+       character_id as "characterId",
+       owner_user_id as "ownerUserId",
+       name,
+       display_name as "displayName",
+       is_self as "isSelf",
+       reference_image_urls as "referenceImageUrls",
+       reference_images as "referenceImages",
+       updated_at as "updatedAt"
+     from character_profiles
+     where ($1::uuid is null or owner_user_id = $1)
+       and (
+         coalesce(is_self, false) = true
+         or character_id = 'creator-self'
+         or lower(coalesce(name, '')) in ('self', 'creator self', 'my self', 'me')
+       )
+     order by updated_at desc nulls last, created_at desc
+     limit 10`,
+    [isUuidLike(userId) ? userId : null],
+  );
+  return result.rows.map(mapSelfCandidate);
+}
+
+function redactedCandidate(candidate: SelfCharacterCandidate) {
+  return {
+    id: redactedId(candidate.id),
+    characterId: redactedId(candidate.characterId),
+    ownerUserId: redactedId(candidate.ownerUserId),
+    name: redactedName(candidate.displayName || candidate.name),
+    updatedAt: candidate.updatedAt,
+  };
+}
+
+async function findSelfReferenceCanaryCandidate(userId?: string | null) {
+  const candidates = await listSelfCharacterCandidates(userId);
+  if (!candidates.length) {
+    throw new SelfReferenceCanarySelectionError('No saved self character found.', {}, 404);
+  }
+
+  if (isUuidLike(userId)) {
+    return candidates[0];
+  }
+
+  if (candidates.length === 1) return candidates[0];
+
+  throw new SelfReferenceCanarySelectionError('Multiple possible self characters found. Provide a userId or characterId.', {
+    candidates: candidates.map(redactedCandidate),
+  }, 409);
+}
+
+export async function startSeedanceSelfReferenceCanary(input: {
+  userId?: string | null;
+  saveAsDraft?: boolean;
+}) {
+  const candidate = await findSelfReferenceCanaryCandidate(input.userId);
+  const selection = selectStrongestCanaryReference(candidate);
+  if (!selection.reference) {
+    throw new SelfReferenceCanarySelectionError('No saved self character found with a usable saved Lumora reference.', {
+      character: redactedCandidate(candidate),
+      selectedReference: selection.diagnostics,
+    }, 404);
+  }
+
+  const job = await insertCanaryJob({
+    kind: 'reference',
+    saveAsDraft: input.saveAsDraft,
+    userId: candidate.ownerUserId,
+    characterId: candidate.characterId,
+    referenceImages: [selection.reference],
+    selectedReference: selection.diagnostics,
   });
   const processed = await processSeedanceCanaryJob(job.id, { pollUntilTerminal: false });
   return formatSeedanceCanaryStatus(processed ?? job);
@@ -732,6 +1020,7 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
     retryAvailableAt: job.retryAvailableAt,
     nextAction,
     payloadSummary: metadata?.payloadSummary ?? null,
+    selectedReference: metadata?.selectedReference ?? null,
     message: status === 'completed' && outputParse.ok
       ? 'Seedance canary succeeded with a verified video URL.'
       : status === 'rate_limited'
@@ -770,9 +1059,45 @@ function metadataHasText(metadata: Record<string, unknown> | null, pattern: RegE
   return pattern.test(JSON.stringify(metadata).toLowerCase());
 }
 
+function payloadReferenceFieldShape(payload: SeedanceProviderPayload | null) {
+  if (!payload || !('reference_images' in payload)) return 'omitted';
+  return Array.isArray(payload.reference_images)
+    ? `array<string>(length=${payload.reference_images.length})`
+    : typeof payload.reference_images;
+}
+
+function hasManualOverrideText(value: unknown) {
+  return /manual_reference_override|manual reference|manual override/i.test(JSON.stringify(value ?? ''));
+}
+
+function hasExternalUrlText(value: unknown) {
+  const text = JSON.stringify(value ?? '');
+  const matches = text.match(/https?:\/\/[^"'\s)]+/gi) ?? [];
+  return matches.some((url) => {
+    try {
+      const host = new URL(url).host.toLowerCase();
+      return !(host.includes('supabase.co') || host.includes('lumora'));
+    } catch {
+      return true;
+    }
+  });
+}
+
 export async function buildRenderPathCompareDiagnostics() {
   try {
     const canaryPayload = buildSeedanceCanaryPayload();
+    const referenceCanaryResult = await query<Record<string, unknown>>(
+      `select ${canaryJobSelect}
+       from generation_jobs
+       where render_mode = 'seedance_reference_canary'
+       order by updated_at desc nulls last, created_at desc
+       limit 1`,
+    );
+    const referenceCanaryRow = referenceCanaryResult.rows[0]
+      ? mapCanaryRow(referenceCanaryResult.rows[0])
+      : null;
+    const referenceCanaryMetadata = referenceCanaryRow ? canaryMetadata(referenceCanaryRow) : null;
+    const referencePayload = referenceCanaryMetadata?.providerInput ?? null;
     const realResult = await query<LatestRealPathRow>(
       `select
          id,
@@ -812,8 +1137,33 @@ export async function buildRenderPathCompareDiagnostics() {
       displayNamePresent: false,
       storyMemoryIncluded: false,
       sceneFlowIncluded: false,
+      manualOverrideIncluded: false,
+      externalUrlsIncluded: false,
+      referenceFieldShape: payloadReferenceFieldShape(canaryPayload),
       payloadFields: Object.keys(canaryPayload),
     };
+    const referenceCanary = referencePayload ? {
+      provider: 'seedance-fast',
+      providerModel: SEEDANCE_FAST_MODEL,
+      references: true,
+      referenceCount: referencePayload.reference_images?.length ?? 0,
+      duration: referencePayload.duration,
+      resolution: referencePayload.resolution,
+      aspect_ratio: referencePayload.aspect_ratio,
+      generate_audio: referencePayload.generate_audio ?? 'omitted',
+      promptLength: referencePayload.prompt.length,
+      promptRiskTerms: promptRiskTerms(referencePayload.prompt),
+      displayNamePresent: false,
+      storyMemoryIncluded: false,
+      sceneFlowIncluded: false,
+      manualOverrideIncluded: Boolean(referenceCanaryMetadata?.selectedReference?.role === 'manual_reference_override'),
+      externalUrlsIncluded: hasExternalUrlText(referencePayload.reference_images ?? []),
+      referenceFieldShape: payloadReferenceFieldShape(referencePayload),
+      selectedReference: referenceCanaryMetadata?.selectedReference ?? null,
+      payloadFields: Object.keys(referencePayload),
+      status: referenceCanaryRow?.status ?? null,
+      errorCategory: referenceCanaryRow?.errorCategory ?? null,
+    } : null;
     const realPath = real ? {
       id: real.id,
       provider: real.providerName ?? real.provider,
@@ -829,6 +1179,9 @@ export async function buildRenderPathCompareDiagnostics() {
       displayNamePresent: Boolean(real.characterName && realPrompt.toLowerCase().includes(real.characterName.toLowerCase())),
       storyMemoryIncluded: metadataHasText(real.sceneMetadata, /story|continuity|memory/),
       sceneFlowIncluded: Boolean(real.renderMode?.includes('scene') || real.providerFallbackStage?.includes('scene') || metadataHasText(real.sceneMetadata, /sceneflow|scene_execution|beats/)),
+      manualOverrideIncluded: hasManualOverrideText(real.sceneMetadata),
+      externalUrlsIncluded: hasExternalUrlText(real.sceneMetadata),
+      referenceFieldShape: (real.referenceCount ?? 0) > 0 ? 'unknown_create_path' : 'omitted',
       renderMode: real.renderMode,
       providerFallbackStage: real.providerFallbackStage,
       renderSuccessRole: real.renderSuccessRole,
@@ -836,7 +1189,8 @@ export async function buildRenderPathCompareDiagnostics() {
 
     return {
       ok: true,
-      canary,
+      textCanary: canary,
+      referenceCanary: redactRenderPathCompareValue(referenceCanary),
       realCreate: redactRenderPathCompareValue(realPath),
       differences: realPath ? {
         references: realPath.references !== canary.references,
@@ -850,6 +1204,9 @@ export async function buildRenderPathCompareDiagnostics() {
         displayNamePresent: realPath.displayNamePresent,
         storyMemoryIncluded: realPath.storyMemoryIncluded,
         sceneFlowIncluded: realPath.sceneFlowIncluded,
+        manualOverrideIncluded: realPath.manualOverrideIncluded,
+        externalUrlsIncluded: realPath.externalUrlsIncluded,
+        referenceFieldShape: realPath.referenceFieldShape,
       } : null,
     };
   } catch (error) {
@@ -883,12 +1240,18 @@ export async function buildSeedanceCanarySummaryDiagnostics() {
           ? 'Fix output parser'
           : 'Provider setup/rate limit issue'
         : !referenceCanaries.length
-          ? 'Run reference canary'
-          : !referenceSucceeded
-            ? lastReference?.errorCategory === 'provider_moderation'
+          ? 'Run self reference canary'
+        : !referenceSucceeded
+            ? lastReference?.errorCategory === 'reference_moderation'
               ? 'Provider moderation blocks references'
-              : 'Fix reference input'
-            : 'Use canary-proven provider path';
+              : lastReference?.errorCategory === 'reference_input_schema'
+                ? 'Fix Seedance reference_images payload shape'
+                : lastReference?.errorCategory === 'reference_asset_access'
+                  ? 'Fix Asset Persistence or selected reference URL'
+                  : lastReference?.errorCategory === 'reference_output_missing'
+                    ? 'Fix reference output parser'
+                    : `Reference canary failed: ${lastReference?.errorCategory ?? 'provider_unknown'}`
+            : 'Align Create Success First with reference canary payload';
 
     return {
       canaryEverSucceeded: textSucceeded,
@@ -903,5 +1266,40 @@ export async function buildSeedanceCanarySummaryDiagnostics() {
       lastReferenceCanaryStatus: null,
       recommendedNextAction: 'Run text canary',
     };
+  }
+}
+
+export async function getReferenceCanaryReadiness(input: {
+  userId?: string | null;
+  characterId?: string | null;
+}) {
+  try {
+    const result = await query<Record<string, unknown>>(
+      `select ${canaryJobSelect}
+       from generation_jobs
+       where render_mode = 'seedance_reference_canary'
+         and ($1::uuid is null or user_id = $1)
+         and ($2::text is null or character_id = $2)
+       order by updated_at desc nulls last, created_at desc
+       limit 1`,
+      [
+        isUuidLike(input.userId) ? input.userId : null,
+        input.characterId ?? null,
+      ],
+    );
+    const row = result.rows[0] ? mapCanaryRow(result.rows[0]) : null;
+    if (!row) {
+      return { state: 'unknown' as const, failureCategory: null as string | null };
+    }
+    const outputParse = parseProviderVideoOutput(row.outputUrl ?? row.resultAssetUrl);
+    if (row.status === 'completed' && outputParse.ok) {
+      return { state: 'succeeded' as const, failureCategory: null as string | null };
+    }
+    if (row.status === 'failed' || row.status === 'canceled') {
+      return { state: 'failed' as const, failureCategory: row.errorCategory };
+    }
+    return { state: 'unknown' as const, failureCategory: row.errorCategory };
+  } catch {
+    return { state: 'unknown' as const, failureCategory: null as string | null };
   }
 }

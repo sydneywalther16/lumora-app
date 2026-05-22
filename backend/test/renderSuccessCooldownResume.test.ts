@@ -49,6 +49,7 @@ const rescuePlan = buildRenderSuccessAttemptPlan({
   ],
   characterName: 'Sydney',
   firstVideoRescue: true,
+  referenceCanaryState: 'succeeded',
 });
 
 assert.equal(rescuePlan.length, 2);

@@ -64,6 +64,7 @@ const firstVideoRescuePlan = buildRenderSuccessAttemptPlan({
   referenceImages: savedReferences,
   characterName: 'Sydney Rose',
   firstVideoRescue: true,
+  referenceCanaryState: 'succeeded',
 });
 assert.deepEqual(firstVideoRescuePlan.map((attempt) => attempt.tier), [1, 2]);
 assert.deepEqual(firstVideoRescuePlan.map((attempt) => attempt.provider), ['seedance-fast', 'seedance-fast']);
@@ -77,6 +78,15 @@ assert.equal(firstVideoRescuePlan[0].prompt, FIRST_VIDEO_RESCUE_PROVIDER_PROMPT)
 assert.ok(firstVideoRescuePlan.every((attempt) => attempt.promptStyle === 'first_video_rescue'));
 assert.ok(firstVideoRescuePlan.every((attempt) => attempt.quality === 'fast'));
 assert.ok(firstVideoRescuePlan.every((attempt) => !attempt.prompt.includes('Sydney')));
+
+const firstVideoUnprovenReferencePlan = buildRenderSuccessAttemptPlan({
+  referenceImages: savedReferences,
+  characterName: 'Sydney Rose',
+  firstVideoRescue: true,
+  referenceCanaryState: 'unknown',
+});
+assert.equal(firstVideoUnprovenReferencePlan[0].referenceCount, 0);
+assert.equal(firstVideoUnprovenReferencePlan[0].lighterCastGuidance, true);
 
 const sanitized = sanitizeSuccessProviderPrompt({
   prompt: 'Sydney Rose walks into a glamour model photoshoot as a superstar public figure.',
