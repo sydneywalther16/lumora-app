@@ -106,6 +106,9 @@ function latestContinuityConfidence(character: CharacterProfile) {
 }
 
 function providerIdentityStatusLabel(character: CharacterProfile) {
+  if (character.videoReferenceRouteStatus === 'canary_succeeded') return 'Video likeness ready';
+  if (character.verificationVideoPresent && character.videoReferenceRouteStatus === 'configured_not_implemented') return 'Video route unmapped';
+  if (character.verificationVideoPresent) return 'Verification video saved';
   if (character.providerCharacterStatus === 'ready' && character.likenessProviderStatus === 'canary_succeeded') return 'Exact likeness ready';
   if (character.providerCharacterStatus === 'ready' && character.likenessProviderStatus === 'character_created_needs_canary') return 'Needs canary';
   if (character.providerCharacterStatus === 'ready' && character.likenessProviderStatus === 'character_created_usage_unmapped') return 'Provider unavailable';
@@ -117,6 +120,13 @@ function providerIdentityStatusLabel(character: CharacterProfile) {
 }
 
 function providerIdentityStatusCopy(character: CharacterProfile) {
+  if (character.videoReferenceRouteStatus === 'canary_succeeded') {
+    return 'Seedance video-reference likeness route is canary-tested and ready.';
+  }
+  if (character.verificationVideoPresent && character.videoReferenceRouteStatus === 'configured_not_implemented') {
+    return 'Self verification video is saved privately; the Seedance video-reference provider field is not mapped yet.';
+  }
+  if (character.verificationVideoPresent) return 'Self verification video is saved privately for future video likeness canaries.';
   if (character.providerCharacterStatus === 'ready' && character.likenessProviderStatus === 'canary_succeeded') {
     return 'Exact self character route is canary-tested and ready.';
   }
@@ -349,9 +359,14 @@ export default function CharacterHub({
   const [soraIdentityConsent, setSoraIdentityConsent] = useState(false);
   const [soraIdentitySaving, setSoraIdentitySaving] = useState(false);
   const [soraIdentityStatus, setSoraIdentityStatus] = useState('');
+  const [verificationVideoFile, setVerificationVideoFile] = useState<File | null>(null);
+  const [verificationVideoConsent, setVerificationVideoConsent] = useState(false);
+  const [verificationAudioPresent, setVerificationAudioPresent] = useState(true);
+  const [verificationVideoSaving, setVerificationVideoSaving] = useState(false);
+  const [verificationVideoStatus, setVerificationVideoStatus] = useState('');
   const [likenessDiagnostics, setLikenessDiagnostics] = useState<ApiHealthDiagnostics | null>(null);
   const [likenessLabStatus, setLikenessLabStatus] = useState('');
-  const [likenessCanaryBusy, setLikenessCanaryBusy] = useState<'runway' | 'kling' | null>(null);
+  const [likenessCanaryBusy, setLikenessCanaryBusy] = useState<'runway' | 'kling' | 'seedance-video' | null>(null);
   const referenceRepairInputRef = useRef<HTMLInputElement | null>(null);
   const atCharacterLimit = characters.length >= characterLimit;
 
@@ -366,6 +381,9 @@ export default function CharacterHub({
       setSoraIdentityFile(null);
       setSoraIdentityConsent(false);
       setSoraIdentityStatus('');
+      setVerificationVideoFile(null);
+      setVerificationVideoConsent(false);
+      setVerificationVideoStatus('');
       setLikenessDiagnostics(null);
       setLikenessLabStatus('');
       setLikenessCanaryBusy(null);
@@ -394,6 +412,7 @@ export default function CharacterHub({
       setRelationshipNotes('');
       setEditorStatus('');
       setSoraIdentityStatus('');
+      setVerificationVideoStatus('');
       setLikenessDiagnostics(null);
       setLikenessLabStatus('');
       return;
@@ -693,6 +712,72 @@ export default function CharacterHub({
     }
   }
 
+  async function handleSaveSelfVerificationVideo() {
+    if (!selectedCharacter || !selectedIsSelf) return;
+    if (!authUser) {
+      setVerificationVideoStatus('Sign in to save your self verification video.');
+      return;
+    }
+    if (!verificationVideoConsent) {
+      setVerificationVideoStatus('Consent is required before saving a self verification video.');
+      return;
+    }
+    if (!verificationVideoFile) {
+      setVerificationVideoStatus('Upload a short self verification video first.');
+      return;
+    }
+
+    setVerificationVideoSaving(true);
+    setVerificationVideoStatus('Saving private self verification video...');
+    try {
+      const upload = await uploadLumoraMedia({
+        userId: authUser.id,
+        bucket: 'lumora-assets',
+        file: verificationVideoFile,
+        folder: `self-verification/${selectedCharacter.id}`,
+        usage: 'self_verification_video',
+        entityType: 'character_profile',
+        entityId: selectedCharacter.id,
+      });
+      const response = await api.saveSelfVerificationVideo({
+        userId: authUser.id,
+        characterId: selectedCharacter.characterId ?? selectedCharacter.id,
+        consentConfirmed: verificationVideoConsent,
+        sourceUploadAssetId: upload.objectPath,
+        sourceVideoUrl: upload.url,
+        verificationAudioPresent,
+      });
+      const fallbackUpdatedCharacter: CharacterProfile = {
+        ...selectedCharacter,
+        verificationVideoUrl: null,
+        verificationVideoPresent: response.verificationVideoPresent,
+        verificationVideoAssetId: upload.objectPath,
+        verificationAudioPresent: response.verificationAudioPresent,
+        verificationConsentAt: new Date().toISOString(),
+        verificationConsentPresent: response.verificationConsentPresent,
+        verificationStatus: response.verificationStatus,
+        verificationPrompt: response.verificationPrompt,
+        videoReferenceRouteStatus: response.videoReferenceRouteStatus,
+        videoReferenceProvider: 'seedance',
+      };
+      const nextCharacter = response.character ?? fallbackUpdatedCharacter;
+      await onRefresh(characters.map((character) => (
+        character.id === selectedCharacter.id || character.characterId === selectedCharacter.characterId
+          ? nextCharacter
+          : character
+      )));
+      setSelectedCharacterId(nextCharacter.id);
+      setVerificationVideoStatus(response.message || 'Self verification video saved privately.');
+      setVerificationVideoFile(null);
+      setVerificationVideoConsent(false);
+      await refreshLikenessDiagnostics();
+    } catch (error) {
+      setVerificationVideoStatus(error instanceof Error ? error.message : 'Unable to save self verification video yet.');
+    } finally {
+      setVerificationVideoSaving(false);
+    }
+  }
+
   async function refreshLikenessDiagnostics() {
     const diagnostics = await api.healthDiagnostics();
     setLikenessDiagnostics(diagnostics);
@@ -738,6 +823,27 @@ export default function CharacterHub({
       await refreshLikenessDiagnostics();
     } catch (error) {
       setLikenessLabStatus(error instanceof Error ? error.message : 'Kling likeness route could not start.');
+    } finally {
+      setLikenessCanaryBusy(null);
+    }
+  }
+
+  async function handleSeedanceVideoReferenceCanary() {
+    if (!authUser) {
+      setLikenessLabStatus('Sign in to run video likeness tests.');
+      return;
+    }
+    if (!window.confirm('This may consume provider credits after a documented video-reference route is mapped. Test the Seedance video likeness route?')) {
+      return;
+    }
+    setLikenessCanaryBusy('seedance-video');
+    setLikenessLabStatus('Checking Seedance video reference route...');
+    try {
+      const result = await api.startSeedanceVideoReferenceCanary({ userId: authUser.id });
+      setLikenessLabStatus(result.recommendedNextAction || result.failureCategory || 'Seedance video reference route checked.');
+      await refreshLikenessDiagnostics();
+    } catch (error) {
+      setLikenessLabStatus(error instanceof Error ? error.message : 'Seedance video reference route could not start.');
     } finally {
       setLikenessCanaryBusy(null);
     }
@@ -957,13 +1063,56 @@ export default function CharacterHub({
                 <div className="character-memory-viewer character-section-card">
                   {metadataLine('Saved visual references', savedRefs.length ? `${savedRefs.length} saved` : 'No saved references yet')}
                   {metadataLine('Soft text guidance', selectedCharacter.appearanceSummary || selectedCharacter.identityProfile?.appearanceSummary ? 'Available' : 'Needs appearance details')}
+                  {metadataLine('Self verification video', selectedCharacter.verificationVideoPresent ? (selectedCharacter.videoReferenceRouteStatus === 'canary_succeeded' ? 'Route ready' : selectedCharacter.verificationStatus || 'Uploaded') : 'Missing')}
                   {metadataLine('Exact likeness', providerIdentityStatusLabel(selectedCharacter))}
                   {metadataLine('Seedance photo references', savedRefs.length ? 'Saved but blocked for this renderer' : 'No saved references yet')}
                   {metadataLine('Consent', selectedCharacter.likenessConsentAt ? 'Confirmed' : 'Not confirmed')}
                   <p className="muted">{providerIdentityStatusCopy(selectedCharacter)}</p>
                 </div>
+                <div className="character-memory-viewer character-section-card">
+                  <strong>Record self verification video</strong>
+                  <p className="muted">
+                    Look forward, say 3 pairs of two-digit numbers, turn slightly right, turn slightly left, return to center,
+                    keep a neutral expression, stay fully clothed, use clear lighting, and avoid filters.
+                  </p>
+                  <label className="field-block">
+                    <span>Private verification video</span>
+                    <input
+                      type="file"
+                      accept="video/*"
+                      onChange={(event) => setVerificationVideoFile(event.target.files?.[0] ?? null)}
+                    />
+                  </label>
+                  <label className="checkbox-row" style={{ alignItems: 'flex-start' }}>
+                    <input
+                      type="checkbox"
+                      checked={verificationAudioPresent}
+                      onChange={(event) => setVerificationAudioPresent(event.target.checked)}
+                    />
+                    <span>Audio is present in this verification video.</span>
+                  </label>
+                  <label className="checkbox-row" style={{ alignItems: 'flex-start' }}>
+                    <input
+                      type="checkbox"
+                      checked={verificationVideoConsent}
+                      onChange={(event) => setVerificationVideoConsent(event.target.checked)}
+                    />
+                    <span>I confirm this is me and I consent to using this recording to create my Lumora self character.</span>
+                  </label>
+                  <div className="button-row">
+                    <button
+                      type="button"
+                      className="ghost-btn"
+                      disabled={verificationVideoSaving}
+                      onClick={() => void handleSaveSelfVerificationVideo()}
+                    >
+                      {verificationVideoSaving ? 'Saving video...' : 'Save verification video'}
+                    </button>
+                  </div>
+                  {verificationVideoStatus ? <p className="muted">{verificationVideoStatus}</p> : null}
+                </div>
                 <label className="field-block">
-                  <span>Verification video</span>
+                  <span>Provider identity video</span>
                   <input
                     type="file"
                     accept="video/*"
@@ -1006,6 +1155,12 @@ export default function CharacterHub({
                 <div className="character-memory-viewer character-section-card">
                   {metadataLine('Soft self guidance', 'Available')}
                   {metadataLine(
+                    'Self verification video',
+                    selectedCharacter.verificationVideoPresent
+                      ? providerLabStatus(likenessDiagnostics, 'seedance_video_reference')
+                      : 'Record video to test',
+                  )}
+                  {metadataLine(
                     'Seedance references',
                     likenessDiagnostics?.referenceRouteStatus?.seedanceReferenceRoutesBlocked ? 'Blocked' : 'Saved; needs route canary',
                   )}
@@ -1018,6 +1173,14 @@ export default function CharacterHub({
                   </p>
                 </div>
                 <div className="button-row">
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    disabled={likenessCanaryBusy !== null || !selectedCharacter.verificationVideoPresent}
+                    onClick={() => void handleSeedanceVideoReferenceCanary()}
+                  >
+                    {likenessCanaryBusy === 'seedance-video' ? 'Checking video...' : 'Test Seedance video likeness'}
+                  </button>
                   <button
                     type="button"
                     className="ghost-btn"

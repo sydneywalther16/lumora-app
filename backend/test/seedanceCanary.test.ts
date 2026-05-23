@@ -18,6 +18,12 @@ import {
 } from '../src/services/seedanceCanary';
 import { parseProviderVideoOutput } from '../src/services/providerOutputParser';
 import { validateSeedanceProviderPayload } from '../src/services/providers/seedanceProvider';
+import {
+  buildSelfVerificationVideoPatch,
+  redactVerificationVideoUrl,
+  SEEDANCE_VIDEO_REFERENCE_PROMPT,
+  validateSelfVerificationVideoConsent,
+} from '../src/services/selfVerificationVideo';
 
 const textPayload = buildSeedanceCanaryPayload();
 
@@ -29,6 +35,24 @@ assert.equal(textPayload.generate_audio, false);
 assert.equal('reference_images' in textPayload, false);
 assert.equal(/Sydney|display name|Story Memory|Scene Flow/i.test(textPayload.prompt), false);
 assert.equal(/photoshoot|influencer|superstar|public figure|glamour|seductive/i.test(textPayload.prompt), false);
+assert.equal(SEEDANCE_VIDEO_REFERENCE_PROMPT.includes('[Video1]'), true);
+assert.equal(/Sydney|photoshoot|model|glamour|influencer|celebrity|public figure/i.test(SEEDANCE_VIDEO_REFERENCE_PROMPT), false);
+
+assert.throws(
+  () => validateSelfVerificationVideoConsent({ consentConfirmed: false }),
+  /Consent is required/i,
+);
+const verificationPatch = buildSelfVerificationVideoPatch({
+  sourceVideoUrl: 'https://demo.supabase.co/storage/v1/object/sign/lumora-assets/private/self.mp4?token=secret',
+  sourceUploadAssetId: 'user/self-verification/self.mp4',
+  verificationAudioPresent: true,
+  now: '2026-05-23T00:00:00.000Z',
+});
+assert.equal(verificationPatch.verificationStatus, 'uploaded');
+assert.equal(verificationPatch.videoReferenceRouteStatus, 'not_tested');
+assert.equal(verificationPatch.verificationAudioPresent, true);
+assert.equal(redactVerificationVideoUrl(verificationPatch.verificationVideoUrl), '[private-verification-video-present]');
+assert.equal(redactVerificationVideoUrl(verificationPatch.verificationVideoUrl)?.includes('token=secret'), false);
 
 const invalidDuration = validateSeedanceProviderPayload({
   ...textPayload,

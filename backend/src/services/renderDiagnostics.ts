@@ -13,6 +13,7 @@ import {
   getOpenAISoraProviderReadiness,
   getSelfProviderCharacterDiagnostics,
 } from './providers/openaiSoraProvider';
+import { getSelfVerificationVideoDiagnostics } from './selfVerificationVideo';
 
 type LatestRenderRow = {
   id: string;
@@ -141,6 +142,10 @@ async function exactLikenessDiagnostics(row: LatestRenderRow | null) {
     userId: row?.userId ?? null,
     characterId: row?.characterId ?? null,
   });
+  const selfVerificationVideo = await getSelfVerificationVideoDiagnostics({
+    userId: row?.userId ?? null,
+    characterId: row?.characterId ?? null,
+  });
 
   return {
     exactLikenessRouterChoice: {
@@ -158,6 +163,9 @@ async function exactLikenessDiagnostics(row: LatestRenderRow | null) {
     exactLikenessProvider: choice.exactLikeness ? choice.provider : null,
     exactLikenessReason: choice.reason,
     softGuidanceAvailable: true,
+    selfVerificationVideoPresent: selfVerificationVideo.selfVerificationVideoPresent,
+    selfVerificationConsentPresent: selfVerificationVideo.selfVerificationConsentPresent,
+    seedanceVideoReferenceCanaryStatus: selfVerificationVideo.seedanceVideoReferenceCanaryStatus,
     alternateProvidersConfigured: choice.providerRegistry.filter((provider) => provider.configured).map((provider) => provider.id),
     runwayConfigured: Boolean(choice.providerRegistry.find((provider) => provider.id === 'runway_gen4_reference')?.configured),
     runwayCanaryStatus: choice.providerRegistry.find((provider) => provider.id === 'runway_gen4_reference')?.canaryStatus ?? 'not_configured',

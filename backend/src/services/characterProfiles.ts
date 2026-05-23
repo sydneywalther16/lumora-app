@@ -93,6 +93,15 @@ export type CharacterProfile = {
   likenessProviderStatus: string | null;
   likenessConsentAt: string | null;
   providerCharacterSourceAssetId: string | null;
+  verificationVideoUrl: string | null;
+  verificationVideoAssetId: string | null;
+  verificationAudioPresent: boolean;
+  verificationConsentAt: string | null;
+  verificationStatus: string | null;
+  verificationPrompt: string | null;
+  verificationLastTestedAt: string | null;
+  videoReferenceRouteStatus: string | null;
+  videoReferenceProvider: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -128,6 +137,15 @@ type CharacterProfileRow = {
   likenessProviderStatus: string | null;
   likenessConsentAt: string | null;
   providerCharacterSourceAssetId: string | null;
+  verificationVideoUrl: string | null;
+  verificationVideoAssetId: string | null;
+  verificationAudioPresent: boolean | null;
+  verificationConsentAt: string | null;
+  verificationStatus: string | null;
+  verificationPrompt: string | null;
+  verificationLastTestedAt: string | null;
+  videoReferenceRouteStatus: string | null;
+  videoReferenceProvider: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -160,6 +178,15 @@ export type CharacterProfilePatch = Partial<{
   likenessProviderStatus: string | null;
   likenessConsentAt: string | null;
   providerCharacterSourceAssetId: string | null;
+  verificationVideoUrl: string | null;
+  verificationVideoAssetId: string | null;
+  verificationAudioPresent: boolean;
+  verificationConsentAt: string | null;
+  verificationStatus: string | null;
+  verificationPrompt: string | null;
+  verificationLastTestedAt: string | null;
+  videoReferenceRouteStatus: string | null;
+  videoReferenceProvider: string | null;
 }>;
 
 export type ProviderCharacterIdentityPatch = Pick<
@@ -227,6 +254,15 @@ const characterSelect = `
   likeness_provider_status as "likenessProviderStatus",
   likeness_consent_at as "likenessConsentAt",
   provider_character_source_asset_id as "providerCharacterSourceAssetId",
+  verification_video_url as "verificationVideoUrl",
+  verification_video_asset_id as "verificationVideoAssetId",
+  verification_audio_present as "verificationAudioPresent",
+  verification_consent_at as "verificationConsentAt",
+  verification_status as "verificationStatus",
+  verification_prompt as "verificationPrompt",
+  verification_last_tested_at as "verificationLastTestedAt",
+  video_reference_route_status as "videoReferenceRouteStatus",
+  video_reference_provider as "videoReferenceProvider",
   created_at as "createdAt",
   updated_at as "updatedAt"
 `;
@@ -326,6 +362,15 @@ function rowToCharacterProfile(row: CharacterProfileRow): CharacterProfile {
     likenessProviderStatus: textValue(row.likenessProviderStatus) || null,
     likenessConsentAt: row.likenessConsentAt,
     providerCharacterSourceAssetId: textValue(row.providerCharacterSourceAssetId) || null,
+    verificationVideoUrl: textValue(row.verificationVideoUrl) || null,
+    verificationVideoAssetId: textValue(row.verificationVideoAssetId) || null,
+    verificationAudioPresent: Boolean(row.verificationAudioPresent),
+    verificationConsentAt: row.verificationConsentAt,
+    verificationStatus: textValue(row.verificationStatus) || null,
+    verificationPrompt: textValue(row.verificationPrompt) || null,
+    verificationLastTestedAt: row.verificationLastTestedAt,
+    videoReferenceRouteStatus: textValue(row.videoReferenceRouteStatus) || null,
+    videoReferenceProvider: textValue(row.videoReferenceProvider) || null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -529,6 +574,15 @@ export function characterProfileFromMetadata(
     likenessProviderStatus: textValue(source.likenessProviderStatus) || null,
     likenessConsentAt: textValue(source.likenessConsentAt) || null,
     providerCharacterSourceAssetId: textValue(source.providerCharacterSourceAssetId) || null,
+    verificationVideoUrl: textValue(source.verificationVideoUrl) || null,
+    verificationVideoAssetId: textValue(source.verificationVideoAssetId) || null,
+    verificationAudioPresent: Boolean(source.verificationAudioPresent),
+    verificationConsentAt: textValue(source.verificationConsentAt) || null,
+    verificationStatus: textValue(source.verificationStatus) || null,
+    verificationPrompt: textValue(source.verificationPrompt) || null,
+    verificationLastTestedAt: textValue(source.verificationLastTestedAt) || null,
+    videoReferenceRouteStatus: textValue(source.videoReferenceRouteStatus) || null,
+    videoReferenceProvider: textValue(source.videoReferenceProvider) || null,
     createdAt: now,
     updatedAt: now,
   };
@@ -679,6 +733,15 @@ export async function updateCharacterProfileForUser(input: {
     likenessProviderStatus: input.likenessProviderStatus === undefined ? current.likenessProviderStatus : input.likenessProviderStatus,
     likenessConsentAt: input.likenessConsentAt === undefined ? current.likenessConsentAt : input.likenessConsentAt,
     providerCharacterSourceAssetId: input.providerCharacterSourceAssetId === undefined ? current.providerCharacterSourceAssetId : input.providerCharacterSourceAssetId,
+    verificationVideoUrl: input.verificationVideoUrl === undefined ? current.verificationVideoUrl : input.verificationVideoUrl,
+    verificationVideoAssetId: input.verificationVideoAssetId === undefined ? current.verificationVideoAssetId : input.verificationVideoAssetId,
+    verificationAudioPresent: input.verificationAudioPresent === undefined ? current.verificationAudioPresent : input.verificationAudioPresent,
+    verificationConsentAt: input.verificationConsentAt === undefined ? current.verificationConsentAt : input.verificationConsentAt,
+    verificationStatus: input.verificationStatus === undefined ? current.verificationStatus : input.verificationStatus,
+    verificationPrompt: input.verificationPrompt === undefined ? current.verificationPrompt : input.verificationPrompt,
+    verificationLastTestedAt: input.verificationLastTestedAt === undefined ? current.verificationLastTestedAt : input.verificationLastTestedAt,
+    videoReferenceRouteStatus: input.videoReferenceRouteStatus === undefined ? current.videoReferenceRouteStatus : input.videoReferenceRouteStatus,
+    videoReferenceProvider: input.videoReferenceProvider === undefined ? current.videoReferenceProvider : input.videoReferenceProvider,
   };
 
   const result = await query<CharacterProfileRow>(
@@ -711,6 +774,15 @@ export async function updateCharacterProfileForUser(input: {
        likeness_provider_status = $27,
        likeness_consent_at = $28,
        provider_character_source_asset_id = $29,
+       verification_video_url = $30,
+       verification_video_asset_id = $31,
+       verification_audio_present = $32,
+       verification_consent_at = $33,
+       verification_status = $34,
+       verification_prompt = $35,
+       verification_last_tested_at = $36,
+       video_reference_route_status = $37,
+       video_reference_provider = $38,
        updated_at = now()
      where owner_user_id = $1 and (id::text = $2 or character_id = $2)
      returning ${characterSelect}`,
@@ -744,6 +816,15 @@ export async function updateCharacterProfileForUser(input: {
       next.likenessProviderStatus,
       next.likenessConsentAt,
       next.providerCharacterSourceAssetId,
+      next.verificationVideoUrl,
+      next.verificationVideoAssetId,
+      next.verificationAudioPresent,
+      next.verificationConsentAt,
+      next.verificationStatus,
+      next.verificationPrompt,
+      next.verificationLastTestedAt,
+      next.videoReferenceRouteStatus,
+      next.videoReferenceProvider,
     ],
   );
 
@@ -934,5 +1015,14 @@ export function publicCharacterProfile(profile: CharacterProfile | null) {
     relationshipMemory: profile.relationshipMemory,
     memorySnapshots: profile.memorySnapshots.slice(0, 6),
     appearanceDrift: profile.appearanceDrift.slice(0, 6),
+    verificationVideoUrl: null,
+    verificationVideoPresent: Boolean(profile.verificationVideoUrl || profile.verificationVideoAssetId),
+    verificationAudioPresent: profile.verificationAudioPresent,
+    verificationConsentPresent: Boolean(profile.verificationConsentAt),
+    verificationStatus: profile.verificationStatus,
+    verificationPrompt: profile.verificationPrompt,
+    verificationLastTestedAt: profile.verificationLastTestedAt,
+    videoReferenceRouteStatus: profile.videoReferenceRouteStatus,
+    videoReferenceProvider: profile.videoReferenceProvider,
   };
 }

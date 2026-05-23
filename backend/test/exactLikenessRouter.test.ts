@@ -163,6 +163,7 @@ try {
   });
   assert.equal(registry.find((provider) => provider.id === 'openai_sora_character')?.deprecated, true);
   assert.equal(registry.find((provider) => provider.id === 'openai_sora_character')?.shutdownDate, '2026-09-24');
+  assert.equal(registry.find((provider) => provider.id === 'seedance_video_reference')?.implementationStatus, 'not_configured');
   assert.equal(registry.find((provider) => provider.id === 'kling_reference')?.implementationStatus, 'configured_not_implemented');
   assert.equal(registry.find((provider) => provider.id === 'runway_gen4_reference')?.implementationStatus, 'configured_ready_for_canary');
   assert.equal(registry.find((provider) => provider.id === 'lumora_identity_pack')?.implementationStatus, 'research_only');
@@ -181,8 +182,8 @@ try {
   assert.equal(configuredButUntested.exactLikeness, false);
 
   const runwaySucceededRegistry = buildLikenessProviderRegistry({
-    openAISoraReadiness: mappedReadiness,
-    selfProviderCharacter: identity,
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
     referenceRouteSummary: blockedReferenceSummary,
     alternateProviderStatuses: [{
       provider: 'runway_gen4_reference',
@@ -197,13 +198,51 @@ try {
     }],
   });
   const runwayExact = chooseExactLikenessRoute({
-    openAISoraReadiness: mappedReadiness,
-    selfProviderCharacter: identity,
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
     referenceRouteSummary: blockedReferenceSummary,
     providerRegistry: runwaySucceededRegistry,
   });
   assert.equal(runwayExact.route, 'runway_reference');
   assert.equal(runwayExact.exactLikeness, true);
+
+  const videoReferenceRegistry = buildLikenessProviderRegistry({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: blockedReferenceSummary,
+    selfVerificationVideo: {
+      schemaReady: true,
+      selfVerificationVideoPresent: true,
+      selfVerificationConsentPresent: true,
+      verificationAudioPresent: true,
+      verificationStatus: 'uploaded',
+      verificationPrompt: 'Look forward and turn.',
+      verificationLastTestedAt: '2026-05-23T00:00:00.000Z',
+      seedanceVideoReferenceCanaryStatus: 'canary_succeeded',
+      videoReferenceProvider: 'seedance',
+      verificationVideoUrlRedacted: '[private-verification-video-present]',
+      recommendedNextAction: 'Use Seedance video reference route.',
+    },
+    alternateProviderStatuses: [{
+      provider: 'runway_gen4_reference',
+      providerModel: 'gen4.5',
+      status: 'canary_succeeded',
+      referenceRole: 'front_angle',
+      referenceLabel: 'Primary front face',
+      lastSuccessAt: '2026-05-23T00:00:00.000Z',
+      lastFailureAt: null,
+      lastFailureCategory: null,
+      outputUrlPresent: true,
+    }],
+  });
+  const videoReferenceExact = chooseExactLikenessRoute({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: blockedReferenceSummary,
+    providerRegistry: videoReferenceRegistry,
+  });
+  assert.equal(videoReferenceExact.route, 'seedance_video_reference');
+  assert.equal(videoReferenceExact.exactLikeness, true);
 
   console.log('exactLikenessRouter unit tests passed');
 } finally {

@@ -712,6 +712,23 @@ export type ApiHealthDiagnostics = {
     knownBlockedReferenceRoutes: Array<Record<string, unknown>>;
     allReferenceRouteResults: Array<Record<string, unknown>>;
   };
+  selfVerificationVideo?: {
+    schemaReady: boolean;
+    selfVerificationVideoPresent: boolean;
+    selfVerificationConsentPresent: boolean;
+    verificationAudioPresent: boolean;
+    verificationStatus: string | null;
+    verificationPrompt: string | null;
+    verificationLastTestedAt: string | null;
+    seedanceVideoReferenceCanaryStatus: string | null;
+    videoReferenceProvider: string | null;
+    verificationVideoUrlRedacted: string | null;
+    recommendedNextAction: string;
+  };
+  selfVerificationVideoPresent?: boolean;
+  selfVerificationConsentPresent?: boolean;
+  seedanceVideoReferenceCanaryStatus?: string | null;
+  seedanceImageReferenceBlocked?: boolean;
   likenessProviderCanary?: {
     textSelfGuidanceAvailable: boolean;
     alternateLikenessProvidersConfigured: string[];
@@ -1016,6 +1033,17 @@ export type CharacterProfile = {
   likenessProviderStatus?: string | null;
   likenessConsentAt?: string | null;
   providerCharacterSourceAssetId?: string | null;
+  verificationVideoUrl?: string | null;
+  verificationVideoPresent?: boolean;
+  verificationVideoAssetId?: string | null;
+  verificationAudioPresent?: boolean;
+  verificationConsentAt?: string | null;
+  verificationConsentPresent?: boolean;
+  verificationStatus?: string | null;
+  verificationPrompt?: string | null;
+  verificationLastTestedAt?: string | null;
+  videoReferenceRouteStatus?: string | null;
+  videoReferenceProvider?: string | null;
   createdAt: string;
   updatedAt: string;
   isSelf?: boolean;
@@ -1028,6 +1056,15 @@ export type SoraSelfCharacterSetupPayload = {
   consentConfirmed: boolean;
   sourceUploadAssetId?: string | null;
   sourceVideoUrl?: string | null;
+};
+
+export type SelfVerificationVideoPayload = {
+  userId?: string | null;
+  characterId?: string | null;
+  consentConfirmed: boolean;
+  sourceUploadAssetId?: string | null;
+  sourceVideoUrl?: string | null;
+  verificationAudioPresent?: boolean;
 };
 
 export type CreateCharacterPayload = {
@@ -1158,6 +1195,13 @@ export const api = {
       timeoutMs: 60_000,
     }),
 
+  startSeedanceVideoReferenceCanary: (payload: { userId?: string | null } = {}) =>
+    request<ExactLikenessCanaryResponse>('/api/diagnostics/seedance-video-reference-canary/self', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 60_000,
+    }),
+
   createCreativeBrainPlan: (payload: CreativeBrainPlanPayload) =>
     request<CreativeBrainPlanResponse>('/api/creative-brain/plan', {
       method: 'POST',
@@ -1227,6 +1271,22 @@ export const api = {
       message: string;
       character: CharacterProfile | null;
     }>('/api/characters/self/sora-character', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  saveSelfVerificationVideo: (payload: SelfVerificationVideoPayload) =>
+    request<{
+      ok: boolean;
+      verificationVideoPresent: boolean;
+      verificationAudioPresent: boolean;
+      verificationConsentPresent: boolean;
+      verificationStatus: string | null;
+      verificationPrompt: string | null;
+      videoReferenceRouteStatus: string | null;
+      message: string;
+      character: CharacterProfile | null;
+    }>('/api/characters/self/verification-video', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

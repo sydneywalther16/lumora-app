@@ -29,6 +29,7 @@ import {
   type SeedanceProviderPayload,
   type SeedanceReferenceImage,
 } from './providers/seedanceProvider';
+import { getSelfVerificationVideoDiagnostics } from './selfVerificationVideo';
 
 export const SEEDANCE_CANARY_PROMPT =
   'A peaceful sunlit garden path with flowers swaying gently in the breeze, soft storybook cinematic style, calm natural motion.';
@@ -2012,6 +2013,10 @@ export async function buildRenderPathCompareDiagnostics() {
       userId: real?.userId ?? null,
       characterId: real?.characterId ?? null,
     });
+    const selfVerificationVideo = await getSelfVerificationVideoDiagnostics({
+      userId: real?.userId ?? null,
+      characterId: real?.characterId ?? null,
+    });
     const openaiSoraRoute = chooseSoraSelfCharacterCreateRoute({
       readiness: openaiSoraReadiness,
       providerCharacterId: openaiSoraIdentity.selfProviderCharacterIdPresent ? 'present' : null,
@@ -2025,6 +2030,7 @@ export async function buildRenderPathCompareDiagnostics() {
     const likenessProviderRegistry = buildLikenessProviderRegistry({
       openAISoraReadiness: openaiSoraReadiness,
       selfProviderCharacter: openaiSoraIdentity,
+      selfVerificationVideo,
       referenceRouteSummary,
       alternateProviderStatuses,
     });
@@ -2136,6 +2142,10 @@ export async function buildRenderPathCompareDiagnostics() {
       textOnlyCanarySucceeded: canarySummary.canaryEverSucceeded,
       textSelfGuidanceAvailable: Boolean(textSelfGuidanceDescriptorPreview || referenceRouteSummary.seedanceReferenceRoutesBlocked),
       textSelfGuidanceDescriptorPreview,
+      selfVerificationVideoPresent: selfVerificationVideo.selfVerificationVideoPresent,
+      selfVerificationConsentPresent: selfVerificationVideo.selfVerificationConsentPresent,
+      seedanceVideoReferenceCanaryStatus: selfVerificationVideo.seedanceVideoReferenceCanaryStatus,
+      seedanceImageReferenceBlocked: referenceRouteSummary.seedanceReferenceRoutesBlocked,
       selectedLikenessMode,
       alternateLikenessProvidersConfigured: alternateLikenessProvidersConfigured().map((provider) => provider.provider),
       alternateLikenessProviderCanaryStatus: buildAlternateLikenessProviderCanaryStatus(),

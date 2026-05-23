@@ -4,6 +4,7 @@ import {
   type LikenessProviderRegistryEntry,
 } from './likenessProviderRegistry';
 import { getAlternateExactLikenessProviderStatuses } from './alternateLikenessProviderMemory';
+import { getSelfVerificationVideoDiagnostics } from './selfVerificationVideo';
 import {
   getOpenAISoraProviderReadiness,
   getSelfProviderCharacterDiagnostics,
@@ -15,6 +16,7 @@ export type ExactLikenessRoute =
   | 'openai_sora_character'
   | 'kling_reference'
   | 'runway_reference'
+  | 'seedance_video_reference'
   | 'seedance_reference'
   | 'seedance_text_guidance';
 
@@ -82,6 +84,44 @@ export function chooseExactLikenessRoute(input: {
   });
   const openAI = registryEntry(registry, 'openai_sora_character');
 
+  if (hasOpenAIExactRoute({
+    readiness: input.openAISoraReadiness,
+    identity: input.selfProviderCharacter,
+  })) {
+    return {
+      route: 'openai_sora_character',
+      provider: 'openai_sora',
+      confidence: 'high',
+      exactLikeness: true,
+      reason: 'OpenAI/Sora provider character exists, character video usage is mapped, and the canary succeeded.',
+      requiredSetup: [],
+      canaryStatus: input.selfProviderCharacter.soraCharacterCanaryStatus ?? 'succeeded',
+      fallbackRoute: 'seedance_text_guidance',
+      providerRegistry: registry,
+      recommendedNextAction: 'Use exact self character route.',
+    };
+  }
+
+  const seedanceVideoReference = registryEntry(registry, 'seedance_video_reference');
+  if (
+    seedanceVideoReference?.configured &&
+    seedanceVideoReference.supportsExactLikeness &&
+    (seedanceVideoReference.canaryStatus === 'canary_succeeded' || seedanceVideoReference.canaryStatus === 'succeeded')
+  ) {
+    return {
+      route: 'seedance_video_reference',
+      provider: 'seedance',
+      confidence: 'high',
+      exactLikeness: true,
+      reason: 'Seedance verification video reference route has a successful canary.',
+      requiredSetup: [],
+      canaryStatus: seedanceVideoReference.canaryStatus,
+      fallbackRoute: 'seedance_text_guidance',
+      providerRegistry: registry,
+      recommendedNextAction: 'Use Seedance video reference route for self-character likeness.',
+    };
+  }
+
   const runway = registryEntry(registry, 'runway_gen4_reference');
   if (runway?.configured && runway.supportsExactLikeness && runway.canaryStatus === 'canary_succeeded') {
     return {
@@ -111,24 +151,6 @@ export function chooseExactLikenessRoute(input: {
       fallbackRoute: 'seedance_text_guidance',
       providerRegistry: registry,
       recommendedNextAction: 'Use Kling exact likeness route.',
-    };
-  }
-
-  if (hasOpenAIExactRoute({
-    readiness: input.openAISoraReadiness,
-    identity: input.selfProviderCharacter,
-  })) {
-    return {
-      route: 'openai_sora_character',
-      provider: 'openai_sora',
-      confidence: 'high',
-      exactLikeness: true,
-      reason: 'OpenAI/Sora provider character exists, character video usage is mapped, and the canary succeeded.',
-      requiredSetup: [],
-      canaryStatus: input.selfProviderCharacter.soraCharacterCanaryStatus ?? 'succeeded',
-      fallbackRoute: 'seedance_text_guidance',
-      providerRegistry: registry,
-      recommendedNextAction: 'Use exact self character route.',
     };
   }
 
@@ -174,12 +196,12 @@ export function chooseExactLikenessRoute(input: {
     exactLikeness: false,
     reason,
     requiredSetup: setup,
-    canaryStatus: openAI?.canaryStatus ?? null,
+    canaryStatus: seedanceVideoReference?.canaryStatus ?? openAI?.canaryStatus ?? null,
     fallbackRoute: 'seedance_text_guidance',
     providerRegistry: registry,
     recommendedNextAction: blocked
       ? 'Continue using Seedance text-first and configure an alternate likeness provider.'
-      : setup[0] ?? 'Run a canary for a configured exact likeness provider.',
+      : seedanceVideoReference?.recommendedNextAction ?? setup[0] ?? 'Run a canary for a configured exact likeness provider.',
   };
 }
 
@@ -188,13 +210,15 @@ export async function resolveExactLikenessRoute(input: {
   characterId?: string | null;
 } = {}) {
   const openAISoraReadiness = getOpenAISoraProviderReadiness();
-  const [selfProviderCharacter, referenceRouteSummary] = await Promise.all([
+  const [selfProviderCharacter, referenceRouteSummary, selfVerificationVideo] = await Promise.all([
     getSelfProviderCharacterDiagnostics(input),
     getReferenceRouteSummary(input),
+    getSelfVerificationVideoDiagnostics(input),
   ]);
   const providerRegistry = buildLikenessProviderRegistry({
     openAISoraReadiness,
     selfProviderCharacter,
+    selfVerificationVideo,
     referenceRouteSummary,
     alternateProviderStatuses: await getAlternateExactLikenessProviderStatuses(input),
   });
@@ -208,6 +232,19 @@ export async function resolveExactLikenessRoute(input: {
 }
 
 export function exactLikenessCanaryCandidate(input: ExactLikenessRouterResult) {
+  const seedanceVideoReference = registryEntry(input.providerRegistry, 'seedance_video_reference');
+  if (
+    seedanceVideoReference?.configured &&
+    seedanceVideoReference.canaryStatus !== 'succeeded' &&
+    seedanceVideoReference.canaryStatus !== 'canary_succeeded'
+  ) {
+    return {
+      provider: 'seedance',
+      route: 'seedance_video_reference' as const,
+      status: seedanceVideoReference.canaryStatus,
+    };
+  }
+
   const runway = registryEntry(input.providerRegistry, 'runway_gen4_reference');
   if (runway?.configured && runway.readinessStatus === 'configured_ready_for_canary') {
     return {

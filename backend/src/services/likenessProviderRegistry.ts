@@ -10,9 +10,11 @@ import {
 } from './providers/openaiSoraProvider';
 import { getKlingProviderReadiness } from './providers/klingProvider';
 import { getRunwayProviderReadiness } from './providers/runwayProvider';
+import { type SelfVerificationVideoDiagnostics } from './selfVerificationVideo';
 
 export type LikenessProviderId =
   | 'seedance_text_guidance'
+  | 'seedance_video_reference'
   | 'seedance_reference_images'
   | 'openai_sora_character'
   | 'kling_reference'
@@ -88,6 +90,7 @@ function openAICanaryStatus(identity?: SelfProviderCharacterDiagnostics | null):
 export function buildLikenessProviderRegistry(input: {
   openAISoraReadiness?: OpenAISoraProviderReadiness;
   selfProviderCharacter?: SelfProviderCharacterDiagnostics | null;
+  selfVerificationVideo?: SelfVerificationVideoDiagnostics | null;
   referenceRouteSummary: ReferenceRouteSummaryLike;
   alternateProviderStatuses?: AlternateExactLikenessProviderStatus[];
 }): LikenessProviderRegistryEntry[] {
@@ -110,6 +113,9 @@ export function buildLikenessProviderRegistry(input: {
   const klingReadiness = getKlingProviderReadiness({ statuses: input.alternateProviderStatuses });
   const runwayExactReady = runwayReadiness.status === 'canary_succeeded';
   const klingExactReady = klingReadiness.status === 'canary_succeeded';
+  const videoReferenceStatus = input.selfVerificationVideo?.seedanceVideoReferenceCanaryStatus ?? 'not_tested';
+  const videoReferenceReady = videoReferenceStatus === 'canary_succeeded' || videoReferenceStatus === 'succeeded';
+  const videoReferenceConfigured = Boolean(env.REPLICATE_API_TOKEN && input.selfVerificationVideo?.selfVerificationVideoPresent);
 
   return [
     {
@@ -129,6 +135,38 @@ export function buildLikenessProviderRegistry(input: {
       shutdownDate: null,
       implementationStatus: 'fallback',
       recommendedNextAction: 'Use as stable fallback with soft self guidance.',
+    },
+    {
+      id: 'seedance_video_reference',
+      displayName: 'Seedance verification video reference',
+      configured: videoReferenceConfigured,
+      supportsExactLikeness: videoReferenceReady,
+      supportsReferenceImages: false,
+      supportsStoredCharacters: false,
+      requiresConsent: true,
+      requiresCanary: true,
+      canaryStatus: input.selfVerificationVideo?.selfVerificationVideoPresent
+        ? videoReferenceStatus
+        : 'not_configured',
+      readinessStatus: input.selfVerificationVideo?.selfVerificationVideoPresent
+        ? videoReferenceStatus
+        : 'not_configured',
+      lastSuccessAt: videoReferenceReady ? input.selfVerificationVideo?.verificationLastTestedAt ?? null : null,
+      lastFailureCategory: videoReferenceReady ? null : videoReferenceStatus,
+      deprecated: false,
+      shutdownDate: null,
+      implementationStatus: videoReferenceReady
+        ? 'ready'
+        : videoReferenceConfigured
+          ? videoReferenceStatus === 'configured_not_implemented'
+            ? 'configured_not_implemented'
+            : 'available'
+          : 'not_configured',
+      recommendedNextAction: videoReferenceReady
+        ? 'Use Seedance verification video reference route.'
+        : input.selfVerificationVideo?.selfVerificationVideoPresent
+          ? input.selfVerificationVideo.recommendedNextAction
+          : 'Record self verification video before testing video references.',
     },
     {
       id: 'seedance_reference_images',

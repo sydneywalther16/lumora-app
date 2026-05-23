@@ -1222,33 +1222,46 @@ export default function CreateVideo({
           : identityProfile.status === 'ready'
             ? 'Cinematic self ready'
             : 'Needs references';
-  const providerSelfCharacterReady =
+  const seedanceVideoReferenceReady =
+    selfReferenceMode &&
+    characterProfile?.videoReferenceRouteStatus === 'canary_succeeded';
+  const openAIProviderSelfCharacterReady =
     selfReferenceMode &&
     characterProfile?.providerIdentityProvider === 'openai_sora' &&
     characterProfile.providerCharacterStatus === 'ready' &&
     characterProfile.likenessProviderStatus === 'canary_succeeded';
+  const providerSelfCharacterReady = openAIProviderSelfCharacterReady || seedanceVideoReferenceReady;
   const providerSelfCharacterSetupStarted =
     selfReferenceMode &&
-    characterProfile?.providerIdentityProvider === 'openai_sora' &&
-    Boolean(characterProfile.providerCharacterStatus);
+    Boolean(
+      (characterProfile?.providerIdentityProvider === 'openai_sora' && characterProfile.providerCharacterStatus) ||
+      characterProfile?.verificationVideoPresent ||
+      characterProfile?.videoReferenceRouteStatus,
+    );
   const selfCharacterProviderStatusLabel = providerSelfCharacterReady
-    ? 'Exact self character ready'
+    ? 'Verified self character ready'
     : providerSelfCharacterSetupStarted
-      ? characterProfile?.providerCharacterStatus === 'failed'
+      ? characterProfile?.videoReferenceRouteStatus === 'blocked' || characterProfile?.videoReferenceRouteStatus === 'reference_moderation_block'
+        ? 'Video likeness route blocked'
+        : characterProfile?.verificationVideoPresent === false
+          ? 'Record self verification video'
+          : characterProfile?.providerCharacterStatus === 'failed'
         ? 'Self character route unavailable'
         : characterProfile?.providerCharacterStatus === 'disabled'
           ? 'Self character route unavailable'
           : 'Self character needs setup'
       : selfReferenceMode
-        ? 'Soft self guidance only'
+        ? 'Record self verification video'
         : '';
   const selfCharacterProviderStatusCopy = providerSelfCharacterReady
-    ? 'Exact self character route is canary-tested and ready.'
+    ? 'Generate with My Self Character is available after a successful video-reference or provider-character canary.'
     : providerSelfCharacterSetupStarted
-      ? characterProfile?.providerCharacterStatus === 'ready' && characterProfile.likenessProviderStatus === 'character_created_usage_unmapped'
-        ? 'Verified self character created. Video route not available yet.'
+      ? characterProfile?.videoReferenceRouteStatus === 'blocked' || characterProfile?.videoReferenceRouteStatus === 'reference_moderation_block'
+        ? 'Video likeness route blocked. Using soft self guidance.'
+        : characterProfile?.providerCharacterStatus === 'ready' && characterProfile.likenessProviderStatus === 'character_created_usage_unmapped'
+          ? 'Verified self character created. Video route not available yet.'
         : 'Self character route needs a quick test before Lumora can claim exact likeness.'
-      : 'Verified self character route unavailable. Using soft self guidance.';
+      : 'Record self verification video, or continue with soft self guidance.';
   const identityReferenceCards = [
     {
       label: 'Front photo',

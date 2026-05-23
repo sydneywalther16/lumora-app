@@ -19,6 +19,11 @@ import {
   OpenAISoraProviderError,
   validateSoraCharacterConsent,
 } from '../services/providers/openaiSoraProvider';
+import {
+  buildSelfVerificationVideoPatch,
+  updateSelfCharacterVerificationVideoForUser,
+  validateSelfVerificationVideoConsent,
+} from '../services/selfVerificationVideo';
 
 const visibilitySchema = z.enum(['private', 'approved_only', 'public']);
 const statusSchema = z.enum(['draft', 'processing', 'ready', 'failed']);
@@ -87,6 +92,16 @@ const soraSelfCharacterSchema = z.object({
   sourceVideoUrl: z.string().url().optional().nullable(),
   identityVideo: mediaUploadSchema.optional().nullable(),
 });
+const selfVerificationVideoSchema = z.object({
+  userId: z.string().min(1).optional().nullable(),
+  characterId: z.string().min(1).optional().nullable(),
+  consentConfirmed: z.boolean().optional(),
+  consent_confirmed: z.boolean().optional(),
+  sourceUploadAssetId: z.string().min(1).optional().nullable(),
+  sourceVideoUrl: z.string().url().optional().nullable(),
+  verificationAudioPresent: z.boolean().optional().default(false),
+  verificationVideo: mediaUploadSchema.optional().nullable(),
+});
 
 export const charactersRouter = Router();
 charactersRouter.use(requireAuth);
@@ -99,11 +114,19 @@ function relationshipMemoryValue(value: Record<string, unknown> | undefined) {
   return (value ?? {}) as Record<string, CharacterRelationshipMemory>;
 }
 
-function creatorSafeCharacter<T extends { providerCharacterId?: string | null }>(character: T) {
+function creatorSafeCharacter<T extends {
+  providerCharacterId?: string | null;
+  verificationVideoUrl?: string | null;
+  verificationVideoAssetId?: string | null;
+  verificationConsentAt?: string | null;
+}>(character: T) {
   return {
     ...character,
     providerCharacterId: null,
     providerCharacterIdPresent: Boolean(character.providerCharacterId),
+    verificationVideoUrl: null,
+    verificationVideoPresent: Boolean(character.verificationVideoUrl || character.verificationVideoAssetId),
+    verificationConsentPresent: Boolean(character.verificationConsentAt),
   };
 }
 
@@ -126,7 +149,15 @@ charactersRouter.post('/self/sora-character', async (req: AuthedRequest, res) =>
     throw error;
   }
 
-  const ownerUserId = payload.userId ?? req.userId!;
+  if (payload.userId && payload.userId !== req.userId) {
+    res.status(403).json({
+      error: 'self_character_owner_mismatch',
+      message: 'Only the authenticated owner can create their provider self character.',
+    });
+    return;
+  }
+
+  const ownerUserId = req.userId!;
   const characterId = payload.characterId ?? 'creator-self';
   const character = await getCharacterProfileForUser(ownerUserId, characterId);
   if (!character && characterId !== 'creator-self') {
@@ -197,6 +228,87 @@ charactersRouter.post('/self/sora-character', async (req: AuthedRequest, res) =>
     failureCategory: setupResult.failureCategory,
     readiness,
     message: setupResult.message,
+    character: updated ? creatorSafeCharacter(updated) : null,
+  });
+});
+
+charactersRouter.post('/self/verification-video', async (req: AuthedRequest, res) => {
+  const payload = selfVerificationVideoSchema.parse(req.body ?? {});
+  const consentConfirmed = payload.consentConfirmed ?? payload.consent_confirmed ?? false;
+
+  try {
+    validateSelfVerificationVideoConsent({ consentConfirmed });
+  } catch (error) {
+    const statusCode = typeof (error as { statusCode?: unknown })?.statusCode === 'number'
+      ? (error as { statusCode: number }).statusCode
+      : 400;
+    res.status(statusCode).json({
+      error: (error as { code?: string })?.code ?? 'verification_consent_required',
+      message: error instanceof Error ? error.message : 'Consent is required before saving a self verification video.',
+    });
+    return;
+  }
+
+  if (payload.userId && payload.userId !== req.userId) {
+    res.status(403).json({
+      error: 'verification_owner_mismatch',
+      message: 'Only the authenticated owner can save their self verification video.',
+    });
+    return;
+  }
+
+  const ownerUserId = req.userId!;
+  const characterId = payload.characterId ?? 'creator-self';
+  const character = await getCharacterProfileForUser(ownerUserId, characterId);
+  if (!character && characterId !== 'creator-self') {
+    res.status(404).json({
+      error: 'self_character_not_found',
+      message: 'Create your Lumora self character before saving a verification video.',
+    });
+    return;
+  }
+
+  let sourceVideoUrl = payload.sourceVideoUrl ?? null;
+  let sourceUploadAssetId = payload.sourceUploadAssetId ?? null;
+  if (payload.verificationVideo) {
+    sourceVideoUrl = await persistMediaUpload({
+      userId: ownerUserId,
+      media: payload.verificationVideo,
+      folder: `characters/${character?.id ?? characterId}/self-verification`,
+      fallbackFileName: 'lumora-self-verification-video',
+    });
+    sourceUploadAssetId = sourceUploadAssetId ?? sourceVideoUrl;
+  }
+
+  if (!sourceVideoUrl) {
+    res.status(400).json({
+      error: 'verification_video_required',
+      message: 'Upload a private self verification video before testing video likeness.',
+    });
+    return;
+  }
+
+  const patch = buildSelfVerificationVideoPatch({
+    sourceVideoUrl,
+    sourceUploadAssetId,
+    verificationAudioPresent: payload.verificationAudioPresent,
+  });
+  const diagnostics = await updateSelfCharacterVerificationVideoForUser({
+    ownerUserId,
+    characterId,
+    patch,
+  });
+  const updated = await getCharacterProfileForUser(ownerUserId, characterId);
+
+  res.json({
+    ok: true,
+    verificationVideoPresent: diagnostics.selfVerificationVideoPresent,
+    verificationAudioPresent: diagnostics.verificationAudioPresent,
+    verificationConsentPresent: diagnostics.selfVerificationConsentPresent,
+    verificationStatus: diagnostics.verificationStatus,
+    verificationPrompt: diagnostics.verificationPrompt,
+    videoReferenceRouteStatus: diagnostics.seedanceVideoReferenceCanaryStatus,
+    message: 'Self verification video saved privately.',
     character: updated ? creatorSafeCharacter(updated) : null,
   });
 });
