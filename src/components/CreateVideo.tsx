@@ -1232,7 +1232,7 @@ export default function CreateVideo({
     characterProfile?.providerIdentityProvider === 'openai_sora' &&
     Boolean(characterProfile.providerCharacterStatus);
   const selfCharacterProviderStatusLabel = providerSelfCharacterReady
-    ? 'Verified self character ready'
+    ? 'Exact self character ready'
     : providerSelfCharacterSetupStarted
       ? characterProfile?.providerCharacterStatus === 'failed'
         ? 'Self character route unavailable'
@@ -1243,12 +1243,12 @@ export default function CreateVideo({
         ? 'Soft self guidance only'
         : '';
   const selfCharacterProviderStatusCopy = providerSelfCharacterReady
-    ? 'Using verified self character.'
+    ? 'Exact self character route is canary-tested and ready.'
     : providerSelfCharacterSetupStarted
       ? characterProfile?.providerCharacterStatus === 'ready' && characterProfile.likenessProviderStatus === 'character_created_usage_unmapped'
         ? 'Verified self character created. Video route not available yet.'
         : 'Self character route needs a quick test before Lumora can claim exact likeness.'
-      : 'Rendering with soft self guidance.';
+      : 'Verified self character route unavailable. Using soft self guidance.';
   const identityReferenceCards = [
     {
       label: 'Front photo',
@@ -1339,7 +1339,7 @@ export default function CreateVideo({
     : engine === 'mock'
       ? 'Demo Mode returns an instant preview and never spends render credits.'
     : isSoraEngine
-      ? 'Self-character likeness currently uses the reference-led video path.'
+      ? (providerSelfCharacterReady ? 'Exact self character route is ready.' : 'Verified self character route unavailable. Using soft self guidance.')
       : 'Kling uses your self-character reference image first.';
   const continuityMemoryDirty = continuityMemory
     ? continuityMemoryChanged(

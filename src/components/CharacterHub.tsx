@@ -106,6 +106,9 @@ function latestContinuityConfidence(character: CharacterProfile) {
 }
 
 function providerIdentityStatusLabel(character: CharacterProfile) {
+  if (character.providerCharacterStatus === 'ready' && character.likenessProviderStatus === 'canary_succeeded') return 'Exact likeness ready';
+  if (character.providerCharacterStatus === 'ready' && character.likenessProviderStatus === 'character_created_needs_canary') return 'Needs canary';
+  if (character.providerCharacterStatus === 'ready' && character.likenessProviderStatus === 'character_created_usage_unmapped') return 'Provider unavailable';
   if (character.providerCharacterStatus === 'ready') return 'Ready';
   if (character.providerCharacterStatus === 'pending') return 'Pending';
   if (character.providerCharacterStatus === 'failed') return 'Failed';
@@ -114,6 +117,12 @@ function providerIdentityStatusLabel(character: CharacterProfile) {
 }
 
 function providerIdentityStatusCopy(character: CharacterProfile) {
+  if (character.providerCharacterStatus === 'ready' && character.likenessProviderStatus === 'canary_succeeded') {
+    return 'Exact self character route is canary-tested and ready.';
+  }
+  if (character.providerCharacterStatus === 'ready' && character.likenessProviderStatus === 'character_created_needs_canary') {
+    return 'Provider character exists, but the exact video route needs a canary before Create can use it.';
+  }
   if (character.providerCharacterStatus === 'ready' && character.likenessProviderStatus === 'character_created_usage_unmapped') {
     return 'Verified self character created. Video route not available yet.';
   }
@@ -854,7 +863,8 @@ export default function CharacterHub({
                 <div className="character-memory-viewer character-section-card">
                   {metadataLine('Saved visual references', savedRefs.length ? `${savedRefs.length} saved` : 'No saved references yet')}
                   {metadataLine('Soft text guidance', selectedCharacter.appearanceSummary || selectedCharacter.identityProfile?.appearanceSummary ? 'Available' : 'Needs appearance details')}
-                  {metadataLine('Verified provider character', providerIdentityStatusLabel(selectedCharacter))}
+                  {metadataLine('Exact likeness', providerIdentityStatusLabel(selectedCharacter))}
+                  {metadataLine('Seedance photo references', savedRefs.length ? 'Saved but blocked for this renderer' : 'No saved references yet')}
                   {metadataLine('Consent', selectedCharacter.likenessConsentAt ? 'Confirmed' : 'Not confirmed')}
                   <p className="muted">{providerIdentityStatusCopy(selectedCharacter)}</p>
                 </div>

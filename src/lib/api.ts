@@ -323,6 +323,9 @@ export type GenerationResponse = {
   multimodalReferenceMode?: boolean | null;
   createdAt: string;
   message?: string;
+  exactLikenessRoute?: string | null;
+  exactLikenessAvailable?: boolean | null;
+  exactLikenessReason?: string | null;
   selfLikenessIntensity?: SelfLikenessIntensity | null;
   textSelfGuidanceAvailable?: boolean | null;
   providerStatus?: string | null;
@@ -705,6 +708,34 @@ export type ApiHealthDiagnostics = {
       status: string;
     }>;
   };
+  exactLikenessRouter?: {
+    route: string;
+    provider: string;
+    confidence: string;
+    exactLikeness: boolean;
+    reason: string;
+    requiredSetup: string[];
+    canaryStatus: string | null;
+    fallbackRoute: string;
+    recommendedNextAction: string;
+  };
+  likenessProviderRegistry?: Array<{
+    id: string;
+    displayName: string;
+    configured: boolean;
+    supportsExactLikeness: boolean;
+    supportsReferenceImages: boolean;
+    supportsStoredCharacters: boolean;
+    requiresConsent: boolean;
+    requiresCanary: boolean;
+    canaryStatus: string;
+    lastSuccessAt: string | null;
+    lastFailureCategory: string | null;
+    deprecated: boolean;
+    shutdownDate: string | null;
+    implementationStatus: string;
+    recommendedNextAction: string;
+  }>;
   openaiSoraProvider?: {
     openaiVideoEnabled: boolean;
     openaiVideoModel: string;

@@ -12,6 +12,8 @@ import {
   alternateLikenessProvidersConfigured,
   buildAlternateLikenessProviderCanaryStatus,
 } from './likenessProviderCanary';
+import { chooseExactLikenessRoute } from './exactLikenessRouter';
+import { buildLikenessProviderRegistry } from './likenessProviderRegistry';
 import {
   chooseSoraSelfCharacterCreateRoute,
   getOpenAISoraProviderReadiness,
@@ -2015,6 +2017,17 @@ export async function buildRenderPathCompareDiagnostics() {
       providerCharacterStatus: openaiSoraIdentity.selfProviderCharacterStatus,
       likenessProviderStatus: openaiSoraIdentity.likenessProviderStatus,
     });
+    const likenessProviderRegistry = buildLikenessProviderRegistry({
+      openAISoraReadiness: openaiSoraReadiness,
+      selfProviderCharacter: openaiSoraIdentity,
+      referenceRouteSummary,
+    });
+    const exactLikenessRouterChoice = chooseExactLikenessRoute({
+      openAISoraReadiness: openaiSoraReadiness,
+      selfProviderCharacter: openaiSoraIdentity,
+      referenceRouteSummary,
+      providerRegistry: likenessProviderRegistry,
+    });
     const canarySummary = await buildSeedanceCanarySummaryDiagnostics();
     const canary = {
       provider: 'seedance-fast',
@@ -2142,6 +2155,24 @@ export async function buildRenderPathCompareDiagnostics() {
             : 'continue using Seedance text-first until character video usage is mapped'
           : 'upload consent video and create provider character'
         : 'enable OPENAI_VIDEO_ENABLED and OPENAI_VIDEO_CHARACTER_ENABLED',
+      exactLikenessRouterChoice: {
+        route: exactLikenessRouterChoice.route,
+        provider: exactLikenessRouterChoice.provider,
+        confidence: exactLikenessRouterChoice.confidence,
+        exactLikeness: exactLikenessRouterChoice.exactLikeness,
+        reason: exactLikenessRouterChoice.reason,
+        requiredSetup: exactLikenessRouterChoice.requiredSetup,
+        canaryStatus: exactLikenessRouterChoice.canaryStatus,
+        fallbackRoute: exactLikenessRouterChoice.fallbackRoute,
+        recommendedNextAction: exactLikenessRouterChoice.recommendedNextAction,
+      },
+      exactLikenessAvailable: exactLikenessRouterChoice.exactLikeness,
+      exactLikenessProvider: exactLikenessRouterChoice.exactLikeness ? exactLikenessRouterChoice.provider : null,
+      exactLikenessReason: exactLikenessRouterChoice.reason,
+      softGuidanceAvailable: true,
+      likenessProviderRegistry,
+      alternateProvidersConfigured: likenessProviderRegistry.filter((provider) => provider.configured).map((provider) => provider.id),
+      recommendedNextAction: exactLikenessRouterChoice.recommendedNextAction,
       seedanceReferenceRoutesBlocked: referenceRouteSummary.seedanceReferenceRoutesBlocked,
       frontReferenceCanaryResult: referenceRouteSummary.allReferenceRouteResults.find((route) => route.referenceRole === 'front_angle') ?? null,
       sideReferenceCanaryResult: referenceRouteSummary.allReferenceRouteResults.find((route) => route.referenceRole === 'side_angle_left' || route.referenceRole === 'side_angle_right') ?? null,
@@ -2167,13 +2198,13 @@ export async function buildRenderPathCompareDiagnostics() {
           lastReferenceResult: null,
         },
         runway: {
-          configured: Boolean(env.RUNWAY_API_KEY),
+          configured: Boolean(env.RUNWAY_ENABLED && env.RUNWAY_API_KEY),
           referenceCapable: false,
           canaryTested: false,
           lastReferenceResult: null,
         },
         klingReference: {
-          configured: false,
+          configured: Boolean(env.KLING_ENABLED && env.KLING_API_KEY && env.KLING_REFERENCE_MODEL),
           referenceCapable: false,
           canaryTested: false,
           lastReferenceResult: null,

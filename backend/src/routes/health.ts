@@ -15,6 +15,7 @@ import {
   alternateLikenessProvidersConfigured,
   buildAlternateLikenessProviderCanaryStatus,
 } from '../services/likenessProviderCanary';
+import { exactLikenessCanaryCandidate, resolveExactLikenessRoute } from '../services/exactLikenessRouter';
 import {
   getOpenAISoraProviderReadiness,
   startOpenAISoraSelfCharacterCanary,
@@ -60,6 +61,7 @@ const canaryRouteInventory = {
   referenceCanaryRouteMounted: true,
   referenceMatrixRouteMounted: true,
   soraCharacterCanaryRouteMounted: true,
+  exactLikenessCanaryRouteMounted: true,
   renderLastRouteMounted: true,
   renderPathCompareRouteMounted: true,
 };
@@ -71,6 +73,7 @@ healthRouter.get('/health', (_req, res) => {
 healthRouter.get('/api/health/diagnostics', async (_req, res) => {
   const posterGenerationAvailability = await getPosterGenerationAvailability();
   const posterBackfillRuntime = getPosterBackfillRuntimeDiagnostics();
+  const exactLikeness = await resolveExactLikenessRoute();
   res.json({
     service: 'lumora-api',
     checkedAt: new Date().toISOString(),
@@ -81,6 +84,8 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
     providerFallback: await buildProviderFallbackDiagnostics(),
     renderSuccessEngine: await buildRenderSuccessDiagnostics(),
     referenceRouteStatus: await getReferenceRouteSummary({}),
+    exactLikenessRouter: exactLikeness,
+    likenessProviderRegistry: exactLikeness.providerRegistry,
     openaiSoraProvider: getOpenAISoraProviderReadiness(),
     likenessProviderCanary: {
       textSelfGuidanceAvailable: true,
@@ -135,10 +140,108 @@ healthRouter.get('/api/diagnostics/canary-routes', (_req, res) => {
       referenceCanary: 'POST /api/diagnostics/seedance-reference-canary/self',
       referenceMatrix: 'POST /api/diagnostics/seedance-reference-matrix/self',
       soraCharacterCanary: 'POST /api/diagnostics/sora-character-canary/self',
+      exactLikenessCanary: 'POST /api/diagnostics/exact-likeness-canary/self',
       renderLast: 'GET /api/diagnostics/render-last',
       renderPathCompare: 'GET /api/diagnostics/render-path-compare',
     },
     ...canaryRouteInventory,
+  });
+});
+
+healthRouter.post('/api/diagnostics/exact-likeness-canary/self', async (req, res) => {
+  if (!env.ENABLE_RENDER_PROBE) {
+    res.status(403).json({
+      error: 'Render probe disabled. Set ENABLE_RENDER_PROBE=true to run a paid exact-likeness canary.',
+    });
+    return;
+  }
+
+  const payload = canarySchema.parse(req.body ?? {});
+  const userId = payload.userId ?? req.header('x-lumora-user-id') ?? null;
+  const routerChoice = await resolveExactLikenessRoute({ userId, characterId: null });
+  const candidate = exactLikenessCanaryCandidate(routerChoice);
+
+  if (!candidate) {
+    res.status(200).json({
+      ok: false,
+      provider: routerChoice.provider,
+      route: routerChoice.route,
+      configured: routerChoice.providerRegistry.some((entry) => entry.configured),
+      canaryStatus: routerChoice.canaryStatus,
+      outputUrlPresent: false,
+      verifiedVideoPresent: false,
+      failureCategory: 'no_exact_likeness_canary_candidate',
+      recommendedNextAction: routerChoice.recommendedNextAction,
+      exactLikenessRouterChoice: routerChoice,
+      warning: 'This may consume provider credits when a supported route is enabled.',
+    });
+    return;
+  }
+
+  if (candidate.status === 'configured_not_implemented') {
+    res.status(501).json({
+      ok: false,
+      provider: candidate.provider,
+      route: candidate.route,
+      configured: true,
+      canaryStatus: candidate.status,
+      outputUrlPresent: false,
+      verifiedVideoPresent: false,
+      failureCategory: 'configured_not_implemented',
+      recommendedNextAction: 'Implement and canary-test this provider before production routing.',
+      exactLikenessRouterChoice: routerChoice,
+      warning: 'This may consume provider credits when a supported route is enabled.',
+    });
+    return;
+  }
+
+  if (candidate.route === 'openai_sora_character') {
+    const status = await startOpenAISoraSelfCharacterCanary({ userId, characterId: null });
+    res.status(status.ok ? 202 : (status as { error?: string }).error === 'character_video_usage_unmapped' ? 200 : 501).json({
+      ...status,
+      exactLikenessRouterChoice: routerChoice,
+      warning: 'This may consume provider credits when a supported route is enabled.',
+    });
+    return;
+  }
+
+  if (candidate.route === 'seedance_reference') {
+    try {
+      const status = await startSeedanceSelfReferenceCanary({
+        userId,
+        saveAsDraft: false,
+      });
+      res.status(202).json({
+        ...status,
+        exactLikenessRouterChoice: routerChoice,
+        warning: 'This may consume provider credits.',
+      });
+    } catch (error) {
+      if (error instanceof SelfReferenceCanarySelectionError) {
+        res.status(error.statusCode).json({
+          error: error.message,
+          ...error.payload,
+          exactLikenessRouterChoice: routerChoice,
+        });
+        return;
+      }
+      throw error;
+    }
+    return;
+  }
+
+  res.status(501).json({
+    ok: false,
+    provider: candidate.provider,
+    route: candidate.route,
+    configured: true,
+    canaryStatus: candidate.status,
+    outputUrlPresent: false,
+    verifiedVideoPresent: false,
+    failureCategory: 'exact_likeness_provider_not_implemented',
+    recommendedNextAction: 'Configure a supported exact likeness provider or continue using soft self guidance.',
+    exactLikenessRouterChoice: routerChoice,
+    warning: 'This may consume provider credits when a supported route is enabled.',
   });
 });
 

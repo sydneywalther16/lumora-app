@@ -1,0 +1,235 @@
+import { getReferenceRouteSummary } from './seedanceCanary';
+import {
+  buildLikenessProviderRegistry,
+  type LikenessProviderRegistryEntry,
+} from './likenessProviderRegistry';
+import {
+  getOpenAISoraProviderReadiness,
+  getSelfProviderCharacterDiagnostics,
+  type OpenAISoraProviderReadiness,
+  type SelfProviderCharacterDiagnostics,
+} from './providers/openaiSoraProvider';
+
+export type ExactLikenessRoute =
+  | 'openai_sora_character'
+  | 'kling_reference'
+  | 'runway_reference'
+  | 'seedance_reference'
+  | 'seedance_text_guidance';
+
+export type ExactLikenessProvider = 'openai_sora' | 'kling' | 'runway' | 'seedance';
+export type ExactLikenessConfidence = 'high' | 'medium' | 'low' | 'fallback';
+
+type ReferenceRouteSummaryLike = Awaited<ReturnType<typeof getReferenceRouteSummary>>;
+
+export type ExactLikenessRouterResult = {
+  route: ExactLikenessRoute;
+  provider: ExactLikenessProvider;
+  confidence: ExactLikenessConfidence;
+  exactLikeness: boolean;
+  reason: string;
+  requiredSetup: string[];
+  canaryStatus: string | null;
+  fallbackRoute: 'seedance_text_guidance';
+  providerRegistry: LikenessProviderRegistryEntry[];
+  recommendedNextAction: string;
+};
+
+function registryEntry(registry: LikenessProviderRegistryEntry[], id: LikenessProviderRegistryEntry['id']) {
+  return registry.find((entry) => entry.id === id) ?? null;
+}
+
+function hasOpenAIExactRoute(input: {
+  readiness: OpenAISoraProviderReadiness;
+  identity: SelfProviderCharacterDiagnostics;
+}) {
+  return Boolean(
+    input.readiness.openaiCharacterConfigured &&
+    input.readiness.characterVideoUsageMapped &&
+    input.identity.selfProviderCharacterIdPresent &&
+    input.identity.selfProviderCharacterStatus === 'ready' &&
+    input.identity.likenessProviderStatus === 'canary_succeeded',
+  );
+}
+
+function openAIRequiredSetup(input: {
+  readiness: OpenAISoraProviderReadiness;
+  identity: SelfProviderCharacterDiagnostics;
+}) {
+  const setup: string[] = [];
+  if (!input.readiness.openaiVideoEnabled) setup.push('enable OPENAI_VIDEO_ENABLED');
+  if (!input.readiness.openaiCharacterEnabled) setup.push('enable OPENAI_VIDEO_CHARACTER_ENABLED');
+  if (!input.readiness.openaiApiKeyConfigured) setup.push('set OPENAI_API_KEY');
+  if (!input.identity.selfProviderCharacterIdPresent) setup.push('create provider self character with consent video');
+  if (!input.readiness.characterVideoUsageMapped) setup.push('map documented character video usage field');
+  if (input.identity.selfProviderCharacterIdPresent && input.identity.likenessProviderStatus !== 'canary_succeeded') {
+    setup.push('run successful exact likeness canary');
+  }
+  return setup;
+}
+
+export function chooseExactLikenessRoute(input: {
+  openAISoraReadiness: OpenAISoraProviderReadiness;
+  selfProviderCharacter: SelfProviderCharacterDiagnostics;
+  referenceRouteSummary: ReferenceRouteSummaryLike;
+  providerRegistry?: LikenessProviderRegistryEntry[];
+}): ExactLikenessRouterResult {
+  const registry = input.providerRegistry ?? buildLikenessProviderRegistry({
+    openAISoraReadiness: input.openAISoraReadiness,
+    selfProviderCharacter: input.selfProviderCharacter,
+    referenceRouteSummary: input.referenceRouteSummary,
+  });
+  const openAI = registryEntry(registry, 'openai_sora_character');
+  if (hasOpenAIExactRoute({
+    readiness: input.openAISoraReadiness,
+    identity: input.selfProviderCharacter,
+  })) {
+    return {
+      route: 'openai_sora_character',
+      provider: 'openai_sora',
+      confidence: 'high',
+      exactLikeness: true,
+      reason: 'OpenAI/Sora provider character exists, character video usage is mapped, and the canary succeeded.',
+      requiredSetup: [],
+      canaryStatus: input.selfProviderCharacter.soraCharacterCanaryStatus ?? 'succeeded',
+      fallbackRoute: 'seedance_text_guidance',
+      providerRegistry: registry,
+      recommendedNextAction: 'Use exact self character route.',
+    };
+  }
+
+  const alternate = registry.find((entry) => (
+    (entry.id === 'kling_reference' || entry.id === 'runway_gen4_reference') &&
+    entry.configured &&
+    entry.supportsExactLikeness &&
+    entry.canaryStatus === 'succeeded'
+  ));
+  if (alternate) {
+    return {
+      route: alternate.id === 'kling_reference' ? 'kling_reference' : 'runway_reference',
+      provider: alternate.id === 'kling_reference' ? 'kling' : 'runway',
+      confidence: 'high',
+      exactLikeness: true,
+      reason: `${alternate.displayName} is configured and has a successful canary.`,
+      requiredSetup: [],
+      canaryStatus: alternate.canaryStatus,
+      fallbackRoute: 'seedance_text_guidance',
+      providerRegistry: registry,
+      recommendedNextAction: `Use ${alternate.displayName}.`,
+    };
+  }
+
+  const seedanceReference = registryEntry(registry, 'seedance_reference_images');
+  if (
+    seedanceReference?.configured &&
+    seedanceReference.canaryStatus === 'succeeded' &&
+    input.referenceRouteSummary.knownSuccessfulReferenceRoutes.length > 0 &&
+    !input.referenceRouteSummary.seedanceReferenceRoutesBlocked
+  ) {
+    return {
+      route: 'seedance_reference',
+      provider: 'seedance',
+      confidence: 'medium',
+      exactLikeness: true,
+      reason: 'A Seedance reference route has succeeded before and is not blocked.',
+      requiredSetup: [],
+      canaryStatus: seedanceReference.canaryStatus,
+      fallbackRoute: 'seedance_text_guidance',
+      providerRegistry: registry,
+      recommendedNextAction: 'Use the successful Seedance reference route.',
+    };
+  }
+
+  const setup = openAIRequiredSetup({
+    readiness: input.openAISoraReadiness,
+    identity: input.selfProviderCharacter,
+  });
+  const blocked = input.referenceRouteSummary.seedanceReferenceRoutesBlocked;
+  const configuredButUnsupported = registry.filter((entry) => (
+    entry.configured && entry.implementationStatus === 'configured_not_implemented'
+  ));
+  const reason = blocked
+    ? 'No exact likeness route is ready; Seedance self reference routes are blocked, so Lumora uses soft text guidance.'
+    : configuredButUnsupported.length
+      ? 'Configured exact likeness providers still need implementation or a successful canary, so Lumora uses soft text guidance.'
+      : 'No canary-proven exact likeness provider is available, so Lumora uses soft text guidance.';
+
+  return {
+    route: 'seedance_text_guidance',
+    provider: 'seedance',
+    confidence: 'fallback',
+    exactLikeness: false,
+    reason,
+    requiredSetup: setup,
+    canaryStatus: openAI?.canaryStatus ?? null,
+    fallbackRoute: 'seedance_text_guidance',
+    providerRegistry: registry,
+    recommendedNextAction: blocked
+      ? 'Continue using Seedance text-first and configure an alternate likeness provider.'
+      : setup[0] ?? 'Run a canary for a configured exact likeness provider.',
+  };
+}
+
+export async function resolveExactLikenessRoute(input: {
+  userId?: string | null;
+  characterId?: string | null;
+} = {}) {
+  const openAISoraReadiness = getOpenAISoraProviderReadiness();
+  const [selfProviderCharacter, referenceRouteSummary] = await Promise.all([
+    getSelfProviderCharacterDiagnostics(input),
+    getReferenceRouteSummary(input),
+  ]);
+  const providerRegistry = buildLikenessProviderRegistry({
+    openAISoraReadiness,
+    selfProviderCharacter,
+    referenceRouteSummary,
+  });
+
+  return chooseExactLikenessRoute({
+    openAISoraReadiness,
+    selfProviderCharacter,
+    referenceRouteSummary,
+    providerRegistry,
+  });
+}
+
+export function exactLikenessCanaryCandidate(input: ExactLikenessRouterResult) {
+  const openAI = registryEntry(input.providerRegistry, 'openai_sora_character');
+  if (
+    openAI?.configured &&
+    openAI.implementationStatus === 'available' &&
+    openAI.canaryStatus !== 'succeeded'
+  ) {
+    return {
+      provider: 'openai_sora',
+      route: 'openai_sora_character' as const,
+      status: 'needs_canary',
+    };
+  }
+
+  const seedanceReference = registryEntry(input.providerRegistry, 'seedance_reference_images');
+  if (
+    seedanceReference?.configured &&
+    seedanceReference.canaryStatus === 'not_tested' &&
+    seedanceReference.implementationStatus === 'available'
+  ) {
+    return {
+      provider: 'seedance',
+      route: 'seedance_reference' as const,
+      status: 'needs_canary',
+    };
+  }
+
+  const configuredUnsupported = input.providerRegistry.find((entry) => (
+    entry.configured && entry.implementationStatus === 'configured_not_implemented'
+  ));
+  if (configuredUnsupported) {
+    return {
+      provider: configuredUnsupported.id,
+      route: configuredUnsupported.id,
+      status: 'configured_not_implemented',
+    };
+  }
+
+  return null;
+}

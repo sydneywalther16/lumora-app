@@ -50,6 +50,8 @@ export function getEnvironmentDiagnostics(): EnvironmentDiagnostics {
     googleVeo: Boolean(env.GOOGLE_API_KEY),
     openai: Boolean(env.OPENAI_API_KEY),
     openaiVideo: openAISora.routeReady,
+    klingReference: Boolean(env.KLING_ENABLED && env.KLING_API_KEY && env.KLING_REFERENCE_MODEL),
+    runwayReference: Boolean(env.RUNWAY_ENABLED && env.RUNWAY_API_KEY),
     stripe: stripeReady,
     billing: billing.enabled,
     redis: Boolean(env.REDIS_URL),
@@ -95,6 +97,16 @@ export function getEnvironmentDiagnostics(): EnvironmentDiagnostics {
         id: 'openai-sora-character',
         ready: openAISora.routeReady,
         status: openAISora.routeReady ? 'ready' : env.OPENAI_VIDEO_ENABLED ? 'placeholder' : 'not_configured',
+      },
+      {
+        id: 'kling-reference',
+        ready: false,
+        status: configured.klingReference ? 'placeholder' : 'not_configured',
+      },
+      {
+        id: 'runway-gen4-reference',
+        ready: false,
+        status: configured.runwayReference ? 'placeholder' : 'not_configured',
       },
       {
         id: 'demo-mode',

@@ -18,11 +18,7 @@ import {
   resumeRenderSuccessJob,
   startRenderSuccessJob,
 } from '../services/renderSuccessEngine';
-import {
-  chooseSoraSelfCharacterCreateRoute,
-  getOpenAISoraProviderReadiness,
-  getSelfProviderCharacterDiagnostics,
-} from '../services/providers/openaiSoraProvider';
+import { resolveExactLikenessRoute } from '../services/exactLikenessRouter';
 import { createVideoGeneration } from '../video';
 
 const generationEngines = ['seedance-2.0', 'seedance-quality', 'veo', 'runway', 'mock', 'openai'] as const;
@@ -321,18 +317,12 @@ generationsRouter.post('/', generationRateLimit, async (req, res) => {
     }
 
     if (payload.engine === 'openai' && payload.isDefaultSelfCharacter) {
-      const identity = await getSelfProviderCharacterDiagnostics({
+      const route = await resolveExactLikenessRoute({
         userId: payload.userId ?? null,
         characterId: payload.characterId ?? null,
       });
-      const route = chooseSoraSelfCharacterCreateRoute({
-        readiness: getOpenAISoraProviderReadiness(),
-        providerCharacterId: identity.selfProviderCharacterIdPresent ? 'present' : null,
-        providerCharacterStatus: identity.selfProviderCharacterStatus,
-        likenessProviderStatus: identity.likenessProviderStatus,
-      });
 
-      if (route.selectedCreateLikenessRoute !== 'openai_sora_character') {
+      if (route.route !== 'openai_sora_character') {
         const { job, duplicateOf, message } = await startRenderSuccessJob({
           prompt,
           userId: payload.userId ?? '',
@@ -359,6 +349,9 @@ generationsRouter.post('/', generationRateLimit, async (req, res) => {
           videoUrl: status.videoUrl ?? '',
           duplicateOf,
           message: message ?? 'Rendering with soft self guidance.',
+          exactLikenessRoute: route.route,
+          exactLikenessAvailable: route.exactLikeness,
+          exactLikenessReason: route.reason,
         });
         return;
       }

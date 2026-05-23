@@ -1,0 +1,168 @@
+import assert from 'node:assert/strict';
+import { env } from '../src/lib/env';
+import { chooseExactLikenessRoute } from '../src/services/exactLikenessRouter';
+import { buildLikenessProviderRegistry } from '../src/services/likenessProviderRegistry';
+import { getOpenAISoraProviderReadiness, type SelfProviderCharacterDiagnostics } from '../src/services/providers/openaiSoraProvider';
+
+const originalEnv = {
+  OPENAI_VIDEO_ENABLED: env.OPENAI_VIDEO_ENABLED,
+  OPENAI_VIDEO_CHARACTER_ENABLED: env.OPENAI_VIDEO_CHARACTER_ENABLED,
+  OPENAI_API_KEY: env.OPENAI_API_KEY,
+  REPLICATE_API_TOKEN: env.REPLICATE_API_TOKEN,
+  KLING_ENABLED: env.KLING_ENABLED,
+  KLING_API_KEY: env.KLING_API_KEY,
+  KLING_REFERENCE_MODEL: env.KLING_REFERENCE_MODEL,
+  RUNWAY_ENABLED: env.RUNWAY_ENABLED,
+  RUNWAY_API_KEY: env.RUNWAY_API_KEY,
+  RUNWAY_MODEL: env.RUNWAY_MODEL,
+};
+
+function restoreEnv() {
+  env.OPENAI_VIDEO_ENABLED = originalEnv.OPENAI_VIDEO_ENABLED;
+  env.OPENAI_VIDEO_CHARACTER_ENABLED = originalEnv.OPENAI_VIDEO_CHARACTER_ENABLED;
+  env.OPENAI_API_KEY = originalEnv.OPENAI_API_KEY;
+  env.REPLICATE_API_TOKEN = originalEnv.REPLICATE_API_TOKEN;
+  env.KLING_ENABLED = originalEnv.KLING_ENABLED;
+  env.KLING_API_KEY = originalEnv.KLING_API_KEY;
+  env.KLING_REFERENCE_MODEL = originalEnv.KLING_REFERENCE_MODEL;
+  env.RUNWAY_ENABLED = originalEnv.RUNWAY_ENABLED;
+  env.RUNWAY_API_KEY = originalEnv.RUNWAY_API_KEY;
+  env.RUNWAY_MODEL = originalEnv.RUNWAY_MODEL;
+}
+
+const identity: SelfProviderCharacterDiagnostics = {
+  schemaReady: true,
+  selfProviderCharacterIdPresent: true,
+  selfProviderCharacterStatus: 'ready',
+  selfProviderIdentityProvider: 'openai_sora',
+  selfProviderCharacterIdRedacted: 'sora...1234',
+  providerCharacterLastVerifiedAt: '2026-05-23T00:00:00.000Z',
+  likenessProviderStatus: 'canary_succeeded',
+  soraCharacterCanaryStatus: 'succeeded',
+};
+
+const noIdentity: SelfProviderCharacterDiagnostics = {
+  schemaReady: true,
+  selfProviderCharacterIdPresent: false,
+  selfProviderCharacterStatus: null,
+  selfProviderIdentityProvider: null,
+  selfProviderCharacterIdRedacted: null,
+  providerCharacterLastVerifiedAt: null,
+  likenessProviderStatus: null,
+  soraCharacterCanaryStatus: null,
+};
+
+const blockedReferenceSummary = {
+  state: 'failed' as const,
+  referenceRole: null,
+  variant: null,
+  failureCategory: 'reference_moderation_block',
+  seedanceReferenceRoutesBlocked: true,
+  blockedReferenceRoles: ['front_angle', 'full_body', 'side_angle_left', 'side_angle_right'],
+  requiredReferenceRoles: ['front_angle', 'full_body', 'side_angle_left', 'side_angle_right'],
+  knownSuccessfulReferenceRoutes: [],
+  knownBlockedReferenceRoutes: [
+    { provider: 'seedance-fast', referenceRole: 'front_angle', failureCategory: 'reference_moderation_block' },
+  ],
+  allReferenceRouteResults: [],
+};
+
+const successfulReferenceSummary = {
+  ...blockedReferenceSummary,
+  state: 'succeeded' as const,
+  failureCategory: null,
+  seedanceReferenceRoutesBlocked: false,
+  blockedReferenceRoles: [],
+  knownSuccessfulReferenceRoutes: [
+    { provider: 'seedance-fast', referenceRole: 'side_angle_left', variant: 'reference_images', lastTestedAt: '2026-05-23T00:00:00.000Z' },
+  ],
+  knownBlockedReferenceRoutes: [],
+};
+
+try {
+  env.OPENAI_VIDEO_ENABLED = true;
+  env.OPENAI_VIDEO_CHARACTER_ENABLED = true;
+  env.OPENAI_API_KEY = 'sk-test-secret';
+  env.REPLICATE_API_TOKEN = 'replicate-secret';
+  env.KLING_ENABLED = false;
+  env.KLING_API_KEY = undefined;
+  env.KLING_REFERENCE_MODEL = undefined;
+  env.RUNWAY_ENABLED = false;
+  env.RUNWAY_API_KEY = undefined;
+  env.RUNWAY_MODEL = undefined;
+
+  const readiness = getOpenAISoraProviderReadiness();
+  const openAIFallback = chooseExactLikenessRoute({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: identity,
+    referenceRouteSummary: blockedReferenceSummary,
+  });
+  assert.equal(openAIFallback.route, 'seedance_text_guidance');
+  assert.equal(openAIFallback.exactLikeness, false);
+  assert.match(openAIFallback.reason, /soft text guidance/i);
+  assert.ok(openAIFallback.requiredSetup.includes('map documented character video usage field'));
+
+  const mappedReadiness = {
+    ...readiness,
+    openaiCharacterConfigured: true,
+    characterVideoUsageMapped: true,
+    routeReady: true,
+    status: 'ready' as const,
+  };
+  const openAIExact = chooseExactLikenessRoute({
+    openAISoraReadiness: mappedReadiness,
+    selfProviderCharacter: identity,
+    referenceRouteSummary: blockedReferenceSummary,
+  });
+  assert.equal(openAIExact.route, 'openai_sora_character');
+  assert.equal(openAIExact.exactLikeness, true);
+  assert.equal(openAIExact.confidence, 'high');
+
+  const noExact = chooseExactLikenessRoute({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: blockedReferenceSummary,
+  });
+  assert.equal(noExact.route, 'seedance_text_guidance');
+  assert.equal(noExact.exactLikeness, false);
+  assert.equal(noExact.provider, 'seedance');
+
+  const seedanceExact = chooseExactLikenessRoute({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: successfulReferenceSummary,
+  });
+  assert.equal(seedanceExact.route, 'seedance_reference');
+  assert.equal(seedanceExact.exactLikeness, true);
+
+  const blockedSeedance = chooseExactLikenessRoute({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: blockedReferenceSummary,
+  });
+  assert.notEqual(blockedSeedance.route, 'seedance_reference');
+
+  env.KLING_ENABLED = true;
+  env.KLING_API_KEY = 'kling-secret';
+  env.KLING_REFERENCE_MODEL = 'kling-reference-model';
+  env.RUNWAY_ENABLED = true;
+  env.RUNWAY_API_KEY = 'runway-secret';
+  env.RUNWAY_MODEL = 'gen4';
+  const registry = buildLikenessProviderRegistry({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: blockedReferenceSummary,
+  });
+  assert.equal(registry.find((provider) => provider.id === 'openai_sora_character')?.deprecated, true);
+  assert.equal(registry.find((provider) => provider.id === 'openai_sora_character')?.shutdownDate, '2026-09-24');
+  assert.equal(registry.find((provider) => provider.id === 'kling_reference')?.implementationStatus, 'configured_not_implemented');
+  assert.equal(registry.find((provider) => provider.id === 'runway_gen4_reference')?.implementationStatus, 'configured_not_implemented');
+  const registryText = JSON.stringify(registry);
+  assert.equal(registryText.includes('sk-test-secret'), false);
+  assert.equal(registryText.includes('kling-secret'), false);
+  assert.equal(registryText.includes('runway-secret'), false);
+
+  console.log('exactLikenessRouter unit tests passed');
+} finally {
+  restoreEnv();
+}

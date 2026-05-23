@@ -3,6 +3,7 @@ import { env } from '../lib/env';
 import { parseProviderVideoOutput } from './providerOutputParser';
 import { serializeDiagnosticError } from './schemaDiagnostics';
 import { buildSeedanceCanarySummaryDiagnostics, getReferenceRouteSummary } from './seedanceCanary';
+import { resolveExactLikenessRoute } from './exactLikenessRouter';
 import {
   alternateLikenessProvidersConfigured,
   buildAlternateLikenessProviderCanaryStatus,
@@ -135,6 +136,35 @@ async function openAISoraDiagnostics(row: LatestRenderRow | null) {
   };
 }
 
+async function exactLikenessDiagnostics(row: LatestRenderRow | null) {
+  const choice = await resolveExactLikenessRoute({
+    userId: row?.userId ?? null,
+    characterId: row?.characterId ?? null,
+  });
+
+  return {
+    exactLikenessRouterChoice: {
+      route: choice.route,
+      provider: choice.provider,
+      confidence: choice.confidence,
+      exactLikeness: choice.exactLikeness,
+      reason: choice.reason,
+      requiredSetup: choice.requiredSetup,
+      canaryStatus: choice.canaryStatus,
+      fallbackRoute: choice.fallbackRoute,
+      recommendedNextAction: choice.recommendedNextAction,
+    },
+    exactLikenessAvailable: choice.exactLikeness,
+    exactLikenessProvider: choice.exactLikeness ? choice.provider : null,
+    exactLikenessReason: choice.reason,
+    softGuidanceAvailable: true,
+    alternateProvidersConfigured: choice.providerRegistry.filter((provider) => provider.configured).map((provider) => provider.id),
+    likenessProviderRegistry: choice.providerRegistry,
+    exactLikenessRecommendedNextAction: choice.recommendedNextAction,
+    recommendedNextAction: choice.recommendedNextAction,
+  };
+}
+
 function publishable(row: LatestRenderRow) {
   const parsed = parseProviderVideoOutput(row.outputUrl ?? row.resultAssetUrl);
   return row.status === 'completed' && parsed.ok;
@@ -259,12 +289,14 @@ export async function buildLastRenderDiagnostics() {
       const referenceRouteSummary = await getReferenceRouteSummary({});
       const textGuidance = textSelfGuidanceDiagnostics(null);
       const soraDiagnostics = await openAISoraDiagnostics(null);
+      const exactDiagnostics = await exactLikenessDiagnostics(null);
       return {
         ok: true,
         latestGenerationJob: null,
         seedanceCanary: canarySummary,
         ...textGuidance,
         ...soraDiagnostics,
+        ...exactDiagnostics,
         textOnlyCanarySucceeded: canarySummary.canaryEverSucceeded,
         referenceRouteState: referenceRouteSummary.state,
         seedanceReferenceRoutesBlocked: referenceRouteSummary.seedanceReferenceRoutesBlocked,
@@ -344,6 +376,7 @@ export async function buildLastRenderDiagnostics() {
     const providerFailure = canaryProviderFailure(activeRow) ?? canaryProviderFailure(row);
     const textGuidance = textSelfGuidanceDiagnostics(row);
     const soraDiagnostics = await openAISoraDiagnostics(row);
+    const exactDiagnostics = await exactLikenessDiagnostics(row);
     const referenceRouteSummary = await getReferenceRouteSummary({
       userId: row.userId,
       characterId: row.characterId,
@@ -406,6 +439,7 @@ export async function buildLastRenderDiagnostics() {
         canaryEverSucceeded: canarySummary.canaryEverSucceeded,
         ...textGuidance,
         ...soraDiagnostics,
+        ...exactDiagnostics,
         textOnlyCanarySucceeded: canarySummary.canaryEverSucceeded,
         lastCanaryStatus: canarySummary.lastCanaryStatus,
         lastReferenceCanaryStatus: canarySummary.lastReferenceCanaryStatus,
