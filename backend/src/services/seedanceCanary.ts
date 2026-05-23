@@ -12,6 +12,7 @@ import {
   alternateLikenessProvidersConfigured,
   buildAlternateLikenessProviderCanaryStatus,
 } from './likenessProviderCanary';
+import { getAlternateExactLikenessProviderStatuses } from './alternateLikenessProviderMemory';
 import { chooseExactLikenessRoute } from './exactLikenessRouter';
 import { buildLikenessProviderRegistry } from './likenessProviderRegistry';
 import {
@@ -2017,10 +2018,15 @@ export async function buildRenderPathCompareDiagnostics() {
       providerCharacterStatus: openaiSoraIdentity.selfProviderCharacterStatus,
       likenessProviderStatus: openaiSoraIdentity.likenessProviderStatus,
     });
+    const alternateProviderStatuses = await getAlternateExactLikenessProviderStatuses({
+      userId: real?.userId ?? null,
+      characterId: real?.characterId ?? null,
+    });
     const likenessProviderRegistry = buildLikenessProviderRegistry({
       openAISoraReadiness: openaiSoraReadiness,
       selfProviderCharacter: openaiSoraIdentity,
       referenceRouteSummary,
+      alternateProviderStatuses,
     });
     const exactLikenessRouterChoice = chooseExactLikenessRoute({
       openAISoraReadiness: openaiSoraReadiness,
@@ -2172,6 +2178,12 @@ export async function buildRenderPathCompareDiagnostics() {
       softGuidanceAvailable: true,
       likenessProviderRegistry,
       alternateProvidersConfigured: likenessProviderRegistry.filter((provider) => provider.configured).map((provider) => provider.id),
+      runwayConfigured: Boolean(likenessProviderRegistry.find((provider) => provider.id === 'runway_gen4_reference')?.configured),
+      runwayCanaryStatus: likenessProviderRegistry.find((provider) => provider.id === 'runway_gen4_reference')?.canaryStatus ?? 'not_configured',
+      klingConfigured: Boolean(likenessProviderRegistry.find((provider) => provider.id === 'kling_reference')?.configured),
+      klingCanaryStatus: likenessProviderRegistry.find((provider) => provider.id === 'kling_reference')?.canaryStatus ?? 'not_configured',
+      openaiSoraDeprecated: openaiSoraReadiness.openaiVideosDeprecated,
+      lumoraIdentityPackStatus: 'research_only',
       recommendedNextAction: exactLikenessRouterChoice.recommendedNextAction,
       seedanceReferenceRoutesBlocked: referenceRouteSummary.seedanceReferenceRoutesBlocked,
       frontReferenceCanaryResult: referenceRouteSummary.allReferenceRouteResults.find((route) => route.referenceRole === 'front_angle') ?? null,

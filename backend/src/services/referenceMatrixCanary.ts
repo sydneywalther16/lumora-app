@@ -169,13 +169,13 @@ export async function buildReferenceProviderReadinessDiagnostics(input: {
       lastReferenceResult: null,
     },
     runway: {
-      configured: Boolean(env.RUNWAY_API_KEY),
-      referenceCapable: false,
+      configured: Boolean(env.RUNWAY_ENABLED && env.RUNWAY_API_KEY && (env.RUNWAY_REFERENCE_MODEL ?? env.RUNWAY_MODEL)),
+      referenceCapable: Boolean(env.RUNWAY_ENABLED && env.RUNWAY_API_KEY && (env.RUNWAY_REFERENCE_MODEL ?? env.RUNWAY_MODEL)),
       canaryTested: false,
       lastReferenceResult: null,
     },
     klingReference: {
-      configured: false,
+      configured: Boolean(env.KLING_ENABLED && env.KLING_API_KEY && env.KLING_REFERENCE_MODEL),
       referenceCapable: false,
       canaryTested: false,
       lastReferenceResult: null,

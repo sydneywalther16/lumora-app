@@ -40,12 +40,12 @@ export function buildAlternateLikenessProviderCanaryStatus(): AlternateLikenessP
     },
     {
       provider: 'runway',
-      configured: Boolean(env.RUNWAY_ENABLED && env.RUNWAY_API_KEY),
-      referenceCapable: false,
+      configured: Boolean(env.RUNWAY_ENABLED && env.RUNWAY_API_KEY && (env.RUNWAY_REFERENCE_MODEL ?? env.RUNWAY_MODEL)),
+      referenceCapable: Boolean(env.RUNWAY_ENABLED && env.RUNWAY_API_KEY && (env.RUNWAY_REFERENCE_MODEL ?? env.RUNWAY_MODEL)),
       canaryTested: false,
       productionRouteEnabled: false,
       lastReferenceResult: null,
-      status: env.RUNWAY_ENABLED && env.RUNWAY_API_KEY ? 'configured_needs_test' : 'not_configured',
+      status: env.RUNWAY_ENABLED && env.RUNWAY_API_KEY && (env.RUNWAY_REFERENCE_MODEL ?? env.RUNWAY_MODEL) ? 'configured_needs_test' : 'not_configured',
     },
     {
       provider: 'veo',

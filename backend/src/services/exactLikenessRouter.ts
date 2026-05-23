@@ -3,6 +3,7 @@ import {
   buildLikenessProviderRegistry,
   type LikenessProviderRegistryEntry,
 } from './likenessProviderRegistry';
+import { getAlternateExactLikenessProviderStatuses } from './alternateLikenessProviderMemory';
 import {
   getOpenAISoraProviderReadiness,
   getSelfProviderCharacterDiagnostics,
@@ -80,6 +81,39 @@ export function chooseExactLikenessRoute(input: {
     referenceRouteSummary: input.referenceRouteSummary,
   });
   const openAI = registryEntry(registry, 'openai_sora_character');
+
+  const runway = registryEntry(registry, 'runway_gen4_reference');
+  if (runway?.configured && runway.supportsExactLikeness && runway.canaryStatus === 'canary_succeeded') {
+    return {
+      route: 'runway_reference',
+      provider: 'runway',
+      confidence: 'high',
+      exactLikeness: true,
+      reason: 'Runway reference route is configured and has a successful canary.',
+      requiredSetup: [],
+      canaryStatus: runway.canaryStatus,
+      fallbackRoute: 'seedance_text_guidance',
+      providerRegistry: registry,
+      recommendedNextAction: 'Use Runway exact likeness route.',
+    };
+  }
+
+  const kling = registryEntry(registry, 'kling_reference');
+  if (kling?.configured && kling.supportsExactLikeness && kling.canaryStatus === 'canary_succeeded') {
+    return {
+      route: 'kling_reference',
+      provider: 'kling',
+      confidence: 'high',
+      exactLikeness: true,
+      reason: 'Kling reference route is configured and has a successful canary.',
+      requiredSetup: [],
+      canaryStatus: kling.canaryStatus,
+      fallbackRoute: 'seedance_text_guidance',
+      providerRegistry: registry,
+      recommendedNextAction: 'Use Kling exact likeness route.',
+    };
+  }
+
   if (hasOpenAIExactRoute({
     readiness: input.openAISoraReadiness,
     identity: input.selfProviderCharacter,
@@ -95,27 +129,6 @@ export function chooseExactLikenessRoute(input: {
       fallbackRoute: 'seedance_text_guidance',
       providerRegistry: registry,
       recommendedNextAction: 'Use exact self character route.',
-    };
-  }
-
-  const alternate = registry.find((entry) => (
-    (entry.id === 'kling_reference' || entry.id === 'runway_gen4_reference') &&
-    entry.configured &&
-    entry.supportsExactLikeness &&
-    entry.canaryStatus === 'succeeded'
-  ));
-  if (alternate) {
-    return {
-      route: alternate.id === 'kling_reference' ? 'kling_reference' : 'runway_reference',
-      provider: alternate.id === 'kling_reference' ? 'kling' : 'runway',
-      confidence: 'high',
-      exactLikeness: true,
-      reason: `${alternate.displayName} is configured and has a successful canary.`,
-      requiredSetup: [],
-      canaryStatus: alternate.canaryStatus,
-      fallbackRoute: 'seedance_text_guidance',
-      providerRegistry: registry,
-      recommendedNextAction: `Use ${alternate.displayName}.`,
     };
   }
 
@@ -183,6 +196,7 @@ export async function resolveExactLikenessRoute(input: {
     openAISoraReadiness,
     selfProviderCharacter,
     referenceRouteSummary,
+    alternateProviderStatuses: await getAlternateExactLikenessProviderStatuses(input),
   });
 
   return chooseExactLikenessRoute({
@@ -194,6 +208,24 @@ export async function resolveExactLikenessRoute(input: {
 }
 
 export function exactLikenessCanaryCandidate(input: ExactLikenessRouterResult) {
+  const runway = registryEntry(input.providerRegistry, 'runway_gen4_reference');
+  if (runway?.configured && runway.readinessStatus === 'configured_ready_for_canary') {
+    return {
+      provider: 'runway',
+      route: 'runway_reference' as const,
+      status: 'configured_ready_for_canary',
+    };
+  }
+
+  const kling = registryEntry(input.providerRegistry, 'kling_reference');
+  if (kling?.configured && kling.readinessStatus === 'configured_ready_for_canary') {
+    return {
+      provider: 'kling',
+      route: 'kling_reference' as const,
+      status: 'configured_ready_for_canary',
+    };
+  }
+
   const openAI = registryEntry(input.providerRegistry, 'openai_sora_character');
   if (
     openAI?.configured &&

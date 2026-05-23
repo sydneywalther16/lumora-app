@@ -11,10 +11,12 @@ const originalEnv = {
   REPLICATE_API_TOKEN: env.REPLICATE_API_TOKEN,
   KLING_ENABLED: env.KLING_ENABLED,
   KLING_API_KEY: env.KLING_API_KEY,
+  KLING_MODEL: env.KLING_MODEL,
   KLING_REFERENCE_MODEL: env.KLING_REFERENCE_MODEL,
   RUNWAY_ENABLED: env.RUNWAY_ENABLED,
   RUNWAY_API_KEY: env.RUNWAY_API_KEY,
   RUNWAY_MODEL: env.RUNWAY_MODEL,
+  RUNWAY_REFERENCE_MODEL: env.RUNWAY_REFERENCE_MODEL,
 };
 
 function restoreEnv() {
@@ -24,10 +26,12 @@ function restoreEnv() {
   env.REPLICATE_API_TOKEN = originalEnv.REPLICATE_API_TOKEN;
   env.KLING_ENABLED = originalEnv.KLING_ENABLED;
   env.KLING_API_KEY = originalEnv.KLING_API_KEY;
+  env.KLING_MODEL = originalEnv.KLING_MODEL;
   env.KLING_REFERENCE_MODEL = originalEnv.KLING_REFERENCE_MODEL;
   env.RUNWAY_ENABLED = originalEnv.RUNWAY_ENABLED;
   env.RUNWAY_API_KEY = originalEnv.RUNWAY_API_KEY;
   env.RUNWAY_MODEL = originalEnv.RUNWAY_MODEL;
+  env.RUNWAY_REFERENCE_MODEL = originalEnv.RUNWAY_REFERENCE_MODEL;
 }
 
 const identity: SelfProviderCharacterDiagnostics = {
@@ -86,10 +90,12 @@ try {
   env.REPLICATE_API_TOKEN = 'replicate-secret';
   env.KLING_ENABLED = false;
   env.KLING_API_KEY = undefined;
+  env.KLING_MODEL = undefined;
   env.KLING_REFERENCE_MODEL = undefined;
   env.RUNWAY_ENABLED = false;
   env.RUNWAY_API_KEY = undefined;
   env.RUNWAY_MODEL = undefined;
+  env.RUNWAY_REFERENCE_MODEL = undefined;
 
   const readiness = getOpenAISoraProviderReadiness();
   const openAIFallback = chooseExactLikenessRoute({
@@ -144,10 +150,12 @@ try {
 
   env.KLING_ENABLED = true;
   env.KLING_API_KEY = 'kling-secret';
+  env.KLING_MODEL = 'kling-video';
   env.KLING_REFERENCE_MODEL = 'kling-reference-model';
   env.RUNWAY_ENABLED = true;
   env.RUNWAY_API_KEY = 'runway-secret';
   env.RUNWAY_MODEL = 'gen4';
+  env.RUNWAY_REFERENCE_MODEL = 'gen4.5';
   const registry = buildLikenessProviderRegistry({
     openAISoraReadiness: readiness,
     selfProviderCharacter: noIdentity,
@@ -156,11 +164,46 @@ try {
   assert.equal(registry.find((provider) => provider.id === 'openai_sora_character')?.deprecated, true);
   assert.equal(registry.find((provider) => provider.id === 'openai_sora_character')?.shutdownDate, '2026-09-24');
   assert.equal(registry.find((provider) => provider.id === 'kling_reference')?.implementationStatus, 'configured_not_implemented');
-  assert.equal(registry.find((provider) => provider.id === 'runway_gen4_reference')?.implementationStatus, 'configured_not_implemented');
+  assert.equal(registry.find((provider) => provider.id === 'runway_gen4_reference')?.implementationStatus, 'configured_ready_for_canary');
+  assert.equal(registry.find((provider) => provider.id === 'lumora_identity_pack')?.implementationStatus, 'research_only');
   const registryText = JSON.stringify(registry);
   assert.equal(registryText.includes('sk-test-secret'), false);
   assert.equal(registryText.includes('kling-secret'), false);
   assert.equal(registryText.includes('runway-secret'), false);
+
+  const configuredButUntested = chooseExactLikenessRoute({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: blockedReferenceSummary,
+    providerRegistry: registry,
+  });
+  assert.equal(configuredButUntested.route, 'seedance_text_guidance');
+  assert.equal(configuredButUntested.exactLikeness, false);
+
+  const runwaySucceededRegistry = buildLikenessProviderRegistry({
+    openAISoraReadiness: mappedReadiness,
+    selfProviderCharacter: identity,
+    referenceRouteSummary: blockedReferenceSummary,
+    alternateProviderStatuses: [{
+      provider: 'runway_gen4_reference',
+      providerModel: 'gen4.5',
+      status: 'canary_succeeded',
+      referenceRole: 'front_angle',
+      referenceLabel: 'Primary front face',
+      lastSuccessAt: '2026-05-23T00:00:00.000Z',
+      lastFailureAt: null,
+      lastFailureCategory: null,
+      outputUrlPresent: true,
+    }],
+  });
+  const runwayExact = chooseExactLikenessRoute({
+    openAISoraReadiness: mappedReadiness,
+    selfProviderCharacter: identity,
+    referenceRouteSummary: blockedReferenceSummary,
+    providerRegistry: runwaySucceededRegistry,
+  });
+  assert.equal(runwayExact.route, 'runway_reference');
+  assert.equal(runwayExact.exactLikeness, true);
 
   console.log('exactLikenessRouter unit tests passed');
 } finally {

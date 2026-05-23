@@ -342,6 +342,22 @@ export type GenerationResponse = {
   retryAvailableAt?: string | null;
 };
 
+export type ExactLikenessCanaryResponse = {
+  ok: boolean;
+  provider: string;
+  route: string;
+  configured?: boolean;
+  readinessStatus?: string;
+  canaryStatus?: string;
+  outputUrlPresent?: boolean;
+  verifiedVideoPresent?: boolean;
+  failureCategory?: string | null;
+  providerErrorSummary?: string | null;
+  recommendedNextAction?: string | null;
+  warning?: string | null;
+  exactLikenessRouterChoice?: Record<string, unknown> | null;
+};
+
 export type GenerationJob = {
   id: string;
   projectId: string | null;
@@ -719,6 +735,9 @@ export type ApiHealthDiagnostics = {
     fallbackRoute: string;
     recommendedNextAction: string;
   };
+  runwayLikenessProvider?: Record<string, unknown>;
+  klingLikenessProvider?: Record<string, unknown>;
+  lumoraIdentityPackStatus?: string;
   likenessProviderRegistry?: Array<{
     id: string;
     displayName: string;
@@ -729,6 +748,7 @@ export type ApiHealthDiagnostics = {
     requiresConsent: boolean;
     requiresCanary: boolean;
     canaryStatus: string;
+    readinessStatus: string;
     lastSuccessAt: string | null;
     lastFailureCategory: string | null;
     deprecated: boolean;
@@ -1123,6 +1143,20 @@ export const api = {
   healthDiagnostics: () => request<ApiHealthDiagnostics>('/api/health/diagnostics', {
     timeoutMs: 15_000,
   }),
+
+  startRunwayLikenessCanary: (payload: { userId?: string | null; saveAsDraft?: boolean } = {}) =>
+    request<ExactLikenessCanaryResponse>('/api/diagnostics/runway-likeness-canary/self', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 180_000,
+    }),
+
+  startKlingLikenessCanary: (payload: { userId?: string | null } = {}) =>
+    request<ExactLikenessCanaryResponse>('/api/diagnostics/kling-likeness-canary/self', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 60_000,
+    }),
 
   createCreativeBrainPlan: (payload: CreativeBrainPlanPayload) =>
     request<CreativeBrainPlanResponse>('/api/creative-brain/plan', {

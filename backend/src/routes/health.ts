@@ -20,6 +20,8 @@ import {
   getOpenAISoraProviderReadiness,
   startOpenAISoraSelfCharacterCanary,
 } from '../services/providers/openaiSoraProvider';
+import { getKlingProviderReadiness, startKlingSelfLikenessCanary } from '../services/providers/klingProvider';
+import { getRunwayProviderReadiness, startRunwaySelfLikenessCanary } from '../services/providers/runwayProvider';
 import { buildVideoThumbnailDiagnostics, repairVideoThumbnails } from '../services/videoThumbnailRepair';
 import {
   backfillGeneratedVideoPosters,
@@ -62,6 +64,8 @@ const canaryRouteInventory = {
   referenceMatrixRouteMounted: true,
   soraCharacterCanaryRouteMounted: true,
   exactLikenessCanaryRouteMounted: true,
+  runwayLikenessCanaryRouteMounted: true,
+  klingLikenessCanaryRouteMounted: true,
   renderLastRouteMounted: true,
   renderPathCompareRouteMounted: true,
 };
@@ -86,6 +90,9 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
     referenceRouteStatus: await getReferenceRouteSummary({}),
     exactLikenessRouter: exactLikeness,
     likenessProviderRegistry: exactLikeness.providerRegistry,
+    runwayLikenessProvider: exactLikeness.providerRegistry.find((provider) => provider.id === 'runway_gen4_reference') ?? getRunwayProviderReadiness(),
+    klingLikenessProvider: exactLikeness.providerRegistry.find((provider) => provider.id === 'kling_reference') ?? getKlingProviderReadiness(),
+    lumoraIdentityPackStatus: 'research_only',
     openaiSoraProvider: getOpenAISoraProviderReadiness(),
     likenessProviderCanary: {
       textSelfGuidanceAvailable: true,
@@ -141,6 +148,8 @@ healthRouter.get('/api/diagnostics/canary-routes', (_req, res) => {
       referenceMatrix: 'POST /api/diagnostics/seedance-reference-matrix/self',
       soraCharacterCanary: 'POST /api/diagnostics/sora-character-canary/self',
       exactLikenessCanary: 'POST /api/diagnostics/exact-likeness-canary/self',
+      runwayLikenessCanary: 'POST /api/diagnostics/runway-likeness-canary/self',
+      klingLikenessCanary: 'POST /api/diagnostics/kling-likeness-canary/self',
       renderLast: 'GET /api/diagnostics/render-last',
       renderPathCompare: 'GET /api/diagnostics/render-path-compare',
     },
@@ -205,6 +214,29 @@ healthRouter.post('/api/diagnostics/exact-likeness-canary/self', async (req, res
     return;
   }
 
+  if (candidate.route === 'runway_reference') {
+    const status = await startRunwaySelfLikenessCanary({
+      userId,
+      saveAsDraft: false,
+    });
+    res.status(status.ok ? 202 : status.failureCategory === 'not_configured' ? 403 : 200).json({
+      ...status,
+      exactLikenessRouterChoice: routerChoice,
+      warning: 'This may consume provider credits when enabled.',
+    });
+    return;
+  }
+
+  if (candidate.route === 'kling_reference') {
+    const status = await startKlingSelfLikenessCanary();
+    res.status(status.failureCategory === 'configured_not_implemented' ? 501 : status.failureCategory === 'not_configured' ? 403 : 200).json({
+      ...status,
+      exactLikenessRouterChoice: routerChoice,
+      warning: 'This may consume provider credits when enabled.',
+    });
+    return;
+  }
+
   if (candidate.route === 'seedance_reference') {
     try {
       const status = await startSeedanceSelfReferenceCanary({
@@ -242,6 +274,52 @@ healthRouter.post('/api/diagnostics/exact-likeness-canary/self', async (req, res
     recommendedNextAction: 'Configure a supported exact likeness provider or continue using soft self guidance.',
     exactLikenessRouterChoice: routerChoice,
     warning: 'This may consume provider credits when a supported route is enabled.',
+  });
+});
+
+healthRouter.post('/api/diagnostics/runway-likeness-canary/self', async (req, res) => {
+  if (!env.ENABLE_RENDER_PROBE) {
+    res.status(403).json({
+      error: 'Render probe disabled. Set ENABLE_RENDER_PROBE=true to run a paid Runway likeness canary.',
+    });
+    return;
+  }
+  if (!env.RUNWAY_ENABLED) {
+    res.status(403).json({
+      error: 'Runway likeness canary disabled. Set RUNWAY_ENABLED=true to run a paid canary.',
+    });
+    return;
+  }
+
+  const payload = canarySchema.parse(req.body ?? {});
+  const status = await startRunwaySelfLikenessCanary({
+    userId: payload.userId ?? req.header('x-lumora-user-id') ?? null,
+    saveAsDraft: payload.saveAsDraft,
+  });
+  res.status(status.ok ? 202 : status.failureCategory === 'not_configured' ? 403 : 200).json({
+    ...status,
+    warning: 'This may consume provider credits.',
+  });
+});
+
+healthRouter.post('/api/diagnostics/kling-likeness-canary/self', async (_req, res) => {
+  if (!env.ENABLE_RENDER_PROBE) {
+    res.status(403).json({
+      error: 'Render probe disabled. Set ENABLE_RENDER_PROBE=true to run a paid Kling likeness canary.',
+    });
+    return;
+  }
+  if (!env.KLING_ENABLED) {
+    res.status(403).json({
+      error: 'Kling likeness canary disabled. Set KLING_ENABLED=true to run a paid canary.',
+    });
+    return;
+  }
+
+  const status = await startKlingSelfLikenessCanary();
+  res.status(status.failureCategory === 'configured_not_implemented' ? 501 : status.failureCategory === 'not_configured' ? 403 : 200).json({
+    ...status,
+    warning: 'This may consume provider credits when a supported Kling route is implemented.',
   });
 });
 

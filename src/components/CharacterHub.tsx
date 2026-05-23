@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { api, type CharacterProfile, type CharacterRelationshipMemory } from '../lib/api';
+import { api, type ApiHealthDiagnostics, type CharacterProfile, type CharacterRelationshipMemory } from '../lib/api';
 import { deleteLocalCharacterProfile, updateLocalCharacterProfile } from '../lib/characterStorage';
 import { getBestThumbnail } from '../lib/mediaThumbnail';
 import {
@@ -33,7 +33,7 @@ type CharacterHubProps = {
   children?: ReactNode;
 };
 
-type DetailSectionKey = 'identity' | 'providerIdentity' | 'appearance' | 'style' | 'voice' | 'memory' | 'references';
+type DetailSectionKey = 'identity' | 'providerIdentity' | 'likenessLab' | 'appearance' | 'style' | 'voice' | 'memory' | 'references';
 
 const characterLimit = 25;
 const characterProfilesMigrationWarning = 'Cast needs the latest Lumora update.';
@@ -130,6 +130,22 @@ function providerIdentityStatusCopy(character: CharacterProfile) {
   if (character.providerCharacterStatus === 'failed') return 'Provider character setup could not run with the current configuration.';
   if (character.providerCharacterStatus === 'disabled') return 'OpenAI video character routing is not configured yet.';
   return 'Create a verified provider character only after uploading a consented self video.';
+}
+
+function likenessRegistryEntry(diagnostics: ApiHealthDiagnostics | null, id: string) {
+  return diagnostics?.likenessProviderRegistry?.find((provider) => provider.id === id) ?? null;
+}
+
+function providerLabStatus(diagnostics: ApiHealthDiagnostics | null, id: string, fallback = 'not configured') {
+  const entry = likenessRegistryEntry(diagnostics, id);
+  if (!entry) return fallback;
+  if (entry.readinessStatus === 'configured_ready_for_canary') return 'ready to test';
+  if (entry.readinessStatus === 'canary_succeeded') return 'succeeded';
+  if (entry.readinessStatus === 'canary_failed') return 'failed';
+  if (entry.readinessStatus === 'configured_not_implemented') return 'configured, not implemented';
+  if (entry.readinessStatus === 'research_only') return 'research only';
+  if (entry.readinessStatus === 'blocked') return 'blocked';
+  return entry.readinessStatus.replace(/_/g, ' ');
 }
 
 function uniqueSceneCount(character: CharacterProfile) {
@@ -333,6 +349,9 @@ export default function CharacterHub({
   const [soraIdentityConsent, setSoraIdentityConsent] = useState(false);
   const [soraIdentitySaving, setSoraIdentitySaving] = useState(false);
   const [soraIdentityStatus, setSoraIdentityStatus] = useState('');
+  const [likenessDiagnostics, setLikenessDiagnostics] = useState<ApiHealthDiagnostics | null>(null);
+  const [likenessLabStatus, setLikenessLabStatus] = useState('');
+  const [likenessCanaryBusy, setLikenessCanaryBusy] = useState<'runway' | 'kling' | null>(null);
   const referenceRepairInputRef = useRef<HTMLInputElement | null>(null);
   const atCharacterLimit = characters.length >= characterLimit;
 
@@ -347,6 +366,9 @@ export default function CharacterHub({
       setSoraIdentityFile(null);
       setSoraIdentityConsent(false);
       setSoraIdentityStatus('');
+      setLikenessDiagnostics(null);
+      setLikenessLabStatus('');
+      setLikenessCanaryBusy(null);
     }
   }, [open]);
 
@@ -372,6 +394,8 @@ export default function CharacterHub({
       setRelationshipNotes('');
       setEditorStatus('');
       setSoraIdentityStatus('');
+      setLikenessDiagnostics(null);
+      setLikenessLabStatus('');
       return;
     }
 
@@ -391,6 +415,26 @@ export default function CharacterHub({
     setDeleteStatus('');
     setExpandedSections(characterIsSelf(selectedCharacter) ? ['memory'] : ['appearance', 'memory']);
   }, [selectedCharacter]);
+
+  useEffect(() => {
+    if (!open || !selectedIsSelf) {
+      setLikenessDiagnostics(null);
+      return;
+    }
+
+    let canceled = false;
+    api.healthDiagnostics()
+      .then((diagnostics) => {
+        if (!canceled) setLikenessDiagnostics(diagnostics);
+      })
+      .catch(() => {
+        if (!canceled) setLikenessDiagnostics(null);
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [open, selectedIsSelf, selectedCharacterId]);
 
   if (!open) return null;
 
@@ -649,6 +693,56 @@ export default function CharacterHub({
     }
   }
 
+  async function refreshLikenessDiagnostics() {
+    const diagnostics = await api.healthDiagnostics();
+    setLikenessDiagnostics(diagnostics);
+    return diagnostics;
+  }
+
+  async function handleRunwayLikenessCanary() {
+    if (!authUser) {
+      setLikenessLabStatus('Sign in to run provider likeness tests.');
+      return;
+    }
+    if (!window.confirm('This may consume provider credits. Run the Runway likeness canary?')) {
+      return;
+    }
+    setLikenessCanaryBusy('runway');
+    setLikenessLabStatus('Starting Runway likeness canary...');
+    try {
+      const result = await api.startRunwayLikenessCanary({ userId: authUser.id, saveAsDraft: false });
+      setLikenessLabStatus(result.ok
+        ? 'Runway likeness canary succeeded.'
+        : result.recommendedNextAction || result.failureCategory || 'Runway likeness canary did not complete.');
+      await refreshLikenessDiagnostics();
+    } catch (error) {
+      setLikenessLabStatus(error instanceof Error ? error.message : 'Runway likeness canary could not start.');
+    } finally {
+      setLikenessCanaryBusy(null);
+    }
+  }
+
+  async function handleKlingLikenessCanary() {
+    if (!authUser) {
+      setLikenessLabStatus('Sign in to run provider likeness tests.');
+      return;
+    }
+    if (!window.confirm('This may consume provider credits when Kling support is mapped. Test Kling likeness route?')) {
+      return;
+    }
+    setLikenessCanaryBusy('kling');
+    setLikenessLabStatus('Checking Kling likeness route...');
+    try {
+      const result = await api.startKlingLikenessCanary({ userId: authUser.id });
+      setLikenessLabStatus(result.recommendedNextAction || result.failureCategory || 'Kling likeness route checked.');
+      await refreshLikenessDiagnostics();
+    } catch (error) {
+      setLikenessLabStatus(error instanceof Error ? error.message : 'Kling likeness route could not start.');
+    } finally {
+      setLikenessCanaryBusy(null);
+    }
+  }
+
   async function handleConfirmDelete() {
     if (!selectedCharacter || selectedIsSelf) return;
 
@@ -896,6 +990,60 @@ export default function CharacterHub({
                 </div>
                 {soraIdentityStatus ? <p className="muted">{soraIdentityStatus}</p> : null}
                 <p className="muted">Provider deletion is unavailable until the configured provider exposes a supported delete route.</p>
+              </div>
+            </CharacterDetailSection>
+          ) : null}
+
+          {selectedIsSelf ? (
+            <CharacterDetailSection
+              id="likenessLab"
+              title="Likeness Lab"
+              summary={`Exact likeness: ${likenessDiagnostics?.exactLikenessRouter?.exactLikeness ? 'ready' : 'soft guidance'}`}
+              expanded={detailSectionIsOpen('likenessLab')}
+              onToggle={toggleDetailSection}
+            >
+              <div className="character-compact-form">
+                <div className="character-memory-viewer character-section-card">
+                  {metadataLine('Soft self guidance', 'Available')}
+                  {metadataLine(
+                    'Seedance references',
+                    likenessDiagnostics?.referenceRouteStatus?.seedanceReferenceRoutesBlocked ? 'Blocked' : 'Saved; needs route canary',
+                  )}
+                  {metadataLine('Runway', providerLabStatus(likenessDiagnostics, 'runway_gen4_reference'))}
+                  {metadataLine('Kling', providerLabStatus(likenessDiagnostics, 'kling_reference'))}
+                  {metadataLine('OpenAI/Sora', `${providerLabStatus(likenessDiagnostics, 'openai_sora_character')} / deprecated bridge`)}
+                  {metadataLine('Lumora Identity Pack', 'Research only')}
+                  <p className="muted">
+                    {likenessDiagnostics?.exactLikenessRouter?.reason || 'Lumora will use soft self guidance until an exact provider canary succeeds.'}
+                  </p>
+                </div>
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    disabled={likenessCanaryBusy !== null}
+                    onClick={() => void handleRunwayLikenessCanary()}
+                  >
+                    {likenessCanaryBusy === 'runway' ? 'Testing Runway...' : 'Test Runway likeness'}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    disabled={likenessCanaryBusy !== null}
+                    onClick={() => void handleKlingLikenessCanary()}
+                  >
+                    {likenessCanaryBusy === 'kling' ? 'Checking Kling...' : 'Test Kling likeness'}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    onClick={() => setLikenessLabStatus('Soft self guidance remains available for reliable videos.')}
+                  >
+                    Use soft self guidance
+                  </button>
+                </div>
+                {likenessLabStatus ? <p className="muted">{likenessLabStatus}</p> : null}
+                <p className="muted">Paid tests require confirmation and never enable production routing until the canary succeeds.</p>
               </div>
             </CharacterDetailSection>
           ) : null}

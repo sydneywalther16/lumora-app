@@ -1,16 +1,23 @@
 import { env } from '../lib/env';
 import {
+  getAlternateProviderStatus,
+  type AlternateExactLikenessProviderStatus,
+} from './alternateLikenessProviderMemory';
+import {
   getOpenAISoraProviderReadiness,
   type OpenAISoraProviderReadiness,
   type SelfProviderCharacterDiagnostics,
 } from './providers/openaiSoraProvider';
+import { getKlingProviderReadiness } from './providers/klingProvider';
+import { getRunwayProviderReadiness } from './providers/runwayProvider';
 
 export type LikenessProviderId =
   | 'seedance_text_guidance'
   | 'seedance_reference_images'
   | 'openai_sora_character'
   | 'kling_reference'
-  | 'runway_gen4_reference';
+  | 'runway_gen4_reference'
+  | 'lumora_identity_pack';
 
 export type LikenessCanaryStatus =
   | 'succeeded'
@@ -21,6 +28,10 @@ export type LikenessCanaryStatus =
   | 'not_required'
   | 'not_configured'
   | 'configured_not_implemented'
+  | 'configured_ready_for_canary'
+  | 'canary_succeeded'
+  | 'canary_failed'
+  | 'research_only'
   | 'unavailable'
   | string;
 
@@ -42,11 +53,12 @@ export type LikenessProviderRegistryEntry = {
   requiresConsent: boolean;
   requiresCanary: boolean;
   canaryStatus: LikenessCanaryStatus;
+  readinessStatus: LikenessCanaryStatus;
   lastSuccessAt: string | null;
   lastFailureCategory: string | null;
   deprecated: boolean;
   shutdownDate: string | null;
-  implementationStatus: 'ready' | 'available' | 'configured_not_implemented' | 'not_configured' | 'blocked' | 'fallback';
+  implementationStatus: 'ready' | 'available' | 'configured_not_implemented' | 'configured_ready_for_canary' | 'not_configured' | 'blocked' | 'fallback' | 'research_only';
   recommendedNextAction: string;
 };
 
@@ -77,6 +89,7 @@ export function buildLikenessProviderRegistry(input: {
   openAISoraReadiness?: OpenAISoraProviderReadiness;
   selfProviderCharacter?: SelfProviderCharacterDiagnostics | null;
   referenceRouteSummary: ReferenceRouteSummaryLike;
+  alternateProviderStatuses?: AlternateExactLikenessProviderStatus[];
 }): LikenessProviderRegistryEntry[] {
   const openAI = input.openAISoraReadiness ?? getOpenAISoraProviderReadiness();
   const summary = input.referenceRouteSummary;
@@ -91,8 +104,12 @@ export function buildLikenessProviderRegistry(input: {
     input.selfProviderCharacter?.selfProviderCharacterStatus === 'ready' &&
     openAICharacterCanaryStatus === 'succeeded',
   );
-  const klingConfigured = Boolean(env.KLING_ENABLED && env.KLING_API_KEY && env.KLING_REFERENCE_MODEL);
-  const runwayConfigured = Boolean(env.RUNWAY_ENABLED && env.RUNWAY_API_KEY);
+  const runwayStatus = getAlternateProviderStatus(input.alternateProviderStatuses, 'runway_gen4_reference');
+  const klingStatus = getAlternateProviderStatus(input.alternateProviderStatuses, 'kling_reference');
+  const runwayReadiness = getRunwayProviderReadiness({ canaryStatus: runwayStatus?.status ?? null });
+  const klingReadiness = getKlingProviderReadiness({ statuses: input.alternateProviderStatuses });
+  const runwayExactReady = runwayReadiness.status === 'canary_succeeded';
+  const klingExactReady = klingReadiness.status === 'canary_succeeded';
 
   return [
     {
@@ -105,6 +122,7 @@ export function buildLikenessProviderRegistry(input: {
       requiresConsent: false,
       requiresCanary: false,
       canaryStatus: 'not_required',
+      readinessStatus: 'not_required',
       lastSuccessAt: null,
       lastFailureCategory: null,
       deprecated: false,
@@ -122,6 +140,7 @@ export function buildLikenessProviderRegistry(input: {
       requiresConsent: false,
       requiresCanary: true,
       canaryStatus: seedanceReferenceCanaryStatus(summary),
+      readinessStatus: seedanceReferenceCanaryStatus(summary),
       lastSuccessAt: routeTimestamp(successfulSeedanceRoute),
       lastFailureCategory: routeFailure(blockedSeedanceRoute) ?? summary.failureCategory,
       deprecated: false,
@@ -149,6 +168,7 @@ export function buildLikenessProviderRegistry(input: {
       requiresConsent: true,
       requiresCanary: true,
       canaryStatus: openAICharacterCanaryStatus,
+      readinessStatus: openAICharacterCanaryStatus,
       lastSuccessAt: input.selfProviderCharacter?.providerCharacterLastVerifiedAt ?? null,
       lastFailureCategory: openAICharacterCanaryStatus !== 'succeeded' && openAICharacterCanaryStatus !== 'not_tested'
         ? openAICharacterCanaryStatus
@@ -167,40 +187,64 @@ export function buildLikenessProviderRegistry(input: {
     {
       id: 'kling_reference',
       displayName: 'Kling reference route',
-      configured: klingConfigured,
-      supportsExactLikeness: false,
-      supportsReferenceImages: klingConfigured,
+      configured: klingReadiness.configured,
+      supportsExactLikeness: klingExactReady,
+      supportsReferenceImages: klingReadiness.configured,
       supportsStoredCharacters: false,
       requiresConsent: false,
       requiresCanary: true,
-      canaryStatus: klingConfigured ? 'configured_not_implemented' : 'not_configured',
-      lastSuccessAt: null,
-      lastFailureCategory: null,
+      canaryStatus: klingReadiness.status,
+      readinessStatus: klingReadiness.status,
+      lastSuccessAt: klingStatus?.lastSuccessAt ?? null,
+      lastFailureCategory: klingStatus?.lastFailureCategory ?? null,
       deprecated: false,
       shutdownDate: null,
-      implementationStatus: klingConfigured ? 'configured_not_implemented' : 'not_configured',
-      recommendedNextAction: klingConfigured
-        ? 'Implement and canary-test Kling reference routing before production use.'
-        : 'Set KLING_ENABLED, KLING_API_KEY, and KLING_REFERENCE_MODEL to evaluate Kling.',
+      implementationStatus: klingExactReady
+        ? 'ready'
+        : klingReadiness.configured
+          ? 'configured_not_implemented'
+          : 'not_configured',
+      recommendedNextAction: klingReadiness.recommendedNextAction,
     },
     {
       id: 'runway_gen4_reference',
       displayName: 'Runway Gen-4 reference route',
-      configured: runwayConfigured,
-      supportsExactLikeness: false,
-      supportsReferenceImages: runwayConfigured,
+      configured: runwayReadiness.configured,
+      supportsExactLikeness: runwayExactReady,
+      supportsReferenceImages: runwayReadiness.configured,
       supportsStoredCharacters: false,
       requiresConsent: false,
       requiresCanary: true,
-      canaryStatus: runwayConfigured ? 'configured_not_implemented' : 'not_configured',
+      canaryStatus: runwayReadiness.status,
+      readinessStatus: runwayReadiness.status,
+      lastSuccessAt: runwayStatus?.lastSuccessAt ?? null,
+      lastFailureCategory: runwayStatus?.lastFailureCategory ?? null,
+      deprecated: false,
+      shutdownDate: null,
+      implementationStatus: runwayExactReady
+        ? 'ready'
+        : runwayReadiness.configured
+          ? 'configured_ready_for_canary'
+          : 'not_configured',
+      recommendedNextAction: runwayReadiness.recommendedNextAction,
+    },
+    {
+      id: 'lumora_identity_pack',
+      displayName: 'Lumora Identity Pack',
+      configured: false,
+      supportsExactLikeness: false,
+      supportsReferenceImages: false,
+      supportsStoredCharacters: true,
+      requiresConsent: true,
+      requiresCanary: true,
+      canaryStatus: 'research_only',
+      readinessStatus: 'research_only',
       lastSuccessAt: null,
       lastFailureCategory: null,
       deprecated: false,
       shutdownDate: null,
-      implementationStatus: runwayConfigured ? 'configured_not_implemented' : 'not_configured',
-      recommendedNextAction: runwayConfigured
-        ? 'Implement and canary-test Runway reference routing before production use.'
-        : 'Set RUNWAY_ENABLED and RUNWAY_API_KEY to evaluate Runway.',
+      implementationStatus: 'research_only',
+      recommendedNextAction: 'Research-only future private identity adapter; do not route production renders here.',
     },
   ];
 }
