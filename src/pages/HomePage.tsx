@@ -1,133 +1,14 @@
 import { useEffect, useState } from 'react';
-import BottomSheet from '../components/BottomSheet';
 import FeedVideoCard from '../components/FeedVideoCard';
 import GeneratedVideoPreview from '../components/GeneratedVideoPreview';
 import SwipeFeed from '../components/SwipeFeed';
-import TopChips from '../components/TopChips';
-import { posts, topChips, type Post, type TopChip } from '../data/mockData';
+import { posts } from '../data/mockData';
 import { type LumoraPost } from '../lib/api';
 import { loadPostedPublications } from '../lib/postStorage';
 import { loadLumoraProfile } from '../lib/profileStorage';
 import { loadLocalProfileAvatarUrl } from '../lib/localAvatarStorage';
 import { useSession } from '../hooks/useSession';
 import { loadSupabasePublicPosts } from '../lib/supabaseAppData';
-
-function formatPostedDate(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return 'Just now';
-  return date.toLocaleString();
-}
-
-function getPostStats(postId: string): { likes: number; comments: number } {
-  let total = 0;
-  for (let i = 0; i < postId.length; i++) {
-    total += postId.charCodeAt(i);
-  }
-
-  return {
-    likes: 100 + (total % 900),
-    comments: 5 + (total % 120),
-  };
-}
-
-const categoryKeywords: Record<Exclude<TopChip, 'For You'>, string[]> = {
-  Cinematic: [
-    'cinematic',
-    'editorial',
-    'dramatic',
-    'golden hour',
-    'sunset',
-    'museum',
-    'skyline',
-    'flashbulb',
-    'art-gallery',
-    'reveal',
-  ],
-  Chaos: [
-    'chaos',
-    'chaotic',
-    'unhinged',
-    'frantic',
-    'spiral',
-    'wild',
-    'high-energy',
-    'turbulence',
-    'crazy',
-    'suspicious',
-  ],
-  Beauty: [
-    'beauty',
-    'glam',
-    'glamour',
-    'makeup',
-    'persona',
-    'portrait',
-    'muse',
-    'creator',
-    'cast',
-    'soft-launch',
-  ],
-  Luxury: [
-    'luxury',
-    'glossy',
-    'high-end',
-    'premium',
-    'elite',
-    'private',
-    'jet',
-    'penthouse',
-    'divine',
-    'confidence',
-  ],
-  Funny: [
-    'funny',
-    'comedy',
-    'comedic',
-    'sitcom',
-    'joke',
-    'deadpan',
-    'confessional',
-    'parody',
-    'humor',
-    'laugh',
-  ],
-  'NPC Core': [
-    'npc',
-    'virtual',
-    'avatar',
-    'persona',
-    'cinematic creator',
-    'bot',
-    'simulation',
-    'pixel',
-    'digital',
-    'streamer',
-  ],
-};
-
-function inferCategoriesFromText(text: string): TopChip[] {
-  const normalized = text.toLowerCase();
-  const matches = (Object.entries(categoryKeywords) as Array<
-    [Exclude<TopChip, 'For You'>, string[]]
-  >)
-    .filter(([, keywords]) => keywords.some((keyword) => normalized.includes(keyword)))
-    .map(([category]) => category);
-
-  return matches.length ? matches : ['For You'];
-}
-
-function getCombinedPostText(post: LumoraPost): string {
-  return `${post.title ?? ''} ${post.caption ?? ''} ${post.prompt ?? ''}`;
-}
-
-function getCombinedDemoPostText(post: Post): string {
-  return `${post.caption} ${post.prompt} ${post.stylePreset} ${post.tags.join(' ')}`;
-}
-
-function matchesCategory(category: TopChip, text: string): boolean {
-  if (category === 'For You') return true;
-  return inferCategoriesFromText(text).includes(category);
-}
 
 function homeMockVideoPost(): LumoraPost {
   const now = new Date().toISOString();
@@ -164,15 +45,12 @@ type HomeFeedCardProps = {
 };
 
 function HomeFeedCard({ post, fallbackAuthorAvatar, onSelect }: HomeFeedCardProps) {
-  const stats = getPostStats(post.id);
-
   const title = post.title || post.caption || 'Untitled Lumora post';
   const bodyText = post.caption || post.prompt || 'Posted from Drafts';
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
   const authorUsername = post.creatorUsername || post.username || 'lumora.creator';
   const authorAvatar = post.creatorAvatar || post.avatar || fallbackAuthorAvatar;
   const featuring = !post.isDefaultSelfCharacter && post.characterName ? `Featuring ${post.characterName}` : undefined;
-  const defaultSelfLabel = post.isDefaultSelfCharacter ? 'Cinematic self' : undefined;
 
   return (
     <FeedVideoCard
@@ -182,8 +60,7 @@ function HomeFeedCard({ post, fallbackAuthorAvatar, onSelect }: HomeFeedCardProp
       creatorName={authorName}
       creatorUsername={authorUsername}
       creatorAvatar={authorAvatar}
-      statsText={`${stats.likes} likes`}
-      badges={[defaultSelfLabel, featuring, formatPostedDate(post.createdAt)].filter((badge): badge is string => Boolean(badge))}
+      badges={[featuring].filter((badge): badge is string => Boolean(badge))}
       variant="hero"
       autoPlayMuted={Boolean(post.videoUrl)}
       onOpen={() => onSelect(post)}
@@ -284,7 +161,6 @@ function HomePostModal({
 
 export default function HomePage() {
   const { configured } = useSession();
-  const [activeCategory, setActiveCategory] = useState<TopChip>('For You');
   const [localPosts, setLocalPosts] = useState<LumoraPost[]>([]);
   const [fallbackAuthorAvatar, setFallbackAuthorAvatar] = useState<string | null>(null);
   const [feedMessage, setFeedMessage] = useState('');
@@ -334,44 +210,17 @@ export default function HomePage() {
     };
   }, [configured]);
 
-  const filteredLocalPosts =
-    activeCategory === 'For You'
-      ? localPosts
-      : localPosts.filter((post) => matchesCategory(activeCategory, getCombinedPostText(post)));
-
-  const filteredDemoPosts =
-    activeCategory === 'For You'
-      ? posts
-      : posts.filter((post) => matchesCategory(activeCategory, getCombinedDemoPostText(post)));
-
-  const emptyCategoryLabel = activeCategory.toLowerCase();
-
   return (
     <div className="page lumora-page cinematic-feed-page">
-      <TopChips
-        items={topChips}
-        activeItem={activeCategory}
-        onSelect={(item) => setActiveCategory(item as TopChip)}
-      />
-
-      {!localPosts.length ? (
-        <div className="hero-stat-row">
-          <div className="hero-stat-card">
-            <span>Creator score</span>
-            <strong>96</strong>
-          </div>
-          <div className="hero-stat-card">
-            <span>Trending rate</span>
-            <strong>+38%</strong>
-          </div>
-        </div>
-      ) : null}
+      <header className="home-feed-header">
+        <p>Cinematic moments from your world</p>
+      </header>
 
       {feedMessage ? <p className="muted">{feedMessage}</p> : null}
 
-      {filteredLocalPosts.length ? (
+      {localPosts.length ? (
         <section className="list-stack">
-          {filteredLocalPosts.map((post) => (
+          {localPosts.map((post) => (
             <HomeFeedCard
               key={`local-${post.id}`}
               post={post}
@@ -380,41 +229,19 @@ export default function HomePage() {
             />
           ))}
         </section>
-      ) : null}
-
-      {localPosts.length && !filteredLocalPosts.length ? (
-        <section className="list-stack">
-          <article className="list-card lumora-card lumora-empty-state">
-            <div className="row-between">
-              <h3>No {emptyCategoryLabel} posts yet</h3>
-              <span className="tiny-pill" style={{ background: 'var(--pill-background)' }}>
-                Local
-              </span>
-            </div>
-            <p>Try another category, or post a concept from Drafts that matches this lane.</p>
-          </article>
-        </section>
-      ) : !localPosts.length && filteredDemoPosts.length ? (
-        <SwipeFeed posts={filteredDemoPosts} />
+      ) : posts.length ? (
+        <SwipeFeed posts={posts} />
       ) : !localPosts.length ? (
         <section className="list-stack">
           <article className="list-card lumora-card lumora-empty-state">
             <div className="row-between">
-              <h3>No {emptyCategoryLabel} demos yet</h3>
+              <h3>No videos yet</h3>
               <span className="tiny-pill status-drafting">Ready</span>
             </div>
-            <p>The demo feed does not have a match for this category yet.</p>
+            <p>Post a public concept from Drafts to add it to Home.</p>
           </article>
         </section>
       ) : null}
-
-      <BottomSheet title={localPosts.length ? 'Feed is live' : 'Quick Drafts note'}>
-        <p>
-          {localPosts.length
-            ? 'Your posted concepts are showing in Home.'
-            : 'Your best-performing concepts this week all share a stronger first-frame hook.'}
-        </p>
-      </BottomSheet>
 
       {selectedPost ? (
         <HomePostModal

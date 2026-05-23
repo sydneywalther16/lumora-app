@@ -17,13 +17,6 @@ type FeedVideoCardProps = {
 
 const CONTROL_HIDE_DELAY_MS = 1800;
 
-function formatTime(value: number) {
-  if (!Number.isFinite(value) || value <= 0) return '0:00';
-  const minutes = Math.floor(value / 60);
-  const seconds = Math.floor(value % 60).toString().padStart(2, '0');
-  return `${minutes}:${seconds}`;
-}
-
 function usePrefersReducedMotion() {
   const [reducedMotion, setReducedMotion] = useState(false);
 
@@ -163,6 +156,7 @@ export default function FeedVideoCard({
       ref={shellRef}
       className={`feed-video-card feed-video-card-${variant}${shouldHideControls ? ' feed-video-controls-hidden' : ''}`}
       onClick={onOpen}
+      onPointerDown={revealControls}
       onMouseEnter={revealControls}
       onMouseMove={revealControls}
       onFocus={revealControls}
@@ -234,7 +228,6 @@ export default function FeedVideoCard({
             <button type="button" className="feed-video-icon-button" onClick={togglePlay} aria-label={playing ? 'Pause video' : 'Play video'}>
               <span className={playing ? 'pause-glyph' : 'play-glyph'} aria-hidden="true" />
             </button>
-            <span className="feed-video-time">{formatTime(currentTime)} / {formatTime(duration)}</span>
             <button type="button" className="feed-video-icon-button" onClick={toggleMuted} aria-label={muted ? 'Unmute video' : 'Mute video'}>
               <span className={muted ? 'mute-glyph' : 'sound-glyph'} aria-hidden="true" />
             </button>
@@ -255,12 +248,14 @@ export default function FeedVideoCard({
 
         {caption ? <p>{caption}</p> : null}
 
-        <div className="feed-video-meta-row">
-          {visibleBadges.map((badge) => (
-            <span key={badge} className="feed-video-meta-text">{badge}</span>
-          ))}
-          {statsText ? <span className="feed-video-meta-text">{statsText}</span> : null}
-        </div>
+        {visibleBadges.length || statsText ? (
+          <div className="feed-video-meta-row">
+            {visibleBadges.map((badge) => (
+              <span key={badge} className="feed-video-meta-text">{badge}</span>
+            ))}
+            {statsText ? <span className="feed-video-meta-text">{statsText}</span> : null}
+          </div>
+        ) : null}
       </div>
     </article>
   );
