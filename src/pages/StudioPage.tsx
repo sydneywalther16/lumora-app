@@ -152,7 +152,7 @@ export default function StudioPage() {
         title:
           project.title ||
           (project.isDefaultSelfCharacter
-            ? 'Cinematic self selected'
+            ? 'Soft self guidance'
             : project.characterName
               ? `Character: ${project.characterName}`
               : 'Generated video'),

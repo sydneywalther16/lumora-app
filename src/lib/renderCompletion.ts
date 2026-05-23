@@ -63,5 +63,8 @@ export function shouldShowLighterCastGuidance(record: Record<string, unknown> | 
 }
 
 export function lighterCastGuidanceMessage(record: Record<string, unknown> | null | undefined) {
-  return shouldShowLighterCastGuidance(record) ? 'Rendered with lighter cast guidance.' : null;
+  if (!shouldShowLighterCastGuidance(record)) return null;
+  return Boolean(record?.isDefaultSelfCharacter || record?.is_default_self_character)
+    ? 'Rendered with soft self guidance.'
+    : 'Rendered with lighter cast guidance.';
 }

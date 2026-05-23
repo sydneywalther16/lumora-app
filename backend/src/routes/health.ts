@@ -11,6 +11,10 @@ import { buildReferenceCleanupDiagnostics } from '../services/referenceCleanup';
 import { startSeedanceReferenceMatrixCanary } from '../services/referenceMatrixCanary';
 import { buildRenderSuccessDiagnostics } from '../services/renderSuccessEngine';
 import { buildRenderReliabilityDiagnostics } from '../services/sceneOptimization';
+import {
+  alternateLikenessProvidersConfigured,
+  buildAlternateLikenessProviderCanaryStatus,
+} from '../services/likenessProviderCanary';
 import { buildVideoThumbnailDiagnostics, repairVideoThumbnails } from '../services/videoThumbnailRepair';
 import {
   backfillGeneratedVideoPosters,
@@ -72,6 +76,11 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
     providerFallback: await buildProviderFallbackDiagnostics(),
     renderSuccessEngine: await buildRenderSuccessDiagnostics(),
     referenceRouteStatus: await getReferenceRouteSummary({}),
+    likenessProviderCanary: {
+      textSelfGuidanceAvailable: true,
+      alternateLikenessProvidersConfigured: alternateLikenessProvidersConfigured().map((provider) => provider.provider),
+      alternateLikenessProviderCanaryStatus: buildAlternateLikenessProviderCanaryStatus(),
+    },
     renderReliability: await buildRenderReliabilityDiagnostics(),
     asyncRenderJobs: await buildAsyncRenderJobDiagnostics(),
     videoThumbnails: await buildVideoThumbnailDiagnostics({ posterGenerationAvailability, posterBackfillRuntime }),

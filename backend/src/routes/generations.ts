@@ -22,6 +22,7 @@ import { createVideoGeneration } from '../video';
 
 const generationEngines = ['seedance-2.0', 'seedance-quality', 'veo', 'runway', 'mock', 'openai'] as const;
 const renderPreferences = ['cinematic_quality', 'balanced', 'success_first'] as const;
+const selfLikenessIntensities = ['light', 'balanced', 'strong'] as const;
 const seedanceReferenceImageSchema = z.union([
   z.string().url(),
   z.object({
@@ -46,6 +47,7 @@ const generationSchema = z.object({
   characterAvatar: z.string().optional().nullable(),
   isDefaultSelfCharacter: z.boolean().optional().nullable(),
   renderPreference: z.enum(renderPreferences).default('balanced'),
+  selfLikenessIntensity: z.enum(selfLikenessIntensities).optional().default('balanced'),
   referenceImages: z.array(seedanceReferenceImageSchema).optional(),
   referenceImageUrls: z.record(z.string(), z.unknown()).optional().nullable(),
   additionalReferenceImageUrls: z.array(z.string()).optional().nullable(),
@@ -63,6 +65,7 @@ const seedanceGenerationSchema = z.object({
   characterAvatar: z.string().optional().nullable(),
   isDefaultSelfCharacter: z.boolean().optional().nullable(),
   renderPreference: z.enum(renderPreferences).default('balanced'),
+  selfLikenessIntensity: z.enum(selfLikenessIntensities).optional().default('balanced'),
   referenceImages: z.array(seedanceReferenceImageSchema).optional(),
   referenceImageUrls: z.record(z.string(), z.unknown()).optional().nullable(),
   additionalReferenceImageUrls: z.array(z.string()).optional().nullable(),
@@ -163,6 +166,7 @@ generationsRouter.post('/seedance', generationRateLimit, async (req, res) => {
         allowDemoFallback: false,
         maxPaidAttempts: undefined,
         maxTotalAttempts: undefined,
+        selfLikenessIntensity: payload.selfLikenessIntensity,
       });
       const status = formatRenderSuccessJobStatus(job);
 
@@ -258,6 +262,7 @@ generationsRouter.post('/', generationRateLimit, async (req, res) => {
           isDefaultSelfCharacter: payload.isDefaultSelfCharacter ?? null,
           referenceImages: references,
           allowDemoFallback: false,
+          selfLikenessIntensity: payload.selfLikenessIntensity,
         });
         const status = formatRenderSuccessJobStatus(job);
 

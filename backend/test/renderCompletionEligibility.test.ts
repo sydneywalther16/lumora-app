@@ -16,7 +16,7 @@ const verifiedTextOnly = {
 assert.equal(hasVerifiedVideoOutput(verifiedTextOnly), true);
 assert.equal(isPublishEligible(verifiedTextOnly), true);
 assert.equal(isContinueStoryEligible(verifiedTextOnly), true);
-assert.equal(lighterCastGuidanceMessage(verifiedTextOnly), 'Rendered with lighter cast guidance.');
+assert.equal(lighterCastGuidanceMessage(verifiedTextOnly), 'Rendered with soft self guidance.');
 
 const renderingNoOutput = {
   status: 'rendering',

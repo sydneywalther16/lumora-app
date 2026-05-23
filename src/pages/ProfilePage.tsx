@@ -1025,7 +1025,7 @@ function ProfilePostTile({
   const bodyText = post.caption || post.prompt || 'No prompt available';
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
   const characterLabel = post.isDefaultSelfCharacter
-    ? 'Cinematic self'
+    ? 'Soft self guidance'
     : post.characterName
       ? `Featuring ${post.characterName}`
       : null;
@@ -1116,7 +1116,7 @@ function ProfilePostPreviewModal({
   const authorUsername = post.creatorUsername || post.username || 'lumora.creator';
   const authorAvatar = post.creatorAvatar || post.avatar || fallbackAvatar;
   const characterLabel = post.isDefaultSelfCharacter
-    ? 'Cinematic self'
+    ? 'Soft self guidance'
     : post.characterName
       ? `Featuring ${post.characterName}`
       : null;
@@ -1583,7 +1583,7 @@ function ProfileMenuSidebar({
 
 function ProjectCard({ project, onOpen }: { project: StudioProject; onOpen: () => void }) {
   const characterLabel = project.isDefaultSelfCharacter
-    ? 'Cinematic self'
+    ? 'Soft self guidance'
     : project.characterName
       ? `Character: ${project.characterName}`
       : 'No character selected';

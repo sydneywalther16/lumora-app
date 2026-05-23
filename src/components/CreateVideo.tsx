@@ -21,6 +21,7 @@ import {
   type RenderSuccessMode,
   type SceneExecutorResult,
   type SceneOptimizationDiagnostics,
+  type SelfLikenessIntensity,
   type SeedanceReferenceImage,
   type VideoAspectRatio,
   type VideoEngine,
@@ -114,6 +115,27 @@ const renderPreferenceOptions: Array<{
     value: 'success_first',
     label: 'Success First',
     description: 'Shorter, gentler scenes with stronger render odds.',
+  },
+];
+const selfLikenessOptions: Array<{
+  value: SelfLikenessIntensity;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: 'light',
+    label: 'Light',
+    description: 'Minimal saved-look guidance for the highest render odds.',
+  },
+  {
+    value: 'balanced',
+    label: 'Balanced',
+    description: 'Short saved-look guidance while keeping the proven text route.',
+  },
+  {
+    value: 'strong',
+    label: 'Strong',
+    description: 'More textual appearance detail without photo references.',
   },
 ];
 const providerOptions: Array<{
@@ -281,6 +303,8 @@ type GenerateVideoApiResponse = {
   duplicateOf?: string | null;
   retryAfterSeconds?: number | null;
   retryAvailableAt?: string | null;
+  selfLikenessIntensity?: SelfLikenessIntensity | null;
+  textSelfGuidanceAvailable?: boolean | null;
 };
 
 type GenerationStatusState = 'idle' | 'queued' | 'processing' | 'verifying_output' | 'rate_limited' | 'completed' | 'failed';
@@ -410,7 +434,7 @@ function creatorSceneStatusLabel(status: string) {
 }
 
 const likenessFeedbackOptions: Array<{ value: LumoraIdentityFeedbackChoice; label: string }> = [
-  { value: 'looks_like_me', label: 'likeness feels right' },
+  { value: 'looks_like_me', label: 'self guidance feels right' },
   { value: 'hair_wrong', label: 'hair wrong' },
   { value: 'face_shape_wrong', label: 'face shape wrong' },
   { value: 'skin_tone_wrong', label: 'skin tone wrong' },
@@ -676,7 +700,7 @@ function providerFallbackWarningMessages(value: unknown): string[] {
     messages.push('Lumora simplified this scene to help it render smoothly.');
   }
   if (value.renderedWithLighterCastGuidance) {
-    messages.push('Rendered with lighter cast guidance.');
+    messages.push('Rendered with soft self guidance.');
   }
 
   return Array.from(new Set(messages));
@@ -1051,6 +1075,7 @@ export default function CreateVideo({
   const [duration, setDuration] = useState(4);
   const [aspectRatio, setAspectRatio] = useState<VideoAspectRatio>('16:9');
   const [renderPreference, setRenderPreference] = useState<RenderSuccessMode>('success_first');
+  const [selfLikenessIntensity, setSelfLikenessIntensity] = useState<SelfLikenessIntensity>('balanced');
   const [engine, setEngine] = useState<VideoEngine>(SEEDANCE_ENGINE_ID);
   const [status, setStatus] = useState('');
   const [generationStatusState, setGenerationStatusState] = useState<GenerationStatusState>('idle');
@@ -1280,7 +1305,7 @@ export default function CreateVideo({
   const engineRoutingMessage =
     isSeedanceEngine
       ? renderPreference === 'success_first'
-        ? 'Success First starts with the proven text-only path, then adds likeness only after a reference route works.'
+        ? 'Success First uses your saved look as text guidance first, then adds photo likeness only after a route works.'
         : `${selectedProviderOption.label} uses ${seedanceReferenceCount} cast reference${seedanceReferenceCount === 1 ? '' : 's'} while keeping the scene fresh.`
     : engine === 'veo'
       ? 'Veo Experimental is ready for the next cinematic video route.'
@@ -1495,7 +1520,9 @@ export default function CreateVideo({
             displayEngine,
             projectId: job.projectId ?? null,
             createdAt: job.createdAt ?? completedAt,
-            message: job.message ?? 'Your cinematic draft is saved.',
+            message: job.message ?? (job.textSelfGuidanceAvailable ? 'Rendered with soft self guidance.' : 'Your cinematic draft is saved.'),
+            selfLikenessIntensity: job.selfLikenessIntensity ?? selfLikenessIntensity,
+            textSelfGuidanceAvailable: job.textSelfGuidanceAvailable ?? null,
           });
           setActiveRenderJobId(null);
           finishGenerationProgress('completed');
@@ -1742,7 +1769,7 @@ export default function CreateVideo({
     setGenerationModerationStages([
       'Trying primary reference...',
       'Trying storybook cinematic take...',
-      'Trying lighter cast guidance...',
+      'Trying soft self guidance...',
     ]);
     setStatus('This scene needs a simpler direction before rendering.');
   }, [mockAllAttemptsBlockedUi]);
@@ -2377,6 +2404,7 @@ export default function CreateVideo({
     const selectedEngine = engine;
     const selectedDuration = options.durationOverride ?? duration;
     const selectedRenderPreference = options.renderPreferenceOverride ?? renderPreference;
+    const selectedSelfLikenessIntensity = selfLikenessIntensity;
     const selectedReferenceImageUrl = resolveRenderableReferenceUrl(referenceImageUrl) || selectedSelfReferenceImageUrl;
 
     if (!currentPrompt.trim()) {
@@ -2503,6 +2531,7 @@ export default function CreateVideo({
           engine: selectedEngine,
           quality: selectedEngine === SEEDANCE_QUALITY_ENGINE_ID ? 'quality' : 'fast',
           renderPreference: selectedRenderPreference,
+          selfLikenessIntensity: selectedSelfLikenessIntensity,
           characterId,
           characterName,
           characterAvatar,
@@ -2543,6 +2572,8 @@ export default function CreateVideo({
           duplicateOf: seedanceResult.duplicateOf,
           retryAfterSeconds: seedanceResult.retryAfterSeconds ?? null,
           retryAvailableAt: seedanceResult.retryAvailableAt ?? null,
+          selfLikenessIntensity: seedanceResult.selfLikenessIntensity ?? selectedSelfLikenessIntensity,
+          textSelfGuidanceAvailable: seedanceResult.textSelfGuidanceAvailable ?? null,
         };
       } else if (selectedIsBackendProviderEngine) {
         const providerResult = await api.createGeneration({
@@ -2558,6 +2589,7 @@ export default function CreateVideo({
           aspectRatio: selectedAspectRatio,
           engine: selectedEngine,
           renderPreference: selectedRenderPreference,
+          selfLikenessIntensity: selectedSelfLikenessIntensity,
         });
 
         if (providerResult.status === 'failed') {
@@ -2586,6 +2618,8 @@ export default function CreateVideo({
           providerStatus: providerResult.providerStatus,
           retryAfterSeconds: providerResult.retryAfterSeconds ?? null,
           retryAvailableAt: providerResult.retryAvailableAt ?? null,
+          selfLikenessIntensity: providerResult.selfLikenessIntensity ?? selectedSelfLikenessIntensity,
+          textSelfGuidanceAvailable: providerResult.textSelfGuidanceAvailable ?? null,
         };
       } else {
         const res = await fetch('/api/lumora/generate-video', {
@@ -2611,6 +2645,7 @@ export default function CreateVideo({
             provider: 'replicate',
             engine: selectedEngine,
             renderPreference: selectedRenderPreference,
+            selfLikenessIntensity: selectedSelfLikenessIntensity,
             generationMode: videoGenerationMode,
           }),
         });
@@ -2776,6 +2811,11 @@ export default function CreateVideo({
       const profile = authUser ? await loadSupabaseProfile(authUser.id) : loadLumoraProfile();
       const now = new Date().toISOString();
       const generationId = createLocalGenerationId();
+      const renderedWithSoftSelfGuidance = Boolean(
+        isDefaultSelfCharacter &&
+        nextGenerationMode === 'seedance-text-to-video' &&
+        (data.textSelfGuidanceAvailable || selectedRenderPreference === 'success_first')
+      );
       const result: GenerationResponse = {
         id: generationId,
         jobId: generationId,
@@ -2811,14 +2851,16 @@ export default function CreateVideo({
         multimodalReferenceMode: selectedIsSeedanceEngine
           ? effectiveSeedanceReferences.length > 1
           : null,
-        message: renderedWithLighterCastGuidance
-          ? 'Rendered with lighter cast guidance.'
+        selfLikenessIntensity: data.selfLikenessIntensity ?? selectedSelfLikenessIntensity,
+        textSelfGuidanceAvailable: data.textSelfGuidanceAvailable ?? null,
+        message: renderedWithLighterCastGuidance || renderedWithSoftSelfGuidance
+          ? 'Rendered with soft self guidance.'
           : nextGenerationMode === 'seedance-multimodal-reference'
           ? 'Cast reference render created.'
           : nextGenerationMode === 'seedance-text-to-video'
           ? 'Cinematic video render created.'
           : nextGenerationMode === 'text-to-video-fallback'
-          ? 'Text-only fallback render created. Likeness is not guaranteed.'
+          ? 'Text-only render created with soft self guidance.'
           : 'Kling self-reference video render created.',
         createdAt: now,
       };
@@ -3170,7 +3212,7 @@ export default function CreateVideo({
 
         <div className="cast-summary-card">
           <div>
-            <strong>{characterName ? (isDefaultSelfCharacter ? 'Cinematic self selected' : characterName) : 'Cinematic self selected'}</strong>
+            <strong>{characterName ? (isDefaultSelfCharacter ? 'Soft self guidance selected' : characterName) : 'Soft self guidance selected'}</strong>
             <p className="muted">
               {isSeedanceEngine
                 ? `${savedSeedanceReferenceCount || seedanceReferenceCount} reference${(savedSeedanceReferenceCount || seedanceReferenceCount) === 1 ? '' : 's'} ready`
@@ -3558,6 +3600,29 @@ export default function CreateVideo({
               {renderPreferenceOptions.find((option) => option.value === renderPreference)?.description}
             </small>
           </div>
+          {selfReferenceMode && isSeedanceEngine ? (
+            <div className="field-block">
+              <span>Self likeness</span>
+              <div className="chip-row wrap" role="radiogroup" aria-label="Self likeness intensity">
+                {selfLikenessOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={selfLikenessIntensity === option.value}
+                    className={`chip ${selfLikenessIntensity === option.value ? 'active' : ''}`}
+                    onClick={() => setSelfLikenessIntensity(option.value)}
+                    title={option.description}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <small className="muted">
+                {selfLikenessOptions.find((option) => option.value === selfLikenessIntensity)?.description}
+              </small>
+            </div>
+          ) : null}
         </details>
 
         <details className="advanced-create-details renderer-details">
@@ -3606,9 +3671,10 @@ export default function CreateVideo({
               </span>
             ) : null}
             {successFirstLighterReferencePath ? (
-              <span className="muted">
-                Likeness guidance is saved, but Lumora will render the first draft with a lighter path.
-              </span>
+              <>
+                <span className="muted">Lumora will use your saved look as text guidance first.</span>
+                <span className="muted">Photo likeness is saved, but this renderer needs a lighter identity path.</span>
+              </>
             ) : null}
             {isSeedanceEngine && seedanceReferenceCount > 0 ? (
               <details className="compact-reference-details">
@@ -3758,7 +3824,7 @@ export default function CreateVideo({
               <ol className="success-ladder-progress" aria-label="Render progress">
                 {[
                   'Preparing cast',
-                  successFirstLighterReferencePath ? 'Creating lighter cast draft' : 'Trying storybook cinematic take',
+                  successFirstLighterReferencePath ? 'Creating soft self-guided draft' : 'Trying storybook cinematic take',
                   'Saving to Drafts',
                 ].map((step, index) => (
                   <li key={step} className={index === 0 || generationStatusState === 'processing' ? 'active' : ''}>
@@ -4019,7 +4085,7 @@ export default function CreateVideo({
             <span className="tiny-pill">Draft saved</span>
           </div>
           {isDefaultSelfCharacter ? (
-            <p><strong>Cinematic self selected</strong></p>
+            <p><strong>Soft self guidance</strong></p>
           ) : generationResult.characterName ? (
             <p>Character: <strong>{generationResult.characterName}</strong></p>
           ) : null}
@@ -4071,9 +4137,9 @@ export default function CreateVideo({
           </div>
           {selfReferenceMode && onLikenessFeedback ? (
             <div style={{ display: 'grid', gap: '10px', marginTop: '12px' }}>
-              <strong>Improve likeness</strong>
+              <strong>Improve self guidance</strong>
               <p className="muted" style={{ margin: 0 }}>
-                Lumora will use your feedback to improve future scenes and cast consistency.
+                Lumora will use your feedback to tune future text guidance while photo routes stay protected.
               </p>
               <div className="chip-row wrap">
                 {likenessFeedbackOptions.map((option) => (
@@ -4093,7 +4159,7 @@ export default function CreateVideo({
                   value={feedbackNote}
                   onChange={(event) => setFeedbackNote(event.target.value)}
                   rows={3}
-                  placeholder="Add a likeness note"
+                  placeholder="Add a self guidance note"
                 />
               </label>
               <button

@@ -3,6 +3,10 @@ import { env } from '../lib/env';
 import { parseProviderVideoOutput } from './providerOutputParser';
 import { serializeDiagnosticError } from './schemaDiagnostics';
 import { buildSeedanceCanarySummaryDiagnostics, getReferenceRouteSummary } from './seedanceCanary';
+import {
+  alternateLikenessProvidersConfigured,
+  buildAlternateLikenessProviderCanaryStatus,
+} from './likenessProviderCanary';
 
 type LatestRenderRow = {
   id: string;
@@ -55,6 +59,31 @@ function canaryProviderFailure(row: LatestRenderRow | null) {
     providerErrorSummary: typeof record.providerErrorSummary === 'string' ? redactMessage(record.providerErrorSummary) : null,
     providerLogsExcerpt: typeof record.providerLogsExcerpt === 'string' ? redactMessage(record.providerLogsExcerpt) : null,
     predictionGetUrlHost: typeof record.predictionGetUrlHost === 'string' ? record.predictionGetUrlHost : null,
+  };
+}
+
+function renderSuccessEngineMetadata(row: LatestRenderRow | null) {
+  const metadata = row?.sceneMetadata?.renderSuccessEngine;
+  return metadata && typeof metadata === 'object' ? metadata as Record<string, unknown> : {};
+}
+
+function textSelfGuidanceDiagnostics(row: LatestRenderRow | null) {
+  const metadata = renderSuccessEngineMetadata(row);
+  const descriptor = typeof metadata.textSelfGuidanceDescriptorPreview === 'string'
+    ? metadata.textSelfGuidanceDescriptorPreview
+    : typeof metadata.selfLikenessDescriptor === 'string'
+      ? metadata.selfLikenessDescriptor
+      : null;
+  const selectedLikenessMode = metadata.selfLikenessIntensity === 'light' || metadata.selfLikenessIntensity === 'strong'
+    ? metadata.selfLikenessIntensity
+    : 'balanced';
+
+  return {
+    textSelfGuidanceAvailable: Boolean(metadata.textSelfGuidanceAvailable || descriptor),
+    textSelfGuidanceDescriptorPreview: descriptor,
+    selectedLikenessMode,
+    alternateLikenessProvidersConfigured: alternateLikenessProvidersConfigured().map((provider) => provider.provider),
+    alternateLikenessProviderCanaryStatus: buildAlternateLikenessProviderCanaryStatus(),
   };
 }
 
@@ -180,10 +209,12 @@ export async function buildLastRenderDiagnostics() {
     if (!row) {
       const canarySummary = await buildSeedanceCanarySummaryDiagnostics();
       const referenceRouteSummary = await getReferenceRouteSummary({});
+      const textGuidance = textSelfGuidanceDiagnostics(null);
       return {
         ok: true,
         latestGenerationJob: null,
         seedanceCanary: canarySummary,
+        ...textGuidance,
         textOnlyCanarySucceeded: canarySummary.canaryEverSucceeded,
         referenceRouteState: referenceRouteSummary.state,
         seedanceReferenceRoutesBlocked: referenceRouteSummary.seedanceReferenceRoutesBlocked,
@@ -261,6 +292,7 @@ export async function buildLastRenderDiagnostics() {
       : null;
     const cooldownRow = activeRow.status === 'rate_limited' ? activeRow : row.status === 'rate_limited' ? row : null;
     const providerFailure = canaryProviderFailure(activeRow) ?? canaryProviderFailure(row);
+    const textGuidance = textSelfGuidanceDiagnostics(row);
     const referenceRouteSummary = await getReferenceRouteSummary({
       userId: row.userId,
       characterId: row.characterId,
@@ -321,6 +353,7 @@ export async function buildLastRenderDiagnostics() {
         whyPaused: whyPaused(row, attemptRow),
         nextAttemptPlanned: nextAttemptPlanned(row, attemptRow, attemptsSummary?.count ?? null),
         canaryEverSucceeded: canarySummary.canaryEverSucceeded,
+        ...textGuidance,
         textOnlyCanarySucceeded: canarySummary.canaryEverSucceeded,
         lastCanaryStatus: canarySummary.lastCanaryStatus,
         lastReferenceCanaryStatus: canarySummary.lastReferenceCanaryStatus,

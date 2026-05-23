@@ -112,6 +112,21 @@ assert.equal(successFirstNoKnownRoutePlan[0].prompt, TEXT_ONLY_SUCCESS_FIRST_PRO
 assert.equal(successFirstNoKnownRoutePlan[0].prompt.includes('Sydney'), false);
 assert.equal(successFirstNoKnownRoutePlan[0].prompt.includes('[Image1]'), false);
 
+const textGuidedNoKnownRoutePlan = buildRenderSuccessAttemptPlan({
+  referenceImages: savedReferences,
+  characterName: 'Sydney Rose',
+  referenceCanaryState: 'failed',
+  selfLikenessIntensity: 'balanced',
+  selfLikenessDescriptor: 'a recurring cinematic character with long copper-red wavy hair, fair skin, blue-green eyes, and soft expressive features',
+});
+assert.deepEqual(textGuidedNoKnownRoutePlan.map((attempt) => attempt.tier), [1]);
+assert.equal(textGuidedNoKnownRoutePlan[0].referenceCount, 0);
+assert.equal(textGuidedNoKnownRoutePlan[0].prompt.includes('long copper-red wavy hair'), true);
+assert.equal(textGuidedNoKnownRoutePlan[0].prompt.includes('walks slowly through a peaceful sunlit garden'), true);
+assert.equal(textGuidedNoKnownRoutePlan[0].prompt.includes('Sydney'), false);
+assert.equal(textGuidedNoKnownRoutePlan[0].prompt.includes('[Image1]'), false);
+assert.equal(textGuidedNoKnownRoutePlan[0].selfLikenessIntensity, 'balanced');
+
 const sideRoutePlan = buildRenderSuccessAttemptPlan({
   referenceImages: savedReferences.map((reference) => (
     reference.label === 'Side angle' ? { ...reference, role: 'side_angle_left' } : reference

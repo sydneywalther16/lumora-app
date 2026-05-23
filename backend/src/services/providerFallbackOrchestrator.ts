@@ -569,7 +569,7 @@ export async function generateSeedanceWithProviderFallback(input: {
             ? ['Lumora found a safer cinematic route.']
             : []),
           ...(diagnostics.renderedWithLighterCastGuidance
-            ? ['Rendered with lighter cast guidance.']
+            ? ['Rendered with soft self guidance.']
             : []),
         ],
         suggestedPrompt: buildCreatorSafeRewrite(),

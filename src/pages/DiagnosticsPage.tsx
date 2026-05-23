@@ -236,10 +236,14 @@ export default function DiagnosticsPage() {
             ) : null}
             {diagnostics.referenceRouteStatus ? (
               <div>
-                <span className="eyebrow">likeness routes</span>
+                <span className="eyebrow">Likeness Lab</span>
                 <p className="diagnostic-row">
-                  <span>Text-only</span>
-                  <strong>{diagnostics.referenceRouteStatus.seedanceReferenceRoutesBlocked ? 'succeeded' : 'available'}</strong>
+                  <span>Text self guidance</span>
+                  <strong>{diagnostics.likenessProviderCanary?.textSelfGuidanceAvailable ? 'available' : 'unknown'}</strong>
+                </p>
+                <p className="diagnostic-row">
+                  <span>Seedance photo reference</span>
+                  <strong>{diagnostics.referenceRouteStatus.seedanceReferenceRoutesBlocked ? 'blocked' : 'testing'}</strong>
                 </p>
                 {diagnostics.referenceRouteStatus.requiredReferenceRoles.map((role) => {
                   const blocked = diagnostics.referenceRouteStatus?.blockedReferenceRoles.includes(role);
@@ -254,6 +258,12 @@ export default function DiagnosticsPage() {
                 {diagnostics.referenceRouteStatus.seedanceReferenceRoutesBlocked ? (
                   <p className="muted">Seedance reference routes are blocked for this character path. Configure an alternate likeness provider before enabling automatic likeness passes.</p>
                 ) : null}
+                {diagnostics.likenessProviderCanary?.alternateLikenessProviderCanaryStatus.map((provider) => (
+                  <p key={provider.provider} className="diagnostic-row">
+                    <span>{provider.provider}</span>
+                    <strong>{provider.productionRouteEnabled ? 'ready' : provider.configured ? 'needs test' : 'not configured'}</strong>
+                  </p>
+                ))}
               </div>
             ) : null}
             {diagnostics.database ? (

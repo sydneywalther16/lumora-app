@@ -89,7 +89,7 @@ function getPostedProjectIds(): string[] {
 function getJobCharacterLabel(job: GenerationJob) {
   // Always prioritize isDefaultSelfCharacter flag
   if (Boolean(job.isDefaultSelfCharacter)) {
-    return 'Cinematic self selected';
+    return 'Soft self guidance';
   }
   
   // Otherwise, show character name if available

@@ -9,6 +9,10 @@ import { sanitizeProviderPrompt } from './providerPromptSanitizer';
 import { getCinematicCharacterProfileForUser, type CharacterReferenceImageUrls } from './characterProfiles';
 import { scoreReferenceConfidence } from './sceneOptimization';
 import {
+  alternateLikenessProvidersConfigured,
+  buildAlternateLikenessProviderCanaryStatus,
+} from './likenessProviderCanary';
+import {
   SEEDANCE_FAST_MODEL,
   SEEDANCE_QUALITY_MODEL,
   isReplicateRateLimitError,
@@ -1978,6 +1982,18 @@ export async function buildRenderPathCompareDiagnostics() {
     );
     const real = realResult.rows[0] ?? null;
     const realPrompt = real?.prompt ?? '';
+    const realRenderSuccessMetadata = real?.sceneMetadata?.renderSuccessEngine &&
+      typeof real.sceneMetadata.renderSuccessEngine === 'object'
+      ? real.sceneMetadata.renderSuccessEngine as Record<string, unknown>
+      : {};
+    const textSelfGuidanceDescriptorPreview = typeof realRenderSuccessMetadata.textSelfGuidanceDescriptorPreview === 'string'
+      ? realRenderSuccessMetadata.textSelfGuidanceDescriptorPreview
+      : typeof realRenderSuccessMetadata.selfLikenessDescriptor === 'string'
+        ? realRenderSuccessMetadata.selfLikenessDescriptor
+        : null;
+    const selectedLikenessMode = realRenderSuccessMetadata.selfLikenessIntensity === 'light' || realRenderSuccessMetadata.selfLikenessIntensity === 'strong'
+      ? realRenderSuccessMetadata.selfLikenessIntensity
+      : 'balanced';
     const selfReferenceDiagnostics = await buildCreateSelfReferenceDiagnostics(real?.userId ?? null);
     const referenceRouteSummary = await getReferenceRouteSummary({
       userId: real?.userId ?? null,
@@ -2061,6 +2077,8 @@ export async function buildRenderPathCompareDiagnostics() {
       providerErrorSummary: null,
       canaryVariant: null,
       createVariant: (real.referenceCount ?? 0) > 0 ? 'reference_images' : 'text_only',
+      textSelfGuidanceAvailable: Boolean(realRenderSuccessMetadata.textSelfGuidanceAvailable || textSelfGuidanceDescriptorPreview),
+      selectedLikenessMode,
       chosenCreateRoute: routeChoice.chosenCreateRoute,
       whyChosen: routeChoice.whyChosen,
       renderMode: real.renderMode,
@@ -2081,6 +2099,11 @@ export async function buildRenderPathCompareDiagnostics() {
       selfReferenceSourceErrors: selfReferenceDiagnostics.selfReferenceSourceErrors,
       textCanarySucceeded: canarySummary.canaryEverSucceeded,
       textOnlyCanarySucceeded: canarySummary.canaryEverSucceeded,
+      textSelfGuidanceAvailable: Boolean(textSelfGuidanceDescriptorPreview || referenceRouteSummary.seedanceReferenceRoutesBlocked),
+      textSelfGuidanceDescriptorPreview,
+      selectedLikenessMode,
+      alternateLikenessProvidersConfigured: alternateLikenessProvidersConfigured().map((provider) => provider.provider),
+      alternateLikenessProviderCanaryStatus: buildAlternateLikenessProviderCanaryStatus(),
       seedanceReferenceRoutesBlocked: referenceRouteSummary.seedanceReferenceRoutesBlocked,
       frontReferenceCanaryResult: referenceRouteSummary.allReferenceRouteResults.find((route) => route.referenceRole === 'front_angle') ?? null,
       sideReferenceCanaryResult: referenceRouteSummary.allReferenceRouteResults.find((route) => route.referenceRole === 'side_angle_left' || route.referenceRole === 'side_angle_right') ?? null,

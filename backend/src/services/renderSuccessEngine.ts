@@ -20,6 +20,12 @@ import {
 import { isProviderOutputError, parseProviderVideoOutput } from './providerOutputParser';
 import { scoreReferenceConfidence } from './sceneOptimization';
 import { buildReferenceImagePrompt, getReferenceRouteReadiness } from './seedanceCanary';
+import {
+  applySelfLikenessDescriptorToPrompt,
+  getSelfLikenessDescriptorForCharacter,
+  normalizeSelfLikenessIntensity,
+  type SelfLikenessIntensity,
+} from './selfLikenessDescriptor';
 
 export const DEFAULT_SUCCESS_FIRST_PROVIDER_PROMPT =
   'the cast character gently moves through a peaceful sunlit garden, natural movement, fully clothed, soft storybook cinematic style, calm mood, gentle camera motion';
@@ -68,6 +74,8 @@ export type RenderSuccessAttempt = {
   label: string;
   progressLabel: string;
   lighterCastGuidance: boolean;
+  selfLikenessDescriptor?: string | null;
+  selfLikenessIntensity?: SelfLikenessIntensity | null;
 };
 
 type RenderSuccessRecipe = {
@@ -95,6 +103,10 @@ type RenderSuccessEngineMetadata = {
   maxTotalAttempts?: number;
   firstVideoRescue?: boolean;
   progressLabel?: string;
+  selfLikenessIntensity?: SelfLikenessIntensity | null;
+  selfLikenessDescriptor?: string | null;
+  textSelfGuidanceAvailable?: boolean;
+  textSelfGuidanceDescriptorPreview?: string | null;
   createdAt?: string;
 };
 
@@ -153,6 +165,9 @@ export type StartRenderSuccessJobInput = {
   maxTotalAttempts?: number;
   forceProbe?: boolean;
   firstVideoRescue?: boolean;
+  selfLikenessIntensity?: SelfLikenessIntensity | null;
+  selfLikenessDescriptor?: string | null;
+  textSelfGuidanceAvailable?: boolean;
 };
 
 const activeRenderSuccessProcessors = new Set<string>();
@@ -378,6 +393,8 @@ function makeAttempt(input: {
   aspectRatio?: SeedanceAspectRatio;
   resolution?: SeedanceResolution;
   generateAudio?: boolean;
+  selfLikenessDescriptor?: string | null;
+  selfLikenessIntensity?: SelfLikenessIntensity | null;
 }): RenderSuccessAttempt {
   return {
     tier: input.tier,
@@ -397,6 +414,8 @@ function makeAttempt(input: {
     label: input.label,
     progressLabel: input.progressLabel,
     lighterCastGuidance: Boolean(input.lighterCastGuidance || input.referenceImages.length === 0),
+    selfLikenessDescriptor: input.selfLikenessDescriptor ?? null,
+    selfLikenessIntensity: input.selfLikenessIntensity ?? null,
   };
 }
 
@@ -407,6 +426,8 @@ export function buildRenderSuccessAttemptPlan(input: {
   firstVideoRescue?: boolean;
   referenceCanaryState?: 'succeeded' | 'failed' | 'unknown';
   preferredReferenceRole?: string | null;
+  selfLikenessDescriptor?: string | null;
+  selfLikenessIntensity?: SelfLikenessIntensity | null;
 }) {
   const routeReferences = input.preferredReferenceRole
     ? (input.referenceImages ?? []).filter((reference) => referenceMatchesPreferredRole(reference, input.preferredReferenceRole))
@@ -415,8 +436,26 @@ export function buildRenderSuccessAttemptPlan(input: {
   const strongestReferences = referenceRouteSucceeded ? strongestSavedReferences(routeReferences) : [];
   const primaryReference = strongestReferences.slice(0, 1);
   const twoStrongestReferences = strongestReferences.slice(0, 2);
+  const textGuidedSuccessPrompt = applySelfLikenessDescriptorToPrompt(
+    TEXT_ONLY_SUCCESS_FIRST_PROVIDER_PROMPT,
+    input.selfLikenessDescriptor,
+  );
+  const textGuidedRescuePrompt = applySelfLikenessDescriptorToPrompt(
+    FIRST_VIDEO_RESCUE_PROVIDER_PROMPT,
+    input.selfLikenessDescriptor,
+  );
+  const textGuidedUltraSafePrompt = applySelfLikenessDescriptorToPrompt(
+    ULTRA_SAFE_SCENE_PROVIDER_PROMPT,
+    input.selfLikenessDescriptor,
+  );
+  const softGuidanceProgressLabel = input.selfLikenessDescriptor
+    ? 'Creating first draft with soft self guidance.'
+    : 'Creating first draft with lighter cast guidance.';
+  const softGuidanceRetryLabel = input.selfLikenessDescriptor
+    ? 'Trying soft self guidance...'
+    : 'Trying lighter cast guidance...';
   const rescuePrompt = sanitizeSuccessProviderPrompt({
-    prompt: FIRST_VIDEO_RESCUE_PROVIDER_PROMPT,
+    prompt: textGuidedRescuePrompt,
     characterName: input.characterName,
   });
   const safePrompt = sanitizeSuccessProviderPrompt({
@@ -428,17 +467,17 @@ export function buildRenderSuccessAttemptPlan(input: {
     characterName: input.characterName,
   });
   const identityLightPrompt = sanitizeSuccessProviderPrompt({
-    prompt: TEXT_ONLY_SUCCESS_FIRST_PROVIDER_PROMPT,
+    prompt: textGuidedSuccessPrompt,
     characterName: input.characterName,
   });
   const textFirstPrompt = sanitizeSuccessProviderPrompt({
-    prompt: TEXT_ONLY_SUCCESS_FIRST_PROVIDER_PROMPT,
+    prompt: textGuidedSuccessPrompt,
     characterName: input.characterName,
   });
 
   const firstVideoReferences = input.referenceCanaryState === 'succeeded' ? primaryReference : [];
   const rescueReferencePrompt = sanitizeSuccessProviderPrompt({
-    prompt: firstVideoReferences.length ? buildReferenceImagePrompt(firstVideoReferences) : FIRST_VIDEO_RESCUE_PROVIDER_PROMPT,
+    prompt: firstVideoReferences.length ? buildReferenceImagePrompt(firstVideoReferences) : textGuidedRescuePrompt,
     characterName: input.characterName,
   });
   const textFirstAttempts = [
@@ -451,8 +490,10 @@ export function buildRenderSuccessAttemptPlan(input: {
       styleMode: 'first_video_rescue',
       aspectRatio: FIRST_VIDEO_RESCUE_ASPECT_RATIO,
       label: 'Seedance Fast text-only success first',
-      progressLabel: 'Creating first draft with lighter cast guidance.',
+      progressLabel: softGuidanceProgressLabel,
       lighterCastGuidance: true,
+      selfLikenessDescriptor: input.selfLikenessDescriptor,
+      selfLikenessIntensity: input.selfLikenessIntensity,
     }),
   ] satisfies RenderSuccessAttempt[];
 
@@ -468,8 +509,10 @@ export function buildRenderSuccessAttemptPlan(input: {
       label: firstVideoReferences.length
         ? 'First video rescue Seedance Fast primary reference'
         : 'First video rescue Seedance Fast text only',
-      progressLabel: firstVideoReferences.length ? 'Trying primary reference...' : 'Creating first draft with lighter cast guidance.',
+      progressLabel: firstVideoReferences.length ? 'Trying primary reference...' : softGuidanceProgressLabel,
       lighterCastGuidance: firstVideoReferences.length === 0,
+      selfLikenessDescriptor: firstVideoReferences.length ? null : input.selfLikenessDescriptor,
+      selfLikenessIntensity: input.selfLikenessIntensity,
     }),
     ...(firstVideoReferences.length ? [makeAttempt({
       tier: 2,
@@ -480,8 +523,10 @@ export function buildRenderSuccessAttemptPlan(input: {
       styleMode: 'first_video_rescue',
       aspectRatio: FIRST_VIDEO_RESCUE_ASPECT_RATIO,
       label: 'First video rescue Seedance Fast text only',
-      progressLabel: 'Trying lighter cast guidance...',
+      progressLabel: softGuidanceRetryLabel,
       lighterCastGuidance: true,
+      selfLikenessDescriptor: input.selfLikenessDescriptor,
+      selfLikenessIntensity: input.selfLikenessIntensity,
     })] : []),
   ] : [
     makeAttempt({
@@ -522,8 +567,10 @@ export function buildRenderSuccessAttemptPlan(input: {
       promptStyle: 'identity_light',
       styleMode: 'ultra_safe',
       label: 'Seedance Fast lighter cast guidance',
-      progressLabel: 'Trying lighter cast guidance...',
+      progressLabel: softGuidanceRetryLabel,
       lighterCastGuidance: true,
+      selfLikenessDescriptor: input.selfLikenessDescriptor,
+      selfLikenessIntensity: input.selfLikenessIntensity,
     }),
   ];
 
@@ -532,12 +579,14 @@ export function buildRenderSuccessAttemptPlan(input: {
       tier: 5,
       quality: 'demo',
       referenceImages: [],
-      prompt: ULTRA_SAFE_SCENE_PROVIDER_PROMPT,
+      prompt: textGuidedUltraSafePrompt,
       promptStyle: 'demo',
       styleMode: 'demo',
       label: 'Demo Mode explicit fallback',
       progressLabel: 'Preparing demo preview...',
       lighterCastGuidance: true,
+      selfLikenessDescriptor: input.selfLikenessDescriptor,
+      selfLikenessIntensity: input.selfLikenessIntensity,
       paid: false,
     }));
   }
@@ -707,6 +756,8 @@ export function recipeMemoryPayload(input: {
     lastFailureAt: input.success ? null : new Date().toISOString(),
     notes: {
       lighterCastGuidance: input.attempt.lighterCastGuidance,
+      textSelfGuidanceAvailable: Boolean(input.attempt.selfLikenessDescriptor),
+      selfLikenessIntensity: input.attempt.selfLikenessIntensity ?? null,
       failureCategory: input.failureCategory ?? null,
     },
   };
@@ -767,8 +818,15 @@ function effectiveAspectRatioForInput(input: Pick<StartRenderSuccessJobInput, 'f
   return input.firstVideoRescue ? FIRST_VIDEO_RESCUE_ASPECT_RATIO : RENDER_SUCCESS_ASPECT_RATIO;
 }
 
-function effectiveInitialPromptForInput(input: Pick<StartRenderSuccessJobInput, 'firstVideoRescue'>) {
-  return input.firstVideoRescue ? FIRST_VIDEO_RESCUE_PROVIDER_PROMPT : DEFAULT_SUCCESS_FIRST_PROVIDER_PROMPT;
+function effectiveInitialPromptForInput(input: Pick<StartRenderSuccessJobInput, 'firstVideoRescue' | 'selfLikenessDescriptor'>) {
+  const basePrompt = input.firstVideoRescue ? FIRST_VIDEO_RESCUE_PROVIDER_PROMPT : DEFAULT_SUCCESS_FIRST_PROVIDER_PROMPT;
+  return applySelfLikenessDescriptorToPrompt(basePrompt, input.selfLikenessDescriptor);
+}
+
+function textGuidanceStartMessage(input: Pick<StartRenderSuccessJobInput, 'selfLikenessDescriptor'>) {
+  return input.selfLikenessDescriptor
+    ? 'Creating first draft with soft self guidance.'
+    : 'Creating first draft with lighter cast guidance.';
 }
 
 async function hasVerifiedVideoForUserCharacter(input: {
@@ -879,7 +937,11 @@ async function insertMasterJob(input: StartRenderSuccessJobInput, groupId: strin
     maxPaidAttempts: input.maxPaidAttempts ?? env.RENDER_SUCCESS_MAX_PAID_ATTEMPTS,
     maxTotalAttempts: input.maxTotalAttempts ?? RENDER_SUCCESS_TOTAL_ATTEMPTS,
     firstVideoRescue: Boolean(input.firstVideoRescue),
-    progressLabel: 'Creating first draft with lighter cast guidance.',
+    progressLabel: textGuidanceStartMessage(input),
+    selfLikenessIntensity: input.selfLikenessIntensity ?? null,
+    selfLikenessDescriptor: input.selfLikenessDescriptor ?? null,
+    textSelfGuidanceAvailable: Boolean(input.textSelfGuidanceAvailable && input.selfLikenessDescriptor),
+    textSelfGuidanceDescriptorPreview: input.selfLikenessDescriptor ?? null,
     createdAt: new Date().toISOString(),
   };
   const aspectRatio = effectiveAspectRatioForInput(input);
@@ -1860,9 +1922,38 @@ export async function startRenderSuccessJob(input: StartRenderSuccessJobInput) {
     userId: input.userId,
     characterId: input.characterId ?? null,
   }));
+  const selfLikenessIntensity = normalizeSelfLikenessIntensity(input.selfLikenessIntensity);
+  const suppliedDescriptor = typeof input.selfLikenessDescriptor === 'string' && input.selfLikenessDescriptor.trim()
+    ? input.selfLikenessDescriptor.trim()
+    : null;
+  const descriptorResult = suppliedDescriptor
+    ? {
+        available: true,
+        descriptor: suppliedDescriptor,
+        intensity: selfLikenessIntensity,
+      }
+    : input.isDefaultSelfCharacter
+      ? await getSelfLikenessDescriptorForCharacter({
+          userId: input.userId,
+          characterId: input.characterId ?? null,
+          characterName: input.characterName ?? null,
+          intensity: selfLikenessIntensity,
+        }).catch(() => ({
+          available: false,
+          descriptor: null,
+          intensity: selfLikenessIntensity,
+        }))
+      : {
+          available: false,
+          descriptor: null,
+          intensity: selfLikenessIntensity,
+        };
   const renderInput: StartRenderSuccessJobInput = {
     ...input,
     firstVideoRescue,
+    selfLikenessIntensity,
+    selfLikenessDescriptor: descriptorResult.descriptor,
+    textSelfGuidanceAvailable: descriptorResult.available,
   };
   const groupId = randomUUID();
   const projectId = await createRenderSuccessProject(renderInput, groupId);
@@ -1872,7 +1963,7 @@ export async function startRenderSuccessJob(input: StartRenderSuccessJobInput) {
   return {
     job: master,
     duplicateOf: null,
-    message: 'Creating first draft with lighter cast guidance.',
+    message: textGuidanceStartMessage(renderInput),
   };
 }
 
@@ -1912,6 +2003,8 @@ export function processRenderSuccessJob(masterJobId: string) {
         firstVideoRescue: Boolean(metadata.firstVideoRescue),
         referenceCanaryState: referenceCanary.state,
         preferredReferenceRole: referenceCanary.referenceRole,
+        selfLikenessDescriptor: metadata.selfLikenessDescriptor ?? null,
+        selfLikenessIntensity: metadata.selfLikenessIntensity ?? null,
       });
       const preferredRecipe = await loadPreferredRecipe({
         userId: master.userId,
@@ -2010,6 +2103,10 @@ export function formatRenderSuccessJobStatus(job: RenderSuccessJobRow) {
     job.referenceCount === 0 ||
     job.renderSuccessReferenceCount === 0
   );
+  const renderedWithSoftSelfGuidance = renderedWithLighterCastGuidance && Boolean(metadata?.textSelfGuidanceAvailable || metadata?.selfLikenessDescriptor);
+  const lighterGuidanceMessage = renderedWithSoftSelfGuidance
+    ? 'Rendered with soft self guidance.'
+    : 'Rendered with lighter cast guidance.';
   const retrySeconds = job.retryAvailableAt
     ? Math.max(0, Math.ceil((Date.parse(job.retryAvailableAt) - Date.now()) / 1000))
     : job.retryAfterSeconds;
@@ -2052,21 +2149,23 @@ export function formatRenderSuccessJobStatus(job: RenderSuccessJobRow) {
     generationMode: (job.referenceCount ?? 0) > 0 ? 'seedance-multimodal-reference' : 'seedance-text-to-video',
     message: completedWithOutput
       ? renderedWithLighterCastGuidance
-        ? 'Rendered with lighter cast guidance.'
+        ? lighterGuidanceMessage
         : 'Cinematic draft ready.'
       : status === 'rate_limited'
         ? 'Render queue is cooling down. Lumora will resume automatically.'
       : status === 'paused' || status === 'failed'
         ? 'This scene needs a simpler direction before rendering.'
         : progressLabel,
-    warnings: renderedWithLighterCastGuidance ? ['Rendered with lighter cast guidance.'] : [],
+    warnings: renderedWithLighterCastGuidance ? [lighterGuidanceMessage] : [],
+    selfLikenessIntensity: metadata?.selfLikenessIntensity ?? null,
+    textSelfGuidanceAvailable: Boolean(metadata?.textSelfGuidanceAvailable || metadata?.selfLikenessDescriptor),
     renderSuccess: {
       enabled: true,
       attemptTier: job.renderSuccessAttemptTier,
       promptStyle: job.renderSuccessPromptStyle,
       progressSteps: [
         'Preparing cast',
-        (job.referenceCount ?? job.renderSuccessReferenceCount ?? 0) > 0 ? 'Trying proven reference route' : 'Creating lighter cast draft',
+        (job.referenceCount ?? job.renderSuccessReferenceCount ?? 0) > 0 ? 'Trying proven reference route' : renderedWithSoftSelfGuidance ? 'Creating soft self-guided draft' : 'Creating lighter cast draft',
         'Saving to Drafts',
       ],
     },

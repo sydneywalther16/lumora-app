@@ -64,6 +64,7 @@ async function request<T>(path: string, init: RequestInitWithTimeout = {}): Prom
 }
 
 export type RenderSuccessMode = 'cinematic_quality' | 'balanced' | 'success_first';
+export type SelfLikenessIntensity = 'light' | 'balanced' | 'strong';
 
 export type GenerationPayload = {
   title?: string;
@@ -80,6 +81,7 @@ export type GenerationPayload = {
   engine?: VideoEngine;
   quality?: 'fast' | 'quality';
   renderPreference?: RenderSuccessMode;
+  selfLikenessIntensity?: SelfLikenessIntensity;
   privacy?: PrivacySetting;
   referenceImages?: SeedanceReferenceImage[];
   referenceImageUrls?: Partial<ReferenceImageUrls> | null;
@@ -321,6 +323,8 @@ export type GenerationResponse = {
   multimodalReferenceMode?: boolean | null;
   createdAt: string;
   message?: string;
+  selfLikenessIntensity?: SelfLikenessIntensity | null;
+  textSelfGuidanceAvailable?: boolean | null;
   providerStatus?: string | null;
   progressLabel?: string | null;
   providerPredictionId?: string | null;
@@ -688,6 +692,18 @@ export type ApiHealthDiagnostics = {
     knownSuccessfulReferenceRoutes: Array<Record<string, unknown>>;
     knownBlockedReferenceRoutes: Array<Record<string, unknown>>;
     allReferenceRouteResults: Array<Record<string, unknown>>;
+  };
+  likenessProviderCanary?: {
+    textSelfGuidanceAvailable: boolean;
+    alternateLikenessProvidersConfigured: string[];
+    alternateLikenessProviderCanaryStatus: Array<{
+      provider: string;
+      configured: boolean;
+      referenceCapable: boolean;
+      canaryTested: boolean;
+      productionRouteEnabled: boolean;
+      status: string;
+    }>;
   };
   asyncRenderJobs?: {
     ok: boolean;
