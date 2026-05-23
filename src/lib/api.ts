@@ -708,14 +708,24 @@ export type ApiHealthDiagnostics = {
   openaiSoraProvider?: {
     openaiVideoEnabled: boolean;
     openaiVideoModel: string;
+    openaiVideoSize: string;
+    openaiVideoSeconds: number;
     openaiCharacterEnabled: boolean;
     openaiApiKeyConfigured: boolean;
     openaiCharacterConfigured: boolean;
+    openaiRawRestAvailable: boolean;
+    openaiSdkVideosAvailable: boolean;
+    apiReachable: boolean | null;
+    openaiVideosDeprecated: boolean;
+    shutdownDate: string;
+    characterCreationSupported: boolean;
+    characterVideoUsageMapped: boolean;
     sdkVideoSupported: boolean;
     sdkCharacterSupported: boolean;
     routeReady: boolean;
     status: string;
     message: string;
+    recommendedNextAction: string;
   };
   asyncRenderJobs?: {
     ok: boolean;
@@ -1144,8 +1154,11 @@ export const api = {
       status: string;
       provider: 'openai_sora';
       providerCharacterIdPresent: boolean;
+      providerCharacterIdRedacted: string | null;
       providerCharacterStatus: string | null;
       likenessProviderStatus: string | null;
+      failureCategory?: string | null;
+      readiness?: ApiHealthDiagnostics['openaiSoraProvider'];
       message: string;
       character: CharacterProfile | null;
     }>('/api/characters/self/sora-character', {

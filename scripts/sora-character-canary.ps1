@@ -56,6 +56,11 @@ try {
 
 Write-Host "Provider: $($payload.provider)"
 Write-Host "Model: $($payload.model)"
+Write-Host "Raw REST available: $($payload.openaiRawRestAvailable)"
+Write-Host "SDK videos available: $($payload.openaiSdkVideosAvailable)"
+Write-Host "Character id present: $($payload.selfProviderCharacterIdPresent)"
+Write-Host "Character creation supported: $($payload.characterCreationSupported)"
+Write-Host "Character video usage mapped: $($payload.characterVideoUsageMapped)"
 Write-Host "Status: $($payload.status)"
 Write-Host "Output URL present: $($payload.output_url_present)"
 Write-Host "Parsed video URL present: $($payload.parsed_video_url_present)"

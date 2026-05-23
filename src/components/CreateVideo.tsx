@@ -1245,7 +1245,9 @@ export default function CreateVideo({
   const selfCharacterProviderStatusCopy = providerSelfCharacterReady
     ? 'Using verified self character.'
     : providerSelfCharacterSetupStarted
-      ? 'Self character route needs a quick test before Lumora can claim exact likeness.'
+      ? characterProfile?.providerCharacterStatus === 'ready' && characterProfile.likenessProviderStatus === 'character_created_usage_unmapped'
+        ? 'Verified self character created. Video route not available yet.'
+        : 'Self character route needs a quick test before Lumora can claim exact likeness.'
       : 'Rendering with soft self guidance.';
   const identityReferenceCards = [
     {

@@ -253,9 +253,9 @@ healthRouter.post('/api/diagnostics/sora-character-canary/self', async (req, res
     userId: payload.userId ?? req.header('x-lumora-user-id') ?? null,
     characterId: null,
   });
-  res.status(status.ok ? 202 : 501).json({
+  res.status(status.ok ? 202 : (status as { error?: string }).error === 'character_video_usage_unmapped' ? 200 : 501).json({
     ...status,
-    message: 'This may consume provider credits when a supported route is enabled.',
+    warning: 'This may consume provider credits when a supported route is enabled.',
   });
 });
 

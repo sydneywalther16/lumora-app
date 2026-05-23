@@ -33,6 +33,10 @@ const envSchema = z.object({
   OPENAI_VIDEO_ENABLED: booleanEnv.default(false),
   OPENAI_VIDEO_MODEL: z.string().default('sora-2'),
   OPENAI_VIDEO_CHARACTER_ENABLED: booleanEnv.default(false),
+  OPENAI_VIDEO_SIZE: z.string().default('720x1280'),
+  OPENAI_VIDEO_SECONDS: z.coerce.number().int().refine((value) => [4, 8, 12].includes(value), {
+    message: 'OPENAI_VIDEO_SECONDS must be 4, 8, or 12.',
+  }).default(4),
   DEBUG_PROVIDER_PROMPTS: booleanEnv.default(false),
   GOOGLE_API_KEY: z.string().min(1).optional(),
   RUNWAY_API_KEY: z.string().min(1).optional(),

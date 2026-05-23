@@ -14,7 +14,7 @@ import {
 import { cleanupObsoleteCharacterReferencesForUser } from '../services/referenceCleanup';
 import { persistMediaUpload } from '../services/storageService';
 import {
-  buildDisabledSoraCharacterIdentityPatch,
+  createOpenAISoraCharacterIdentity,
   getOpenAISoraProviderReadiness,
   OpenAISoraProviderError,
   validateSoraCharacterConsent,
@@ -158,11 +158,23 @@ charactersRouter.post('/self/sora-character', async (req: AuthedRequest, res) =>
   }
 
   const readiness = getOpenAISoraProviderReadiness();
-  const patch = buildDisabledSoraCharacterIdentityPatch({
-    consentConfirmed,
-    sourceUploadAssetId,
-    sourceVideoUrl,
-  }, readiness);
+  let setupResult;
+  try {
+    setupResult = await createOpenAISoraCharacterIdentity({
+      consentConfirmed,
+      sourceUploadAssetId,
+      sourceVideoUrl,
+      sourceVideoFilename: 'self-character-video.mp4',
+      characterName: character?.displayName ?? character?.name ?? 'Lumora self character',
+    });
+  } catch (error) {
+    if (error instanceof OpenAISoraProviderError) {
+      res.status(error.statusCode).json({ error: error.code, message: error.message });
+      return;
+    }
+    throw error;
+  }
+  const patch = setupResult.patch;
 
   const updated = await updateCharacterProfileForUser({
     ownerUserId,
@@ -174,17 +186,17 @@ charactersRouter.post('/self/sora-character', async (req: AuthedRequest, res) =>
     patch,
   });
 
-  res.status(readiness.routeReady ? 202 : 200).json({
-    ok: readiness.routeReady,
+  res.status(setupResult.statusCode).json({
+    ok: setupResult.ok,
     status: patch.providerCharacterStatus,
     provider: 'openai_sora',
-    providerCharacterIdPresent: Boolean(patch.providerCharacterId),
+    providerCharacterIdPresent: setupResult.providerCharacterIdPresent,
+    providerCharacterIdRedacted: setupResult.providerCharacterIdRedacted,
     providerCharacterStatus: patch.providerCharacterStatus,
     likenessProviderStatus: patch.likenessProviderStatus,
+    failureCategory: setupResult.failureCategory,
     readiness,
-    message: readiness.routeReady
-      ? 'Verified self character creation started.'
-      : readiness.message,
+    message: setupResult.message,
     character: updated ? creatorSafeCharacter(updated) : null,
   });
 });

@@ -110,6 +110,12 @@ async function openAISoraDiagnostics(row: LatestRenderRow | null) {
     openaiVideoModel: readiness.openaiVideoModel,
     openaiCharacterEnabled: readiness.openaiCharacterEnabled,
     openaiCharacterConfigured: readiness.openaiCharacterConfigured,
+    openaiRawRestAvailable: readiness.openaiRawRestAvailable,
+    openaiSdkVideosAvailable: readiness.openaiSdkVideosAvailable,
+    openaiVideosDeprecated: readiness.openaiVideosDeprecated,
+    shutdownDate: readiness.shutdownDate,
+    characterCreationSupported: readiness.characterCreationSupported,
+    characterVideoUsageMapped: readiness.characterVideoUsageMapped,
     openaiVideoRouteReady: readiness.routeReady,
     openaiVideoRouteStatus: readiness.status,
     selfProviderCharacterIdPresent: identity.selfProviderCharacterIdPresent,
@@ -119,6 +125,13 @@ async function openAISoraDiagnostics(row: LatestRenderRow | null) {
     soraCharacterCanaryStatus: identity.soraCharacterCanaryStatus,
     selectedCreateLikenessRoute: route.selectedCreateLikenessRoute,
     openaiSoraWhyChosen: route.whyChosen,
+    openaiSoraRecommendedNextAction: readiness.openaiCharacterConfigured
+      ? identity.selfProviderCharacterIdPresent
+        ? readiness.characterVideoUsageMapped
+          ? 'run canary'
+          : 'continue using Seedance text-first until character video usage is mapped'
+        : 'upload consent video and create provider character'
+      : 'enable OPENAI_VIDEO_ENABLED and OPENAI_VIDEO_CHARACTER_ENABLED',
   };
 }
 

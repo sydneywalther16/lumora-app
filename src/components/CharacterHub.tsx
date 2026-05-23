@@ -114,6 +114,9 @@ function providerIdentityStatusLabel(character: CharacterProfile) {
 }
 
 function providerIdentityStatusCopy(character: CharacterProfile) {
+  if (character.providerCharacterStatus === 'ready' && character.likenessProviderStatus === 'character_created_usage_unmapped') {
+    return 'Verified self character created. Video route not available yet.';
+  }
   if (character.providerCharacterStatus === 'ready') return 'Verified provider character is ready after setup and canary testing.';
   if (character.providerCharacterStatus === 'failed') return 'Provider character setup could not run with the current configuration.';
   if (character.providerCharacterStatus === 'disabled') return 'OpenAI video character routing is not configured yet.';

@@ -7,6 +7,7 @@ import {
   validateSoraCharacterConsent,
   OpenAISoraProviderError,
 } from '../src/services/providers/openaiSoraProvider';
+import { env } from '../src/lib/env';
 
 const readiness = getOpenAISoraProviderReadiness();
 
@@ -14,6 +15,27 @@ assert.equal(readiness.openaiVideoEnabled, false);
 assert.equal(readiness.openaiCharacterEnabled, false);
 assert.equal(readiness.routeReady, false);
 assert.equal(readiness.status, 'disabled');
+
+const originalEnv = {
+  OPENAI_VIDEO_ENABLED: env.OPENAI_VIDEO_ENABLED,
+  OPENAI_VIDEO_CHARACTER_ENABLED: env.OPENAI_VIDEO_CHARACTER_ENABLED,
+  OPENAI_API_KEY: env.OPENAI_API_KEY,
+};
+env.OPENAI_VIDEO_ENABLED = true;
+env.OPENAI_VIDEO_CHARACTER_ENABLED = true;
+env.OPENAI_API_KEY = 'sk-test';
+const rawReadiness = getOpenAISoraProviderReadiness();
+assert.equal(rawReadiness.openaiRawRestAvailable, true);
+assert.equal(rawReadiness.openaiSdkVideosAvailable, false);
+assert.equal(rawReadiness.characterCreationSupported, true);
+assert.equal(rawReadiness.characterVideoUsageMapped, false);
+assert.equal(rawReadiness.openaiVideosDeprecated, true);
+assert.equal(rawReadiness.shutdownDate, '2026-09-24');
+assert.equal(rawReadiness.status, 'character_creation_available_video_usage_unmapped');
+assert.equal(rawReadiness.routeReady, false);
+env.OPENAI_VIDEO_ENABLED = originalEnv.OPENAI_VIDEO_ENABLED;
+env.OPENAI_VIDEO_CHARACTER_ENABLED = originalEnv.OPENAI_VIDEO_CHARACTER_ENABLED;
+env.OPENAI_API_KEY = originalEnv.OPENAI_API_KEY;
 
 assert.throws(
   () => validateSoraCharacterConsent({ consentConfirmed: false }),

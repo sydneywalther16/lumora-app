@@ -2124,11 +2124,24 @@ export async function buildRenderPathCompareDiagnostics() {
       openaiVideoModel: openaiSoraReadiness.openaiVideoModel,
       openaiCharacterEnabled: openaiSoraReadiness.openaiCharacterEnabled,
       openaiCharacterConfigured: openaiSoraReadiness.openaiCharacterConfigured,
+      openaiRawRestAvailable: openaiSoraReadiness.openaiRawRestAvailable,
+      openaiSdkVideosAvailable: openaiSoraReadiness.openaiSdkVideosAvailable,
+      openaiVideosDeprecated: openaiSoraReadiness.openaiVideosDeprecated,
+      shutdownDate: openaiSoraReadiness.shutdownDate,
+      characterCreationSupported: openaiSoraReadiness.characterCreationSupported,
+      characterVideoUsageMapped: openaiSoraReadiness.characterVideoUsageMapped,
       selfProviderCharacterIdPresent: openaiSoraIdentity.selfProviderCharacterIdPresent,
       selfProviderCharacterStatus: openaiSoraIdentity.selfProviderCharacterStatus,
       soraCharacterCanaryStatus: openaiSoraIdentity.soraCharacterCanaryStatus,
       selectedCreateLikenessRoute: openaiSoraRoute.selectedCreateLikenessRoute,
       openaiSoraWhyChosen: openaiSoraRoute.whyChosen,
+      openaiSoraRecommendedNextAction: openaiSoraReadiness.openaiCharacterConfigured
+        ? openaiSoraIdentity.selfProviderCharacterIdPresent
+          ? openaiSoraReadiness.characterVideoUsageMapped
+            ? 'run canary'
+            : 'continue using Seedance text-first until character video usage is mapped'
+          : 'upload consent video and create provider character'
+        : 'enable OPENAI_VIDEO_ENABLED and OPENAI_VIDEO_CHARACTER_ENABLED',
       seedanceReferenceRoutesBlocked: referenceRouteSummary.seedanceReferenceRoutesBlocked,
       frontReferenceCanaryResult: referenceRouteSummary.allReferenceRouteResults.find((route) => route.referenceRole === 'front_angle') ?? null,
       sideReferenceCanaryResult: referenceRouteSummary.allReferenceRouteResults.find((route) => route.referenceRole === 'side_angle_left' || route.referenceRole === 'side_angle_right') ?? null,
