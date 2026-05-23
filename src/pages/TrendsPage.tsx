@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import FeedVideoCard from '../components/FeedVideoCard';
 import GeneratedVideoPreview from '../components/GeneratedVideoPreview';
 import { posts as demoPosts, type Post } from '../data/mockData';
 import type { LumoraPost } from '../lib/api';
@@ -14,6 +15,36 @@ type FeedPost = LumoraPost & {
 };
 
 const searchPlaceholder = 'Search videos, creators, characters...';
+
+function mockForYouVideoPost(): FeedPost {
+  const now = new Date().toISOString();
+  return {
+    id: 'for-you-mock-video-no-poster',
+    title: 'Garden canary scene',
+    caption: 'A real generated garden take',
+    prompt: 'A character walks through a peaceful sunlit garden.',
+    videoUrl: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+    posterUrl: null,
+    thumbnailUrl: 'https://example.com/self-reference.jpg',
+    thumbnailSource: 'video_output',
+    status: 'published',
+    privacy: 'public',
+    visibility: 'public',
+    createdAt: now,
+    publishedAt: now,
+    updatedAt: now,
+    creatorName: 'Lumora Creator',
+    creatorUsername: 'lumora.creator',
+    displayName: 'Lumora Creator',
+    username: 'lumora.creator',
+    likeCount: 128,
+    viewCount: 1200,
+    shareCount: 8,
+    commentCount: 4,
+    tags: ['cinematic'],
+    stylePreset: 'Cinematic',
+  };
+}
 
 function formatCompactCount(value: number | null | undefined) {
   const count = Math.max(0, Math.round(value ?? 0));
@@ -175,87 +206,19 @@ function ForYouCard({
   const statsText = `${formatCompactCount(post.likeCount)} likes`;
 
   return (
-    <button
-      type="button"
-      className="for-you-card lumora-card"
-      onClick={() => onSelect(post)}
+    <FeedVideoCard
+      item={post}
       title={title}
-      style={{
-        position: 'relative',
-        minHeight: 0,
-        aspectRatio: '1 / 1.18',
-        overflow: 'hidden',
-        padding: 0,
-        borderRadius: '18px',
-        border: '1px solid var(--surface-border)',
-        background: 'var(--card-media-background)',
-        color: '#fff',
-        textAlign: 'left',
-        cursor: 'pointer',
-        boxShadow: 'var(--surface-shadow)',
-      }}
-    >
-      <GeneratedVideoPreview
-        item={post}
-        title={title}
-        autoPlay={Boolean(preview && post.videoUrl)}
-        forceVideo={Boolean(preview && post.videoUrl)}
-        showCastBadge={false}
-        placeholderLabel={post.stylePreset || title}
-        style={{ width: '100%', height: '100%' }}
-      />
-
-      <div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          background: 'linear-gradient(180deg, rgba(5,4,11,0.02) 36%, rgba(5,4,11,0.86) 100%)',
-        }}
-      />
-
-      <div
-        style={{
-          position: 'absolute',
-          left: '9px',
-          right: '9px',
-          bottom: '9px',
-          display: 'grid',
-          gap: '6px',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
-          <div
-            style={{
-              width: '24px',
-              height: '24px',
-              borderRadius: '50%',
-              overflow: 'hidden',
-              background: 'rgba(255,255,255,0.18)',
-              border: '1px solid rgba(255,255,255,0.22)',
-              flex: '0 0 auto',
-              display: 'grid',
-              placeItems: 'center',
-              fontSize: '0.72rem',
-              fontWeight: 800,
-            }}
-          >
-            {creatorAvatar ? (
-              <img src={creatorAvatar} alt={creatorName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            ) : (
-              creatorName.charAt(0).toUpperCase()
-            )}
-          </div>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.78rem' }}>
-            {creatorName}
-          </span>
-        </div>
-
-        <strong style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.86rem' }}>
-          {caption}
-        </strong>
-        <span style={{ color: '#d8d2ef', fontSize: '0.74rem' }}>{statsText}</span>
-      </div>
-    </button>
+      caption={caption}
+      creatorName={creatorName}
+      creatorUsername={post.creatorUsername || post.username || null}
+      creatorAvatar={creatorAvatar}
+      statsText={statsText}
+      badges={[recommendationReason(post, 0)]}
+      variant="compact"
+      autoPlayMuted={Boolean(preview && post.videoUrl)}
+      onOpen={() => onSelect(post)}
+    />
   );
 }
 
@@ -380,12 +343,18 @@ export default function TrendsPage() {
 
   useEffect(() => {
     let active = true;
+    const mockVideoNoPoster = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mockVideoNoPoster');
 
     async function loadFeed() {
       setLoading(true);
       setErrorMessage('');
 
       try {
+        if (mockVideoNoPoster) {
+          if (active) setFeed([mockForYouVideoPost()]);
+          return;
+        }
+
         const nextFeed = configured
           ? await listForYouFeed({
               currentUserId: authUser?.id ?? null,
@@ -417,6 +386,7 @@ export default function TrendsPage() {
     return feed.length ? 'Recommended for you' : 'No public posts yet';
   }, [debouncedQuery, feed.length, loading]);
   const discoveryHighlights = useMemo(() => feed.slice(0, 3), [feed]);
+  const shouldPrioritizeVideoGrid = useMemo(() => feed.some((post) => Boolean(post.videoUrl)), [feed]);
   const trendingStories = useMemo(
     () =>
       [...feed]
@@ -460,7 +430,7 @@ export default function TrendsPage() {
   }
 
   return (
-    <div className="page lumora-page">
+    <div className="page lumora-page cinematic-feed-page">
       <section
         className="for-you-topbar lumora-card-hero luxury-page-hero"
         style={{
@@ -497,7 +467,7 @@ export default function TrendsPage() {
         </article>
       ) : null}
 
-      {!loading && !debouncedQuery && feed.length ? (
+      {!loading && !debouncedQuery && feed.length && !shouldPrioritizeVideoGrid ? (
         <section className="discovery-magic-stack" aria-label="Recommendation highlights">
           <div className="discovery-reason-rail">
             {discoveryHighlights.map((post, index) => (
@@ -522,13 +492,13 @@ export default function TrendsPage() {
         <ForYouSkeletonGrid />
       ) : feed.length ? (
         <>
-          {!debouncedQuery && trendingStories.length ? (
+          {!debouncedQuery && trendingStories.length && !shouldPrioritizeVideoGrid ? (
             <div className="row-between" style={{ marginTop: '2px' }}>
               <span className="eyebrow">Trending story worlds</span>
               <span className="tiny-pill">Live</span>
             </div>
           ) : null}
-          {!debouncedQuery ? (
+          {!debouncedQuery && !shouldPrioritizeVideoGrid ? (
             <div className="chip-row wrap" aria-label="For You story sections">
               <span className="tiny-pill">Because you follow creators like this</span>
               <span className="tiny-pill">Recently published</span>
