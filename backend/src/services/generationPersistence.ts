@@ -90,6 +90,7 @@ async function insertCompletedProject(input: CompletedGenerationPersistenceInput
     cover_asset_url: input.videoUrl,
     thumbnail_url: input.thumbnailUrl ?? null,
     poster_url: input.posterUrl ?? input.thumbnailUrl ?? null,
+    thumbnail_source: input.posterUrl || input.thumbnailUrl ? 'generated_poster' : 'video_output',
     character_id: input.characterId ?? null,
     character_name: input.characterName ?? null,
     character_avatar: input.characterAvatar ?? null,

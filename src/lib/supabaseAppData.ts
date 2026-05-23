@@ -1563,6 +1563,7 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
       final_prompt: project.finalPrompt ?? project.prompt,
       thumbnail_url: storageUrl(thumbnailUrl, 'Generated project thumbnail'),
       poster_url: storageUrl(posterUrl, 'Generated project poster'),
+      thumbnail_source: generatedMedia.thumbnailSource,
       style_preset: project.engine ?? project.provider ?? 'replicate',
       status: project.status || 'draft',
       published_at: project.publishedAt ?? null,
@@ -1613,6 +1614,7 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
   const removableProjectColumns = [
     'thumbnail_url',
     'poster_url',
+    'thumbnail_source',
     'published_at',
     'posted_at',
     'is_posted',
@@ -2090,6 +2092,7 @@ export async function saveSupabasePost(userId: string, post: LumoraPost): Promis
     video_url: storageUrl(post.videoUrl, 'Post video'),
     thumbnail_url: storageUrl(thumbnailUrl, 'Post thumbnail'),
     poster_url: storageUrl(posterUrl, 'Post poster'),
+    thumbnail_source: generatedMedia.thumbnailSource,
     source_generation_id: post.sourceGenerationId ?? null,
     privacy: post.privacy ?? post.visibility ?? 'public',
     visibility: post.visibility ?? post.privacy ?? 'public',
@@ -2151,6 +2154,7 @@ export async function saveSupabasePost(userId: string, post: LumoraPost): Promis
         visibility: payload.visibility,
         thumbnail_url: storageUrl(thumbnailUrl, 'Published project thumbnail'),
         poster_url: storageUrl(posterUrl, 'Published project poster'),
+        thumbnail_source: generatedMedia.thumbnailSource,
         updated_at: new Date().toISOString(),
       })
       .eq('id', post.sourceGenerationId)

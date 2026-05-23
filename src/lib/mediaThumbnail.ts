@@ -132,31 +132,36 @@ function sourceLabelLooksReference(value: unknown) {
   return typeof value === 'string' && /character|reference|self|avatar|cast/i.test(value);
 }
 
+function sourceLabelLooksGenerated(value: unknown) {
+  return typeof value === 'string' && /generated|poster|video|provider|output/i.test(value);
+}
+
 function generatedPosterCandidate(record: MediaRecord, referenceUrls: string[]) {
   const candidates = [
-    { url: imageLikeUrl(record.posterUrl), source: record.posterSource ?? record.poster_source },
-    { url: imageLikeUrl(record.poster_url), source: record.posterSource ?? record.poster_source },
-    { url: imageLikeUrl(record.videoPosterUrl), source: record.videoPosterSource ?? record.video_poster_source },
-    { url: imageLikeUrl(record.video_poster_url), source: record.videoPosterSource ?? record.video_poster_source },
-    { url: imageLikeUrl(record.thumbnailUrl), source: record.thumbnailSource ?? record.thumbnail_source },
-    { url: imageLikeUrl(record.thumbnail_url), source: record.thumbnailSource ?? record.thumbnail_source },
-    { url: imageLikeUrl(record.coverImageUrl), source: record.coverImageSource ?? record.cover_image_source },
-    { url: imageLikeUrl(record.cover_image_url), source: record.coverImageSource ?? record.cover_image_source },
-    { url: imageLikeUrl(record.coverAssetUrl), source: record.coverAssetSource ?? record.cover_asset_source },
-    { url: imageLikeUrl(record.cover_asset_url), source: record.coverAssetSource ?? record.cover_asset_source },
-    { url: imageLikeUrl(record.previewImageUrl), source: record.previewImageSource ?? record.preview_image_source },
-    { url: imageLikeUrl(record.preview_image_url), source: record.previewImageSource ?? record.preview_image_source },
-    { url: imageLikeUrl(record.providerPreviewImageUrl), source: record.providerPreviewImageSource ?? record.provider_preview_image_source },
-    { url: imageLikeUrl(record.provider_preview_image_url), source: record.providerPreviewImageSource ?? record.provider_preview_image_source },
-    { url: imageLikeUrl(record.imageUrl), source: record.imageSource ?? record.image_source },
-    { url: imageLikeUrl(record.image_url), source: record.imageSource ?? record.image_source },
-    { url: imageLikeUrl(record.keyframeUrl), source: record.keyframeSource ?? record.keyframe_source },
-    { url: imageLikeUrl(record.keyframe_url), source: record.keyframeSource ?? record.keyframe_source },
+    { url: imageLikeUrl(record.posterUrl), source: record.posterSource ?? record.poster_source, needsGeneratedSource: false },
+    { url: imageLikeUrl(record.poster_url), source: record.posterSource ?? record.poster_source, needsGeneratedSource: false },
+    { url: imageLikeUrl(record.videoPosterUrl), source: record.videoPosterSource ?? record.video_poster_source, needsGeneratedSource: false },
+    { url: imageLikeUrl(record.video_poster_url), source: record.videoPosterSource ?? record.video_poster_source, needsGeneratedSource: false },
+    { url: imageLikeUrl(record.thumbnailUrl), source: record.thumbnailSource ?? record.thumbnail_source, needsGeneratedSource: true },
+    { url: imageLikeUrl(record.thumbnail_url), source: record.thumbnailSource ?? record.thumbnail_source, needsGeneratedSource: true },
+    { url: imageLikeUrl(record.coverImageUrl), source: record.coverImageSource ?? record.cover_image_source, needsGeneratedSource: false },
+    { url: imageLikeUrl(record.cover_image_url), source: record.coverImageSource ?? record.cover_image_source, needsGeneratedSource: false },
+    { url: imageLikeUrl(record.coverAssetUrl), source: record.coverAssetSource ?? record.cover_asset_source, needsGeneratedSource: false },
+    { url: imageLikeUrl(record.cover_asset_url), source: record.coverAssetSource ?? record.cover_asset_source, needsGeneratedSource: false },
+    { url: imageLikeUrl(record.previewImageUrl), source: record.previewImageSource ?? record.preview_image_source, needsGeneratedSource: false },
+    { url: imageLikeUrl(record.preview_image_url), source: record.previewImageSource ?? record.preview_image_source, needsGeneratedSource: false },
+    { url: imageLikeUrl(record.providerPreviewImageUrl), source: record.providerPreviewImageSource ?? record.provider_preview_image_source, needsGeneratedSource: false },
+    { url: imageLikeUrl(record.provider_preview_image_url), source: record.providerPreviewImageSource ?? record.provider_preview_image_source, needsGeneratedSource: false },
+    { url: imageLikeUrl(record.imageUrl), source: record.imageSource ?? record.image_source, needsGeneratedSource: false },
+    { url: imageLikeUrl(record.image_url), source: record.imageSource ?? record.image_source, needsGeneratedSource: false },
+    { url: imageLikeUrl(record.keyframeUrl), source: record.keyframeSource ?? record.keyframe_source, needsGeneratedSource: false },
+    { url: imageLikeUrl(record.keyframe_url), source: record.keyframeSource ?? record.keyframe_source, needsGeneratedSource: false },
   ];
 
   for (const candidate of candidates) {
     if (!candidate.url) continue;
     if (sourceLabelLooksReference(candidate.source)) continue;
+    if (candidate.needsGeneratedSource && !sourceLabelLooksGenerated(candidate.source)) continue;
     if (referenceUrls.some((referenceUrl) => sameUrl(candidate.url, referenceUrl))) continue;
     return candidate.url;
   }

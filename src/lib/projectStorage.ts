@@ -101,7 +101,7 @@ export function loadStudioProjects(): StudioProject[] {
           finalPrompt: typeof project.finalPrompt === 'string' ? project.finalPrompt : null,
           thumbnailUrl: generatedMedia.hasVerifiedVideo ? generatedMedia.thumbnailUrl : getBestThumbnail(project),
           posterUrl: generatedMedia.hasVerifiedVideo ? generatedMedia.posterUrl : getBestPoster(project),
-          thumbnailSource: typeof project.thumbnailSource === 'string' ? project.thumbnailSource : null,
+          thumbnailSource: generatedMedia.thumbnailSource,
           publishedAt: typeof project.publishedAt === 'string' ? project.publishedAt : null,
           postedAt: typeof project.postedAt === 'string' ? project.postedAt : null,
           isPosted: typeof project.isPosted === 'boolean' ? project.isPosted : false,

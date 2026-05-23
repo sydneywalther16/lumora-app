@@ -387,6 +387,7 @@ generationsRouter.post('/', generationRateLimit, async (req, res) => {
       videoUrl: persistence.videoUrl,
       thumbnailUrl: null,
       posterUrl: null,
+      thumbnailSource: 'video_output',
       projectId: persistence.projectId,
       storagePath: persistence.storagePath,
       warnings: persistence.warnings,

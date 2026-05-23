@@ -104,6 +104,7 @@ export type SeedanceGenerationRecord = {
   videoUrl: string;
   thumbnailUrl: string | null;
   posterUrl: string | null;
+  thumbnailSource: 'generated_poster' | 'video_output' | 'placeholder';
   durationSeconds: number;
   aspectRatio: SeedanceAspectRatio;
   resolution: SeedanceResolution;
@@ -202,6 +203,7 @@ export async function createSeedanceGeneration(input: {
     videoUrl: persistence.videoUrl,
     thumbnailUrl: null,
     posterUrl: null,
+    thumbnailSource: 'video_output',
     durationSeconds: result.settings.duration,
     aspectRatio: result.settings.aspect_ratio,
     resolution: result.settings.resolution,
@@ -267,13 +269,14 @@ export async function createGenerationJob(input: {
          aspect_ratio,
          privacy,
          result_asset_url,
+         thumbnail_source,
          error_message,
          scene_execution_id,
          scene_id,
          clip_order,
          scene_metadata
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb)
        returning
          id,
          project_id as "projectId",
@@ -307,6 +310,7 @@ export async function createGenerationJob(input: {
         input.aspectRatio ?? null,
         input.privacy ?? 'private',
         input.resultAssetUrl ?? null,
+        input.outputType === 'video' && input.resultAssetUrl ? 'video_output' : null,
         input.errorMessage ?? null,
         input.sceneExecutionId ?? null,
         input.sceneId ?? null,

@@ -41,6 +41,8 @@ export default function GeneratedVideoPreview({
   const alt = title || 'Generated video preview';
   const useVideo = Boolean(media.videoUrl && !videoFailed && (forceVideo || posterFailed || !media.posterUrl || media.mainPreviewType === 'video'));
   const showPoster = Boolean(media.posterUrl && !useVideo && !posterFailed);
+  const showLoading = !loaded && (showPoster || useVideo);
+  const shouldAutoPlay = autoPlay || Boolean(useVideo && !media.posterUrl && !controls);
 
   const shellStyle: CSSProperties = {
     position: 'relative',
@@ -55,11 +57,15 @@ export default function GeneratedVideoPreview({
     objectFit: fit,
     display: 'block',
     background: 'var(--media-background)',
+    position: 'relative',
+    zIndex: 1,
+    opacity: showLoading ? 0 : 1,
+    transition: 'opacity 160ms ease',
   };
 
   return (
     <div className={className} style={shellStyle} onClick={onClick}>
-      {!loaded && (showPoster || useVideo) ? (
+      {showLoading ? (
         <div
           aria-hidden="true"
           className="cinematic-shimmer"
@@ -88,7 +94,7 @@ export default function GeneratedVideoPreview({
         <video
           src={media.videoUrl}
           controls={controls}
-          autoPlay={autoPlay}
+          autoPlay={shouldAutoPlay}
           muted={muted}
           loop={loop}
           playsInline

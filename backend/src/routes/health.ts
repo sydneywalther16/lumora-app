@@ -13,6 +13,10 @@ import { buildRenderSuccessDiagnostics } from '../services/renderSuccessEngine';
 import { buildRenderReliabilityDiagnostics } from '../services/sceneOptimization';
 import { buildVideoThumbnailDiagnostics, repairVideoThumbnails } from '../services/videoThumbnailRepair';
 import {
+  backfillGeneratedVideoPosters,
+  getPosterGenerationAvailability,
+} from '../services/generatedVideoPosterService';
+import {
   buildRenderPathCompareDiagnostics,
   getSeedanceCanaryStatus,
   getReferenceRouteSummary,
@@ -50,6 +54,7 @@ healthRouter.get('/health', (_req, res) => {
 });
 
 healthRouter.get('/api/health/diagnostics', async (_req, res) => {
+  const posterGenerationAvailability = await getPosterGenerationAvailability();
   res.json({
     service: 'lumora-api',
     checkedAt: new Date().toISOString(),
@@ -62,7 +67,7 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
     referenceRouteStatus: await getReferenceRouteSummary({}),
     renderReliability: await buildRenderReliabilityDiagnostics(),
     asyncRenderJobs: await buildAsyncRenderJobDiagnostics(),
-    videoThumbnails: await buildVideoThumbnailDiagnostics(),
+    videoThumbnails: await buildVideoThumbnailDiagnostics({ posterGenerationAvailability }),
   });
 });
 
@@ -71,7 +76,8 @@ healthRouter.get('/api/diagnostics/render-last', async (_req, res) => {
 });
 
 healthRouter.get('/api/diagnostics/media-thumbnails', async (_req, res) => {
-  res.json(await buildVideoThumbnailDiagnostics());
+  const posterGenerationAvailability = await getPosterGenerationAvailability();
+  res.json(await buildVideoThumbnailDiagnostics({ posterGenerationAvailability }));
 });
 
 healthRouter.post('/api/diagnostics/repair-video-thumbnails', async (_req, res) => {
@@ -83,6 +89,18 @@ healthRouter.post('/api/diagnostics/repair-video-thumbnails', async (_req, res) 
   }
 
   res.json(await repairVideoThumbnails());
+});
+
+healthRouter.post('/api/diagnostics/backfill-video-posters', async (req, res) => {
+  if (!env.ENABLE_RENDER_PROBE) {
+    res.status(403).json({
+      error: 'Video poster backfill disabled. Set ENABLE_RENDER_PROBE=true to run the diagnostic backfill.',
+    });
+    return;
+  }
+
+  const limit = z.coerce.number().int().min(1).max(250).optional().parse(req.body?.limit);
+  res.json(await backfillGeneratedVideoPosters({ limit }));
 });
 
 healthRouter.get('/api/diagnostics/canary-routes', (_req, res) => {

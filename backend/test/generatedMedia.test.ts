@@ -49,6 +49,30 @@ assert.equal(videoWithGeneratedPoster.thumbnailSource, 'generated_poster');
 assert.equal(videoWithGeneratedPoster.posterUrl, posterUrl);
 assert.equal(getBestThumbnail({ videoUrl, posterUrl, referenceImageUrl: referenceUrl }), posterUrl);
 
+const videoWithGeneratedThumbnailOnly = resolveGeneratedVideoMedia({
+  videoUrl,
+  posterUrl: referenceUrl,
+  thumbnailUrl: posterUrl,
+  thumbnailSource: 'generated_poster',
+  referenceImageUrl: referenceUrl,
+});
+
+assert.equal(videoWithGeneratedThumbnailOnly.mainPreviewType, 'poster');
+assert.equal(videoWithGeneratedThumbnailOnly.thumbnailSource, 'generated_poster');
+assert.equal(videoWithGeneratedThumbnailOnly.posterUrl, posterUrl);
+assert.equal(videoWithGeneratedThumbnailOnly.thumbnailUrl, posterUrl);
+
+const videoWithUnsetReferenceThumbnail = resolveGeneratedVideoMedia({
+  videoUrl,
+  thumbnailUrl: referenceUrl,
+  thumbnailSource: 'unset',
+  characterAvatar: referenceUrl,
+});
+
+assert.equal(videoWithUnsetReferenceThumbnail.mainPreviewType, 'video');
+assert.equal(videoWithUnsetReferenceThumbnail.thumbnailUrl, null);
+assert.equal(videoWithUnsetReferenceThumbnail.castBadgeUrl, referenceUrl);
+
 const imageOnlyPost = resolveGeneratedVideoMedia({
   imageUrl: posterUrl,
   characterAvatar: referenceUrl,

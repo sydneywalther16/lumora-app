@@ -438,6 +438,7 @@ async function markJobCompleted(input: {
        result_asset_url = $4,
        output_url = $4,
        thumbnail_url = $6,
+       thumbnail_source = case when $6::text is not null then 'generated_poster' else 'video_output' end,
        error_message = null,
        error_category = null,
        completed_at = now(),
