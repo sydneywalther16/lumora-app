@@ -85,6 +85,14 @@ export type CharacterProfile = {
   memorySnapshots: CharacterMemorySnapshot[];
   relationshipMemory: Record<string, CharacterRelationshipMemory>;
   appearanceDrift: CharacterAppearanceDrift[];
+  providerIdentityProvider: string | null;
+  providerCharacterId: string | null;
+  providerCharacterStatus: string | null;
+  providerCharacterCreatedAt: string | null;
+  providerCharacterLastVerifiedAt: string | null;
+  likenessProviderStatus: string | null;
+  likenessConsentAt: string | null;
+  providerCharacterSourceAssetId: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -112,6 +120,14 @@ type CharacterProfileRow = {
   memorySnapshots: unknown;
   relationshipMemory: unknown;
   appearanceDrift: unknown;
+  providerIdentityProvider: string | null;
+  providerCharacterId: string | null;
+  providerCharacterStatus: string | null;
+  providerCharacterCreatedAt: string | null;
+  providerCharacterLastVerifiedAt: string | null;
+  likenessProviderStatus: string | null;
+  likenessConsentAt: string | null;
+  providerCharacterSourceAssetId: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -136,7 +152,27 @@ export type CharacterProfilePatch = Partial<{
   memorySnapshots: CharacterMemorySnapshot[];
   relationshipMemory: Record<string, CharacterRelationshipMemory>;
   appearanceDrift: CharacterAppearanceDrift[];
+  providerIdentityProvider: string | null;
+  providerCharacterId: string | null;
+  providerCharacterStatus: string | null;
+  providerCharacterCreatedAt: string | null;
+  providerCharacterLastVerifiedAt: string | null;
+  likenessProviderStatus: string | null;
+  likenessConsentAt: string | null;
+  providerCharacterSourceAssetId: string | null;
 }>;
+
+export type ProviderCharacterIdentityPatch = Pick<
+  CharacterProfilePatch,
+  | 'providerIdentityProvider'
+  | 'providerCharacterId'
+  | 'providerCharacterStatus'
+  | 'providerCharacterCreatedAt'
+  | 'providerCharacterLastVerifiedAt'
+  | 'likenessProviderStatus'
+  | 'likenessConsentAt'
+  | 'providerCharacterSourceAssetId'
+>;
 
 export type DeleteCharacterProfileResult = {
   character: CharacterProfile;
@@ -183,6 +219,14 @@ const characterSelect = `
   memory_snapshots as "memorySnapshots",
   relationship_memory as "relationshipMemory",
   appearance_drift as "appearanceDrift",
+  provider_identity_provider as "providerIdentityProvider",
+  provider_character_id as "providerCharacterId",
+  provider_character_status as "providerCharacterStatus",
+  provider_character_created_at as "providerCharacterCreatedAt",
+  provider_character_last_verified_at as "providerCharacterLastVerifiedAt",
+  likeness_provider_status as "likenessProviderStatus",
+  likeness_consent_at as "likenessConsentAt",
+  provider_character_source_asset_id as "providerCharacterSourceAssetId",
   created_at as "createdAt",
   updated_at as "updatedAt"
 `;
@@ -274,6 +318,14 @@ function rowToCharacterProfile(row: CharacterProfileRow): CharacterProfile {
     memorySnapshots: normalizeMemorySnapshots(row.memorySnapshots),
     relationshipMemory: normalizeRelationshipMemory(row.relationshipMemory),
     appearanceDrift: normalizeAppearanceDrift(row.appearanceDrift),
+    providerIdentityProvider: textValue(row.providerIdentityProvider) || null,
+    providerCharacterId: textValue(row.providerCharacterId) || null,
+    providerCharacterStatus: textValue(row.providerCharacterStatus) || null,
+    providerCharacterCreatedAt: row.providerCharacterCreatedAt,
+    providerCharacterLastVerifiedAt: row.providerCharacterLastVerifiedAt,
+    likenessProviderStatus: textValue(row.likenessProviderStatus) || null,
+    likenessConsentAt: row.likenessConsentAt,
+    providerCharacterSourceAssetId: textValue(row.providerCharacterSourceAssetId) || null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -469,6 +521,14 @@ export function characterProfileFromMetadata(
     memorySnapshots: normalizeMemorySnapshots(source.memorySnapshots),
     relationshipMemory: normalizeRelationshipMemory(source.relationshipMemory),
     appearanceDrift: normalizeAppearanceDrift(source.appearanceDrift),
+    providerIdentityProvider: textValue(source.providerIdentityProvider) || null,
+    providerCharacterId: textValue(source.providerCharacterId) || null,
+    providerCharacterStatus: textValue(source.providerCharacterStatus) || null,
+    providerCharacterCreatedAt: textValue(source.providerCharacterCreatedAt) || null,
+    providerCharacterLastVerifiedAt: textValue(source.providerCharacterLastVerifiedAt) || null,
+    likenessProviderStatus: textValue(source.likenessProviderStatus) || null,
+    likenessConsentAt: textValue(source.likenessConsentAt) || null,
+    providerCharacterSourceAssetId: textValue(source.providerCharacterSourceAssetId) || null,
     createdAt: now,
     updatedAt: now,
   };
@@ -611,6 +671,14 @@ export async function updateCharacterProfileForUser(input: {
     memorySnapshots: input.memorySnapshots ?? current.memorySnapshots,
     relationshipMemory: input.relationshipMemory ?? current.relationshipMemory,
     appearanceDrift: input.appearanceDrift ?? current.appearanceDrift,
+    providerIdentityProvider: input.providerIdentityProvider === undefined ? current.providerIdentityProvider : input.providerIdentityProvider,
+    providerCharacterId: input.providerCharacterId === undefined ? current.providerCharacterId : input.providerCharacterId,
+    providerCharacterStatus: input.providerCharacterStatus === undefined ? current.providerCharacterStatus : input.providerCharacterStatus,
+    providerCharacterCreatedAt: input.providerCharacterCreatedAt === undefined ? current.providerCharacterCreatedAt : input.providerCharacterCreatedAt,
+    providerCharacterLastVerifiedAt: input.providerCharacterLastVerifiedAt === undefined ? current.providerCharacterLastVerifiedAt : input.providerCharacterLastVerifiedAt,
+    likenessProviderStatus: input.likenessProviderStatus === undefined ? current.likenessProviderStatus : input.likenessProviderStatus,
+    likenessConsentAt: input.likenessConsentAt === undefined ? current.likenessConsentAt : input.likenessConsentAt,
+    providerCharacterSourceAssetId: input.providerCharacterSourceAssetId === undefined ? current.providerCharacterSourceAssetId : input.providerCharacterSourceAssetId,
   };
 
   const result = await query<CharacterProfileRow>(
@@ -635,6 +703,14 @@ export async function updateCharacterProfileForUser(input: {
        memory_snapshots = $19::jsonb,
        relationship_memory = $20::jsonb,
        appearance_drift = $21::jsonb,
+       provider_identity_provider = $22,
+       provider_character_id = $23,
+       provider_character_status = $24,
+       provider_character_created_at = $25,
+       provider_character_last_verified_at = $26,
+       likeness_provider_status = $27,
+       likeness_consent_at = $28,
+       provider_character_source_asset_id = $29,
        updated_at = now()
      where owner_user_id = $1 and (id::text = $2 or character_id = $2)
      returning ${characterSelect}`,
@@ -660,10 +736,54 @@ export async function updateCharacterProfileForUser(input: {
       JSON.stringify(next.memorySnapshots),
       JSON.stringify(next.relationshipMemory),
       JSON.stringify(next.appearanceDrift),
+      next.providerIdentityProvider,
+      next.providerCharacterId,
+      next.providerCharacterStatus,
+      next.providerCharacterCreatedAt,
+      next.providerCharacterLastVerifiedAt,
+      next.likenessProviderStatus,
+      next.likenessConsentAt,
+      next.providerCharacterSourceAssetId,
     ],
   );
 
   return result.rows[0] ? rowToCharacterProfile(result.rows[0]) : null;
+}
+
+export async function updateSelfCharacterProviderIdentityForUser(input: {
+  ownerUserId: string;
+  patch: ProviderCharacterIdentityPatch;
+}) {
+  try {
+    await query(
+      `update self_characters
+       set
+         provider_identity_provider = $2,
+         provider_character_id = $3,
+         provider_character_status = $4,
+         provider_character_created_at = $5,
+         provider_character_last_verified_at = $6,
+         likeness_provider_status = $7,
+         likeness_consent_at = $8,
+         provider_character_source_asset_id = $9,
+         updated_at = now()
+       where user_id = $1`,
+      [
+        input.ownerUserId,
+        input.patch.providerIdentityProvider ?? null,
+        input.patch.providerCharacterId ?? null,
+        input.patch.providerCharacterStatus ?? null,
+        input.patch.providerCharacterCreatedAt ?? null,
+        input.patch.providerCharacterLastVerifiedAt ?? null,
+        input.patch.likenessProviderStatus ?? null,
+        input.patch.likenessConsentAt ?? null,
+        input.patch.providerCharacterSourceAssetId ?? null,
+      ],
+    );
+  } catch (error) {
+    if (optionalCleanupSchemaError(error)) return;
+    throw error;
+  }
 }
 
 export async function deleteCharacterProfileForUser(input: {

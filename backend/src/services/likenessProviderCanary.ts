@@ -1,6 +1,7 @@
 import { env } from '../lib/env';
+import { getOpenAISoraProviderReadiness } from './providers/openaiSoraProvider';
 
-export type AlternateLikenessProvider = 'kling-reference' | 'runway' | 'veo';
+export type AlternateLikenessProvider = 'openai-sora-character' | 'kling-reference' | 'runway' | 'veo';
 
 export type AlternateLikenessProviderStatus = {
   provider: AlternateLikenessProvider;
@@ -13,7 +14,21 @@ export type AlternateLikenessProviderStatus = {
 };
 
 export function buildAlternateLikenessProviderCanaryStatus(): AlternateLikenessProviderStatus[] {
+  const openAISora = getOpenAISoraProviderReadiness();
   const providers: AlternateLikenessProviderStatus[] = [
+    {
+      provider: 'openai-sora-character',
+      configured: openAISora.openaiCharacterConfigured,
+      referenceCapable: openAISora.routeReady,
+      canaryTested: false,
+      productionRouteEnabled: openAISora.routeReady,
+      lastReferenceResult: null,
+      status: openAISora.routeReady
+        ? 'configured_needs_test'
+        : openAISora.openaiCharacterConfigured
+          ? 'configured_needs_test'
+          : 'not_configured',
+    },
     {
       provider: 'kling-reference',
       configured: false,

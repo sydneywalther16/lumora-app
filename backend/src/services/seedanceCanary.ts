@@ -13,6 +13,11 @@ import {
   buildAlternateLikenessProviderCanaryStatus,
 } from './likenessProviderCanary';
 import {
+  chooseSoraSelfCharacterCreateRoute,
+  getOpenAISoraProviderReadiness,
+  getSelfProviderCharacterDiagnostics,
+} from './providers/openaiSoraProvider';
+import {
   SEEDANCE_FAST_MODEL,
   SEEDANCE_QUALITY_MODEL,
   isReplicateRateLimitError,
@@ -1999,6 +2004,17 @@ export async function buildRenderPathCompareDiagnostics() {
       userId: real?.userId ?? null,
       characterId: real?.characterId ?? null,
     });
+    const openaiSoraReadiness = getOpenAISoraProviderReadiness();
+    const openaiSoraIdentity = await getSelfProviderCharacterDiagnostics({
+      userId: real?.userId ?? null,
+      characterId: real?.characterId ?? null,
+    });
+    const openaiSoraRoute = chooseSoraSelfCharacterCreateRoute({
+      readiness: openaiSoraReadiness,
+      providerCharacterId: openaiSoraIdentity.selfProviderCharacterIdPresent ? 'present' : null,
+      providerCharacterStatus: openaiSoraIdentity.selfProviderCharacterStatus,
+      likenessProviderStatus: openaiSoraIdentity.likenessProviderStatus,
+    });
     const canarySummary = await buildSeedanceCanarySummaryDiagnostics();
     const canary = {
       provider: 'seedance-fast',
@@ -2104,6 +2120,15 @@ export async function buildRenderPathCompareDiagnostics() {
       selectedLikenessMode,
       alternateLikenessProvidersConfigured: alternateLikenessProvidersConfigured().map((provider) => provider.provider),
       alternateLikenessProviderCanaryStatus: buildAlternateLikenessProviderCanaryStatus(),
+      openaiVideoEnabled: openaiSoraReadiness.openaiVideoEnabled,
+      openaiVideoModel: openaiSoraReadiness.openaiVideoModel,
+      openaiCharacterEnabled: openaiSoraReadiness.openaiCharacterEnabled,
+      openaiCharacterConfigured: openaiSoraReadiness.openaiCharacterConfigured,
+      selfProviderCharacterIdPresent: openaiSoraIdentity.selfProviderCharacterIdPresent,
+      selfProviderCharacterStatus: openaiSoraIdentity.selfProviderCharacterStatus,
+      soraCharacterCanaryStatus: openaiSoraIdentity.soraCharacterCanaryStatus,
+      selectedCreateLikenessRoute: openaiSoraRoute.selectedCreateLikenessRoute,
+      openaiSoraWhyChosen: openaiSoraRoute.whyChosen,
       seedanceReferenceRoutesBlocked: referenceRouteSummary.seedanceReferenceRoutesBlocked,
       frontReferenceCanaryResult: referenceRouteSummary.allReferenceRouteResults.find((route) => route.referenceRole === 'front_angle') ?? null,
       sideReferenceCanaryResult: referenceRouteSummary.allReferenceRouteResults.find((route) => route.referenceRole === 'side_angle_left' || route.referenceRole === 'side_angle_right') ?? null,

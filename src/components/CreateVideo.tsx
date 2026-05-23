@@ -1222,6 +1222,31 @@ export default function CreateVideo({
           : identityProfile.status === 'ready'
             ? 'Cinematic self ready'
             : 'Needs references';
+  const providerSelfCharacterReady =
+    selfReferenceMode &&
+    characterProfile?.providerIdentityProvider === 'openai_sora' &&
+    characterProfile.providerCharacterStatus === 'ready' &&
+    characterProfile.likenessProviderStatus === 'canary_succeeded';
+  const providerSelfCharacterSetupStarted =
+    selfReferenceMode &&
+    characterProfile?.providerIdentityProvider === 'openai_sora' &&
+    Boolean(characterProfile.providerCharacterStatus);
+  const selfCharacterProviderStatusLabel = providerSelfCharacterReady
+    ? 'Verified self character ready'
+    : providerSelfCharacterSetupStarted
+      ? characterProfile?.providerCharacterStatus === 'failed'
+        ? 'Self character route unavailable'
+        : characterProfile?.providerCharacterStatus === 'disabled'
+          ? 'Self character route unavailable'
+          : 'Self character needs setup'
+      : selfReferenceMode
+        ? 'Soft self guidance only'
+        : '';
+  const selfCharacterProviderStatusCopy = providerSelfCharacterReady
+    ? 'Using verified self character.'
+    : providerSelfCharacterSetupStarted
+      ? 'Self character route needs a quick test before Lumora can claim exact likeness.'
+      : 'Rendering with soft self guidance.';
   const identityReferenceCards = [
     {
       label: 'Front photo',
@@ -1378,6 +1403,8 @@ export default function CreateVideo({
       ? 'Add a scene idea'
     : !canGenerate
       ? 'Add reference before generating'
+    : providerSelfCharacterReady
+      ? 'Generate with My Self Character'
     : 'Generate Cinematic Scene';
   const showCinematicStructure = Boolean(
     !activeSuccessFirstWithoutOutput && (
@@ -3675,6 +3702,12 @@ export default function CreateVideo({
                 <span className="muted">Lumora will use your saved look as text guidance first.</span>
                 <span className="muted">Photo likeness is saved, but this renderer needs a lighter identity path.</span>
               </>
+            ) : null}
+            {selfReferenceMode ? (
+              <div style={{ display: 'grid', gap: '6px', marginTop: '10px' }}>
+                <span className="tiny-pill" style={{ width: 'fit-content' }}>{selfCharacterProviderStatusLabel}</span>
+                <span className="muted">{selfCharacterProviderStatusCopy}</span>
+              </div>
             ) : null}
             {isSeedanceEngine && seedanceReferenceCount > 0 ? (
               <details className="compact-reference-details">

@@ -1,4 +1,5 @@
 import { env } from './env';
+import { getOpenAISoraProviderReadiness } from '../services/providers/openaiSoraProvider';
 
 export type EnvironmentDiagnostics = {
   ok: boolean;
@@ -22,6 +23,7 @@ export type EnvironmentDiagnostics = {
 };
 
 export function getEnvironmentDiagnostics(): EnvironmentDiagnostics {
+  const openAISora = getOpenAISoraProviderReadiness();
   const stripeMissing = [
     ['STRIPE_SECRET_KEY', Boolean(env.STRIPE_SECRET_KEY)],
     ['STRIPE_WEBHOOK_SECRET', Boolean(env.STRIPE_WEBHOOK_SECRET)],
@@ -47,6 +49,7 @@ export function getEnvironmentDiagnostics(): EnvironmentDiagnostics {
     replicate: Boolean(env.REPLICATE_API_TOKEN),
     googleVeo: Boolean(env.GOOGLE_API_KEY),
     openai: Boolean(env.OPENAI_API_KEY),
+    openaiVideo: openAISora.routeReady,
     stripe: stripeReady,
     billing: billing.enabled,
     redis: Boolean(env.REDIS_URL),
@@ -87,6 +90,11 @@ export function getEnvironmentDiagnostics(): EnvironmentDiagnostics {
         id: 'veo-experimental',
         ready: configured.googleVeo,
         status: configured.googleVeo ? 'ready' : 'placeholder',
+      },
+      {
+        id: 'openai-sora-character',
+        ready: openAISora.routeReady,
+        status: openAISora.routeReady ? 'ready' : env.OPENAI_VIDEO_ENABLED ? 'placeholder' : 'not_configured',
       },
       {
         id: 'demo-mode',

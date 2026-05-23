@@ -705,6 +705,18 @@ export type ApiHealthDiagnostics = {
       status: string;
     }>;
   };
+  openaiSoraProvider?: {
+    openaiVideoEnabled: boolean;
+    openaiVideoModel: string;
+    openaiCharacterEnabled: boolean;
+    openaiApiKeyConfigured: boolean;
+    openaiCharacterConfigured: boolean;
+    sdkVideoSupported: boolean;
+    sdkCharacterSupported: boolean;
+    routeReady: boolean;
+    status: string;
+    message: string;
+  };
   asyncRenderJobs?: {
     ok: boolean;
     pendingJobCount: number;
@@ -934,10 +946,27 @@ export type CharacterProfile = {
   memorySnapshots?: CharacterMemorySnapshot[];
   relationshipMemory?: Record<string, CharacterRelationshipMemory>;
   appearanceDrift?: CharacterAppearanceDrift[];
+  providerIdentityProvider?: string | null;
+  providerCharacterId?: string | null;
+  providerCharacterIdPresent?: boolean;
+  providerCharacterStatus?: string | null;
+  providerCharacterCreatedAt?: string | null;
+  providerCharacterLastVerifiedAt?: string | null;
+  likenessProviderStatus?: string | null;
+  likenessConsentAt?: string | null;
+  providerCharacterSourceAssetId?: string | null;
   createdAt: string;
   updatedAt: string;
   isSelf?: boolean;
   isCreatorSelf?: boolean;
+};
+
+export type SoraSelfCharacterSetupPayload = {
+  userId?: string | null;
+  characterId?: string | null;
+  consentConfirmed: boolean;
+  sourceUploadAssetId?: string | null;
+  sourceVideoUrl?: string | null;
 };
 
 export type CreateCharacterPayload = {
@@ -1107,6 +1136,21 @@ export const api = {
   cleanupObsoleteCharacterReferences: (id: string) =>
     request<ReferenceCleanupResponse>(`/api/characters/${id}/references/cleanup-obsolete`, {
       method: 'POST',
+    }),
+
+  createSoraSelfCharacter: (payload: SoraSelfCharacterSetupPayload) =>
+    request<{
+      ok: boolean;
+      status: string;
+      provider: 'openai_sora';
+      providerCharacterIdPresent: boolean;
+      providerCharacterStatus: string | null;
+      likenessProviderStatus: string | null;
+      message: string;
+      character: CharacterProfile | null;
+    }>('/api/characters/self/sora-character', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }),
 
   listProjects: () => request<{ projects: Array<Record<string, unknown>> }>('/api/projects'),

@@ -10,6 +10,7 @@ export {
   publicCharacterProfile,
   updateCharacterProfileForUser,
   updateCharacterProfileFromMemory,
+  updateSelfCharacterProviderIdentityForUser,
   type CharacterAppearanceDrift,
   type DeleteCharacterProfileResult,
   type CharacterMemorySnapshot,
@@ -18,4 +19,5 @@ export {
   type CharacterRelationshipMemory,
   type CharacterStatus,
   type CharacterVisibility,
+  type ProviderCharacterIdentityPatch,
 } from './characterProfiles';

@@ -7,6 +7,11 @@ import {
   alternateLikenessProvidersConfigured,
   buildAlternateLikenessProviderCanaryStatus,
 } from './likenessProviderCanary';
+import {
+  chooseSoraSelfCharacterCreateRoute,
+  getOpenAISoraProviderReadiness,
+  getSelfProviderCharacterDiagnostics,
+} from './providers/openaiSoraProvider';
 
 type LatestRenderRow = {
   id: string;
@@ -84,6 +89,36 @@ function textSelfGuidanceDiagnostics(row: LatestRenderRow | null) {
     selectedLikenessMode,
     alternateLikenessProvidersConfigured: alternateLikenessProvidersConfigured().map((provider) => provider.provider),
     alternateLikenessProviderCanaryStatus: buildAlternateLikenessProviderCanaryStatus(),
+  };
+}
+
+async function openAISoraDiagnostics(row: LatestRenderRow | null) {
+  const readiness = getOpenAISoraProviderReadiness();
+  const identity = await getSelfProviderCharacterDiagnostics({
+    userId: row?.userId ?? null,
+    characterId: row?.characterId ?? null,
+  });
+  const route = chooseSoraSelfCharacterCreateRoute({
+    readiness,
+    providerCharacterId: identity.selfProviderCharacterIdPresent ? 'present' : null,
+    providerCharacterStatus: identity.selfProviderCharacterStatus,
+    likenessProviderStatus: identity.likenessProviderStatus,
+  });
+
+  return {
+    openaiVideoEnabled: readiness.openaiVideoEnabled,
+    openaiVideoModel: readiness.openaiVideoModel,
+    openaiCharacterEnabled: readiness.openaiCharacterEnabled,
+    openaiCharacterConfigured: readiness.openaiCharacterConfigured,
+    openaiVideoRouteReady: readiness.routeReady,
+    openaiVideoRouteStatus: readiness.status,
+    selfProviderCharacterIdPresent: identity.selfProviderCharacterIdPresent,
+    selfProviderCharacterStatus: identity.selfProviderCharacterStatus,
+    selfProviderIdentityProvider: identity.selfProviderIdentityProvider,
+    selfProviderCharacterIdRedacted: identity.selfProviderCharacterIdRedacted,
+    soraCharacterCanaryStatus: identity.soraCharacterCanaryStatus,
+    selectedCreateLikenessRoute: route.selectedCreateLikenessRoute,
+    openaiSoraWhyChosen: route.whyChosen,
   };
 }
 
@@ -210,11 +245,13 @@ export async function buildLastRenderDiagnostics() {
       const canarySummary = await buildSeedanceCanarySummaryDiagnostics();
       const referenceRouteSummary = await getReferenceRouteSummary({});
       const textGuidance = textSelfGuidanceDiagnostics(null);
+      const soraDiagnostics = await openAISoraDiagnostics(null);
       return {
         ok: true,
         latestGenerationJob: null,
         seedanceCanary: canarySummary,
         ...textGuidance,
+        ...soraDiagnostics,
         textOnlyCanarySucceeded: canarySummary.canaryEverSucceeded,
         referenceRouteState: referenceRouteSummary.state,
         seedanceReferenceRoutesBlocked: referenceRouteSummary.seedanceReferenceRoutesBlocked,
@@ -293,6 +330,7 @@ export async function buildLastRenderDiagnostics() {
     const cooldownRow = activeRow.status === 'rate_limited' ? activeRow : row.status === 'rate_limited' ? row : null;
     const providerFailure = canaryProviderFailure(activeRow) ?? canaryProviderFailure(row);
     const textGuidance = textSelfGuidanceDiagnostics(row);
+    const soraDiagnostics = await openAISoraDiagnostics(row);
     const referenceRouteSummary = await getReferenceRouteSummary({
       userId: row.userId,
       characterId: row.characterId,
@@ -354,6 +392,7 @@ export async function buildLastRenderDiagnostics() {
         nextAttemptPlanned: nextAttemptPlanned(row, attemptRow, attemptsSummary?.count ?? null),
         canaryEverSucceeded: canarySummary.canaryEverSucceeded,
         ...textGuidance,
+        ...soraDiagnostics,
         textOnlyCanarySucceeded: canarySummary.canaryEverSucceeded,
         lastCanaryStatus: canarySummary.lastCanaryStatus,
         lastReferenceCanaryStatus: canarySummary.lastReferenceCanaryStatus,

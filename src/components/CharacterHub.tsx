@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { type CharacterProfile, type CharacterRelationshipMemory } from '../lib/api';
+import { api, type CharacterProfile, type CharacterRelationshipMemory } from '../lib/api';
 import { deleteLocalCharacterProfile, updateLocalCharacterProfile } from '../lib/characterStorage';
 import { getBestThumbnail } from '../lib/mediaThumbnail';
 import {
@@ -33,7 +33,7 @@ type CharacterHubProps = {
   children?: ReactNode;
 };
 
-type DetailSectionKey = 'identity' | 'appearance' | 'style' | 'voice' | 'memory' | 'references';
+type DetailSectionKey = 'identity' | 'providerIdentity' | 'appearance' | 'style' | 'voice' | 'memory' | 'references';
 
 const characterLimit = 25;
 const characterProfilesMigrationWarning = 'Cast needs the latest Lumora update.';
@@ -103,6 +103,21 @@ function formatPercent(value: number | null | undefined) {
 function latestContinuityConfidence(character: CharacterProfile) {
   const latestSnapshot = character.memorySnapshots?.find((snapshot) => typeof snapshot.continuityConfidence === 'number');
   return latestSnapshot?.continuityConfidence ?? null;
+}
+
+function providerIdentityStatusLabel(character: CharacterProfile) {
+  if (character.providerCharacterStatus === 'ready') return 'Ready';
+  if (character.providerCharacterStatus === 'pending') return 'Pending';
+  if (character.providerCharacterStatus === 'failed') return 'Failed';
+  if (character.providerCharacterStatus === 'disabled') return 'Not configured';
+  return 'Needs setup';
+}
+
+function providerIdentityStatusCopy(character: CharacterProfile) {
+  if (character.providerCharacterStatus === 'ready') return 'Verified provider character is ready after setup and canary testing.';
+  if (character.providerCharacterStatus === 'failed') return 'Provider character setup could not run with the current configuration.';
+  if (character.providerCharacterStatus === 'disabled') return 'OpenAI video character routing is not configured yet.';
+  return 'Create a verified provider character only after uploading a consented self video.';
 }
 
 function uniqueSceneCount(character: CharacterProfile) {
@@ -302,6 +317,10 @@ export default function CharacterHub({
   const [referenceRepairSlot, setReferenceRepairSlot] = useState<ReferenceRepairSlot | null>(null);
   const [referenceRepairStatus, setReferenceRepairStatus] = useState('');
   const [referenceRepairSaving, setReferenceRepairSaving] = useState(false);
+  const [soraIdentityFile, setSoraIdentityFile] = useState<File | null>(null);
+  const [soraIdentityConsent, setSoraIdentityConsent] = useState(false);
+  const [soraIdentitySaving, setSoraIdentitySaving] = useState(false);
+  const [soraIdentityStatus, setSoraIdentityStatus] = useState('');
   const referenceRepairInputRef = useRef<HTMLInputElement | null>(null);
   const atCharacterLimit = characters.length >= characterLimit;
 
@@ -313,6 +332,9 @@ export default function CharacterHub({
       setActionsOpen(false);
       setConfirmDeleteOpen(false);
       setDeleteStatus('');
+      setSoraIdentityFile(null);
+      setSoraIdentityConsent(false);
+      setSoraIdentityStatus('');
     }
   }, [open]);
 
@@ -337,6 +359,7 @@ export default function CharacterHub({
       setCinematicStyle('');
       setRelationshipNotes('');
       setEditorStatus('');
+      setSoraIdentityStatus('');
       return;
     }
 
@@ -550,6 +573,70 @@ export default function CharacterHub({
     }
   }
 
+  async function handleCreateSoraSelfCharacter() {
+    if (!selectedCharacter || !selectedIsSelf) return;
+    if (!authUser) {
+      setSoraIdentityStatus('Sign in to create a verified self character.');
+      return;
+    }
+    if (!soraIdentityConsent) {
+      setSoraIdentityStatus('Consent is required before creating a verified self character.');
+      return;
+    }
+    if (!soraIdentityFile) {
+      setSoraIdentityStatus('Upload a short self video first.');
+      return;
+    }
+
+    setSoraIdentitySaving(true);
+    setSoraIdentityStatus('Uploading self character video...');
+    try {
+      const upload = await uploadLumoraMedia({
+        userId: authUser.id,
+        bucket: 'lumora-assets',
+        file: soraIdentityFile,
+        folder: `provider-identities/${selectedCharacter.id}`,
+        usage: 'self_character_provider_identity_video',
+        entityType: 'character_profile',
+        entityId: selectedCharacter.id,
+      });
+      setSoraIdentityStatus('Checking provider character route...');
+      const response = await api.createSoraSelfCharacter({
+        userId: authUser.id,
+        characterId: selectedCharacter.characterId ?? selectedCharacter.id,
+        consentConfirmed: soraIdentityConsent,
+        sourceUploadAssetId: upload.objectPath,
+        sourceVideoUrl: upload.url,
+      });
+      const fallbackUpdatedCharacter: CharacterProfile = {
+        ...selectedCharacter,
+        providerIdentityProvider: 'openai_sora',
+        providerCharacterId: null,
+        providerCharacterIdPresent: response.providerCharacterIdPresent,
+        providerCharacterStatus: response.providerCharacterStatus,
+        likenessProviderStatus: response.likenessProviderStatus,
+        likenessConsentAt: new Date().toISOString(),
+        providerCharacterSourceAssetId: upload.objectPath,
+      };
+      const nextCharacter = response.character ?? fallbackUpdatedCharacter;
+      await onRefresh(
+        characters.map((character) => (
+          character.id === selectedCharacter.id || character.characterId === selectedCharacter.characterId
+            ? nextCharacter
+            : character
+        )),
+      );
+      setSelectedCharacterId(nextCharacter.id);
+      setSoraIdentityStatus(response.message || 'Provider character status updated.');
+      setSoraIdentityFile(null);
+      setSoraIdentityConsent(false);
+    } catch (error) {
+      setSoraIdentityStatus(error instanceof Error ? error.message : 'Unable to create verified self character yet.');
+    } finally {
+      setSoraIdentitySaving(false);
+    }
+  }
+
   async function handleConfirmDelete() {
     if (!selectedCharacter || selectedIsSelf) return;
 
@@ -751,6 +838,54 @@ export default function CharacterHub({
               </div>
             )}
           </CharacterDetailSection>
+
+          {selectedIsSelf ? (
+            <CharacterDetailSection
+              id="providerIdentity"
+              title="Self Character Identity"
+              summary={`Verified provider character: ${providerIdentityStatusLabel(selectedCharacter)}`}
+              expanded={detailSectionIsOpen('providerIdentity')}
+              onToggle={toggleDetailSection}
+            >
+              <div className="character-compact-form">
+                <div className="character-memory-viewer character-section-card">
+                  {metadataLine('Saved visual references', savedRefs.length ? `${savedRefs.length} saved` : 'No saved references yet')}
+                  {metadataLine('Soft text guidance', selectedCharacter.appearanceSummary || selectedCharacter.identityProfile?.appearanceSummary ? 'Available' : 'Needs appearance details')}
+                  {metadataLine('Verified provider character', providerIdentityStatusLabel(selectedCharacter))}
+                  {metadataLine('Consent', selectedCharacter.likenessConsentAt ? 'Confirmed' : 'Not confirmed')}
+                  <p className="muted">{providerIdentityStatusCopy(selectedCharacter)}</p>
+                </div>
+                <label className="field-block">
+                  <span>Verification video</span>
+                  <input
+                    type="file"
+                    accept="video/*"
+                    onChange={(event) => setSoraIdentityFile(event.target.files?.[0] ?? null)}
+                  />
+                </label>
+                <label className="checkbox-row" style={{ alignItems: 'flex-start' }}>
+                  <input
+                    type="checkbox"
+                    checked={soraIdentityConsent}
+                    onChange={(event) => setSoraIdentityConsent(event.target.checked)}
+                  />
+                  <span>I confirm this is me and I consent to using this recording to create my Lumora self character.</span>
+                </label>
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    disabled={soraIdentitySaving}
+                    onClick={() => void handleCreateSoraSelfCharacter()}
+                  >
+                    {soraIdentitySaving ? 'Checking route...' : 'Create verified self character'}
+                  </button>
+                </div>
+                {soraIdentityStatus ? <p className="muted">{soraIdentityStatus}</p> : null}
+                <p className="muted">Provider deletion is unavailable until the configured provider exposes a supported delete route.</p>
+              </div>
+            </CharacterDetailSection>
+          ) : null}
 
           <CharacterDetailSection
             id="appearance"

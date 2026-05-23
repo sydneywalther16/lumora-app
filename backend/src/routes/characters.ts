@@ -7,11 +7,18 @@ import {
   getCharacterProfileForUser,
   listCharacterProfilesForUser,
   updateCharacterProfileForUser,
+  updateSelfCharacterProviderIdentityForUser,
   type CharacterReferenceImageUrls,
   type CharacterRelationshipMemory,
 } from '../services/characterService';
 import { cleanupObsoleteCharacterReferencesForUser } from '../services/referenceCleanup';
 import { persistMediaUpload } from '../services/storageService';
+import {
+  buildDisabledSoraCharacterIdentityPatch,
+  getOpenAISoraProviderReadiness,
+  OpenAISoraProviderError,
+  validateSoraCharacterConsent,
+} from '../services/providers/openaiSoraProvider';
 
 const visibilitySchema = z.enum(['private', 'approved_only', 'public']);
 const statusSchema = z.enum(['draft', 'processing', 'ready', 'failed']);
@@ -71,6 +78,15 @@ const patchCharacterSchema = z.object({
   sourceCaptureVideo: mediaUploadSchema.optional().nullable(),
   voiceSample: mediaUploadSchema.optional().nullable(),
 });
+const soraSelfCharacterSchema = z.object({
+  userId: z.string().min(1).optional().nullable(),
+  characterId: z.string().min(1).optional().nullable(),
+  consentConfirmed: z.boolean().optional(),
+  consent_confirmed: z.boolean().optional(),
+  sourceUploadAssetId: z.string().min(1).optional().nullable(),
+  sourceVideoUrl: z.string().url().optional().nullable(),
+  identityVideo: mediaUploadSchema.optional().nullable(),
+});
 
 export const charactersRouter = Router();
 charactersRouter.use(requireAuth);
@@ -83,9 +99,94 @@ function relationshipMemoryValue(value: Record<string, unknown> | undefined) {
   return (value ?? {}) as Record<string, CharacterRelationshipMemory>;
 }
 
+function creatorSafeCharacter<T extends { providerCharacterId?: string | null }>(character: T) {
+  return {
+    ...character,
+    providerCharacterId: null,
+    providerCharacterIdPresent: Boolean(character.providerCharacterId),
+  };
+}
+
 charactersRouter.get('/', async (req: AuthedRequest, res) => {
   const characters = await listCharacterProfilesForUser(req.userId!);
-  res.json({ characters });
+  res.json({ characters: characters.map(creatorSafeCharacter) });
+});
+
+charactersRouter.post('/self/sora-character', async (req: AuthedRequest, res) => {
+  const payload = soraSelfCharacterSchema.parse(req.body ?? {});
+  const consentConfirmed = payload.consentConfirmed ?? payload.consent_confirmed ?? false;
+
+  try {
+    validateSoraCharacterConsent({ consentConfirmed });
+  } catch (error) {
+    if (error instanceof OpenAISoraProviderError) {
+      res.status(error.statusCode).json({ error: error.code, message: error.message });
+      return;
+    }
+    throw error;
+  }
+
+  const ownerUserId = payload.userId ?? req.userId!;
+  const characterId = payload.characterId ?? 'creator-self';
+  const character = await getCharacterProfileForUser(ownerUserId, characterId);
+  if (!character && characterId !== 'creator-self') {
+    res.status(404).json({
+      error: 'self_character_not_found',
+      message: 'Create your Lumora self character before creating a verified provider identity.',
+    });
+    return;
+  }
+
+  let sourceVideoUrl = payload.sourceVideoUrl ?? null;
+  let sourceUploadAssetId = payload.sourceUploadAssetId ?? null;
+  if (payload.identityVideo) {
+    sourceVideoUrl = await persistMediaUpload({
+      userId: ownerUserId,
+      media: payload.identityVideo,
+      folder: `characters/${character?.id ?? characterId}/provider-identity`,
+      fallbackFileName: 'sora-self-identity-video',
+    });
+    sourceUploadAssetId = sourceUploadAssetId ?? sourceVideoUrl;
+  }
+
+  if (!sourceVideoUrl && !sourceUploadAssetId) {
+    res.status(400).json({
+      error: 'identity_video_required',
+      message: 'Upload a short self video before creating a verified self character.',
+    });
+    return;
+  }
+
+  const readiness = getOpenAISoraProviderReadiness();
+  const patch = buildDisabledSoraCharacterIdentityPatch({
+    consentConfirmed,
+    sourceUploadAssetId,
+    sourceVideoUrl,
+  }, readiness);
+
+  const updated = await updateCharacterProfileForUser({
+    ownerUserId,
+    characterId,
+    ...patch,
+  });
+  await updateSelfCharacterProviderIdentityForUser({
+    ownerUserId,
+    patch,
+  });
+
+  res.status(readiness.routeReady ? 202 : 200).json({
+    ok: readiness.routeReady,
+    status: patch.providerCharacterStatus,
+    provider: 'openai_sora',
+    providerCharacterIdPresent: Boolean(patch.providerCharacterId),
+    providerCharacterStatus: patch.providerCharacterStatus,
+    likenessProviderStatus: patch.likenessProviderStatus,
+    readiness,
+    message: readiness.routeReady
+      ? 'Verified self character creation started.'
+      : readiness.message,
+    character: updated ? creatorSafeCharacter(updated) : null,
+  });
 });
 
 charactersRouter.get('/:id', async (req: AuthedRequest, res) => {
@@ -101,7 +202,7 @@ charactersRouter.get('/:id', async (req: AuthedRequest, res) => {
     return;
   }
 
-  res.json({ character });
+  res.json({ character: creatorSafeCharacter(character) });
 });
 
 charactersRouter.delete('/:id', async (req: AuthedRequest, res) => {
@@ -162,7 +263,7 @@ charactersRouter.post('/:id/references/cleanup-obsolete', async (req: AuthedRequ
   res.json({
     removedCount: result.removedCount,
     remainingReferences: result.remainingReferences,
-    character: result.character,
+    character: creatorSafeCharacter(result.character),
   });
 });
 
@@ -250,7 +351,7 @@ charactersRouter.post('/', async (req: AuthedRequest, res) => {
     relationshipMemory: relationshipMemoryValue(payload.relationshipMemory),
   });
 
-  res.status(201).json({ character });
+  res.status(201).json({ character: creatorSafeCharacter(character) });
 });
 
 charactersRouter.patch('/:id', async (req: AuthedRequest, res) => {
@@ -352,5 +453,5 @@ charactersRouter.patch('/:id', async (req: AuthedRequest, res) => {
       : undefined,
   });
 
-  res.json({ character });
+  res.json({ character: creatorSafeCharacter(character) });
 });

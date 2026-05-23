@@ -43,6 +43,14 @@ try {
   assert.equal(textCanary.status, 403);
   assert.match((await textCanary.json()).error, /Render probe disabled/);
 
+  const soraCanary = await request('/api/diagnostics/sora-character-canary/self', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  assert.equal(soraCanary.status, 403);
+  assert.match((await soraCanary.json()).error, /Render probe disabled/);
+
   const renderLast = await request('/api/diagnostics/render-last');
   assert.equal(renderLast.status, 200);
 
@@ -53,10 +61,12 @@ try {
   assert.equal(inventoryBody.textCanaryRouteMounted, true);
   assert.equal(inventoryBody.referenceCanaryRouteMounted, true);
   assert.equal(inventoryBody.referenceMatrixRouteMounted, true);
+  assert.equal(inventoryBody.soraCharacterCanaryRouteMounted, true);
   assert.equal(inventoryBody.renderLastRouteMounted, true);
   assert.equal(inventoryBody.renderPathCompareRouteMounted, true);
   assert.equal(inventoryBody.routes.referenceCanary, 'POST /api/diagnostics/seedance-reference-canary/self');
   assert.equal(inventoryBody.routes.referenceMatrix, 'POST /api/diagnostics/seedance-reference-matrix/self');
+  assert.equal(inventoryBody.routes.soraCharacterCanary, 'POST /api/diagnostics/sora-character-canary/self');
 
   console.log('diagnostics route smoke tests passed');
 } finally {

@@ -18,6 +18,11 @@ import {
   resumeRenderSuccessJob,
   startRenderSuccessJob,
 } from '../services/renderSuccessEngine';
+import {
+  chooseSoraSelfCharacterCreateRoute,
+  getOpenAISoraProviderReadiness,
+  getSelfProviderCharacterDiagnostics,
+} from '../services/providers/openaiSoraProvider';
 import { createVideoGeneration } from '../video';
 
 const generationEngines = ['seedance-2.0', 'seedance-quality', 'veo', 'runway', 'mock', 'openai'] as const;
@@ -313,6 +318,50 @@ generationsRouter.post('/', generationRateLimit, async (req, res) => {
         message,
       });
       return;
+    }
+
+    if (payload.engine === 'openai' && payload.isDefaultSelfCharacter) {
+      const identity = await getSelfProviderCharacterDiagnostics({
+        userId: payload.userId ?? null,
+        characterId: payload.characterId ?? null,
+      });
+      const route = chooseSoraSelfCharacterCreateRoute({
+        readiness: getOpenAISoraProviderReadiness(),
+        providerCharacterId: identity.selfProviderCharacterIdPresent ? 'present' : null,
+        providerCharacterStatus: identity.selfProviderCharacterStatus,
+        likenessProviderStatus: identity.likenessProviderStatus,
+      });
+
+      if (route.selectedCreateLikenessRoute !== 'openai_sora_character') {
+        const { job, duplicateOf, message } = await startRenderSuccessJob({
+          prompt,
+          userId: payload.userId ?? '',
+          title: payload.title ?? null,
+          characterId: payload.characterId ?? null,
+          characterName: payload.characterName ?? null,
+          characterAvatar: payload.characterAvatar ?? null,
+          isDefaultSelfCharacter: payload.isDefaultSelfCharacter ?? null,
+          referenceImages: [],
+          allowDemoFallback: false,
+          selfLikenessIntensity: payload.selfLikenessIntensity,
+        });
+        const status = formatRenderSuccessJobStatus(job);
+
+        res.status(202).json({
+          ...status,
+          characterId: payload.characterId ?? null,
+          characterName: payload.characterName ?? null,
+          characterAvatar: payload.characterAvatar ?? null,
+          isDefaultSelfCharacter: payload.isDefaultSelfCharacter ?? null,
+          displayEngine: 'Seedance Fast',
+          generationMode: 'seedance-text-to-video',
+          outputUrl: status.outputUrl ?? '',
+          videoUrl: status.videoUrl ?? '',
+          duplicateOf,
+          message: message ?? 'Rendering with soft self guidance.',
+        });
+        return;
+      }
     }
 
     const providerResult = await createVideoGeneration(payload.engine, {

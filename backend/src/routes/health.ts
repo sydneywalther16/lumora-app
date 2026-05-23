@@ -15,6 +15,10 @@ import {
   alternateLikenessProvidersConfigured,
   buildAlternateLikenessProviderCanaryStatus,
 } from '../services/likenessProviderCanary';
+import {
+  getOpenAISoraProviderReadiness,
+  startOpenAISoraSelfCharacterCanary,
+} from '../services/providers/openaiSoraProvider';
 import { buildVideoThumbnailDiagnostics, repairVideoThumbnails } from '../services/videoThumbnailRepair';
 import {
   backfillGeneratedVideoPosters,
@@ -55,6 +59,7 @@ const canaryRouteInventory = {
   textCanaryRouteMounted: true,
   referenceCanaryRouteMounted: true,
   referenceMatrixRouteMounted: true,
+  soraCharacterCanaryRouteMounted: true,
   renderLastRouteMounted: true,
   renderPathCompareRouteMounted: true,
 };
@@ -76,6 +81,7 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
     providerFallback: await buildProviderFallbackDiagnostics(),
     renderSuccessEngine: await buildRenderSuccessDiagnostics(),
     referenceRouteStatus: await getReferenceRouteSummary({}),
+    openaiSoraProvider: getOpenAISoraProviderReadiness(),
     likenessProviderCanary: {
       textSelfGuidanceAvailable: true,
       alternateLikenessProvidersConfigured: alternateLikenessProvidersConfigured().map((provider) => provider.provider),
@@ -128,6 +134,7 @@ healthRouter.get('/api/diagnostics/canary-routes', (_req, res) => {
       textCanary: 'POST /api/diagnostics/seedance-canary',
       referenceCanary: 'POST /api/diagnostics/seedance-reference-canary/self',
       referenceMatrix: 'POST /api/diagnostics/seedance-reference-matrix/self',
+      soraCharacterCanary: 'POST /api/diagnostics/sora-character-canary/self',
       renderLast: 'GET /api/diagnostics/render-last',
       renderPathCompare: 'GET /api/diagnostics/render-path-compare',
     },
@@ -225,6 +232,31 @@ healthRouter.post('/api/diagnostics/seedance-reference-canary/self', async (req,
     }
     throw error;
   }
+});
+
+healthRouter.post('/api/diagnostics/sora-character-canary/self', async (req, res) => {
+  if (!env.ENABLE_RENDER_PROBE) {
+    res.status(403).json({
+      error: 'Render probe disabled. Set ENABLE_RENDER_PROBE=true to run a paid canary.',
+    });
+    return;
+  }
+  if (!env.OPENAI_VIDEO_ENABLED || !env.OPENAI_VIDEO_CHARACTER_ENABLED) {
+    res.status(403).json({
+      error: 'OpenAI video character canary disabled. Set OPENAI_VIDEO_ENABLED=true and OPENAI_VIDEO_CHARACTER_ENABLED=true to run a paid canary.',
+    });
+    return;
+  }
+
+  const payload = canarySchema.parse(req.body ?? {});
+  const status = await startOpenAISoraSelfCharacterCanary({
+    userId: payload.userId ?? req.header('x-lumora-user-id') ?? null,
+    characterId: null,
+  });
+  res.status(status.ok ? 202 : 501).json({
+    ...status,
+    message: 'This may consume provider credits when a supported route is enabled.',
+  });
 });
 
 healthRouter.get('/api/diagnostics/seedance-canary/:id', async (req, res) => {
