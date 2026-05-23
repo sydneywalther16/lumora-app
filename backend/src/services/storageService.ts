@@ -1,7 +1,7 @@
 import { supabaseAdmin } from '../lib/supabaseAdmin';
 import { persistAssetUrl } from './assetPersistence';
 
-const bucket = 'lumora-assets';
+export const LUMORA_ASSET_BUCKET = 'lumora-assets';
 
 export async function uploadGeneratedAsset(input: {
   userId: string;
@@ -10,11 +10,15 @@ export async function uploadGeneratedAsset(input: {
   buffer: Buffer;
   folder?: string;
 }) {
+  if (!supabaseAdmin) {
+    throw new Error('Supabase admin client is not configured.');
+  }
+
   const safeFileName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, '-');
   const folder = input.folder ? `${input.folder.replace(/[^a-zA-Z0-9/_-]/g, '-')}/` : '';
   const objectPath = `${input.userId}/${folder}${Date.now()}-${safeFileName}`;
   const { error } = await supabaseAdmin.storage
-    .from(bucket)
+    .from(LUMORA_ASSET_BUCKET)
     .upload(objectPath, input.buffer, {
       contentType: input.contentType,
       upsert: false,
@@ -22,7 +26,7 @@ export async function uploadGeneratedAsset(input: {
 
   if (error) throw error;
 
-  const { data } = supabaseAdmin.storage.from(bucket).getPublicUrl(objectPath);
+  const { data } = supabaseAdmin.storage.from(LUMORA_ASSET_BUCKET).getPublicUrl(objectPath);
   return { objectPath, publicUrl: data.publicUrl };
 }
 

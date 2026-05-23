@@ -1065,6 +1065,7 @@ async function markMasterStatus(input: {
   providerStatus?: string | null;
   progressLabel?: string | null;
   outputUrl?: string | null;
+  posterUrl?: string | null;
   projectId?: string | null;
   errorMessage?: string | null;
   errorCategory?: string | null;
@@ -1081,8 +1082,9 @@ async function markMasterStatus(input: {
        provider_status = coalesce($3, provider_status),
        result_asset_url = coalesce($4, result_asset_url),
        output_url = coalesce($4, output_url),
-       thumbnail_url = case when $4::text is null then thumbnail_url else null end,
-       thumbnail_source = case when $4::text is null then thumbnail_source else 'video_output' end,
+       thumbnail_url = case when $4::text is null then thumbnail_url else $14 end,
+       poster_url = case when $4::text is null then poster_url else $14 end,
+       thumbnail_source = case when $4::text is null then thumbnail_source when $14::text is null then 'video_output' else 'generated_poster' end,
        project_id = coalesce($5, project_id),
        error_message = $6,
        error_category = $7,
@@ -1112,6 +1114,7 @@ async function markMasterStatus(input: {
       input.referenceCount ?? null,
       input.attemptTier ?? null,
       input.progressLabel ?? null,
+      input.posterUrl ?? null,
     ],
   );
   return result.rows[0] ? mapRow(result.rows[0]) : null;
@@ -1151,6 +1154,7 @@ async function markAttemptCompleted(input: {
   attempt: RenderSuccessAttempt;
   providerJobId: string | null;
   outputUrl: string;
+  posterUrl?: string | null;
   projectId: string | null;
 }) {
   await query(
@@ -1162,15 +1166,16 @@ async function markAttemptCompleted(input: {
        provider_prediction_id = coalesce($2, provider_prediction_id),
        result_asset_url = $3,
        output_url = $3,
-       thumbnail_url = null,
-       thumbnail_source = 'video_output',
+       thumbnail_url = $6,
+       poster_url = $6,
+       thumbnail_source = case when $6::text is null then 'video_output' else 'generated_poster' end,
        project_id = coalesce($4, project_id),
        error_message = null,
        error_category = null,
        render_success_reference_count = $5,
        updated_at = now()
      where id = $1`,
-    [input.attemptJobId, input.providerJobId, input.outputUrl, input.projectId, input.attempt.referenceCount],
+    [input.attemptJobId, input.providerJobId, input.outputUrl, input.projectId, input.attempt.referenceCount, input.posterUrl ?? null],
   );
   renderSuccessRuntimeStats.completedAttempts += 1;
 }
@@ -1510,6 +1515,7 @@ async function finalizeSuccessfulAttempt(input: {
     attempt: input.attempt,
     providerJobId: input.providerJobId,
     outputUrl: persistence.videoUrl,
+    posterUrl: persistence.posterUrl,
     projectId: persistence.projectId ?? input.master.projectId,
   });
   await markMasterStatus({
@@ -1518,6 +1524,7 @@ async function finalizeSuccessfulAttempt(input: {
     providerStatus: 'succeeded',
     progressLabel: 'Cinematic draft ready.',
     outputUrl: persistence.videoUrl,
+    posterUrl: persistence.posterUrl,
     projectId: persistence.projectId ?? input.master.projectId,
     providerModel: input.model,
     referenceCount: input.attempt.referenceCount,

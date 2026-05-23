@@ -14,6 +14,7 @@ import { buildRenderReliabilityDiagnostics } from '../services/sceneOptimization
 import { buildVideoThumbnailDiagnostics, repairVideoThumbnails } from '../services/videoThumbnailRepair';
 import {
   backfillGeneratedVideoPosters,
+  getPosterBackfillRuntimeDiagnostics,
   getPosterGenerationAvailability,
 } from '../services/generatedVideoPosterService';
 import {
@@ -40,6 +41,11 @@ const referenceMatrixSchema = canarySchema.extend({
   maxPaidAttempts: z.coerce.number().int().min(1).max(5).optional().default(1),
   confirmBroadTest: z.boolean().optional().default(false),
 });
+const videoPosterBackfillSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(250).optional().default(10),
+  onlyLatest: z.boolean().optional().default(false),
+  entityKind: z.enum(['generation_job', 'post', 'project', 'all']).optional().default('all'),
+});
 
 const canaryRouteInventory = {
   textCanaryRouteMounted: true,
@@ -55,6 +61,7 @@ healthRouter.get('/health', (_req, res) => {
 
 healthRouter.get('/api/health/diagnostics', async (_req, res) => {
   const posterGenerationAvailability = await getPosterGenerationAvailability();
+  const posterBackfillRuntime = getPosterBackfillRuntimeDiagnostics();
   res.json({
     service: 'lumora-api',
     checkedAt: new Date().toISOString(),
@@ -67,7 +74,7 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
     referenceRouteStatus: await getReferenceRouteSummary({}),
     renderReliability: await buildRenderReliabilityDiagnostics(),
     asyncRenderJobs: await buildAsyncRenderJobDiagnostics(),
-    videoThumbnails: await buildVideoThumbnailDiagnostics({ posterGenerationAvailability }),
+    videoThumbnails: await buildVideoThumbnailDiagnostics({ posterGenerationAvailability, posterBackfillRuntime }),
   });
 });
 
@@ -77,7 +84,8 @@ healthRouter.get('/api/diagnostics/render-last', async (_req, res) => {
 
 healthRouter.get('/api/diagnostics/media-thumbnails', async (_req, res) => {
   const posterGenerationAvailability = await getPosterGenerationAvailability();
-  res.json(await buildVideoThumbnailDiagnostics({ posterGenerationAvailability }));
+  const posterBackfillRuntime = getPosterBackfillRuntimeDiagnostics();
+  res.json(await buildVideoThumbnailDiagnostics({ posterGenerationAvailability, posterBackfillRuntime }));
 });
 
 healthRouter.post('/api/diagnostics/repair-video-thumbnails', async (_req, res) => {
@@ -99,8 +107,8 @@ healthRouter.post('/api/diagnostics/backfill-video-posters', async (req, res) =>
     return;
   }
 
-  const limit = z.coerce.number().int().min(1).max(250).optional().parse(req.body?.limit);
-  res.json(await backfillGeneratedVideoPosters({ limit }));
+  const payload = videoPosterBackfillSchema.parse(req.body ?? {});
+  res.json(await backfillGeneratedVideoPosters(payload));
 });
 
 healthRouter.get('/api/diagnostics/canary-routes', (_req, res) => {

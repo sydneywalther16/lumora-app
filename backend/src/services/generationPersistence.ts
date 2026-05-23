@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../lib/supabaseAdmin';
 import { persistOptionalAssetUrl } from './assetPersistence';
+import { generatePosterForVideo } from './generatedVideoPosterService';
 
 const GENERATED_VIDEO_BUCKET = 'generated-videos';
 
@@ -28,6 +29,9 @@ export type CompletedGenerationPersistenceInput = {
 
 export type CompletedGenerationPersistenceResult = {
   videoUrl: string;
+  thumbnailUrl: string | null;
+  posterUrl: string | null;
+  thumbnailSource: 'generated_poster' | 'video_output';
   projectId: string | null;
   storagePath: string | null;
   warnings: string[];
@@ -132,6 +136,9 @@ export async function persistCompletedGeneration(
   if (!input.userId) {
     return {
       videoUrl: input.videoUrl,
+      thumbnailUrl: input.thumbnailUrl ?? input.posterUrl ?? null,
+      posterUrl: input.posterUrl ?? input.thumbnailUrl ?? null,
+      thumbnailSource: input.posterUrl || input.thumbnailUrl ? 'generated_poster' : 'video_output',
       projectId: null,
       storagePath: null,
       warnings: ['No authenticated user id was provided, so backend Supabase persistence was skipped.'],
@@ -141,6 +148,9 @@ export async function persistCompletedGeneration(
   if (!supabaseAdmin) {
     return {
       videoUrl: input.videoUrl,
+      thumbnailUrl: input.thumbnailUrl ?? input.posterUrl ?? null,
+      posterUrl: input.posterUrl ?? input.thumbnailUrl ?? null,
+      thumbnailSource: input.posterUrl || input.thumbnailUrl ? 'generated_poster' : 'video_output',
       projectId: null,
       storagePath: null,
       warnings: ['Supabase admin is not configured, so backend persistence was skipped.'],
@@ -199,6 +209,22 @@ export async function persistCompletedGeneration(
     posterUrl = persistedPoster?.publicUrl ?? posterUrl;
   }
 
+  if (!posterUrl && videoUrl) {
+    const generatedPoster = await generatePosterForVideo({
+      entityKind: 'generation_job',
+      id: input.id,
+      userId: input.userId,
+      videoUrl,
+    });
+    if (generatedPoster.ok) {
+      posterUrl = generatedPoster.posterUrl;
+      thumbnailUrl = generatedPoster.posterUrl;
+    } else {
+      const posterFailure = generatedPoster as Extract<typeof generatedPoster, { ok: false }>;
+      warnings.push(`Poster generation ${posterFailure.skipped ? 'skipped' : 'failed'}: ${posterFailure.reason}`);
+    }
+  }
+
   let projectId: string | null = null;
   try {
     projectId = await insertCompletedProject({ ...input, videoUrl, thumbnailUrl, posterUrl });
@@ -215,6 +241,9 @@ export async function persistCompletedGeneration(
 
   return {
     videoUrl,
+    thumbnailUrl,
+    posterUrl,
+    thumbnailSource: posterUrl || thumbnailUrl ? 'generated_poster' : 'video_output',
     projectId,
     storagePath,
     warnings,

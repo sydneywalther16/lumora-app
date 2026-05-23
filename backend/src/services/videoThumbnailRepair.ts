@@ -4,7 +4,16 @@ import { serializeDiagnosticError } from './schemaDiagnostics';
 type PosterGenerationAvailabilitySummary = {
   available: boolean;
   method?: string;
+  posterBucketName?: string;
+  posterBucketExists?: boolean;
   reason?: string | null;
+} | null;
+
+type PosterBackfillRuntimeSummary = {
+  staleExternalVideoUrlCount?: number;
+  protectedOrNonVideoUrlCount?: number;
+  latestPosterGenerationFailureReason?: string | null;
+  latestPosterBackfillRunAt?: string | null;
 } | null;
 
 function countValue(value: unknown) {
@@ -17,6 +26,7 @@ function stringValue(value: unknown) {
 
 export async function buildVideoThumbnailDiagnostics(input: {
   posterGenerationAvailability?: PosterGenerationAvailabilitySummary;
+  posterBackfillRuntime?: PosterBackfillRuntimeSummary;
 } = {}) {
   try {
     const counts = await query<Record<string, unknown>>(
@@ -194,9 +204,15 @@ export async function buildVideoThumbnailDiagnostics(input: {
       posterGenerationAvailable: input.posterGenerationAvailability?.available ?? false,
       posterGenerationMethod: input.posterGenerationAvailability?.method ?? 'unavailable',
       posterGenerationUnavailableReason: input.posterGenerationAvailability?.reason ?? null,
+      posterBucketName: input.posterGenerationAvailability?.posterBucketName ?? 'lumora-assets',
+      posterBucketExists: input.posterGenerationAvailability?.posterBucketExists ?? false,
       completedVideosUsingVideoFallbackCount: countValue(row.completedVideosUsingVideoFallbackCount),
       completedVideosUsingGeneratedPosterCount: countValue(row.completedVideosUsingGeneratedPosterCount),
       completedVideosUsingPlaceholderCount: countValue(row.completedVideosUsingPlaceholderCount),
+      staleExternalVideoUrlCount: input.posterBackfillRuntime?.staleExternalVideoUrlCount ?? 0,
+      protectedOrNonVideoUrlCount: input.posterBackfillRuntime?.protectedOrNonVideoUrlCount ?? 0,
+      latestPosterGenerationFailureReason: input.posterBackfillRuntime?.latestPosterGenerationFailureReason ?? null,
+      latestPosterBackfillRunAt: input.posterBackfillRuntime?.latestPosterBackfillRunAt ?? null,
       thumbnailSourceBreakdown: breakdown.rows.map((entry) => ({
         thumbnailSource: stringValue(entry.thumbnailSource) ?? 'unset',
         count: countValue(entry.count),

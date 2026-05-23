@@ -425,6 +425,7 @@ async function markJobCompleted(input: {
   providerStatus?: string | null;
   outputUrl: string;
   thumbnailUrl?: string | null;
+  posterUrl?: string | null;
   providerModel?: string | null;
 }) {
   const result = await query<Record<string, unknown>>(
@@ -438,7 +439,8 @@ async function markJobCompleted(input: {
        result_asset_url = $4,
        output_url = $4,
        thumbnail_url = $6,
-       thumbnail_source = case when $6::text is not null then 'generated_poster' else 'video_output' end,
+       poster_url = $8,
+       thumbnail_source = case when coalesce($6::text, $8::text) is not null then 'generated_poster' else 'video_output' end,
        error_message = null,
        error_category = null,
        completed_at = now(),
@@ -454,6 +456,7 @@ async function markJobCompleted(input: {
       input.providerStatus ?? null,
       input.thumbnailUrl ?? null,
       input.providerModel ?? null,
+      input.posterUrl ?? input.thumbnailUrl ?? null,
     ],
   );
 
@@ -687,6 +690,7 @@ export function processAsyncRenderJob(jobId: string) {
         providerStatus: 'succeeded',
         outputUrl: result.videoUrl,
         thumbnailUrl: result.thumbnailUrl,
+        posterUrl: result.posterUrl,
         providerModel: result.model,
       });
       await updateProjectStatus(job?.projectId ?? null, 'completed');
@@ -861,7 +865,8 @@ async function finalizePredictionJob(job: AsyncRenderJobRecord, prediction: Pred
     providerJobId: prediction.id,
     providerStatus: prediction.status,
     outputUrl: persistedOutputParse.videoUrl,
-    thumbnailUrl: null,
+    thumbnailUrl: persistence.thumbnailUrl,
+    posterUrl: persistence.posterUrl,
     providerModel: job.providerModel ?? modelForQuality(input.quality),
   });
   await updateProjectStatus(job.projectId, 'completed');
