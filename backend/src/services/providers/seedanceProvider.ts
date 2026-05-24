@@ -152,6 +152,7 @@ export type SeedanceProviderPayload = {
   aspect_ratio: SeedanceAspectRatio;
   resolution: SeedanceResolution;
   reference_images?: string[];
+  reference_videos?: string[];
   generate_audio?: boolean;
 };
 
@@ -687,7 +688,7 @@ export function validateSeedanceProviderPayload(payload: unknown): SeedancePaylo
     };
   }
 
-  const allowedKeys = new Set(['prompt', 'duration', 'aspect_ratio', 'resolution', 'reference_images', 'generate_audio']);
+  const allowedKeys = new Set(['prompt', 'duration', 'aspect_ratio', 'resolution', 'reference_images', 'reference_videos', 'generate_audio']);
   for (const key of Object.keys(record)) {
     if (!allowedKeys.has(key)) {
       issues.push({
@@ -758,6 +759,33 @@ export function validateSeedanceProviderPayload(payload: unknown): SeedancePaylo
     }
   }
 
+  if ('reference_videos' in record) {
+    if (!Array.isArray(record.reference_videos)) {
+      issues.push({
+        field: 'reference_videos',
+        valueSummary: payloadValueSummary(record.reference_videos),
+        expected: 'array of http(s) video URLs',
+      });
+    } else {
+      if (record.reference_videos.length > 3) {
+        issues.push({
+          field: 'reference_videos',
+          valueSummary: payloadValueSummary(record.reference_videos),
+          expected: 'up to 3 reference video URLs',
+        });
+      }
+      record.reference_videos.forEach((value, index) => {
+        if (typeof value !== 'string' || !/^https?:\/\//i.test(value)) {
+          issues.push({
+            field: `reference_videos[${index}]`,
+            valueSummary: payloadValueSummary(value),
+            expected: 'http(s) video URL string',
+          });
+        }
+      });
+    }
+  }
+
   return issues.length ? { ok: false, issues } : { ok: true, issues: [] };
 }
 
@@ -772,7 +800,11 @@ export function seedancePayloadSummary(payload: SeedanceProviderPayload) {
     reference_images: payload.reference_images
       ? payload.reference_images.map((url) => payloadValueSummary(url))
       : [],
+    reference_videos: payload.reference_videos
+      ? payload.reference_videos.map((url) => payloadValueSummary(url))
+      : [],
     referenceCount: payload.reference_images?.length ?? 0,
+    referenceVideoCount: payload.reference_videos?.length ?? 0,
   };
 }
 

@@ -749,6 +749,8 @@ export type ApiHealthDiagnostics = {
     verificationPrompt: string | null;
     verificationLastTestedAt: string | null;
     seedanceVideoReferenceCanaryStatus: string | null;
+    seedanceVideoReferenceLastFailureCategory?: string | null;
+    seedanceVideoReferenceProviderStatus?: string | null;
     videoReferenceProvider: string | null;
     verificationVideoUrlRedacted: string | null;
     migratedFromOldSelfCapture: boolean;
@@ -759,6 +761,8 @@ export type ApiHealthDiagnostics = {
   oldSelfCapturePresent?: boolean;
   migratedFromOldSelfCapture?: boolean;
   seedanceVideoReferenceCanaryStatus?: string | null;
+  seedanceVideoReferenceLastFailureCategory?: string | null;
+  seedanceVideoReferenceProviderStatus?: string | null;
   verificationStatus?: string | null;
   obsoleteManualReferenceCount?: number;
   savedLumoraReferenceCount?: number;

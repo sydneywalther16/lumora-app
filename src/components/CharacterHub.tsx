@@ -132,7 +132,7 @@ function latestContinuityConfidence(character: CharacterProfile) {
 
 function providerIdentityStatusLabel(character: CharacterProfile) {
   if (character.videoReferenceRouteStatus === 'canary_succeeded') return 'Video likeness ready';
-  if (hasEffectiveSelfVerificationVideo(character) && character.videoReferenceRouteStatus === 'configured_not_implemented') return 'Video route unmapped';
+  if (hasEffectiveSelfVerificationVideo(character) && character.videoReferenceRouteStatus === 'configured_not_implemented') return 'Video route needs canary';
   if (hasEffectiveSelfVerificationVideo(character)) return 'Verification video saved';
   if (character.providerCharacterStatus === 'ready' && character.likenessProviderStatus === 'canary_succeeded') return 'Exact likeness ready';
   if (character.providerCharacterStatus === 'ready' && character.likenessProviderStatus === 'character_created_needs_canary') return 'Needs canary';
@@ -149,7 +149,7 @@ function providerIdentityStatusCopy(character: CharacterProfile) {
     return 'Seedance video-reference likeness route is canary-tested and ready.';
   }
   if (hasEffectiveSelfVerificationVideo(character) && character.videoReferenceRouteStatus === 'configured_not_implemented') {
-    return 'Self verification video is saved privately; the Seedance video-reference provider field is not mapped yet.';
+    return 'Self verification video is saved privately; run the Seedance video-reference canary before Create can use it.';
   }
   if (hasLegacySelfCaptureVideo(character) && !character.verificationVideoPresent) {
     return 'Your previous self capture is now treated as the private verification video for future likeness canaries.';
@@ -1009,7 +1009,7 @@ export default function CharacterHub({
       setLikenessLabStatus('Sign in to run video likeness tests.');
       return;
     }
-    if (!window.confirm('This may consume provider credits after a documented video-reference route is mapped. Test the Seedance video likeness route?')) {
+    if (!window.confirm('This may consume provider credits. Test the Seedance video likeness route?')) {
       return;
     }
     setLikenessCanaryBusy('seedance-video');

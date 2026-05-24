@@ -28,10 +28,25 @@ export type SelfVerificationVideoDiagnostics = {
   verificationPrompt: string | null;
   verificationLastTestedAt: string | null;
   seedanceVideoReferenceCanaryStatus: string | null;
+  seedanceVideoReferenceLastFailureCategory: string | null;
+  seedanceVideoReferenceProviderStatus: string | null;
   videoReferenceProvider: string | null;
   verificationVideoUrlRedacted: string | null;
   migratedFromOldSelfCapture: boolean;
   recommendedNextAction: string;
+};
+
+export type SelfVerificationVideoReferenceAsset = {
+  schemaReady: boolean;
+  selfVerificationVideoPresent: boolean;
+  selfVerificationConsentPresent: boolean;
+  verificationVideoUrl: string | null;
+  verificationVideoAssetId: string | null;
+  verificationAudioPresent: boolean;
+  verificationStatus: string | null;
+  verificationPrompt: string | null;
+  videoReferenceRouteStatus: string | null;
+  videoReferenceProvider: string | null;
 };
 
 export const SELF_VERIFICATION_VIDEO_MAX_SIZE_BYTES = 100 * 1024 * 1024;
@@ -187,8 +202,8 @@ function diagnosticsFromRow(row: VerificationRow | null, schemaReady = true): Se
           : routeStatus === 'blocked'
             ? 'Continue using soft self guidance or test another exact likeness provider.'
             : routeStatus === 'configured_not_implemented'
-              ? 'Map a documented Seedance reference-video field before running paid video-reference canaries.'
-              : 'Run Seedance video reference canary when the provider video-reference field is mapped.';
+              ? 'Run Seedance video reference canary now that the provider video-reference field is mapped.'
+              : 'Run Seedance video reference canary.';
 
   return {
     schemaReady,
@@ -200,6 +215,13 @@ function diagnosticsFromRow(row: VerificationRow | null, schemaReady = true): Se
     verificationPrompt: textValue(row?.verificationPrompt) || (oldSelfCapturePresent ? SELF_VERIFICATION_PROMPT : null),
     verificationLastTestedAt: row?.verificationLastTestedAt ?? null,
     seedanceVideoReferenceCanaryStatus: routeStatus,
+    seedanceVideoReferenceLastFailureCategory: routeStatus &&
+      !['not_tested', 'canary_succeeded', 'succeeded', 'configured_ready_for_canary'].includes(routeStatus)
+      ? routeStatus
+      : null,
+    seedanceVideoReferenceProviderStatus: textValue(row?.videoReferenceProvider) === 'seedance' && routeStatus
+      ? routeStatus
+      : null,
     videoReferenceProvider: textValue(row?.videoReferenceProvider) || null,
     verificationVideoUrlRedacted: redactVerificationVideoUrl(row?.verificationVideoUrl || row?.oldSelfCaptureVideoUrl),
     migratedFromOldSelfCapture,
@@ -298,6 +320,44 @@ export async function getSelfVerificationVideoDiagnostics(input: {
     return diagnosticsFromRow(await firstSelfVerificationRow(input));
   } catch (error) {
     if (optionalVerificationSchemaError(error)) return diagnosticsFromRow(null, false);
+    throw error;
+  }
+}
+
+export async function getSelfVerificationVideoReferenceAsset(input: {
+  userId?: string | null;
+  characterId?: string | null;
+} = {}): Promise<SelfVerificationVideoReferenceAsset> {
+  try {
+    const row = await firstSelfVerificationRow(input);
+    const diagnostics = diagnosticsFromRow(row);
+    return {
+      schemaReady: diagnostics.schemaReady,
+      selfVerificationVideoPresent: diagnostics.selfVerificationVideoPresent,
+      selfVerificationConsentPresent: diagnostics.selfVerificationConsentPresent,
+      verificationVideoUrl: textValue(row?.verificationVideoUrl) || textValue(row?.oldSelfCaptureVideoUrl) || null,
+      verificationVideoAssetId: textValue(row?.verificationVideoAssetId) || null,
+      verificationAudioPresent: diagnostics.verificationAudioPresent,
+      verificationStatus: diagnostics.verificationStatus,
+      verificationPrompt: diagnostics.verificationPrompt,
+      videoReferenceRouteStatus: diagnostics.seedanceVideoReferenceCanaryStatus,
+      videoReferenceProvider: diagnostics.videoReferenceProvider,
+    };
+  } catch (error) {
+    if (optionalVerificationSchemaError(error)) {
+      return {
+        schemaReady: false,
+        selfVerificationVideoPresent: false,
+        selfVerificationConsentPresent: false,
+        verificationVideoUrl: null,
+        verificationVideoAssetId: null,
+        verificationAudioPresent: false,
+        verificationStatus: null,
+        verificationPrompt: null,
+        videoReferenceRouteStatus: null,
+        videoReferenceProvider: null,
+      };
+    }
     throw error;
   }
 }
@@ -470,6 +530,34 @@ export async function markSeedanceVideoReferenceCanaryUnmapped(input: {
         verificationConsentAt: existing?.verificationConsentAt ?? existing?.oldSelfCaptureCapturedAt ?? null,
         verificationStatus: existing?.verificationStatus ?? 'uploaded',
         verificationPrompt: existing?.verificationPrompt ?? SELF_VERIFICATION_PROMPT,
+      },
+    });
+  }
+  return now;
+}
+
+export async function markSeedanceVideoReferenceCanaryResult(input: {
+  userId?: string | null;
+  characterId?: string | null;
+  routeStatus: string;
+  provider?: string | null;
+}) {
+  const now = new Date().toISOString();
+  if (input.userId) {
+    const existing = await firstSelfVerificationRow(input);
+    await updateSelfCharacterVerificationVideoForUser({
+      ownerUserId: input.userId,
+      characterId: input.characterId,
+      patch: {
+        verificationVideoUrl: existing?.verificationVideoUrl ?? existing?.oldSelfCaptureVideoUrl ?? null,
+        verificationVideoAssetId: existing?.verificationVideoAssetId ?? null,
+        verificationAudioPresent: Boolean(existing?.verificationAudioPresent),
+        verificationConsentAt: existing?.verificationConsentAt ?? existing?.oldSelfCaptureCapturedAt ?? null,
+        verificationStatus: existing?.verificationStatus ?? 'uploaded',
+        verificationPrompt: existing?.verificationPrompt ?? SELF_VERIFICATION_PROMPT,
+        verificationLastTestedAt: now,
+        videoReferenceRouteStatus: input.routeStatus,
+        videoReferenceProvider: input.provider ?? 'seedance',
       },
     });
   }

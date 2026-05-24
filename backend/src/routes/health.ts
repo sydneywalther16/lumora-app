@@ -37,11 +37,10 @@ import {
   startSeedanceCanary,
   startSeedanceReferenceCanary,
   startSeedanceSelfReferenceCanary,
+  startSeedanceVideoReferenceCanary,
 } from '../services/seedanceCanary';
 import {
   getSelfVerificationVideoDiagnostics,
-  markSeedanceVideoReferenceCanaryUnmapped,
-  SEEDANCE_VIDEO_REFERENCE_PROMPT,
 } from '../services/selfVerificationVideo';
 import { requireAuth, type AuthedRequest } from '../middleware/auth';
 import {
@@ -151,6 +150,8 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
       exactLikenessCanaryStatus,
       recommendedNextAction,
       seedanceVideoReferenceCanaryStatus: selfVerificationVideo.seedanceVideoReferenceCanaryStatus,
+      seedanceVideoReferenceLastFailureCategory: selfVerificationVideo.seedanceVideoReferenceLastFailureCategory,
+      seedanceVideoReferenceProviderStatus: selfVerificationVideo.seedanceVideoReferenceProviderStatus,
       seedanceImageReferenceBlocked: referenceRouteStatus.seedanceReferenceRoutesBlocked,
       exactLikenessRouter: exactLikeness,
       likenessProviderRegistry: exactLikeness.providerRegistry,
@@ -354,28 +355,14 @@ healthRouter.post('/api/diagnostics/exact-likeness-canary/self', async (req, res
   }
 
   if (candidate.route === 'seedance_video_reference') {
-    const diagnostics = await getSelfVerificationVideoDiagnostics({ userId, characterId: null });
-    const testedAt = diagnostics.selfVerificationVideoPresent && diagnostics.selfVerificationConsentPresent
-      ? await markSeedanceVideoReferenceCanaryUnmapped({ userId, characterId: null })
-      : null;
-    res.status(diagnostics.selfVerificationVideoPresent ? 501 : 404).json({
-      ok: false,
-      provider: 'seedance-fast',
-      route: 'seedance_video_reference',
-      configured: diagnostics.selfVerificationVideoPresent,
-      canaryStatus: diagnostics.seedanceVideoReferenceCanaryStatus ?? 'not_tested',
-      verificationVideoPresent: diagnostics.selfVerificationVideoPresent,
-      outputUrlPresent: false,
-      verifiedVideoPresent: false,
-      failureCategory: diagnostics.selfVerificationVideoPresent
-        ? 'seedance_video_reference_unmapped'
-        : 'verification_video_missing',
-      recommendedNextAction: diagnostics.selfVerificationVideoPresent
-        ? 'Map the documented Seedance reference-video field before running a paid video-reference canary.'
-        : 'Record self verification video.',
-      verificationLastTestedAt: testedAt,
+    const status = await startSeedanceVideoReferenceCanary({
+      userId,
+      saveAsDraft: false,
+    });
+    res.status('ok' in status && status.ok === false ? 200 : 202).json({
+      ...status,
       exactLikenessRouterChoice: routerChoice,
-      warning: 'This may consume provider credits when a supported video-reference route is mapped.',
+      warning: 'This may consume provider credits.',
     });
     return;
   }
@@ -543,70 +530,13 @@ healthRouter.post('/api/diagnostics/seedance-video-reference-canary/self', async
 
   const payload = canarySchema.parse(req.body ?? {});
   const userId = payload.userId ?? req.header('x-lumora-user-id') ?? null;
-  const diagnostics = await getSelfVerificationVideoDiagnostics({ userId, characterId: null });
-
-  if (!diagnostics.schemaReady) {
-    res.status(500).json({
-      ok: false,
-      error: 'self_verification_schema_missing',
-      message: 'Apply the self verification video migration before testing video references.',
-      verificationVideoPresent: false,
-      providerPredictionCreated: false,
-      outputPresent: false,
-      parsedVideoUrlPresent: false,
-      recommendedNextAction: diagnostics.recommendedNextAction,
-    });
-    return;
-  }
-
-  if (!diagnostics.selfVerificationVideoPresent) {
-    res.status(404).json({
-      ok: false,
-      error: 'verification_video_missing',
-      message: 'Record a private self verification video before testing the Seedance video-reference route.',
-      verificationVideoPresent: false,
-      providerPredictionCreated: false,
-      outputPresent: false,
-      parsedVideoUrlPresent: false,
-      recommendedNextAction: 'Record self verification video.',
-    });
-    return;
-  }
-
-  if (!diagnostics.selfVerificationConsentPresent) {
-    res.status(400).json({
-      ok: false,
-      error: 'verification_consent_missing',
-      message: 'Consent is required before using the self verification video for likeness testing.',
-      verificationVideoPresent: true,
-      providerPredictionCreated: false,
-      outputPresent: false,
-      parsedVideoUrlPresent: false,
-      recommendedNextAction: 'Confirm self verification consent.',
-    });
-    return;
-  }
-
-  const testedAt = await markSeedanceVideoReferenceCanaryUnmapped({ userId, characterId: null });
-  res.status(501).json({
-    ok: false,
-    provider: 'seedance-fast',
-    route: 'seedance_video_reference',
-    canaryStatus: 'configured_not_implemented',
-    verificationVideoPresent: true,
-    verificationAudioPresent: diagnostics.verificationAudioPresent,
-    verificationConsentPresent: true,
-    providerPredictionCreated: false,
-    providerStatus: null,
-    outputPresent: false,
-    outputUrlPresent: false,
-    parsedVideoUrlPresent: false,
-    failureCategory: 'seedance_video_reference_unmapped',
-    providerErrorSummary: 'Seedance provider adapter does not expose a documented reference-video input field yet.',
-    promptPreview: SEEDANCE_VIDEO_REFERENCE_PROMPT,
-    verificationLastTestedAt: testedAt,
-    recommendedNextAction: 'Map the documented Seedance reference-video field before running a paid video-reference canary.',
-    warning: 'This endpoint is gated because a mapped route may consume provider credits.',
+  const status = await startSeedanceVideoReferenceCanary({
+    userId,
+    saveAsDraft: payload.saveAsDraft,
+  });
+  res.status('ok' in status && status.ok === false ? 200 : 202).json({
+    ...status,
+    warning: 'This may consume provider credits.',
   });
 });
 

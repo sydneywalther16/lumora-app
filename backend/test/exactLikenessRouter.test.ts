@@ -219,6 +219,8 @@ try {
       verificationPrompt: 'Look forward and turn.',
       verificationLastTestedAt: '2026-05-23T00:00:00.000Z',
       seedanceVideoReferenceCanaryStatus: 'canary_succeeded',
+      seedanceVideoReferenceLastFailureCategory: null,
+      seedanceVideoReferenceProviderStatus: 'canary_succeeded',
       videoReferenceProvider: 'seedance',
       verificationVideoUrlRedacted: '[private-verification-video-present]',
       recommendedNextAction: 'Use Seedance video reference route.',

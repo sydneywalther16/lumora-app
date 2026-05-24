@@ -3,9 +3,11 @@ import {
   buildSeedanceCanaryPayload,
   buildReferenceRouteSummaryFromRows,
   buildReferenceImagePrompt,
+  buildSeedanceVerificationVideoCanaryPayload,
   canaryRateLimitStatus,
   chooseCreateRouteFromReferenceSummary,
   classifyReferenceCanaryFailure,
+  classifyVideoReferenceCanaryFailure,
   matrixCandidatesFromSelfCandidates,
   noSavedSelfReferencePayloadForTest,
   providerFailureDiagnostics,
@@ -37,6 +39,17 @@ assert.equal(/Sydney|display name|Story Memory|Scene Flow/i.test(textPayload.pro
 assert.equal(/photoshoot|influencer|superstar|public figure|glamour|seductive/i.test(textPayload.prompt), false);
 assert.equal(SEEDANCE_VIDEO_REFERENCE_PROMPT.includes('[Video1]'), true);
 assert.equal(/Sydney|photoshoot|model|glamour|influencer|celebrity|public figure/i.test(SEEDANCE_VIDEO_REFERENCE_PROMPT), false);
+const verificationVideoPayload = buildSeedanceVerificationVideoCanaryPayload('https://signed.example.com/private-self.mp4?token=secret');
+assert.equal(verificationVideoPayload.prompt, SEEDANCE_VIDEO_REFERENCE_PROMPT);
+assert.deepEqual(verificationVideoPayload.reference_videos, ['https://signed.example.com/private-self.mp4?token=secret']);
+assert.equal(verificationVideoPayload.prompt.includes('[Video1]'), true);
+assert.equal(verificationVideoPayload.duration, 5);
+assert.equal(verificationVideoPayload.aspect_ratio, '9:16');
+assert.equal(verificationVideoPayload.resolution, '480p');
+assert.equal(verificationVideoPayload.generate_audio, false);
+assert.equal(validateSeedanceProviderPayload(verificationVideoPayload).ok, true);
+assert.equal(JSON.stringify(verificationVideoPayload).includes('reference_images'), false);
+assert.equal(/Sydney|photoshoot|model|glamour|influencer|celebrity|public figure/i.test(verificationVideoPayload.prompt), false);
 
 assert.throws(
   () => validateSelfVerificationVideoConsent({ consentConfirmed: false }),
@@ -176,6 +189,11 @@ assert.equal(classifyReferenceCanaryFailure('403 asset access denied'), 'referen
 assert.equal(classifyReferenceCanaryFailure('Prediction failed.', 'failed'), 'reference_unknown_provider_failure');
 assert.equal(classifyReferenceCanaryFailure('seedance backend failed with no video', 'failed'), 'reference_provider_failed');
 assert.equal(classifyReferenceCanaryFailure('provider succeeded but output missing', 'succeeded'), 'reference_output_missing');
+assert.equal(classifyVideoReferenceCanaryFailure('E005: input or output was flagged as sensitive', 'failed'), 'video_reference_moderation_block');
+assert.equal(classifyVideoReferenceCanaryFailure('unknown field reference_videos'), 'video_reference_input_schema');
+assert.equal(classifyVideoReferenceCanaryFailure('403 asset access denied'), 'verification_video_asset_access');
+assert.equal(classifyVideoReferenceCanaryFailure('provider succeeded but output missing', 'succeeded'), 'video_reference_output_missing');
+assert.equal(classifyVideoReferenceCanaryFailure('Prediction failed.', 'failed'), 'video_reference_provider_failed');
 
 const providerFailure = providerFailureDiagnostics({
   category: 'reference_provider_failed',

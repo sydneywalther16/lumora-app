@@ -166,6 +166,8 @@ async function exactLikenessDiagnostics(row: LatestRenderRow | null) {
     selfVerificationVideoPresent: selfVerificationVideo.selfVerificationVideoPresent,
     selfVerificationConsentPresent: selfVerificationVideo.selfVerificationConsentPresent,
     seedanceVideoReferenceCanaryStatus: selfVerificationVideo.seedanceVideoReferenceCanaryStatus,
+    seedanceVideoReferenceLastFailureCategory: selfVerificationVideo.seedanceVideoReferenceLastFailureCategory,
+    seedanceVideoReferenceProviderStatus: selfVerificationVideo.seedanceVideoReferenceProviderStatus,
     alternateProvidersConfigured: choice.providerRegistry.filter((provider) => provider.configured).map((provider) => provider.id),
     runwayConfigured: Boolean(choice.providerRegistry.find((provider) => provider.id === 'runway_gen4_reference')?.configured),
     runwayCanaryStatus: choice.providerRegistry.find((provider) => provider.id === 'runway_gen4_reference')?.canaryStatus ?? 'not_configured',
