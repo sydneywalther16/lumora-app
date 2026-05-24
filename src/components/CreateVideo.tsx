@@ -72,6 +72,7 @@ import {
   getVerifiedVideoOutputUrl,
   normalizeVerifiedVideoOutputUrl,
 } from '../lib/renderCompletion';
+import { createSelfCharacterStatusCopy } from '../lib/selfCharacterSetup';
 
 type CreateVideoProps = {
   refreshKey?: number;
@@ -1254,14 +1255,13 @@ export default function CreateVideo({
         ? 'Record self verification video'
         : '';
   const selfCharacterProviderStatusCopy = providerSelfCharacterReady
-    ? 'Generate with My Self Character is available after a successful video-reference or provider-character canary.'
-    : providerSelfCharacterSetupStarted
-      ? characterProfile?.videoReferenceRouteStatus === 'blocked' || characterProfile?.videoReferenceRouteStatus === 'reference_moderation_block'
-        ? 'Video likeness route blocked. Using soft self guidance.'
-        : characterProfile?.providerCharacterStatus === 'ready' && characterProfile.likenessProviderStatus === 'character_created_usage_unmapped'
-          ? 'Verified self character created. Video route not available yet.'
-        : 'Self character route needs a quick test before Lumora can claim exact likeness.'
-      : 'Record self verification video, or continue with soft self guidance.';
+    ? 'Verified self character ready.'
+    : characterProfile?.providerCharacterStatus === 'ready' && characterProfile.likenessProviderStatus === 'character_created_usage_unmapped'
+      ? 'Verified self character created. Video route not available yet.'
+      : createSelfCharacterStatusCopy({
+          character: characterProfile,
+          exactRouteReady: providerSelfCharacterReady,
+        });
   const identityReferenceCards = [
     {
       label: 'Front photo',

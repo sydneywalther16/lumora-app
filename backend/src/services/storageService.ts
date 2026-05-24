@@ -9,16 +9,18 @@ export async function uploadGeneratedAsset(input: {
   contentType: string;
   buffer: Buffer;
   folder?: string;
+  bucket?: string;
 }) {
   if (!supabaseAdmin) {
     throw new Error('Supabase admin client is not configured.');
   }
 
+  const bucket = input.bucket ?? LUMORA_ASSET_BUCKET;
   const safeFileName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, '-');
   const folder = input.folder ? `${input.folder.replace(/[^a-zA-Z0-9/_-]/g, '-')}/` : '';
   const objectPath = `${input.userId}/${folder}${Date.now()}-${safeFileName}`;
   const { error } = await supabaseAdmin.storage
-    .from(LUMORA_ASSET_BUCKET)
+    .from(bucket)
     .upload(objectPath, input.buffer, {
       contentType: input.contentType,
       upsert: false,
@@ -26,8 +28,14 @@ export async function uploadGeneratedAsset(input: {
 
   if (error) throw error;
 
-  const { data } = supabaseAdmin.storage.from(LUMORA_ASSET_BUCKET).getPublicUrl(objectPath);
-  return { objectPath, publicUrl: data.publicUrl };
+  if (bucket === LUMORA_ASSET_BUCKET) {
+    const { data } = supabaseAdmin.storage.from(bucket).getPublicUrl(objectPath);
+    return { objectPath, publicUrl: data.publicUrl };
+  }
+
+  const { data, error: signedUrlError } = await supabaseAdmin.storage.from(bucket).createSignedUrl(objectPath, 60 * 60 * 24 * 7);
+  if (signedUrlError) throw signedUrlError;
+  return { objectPath, publicUrl: data.signedUrl };
 }
 
 export type MediaUploadInput = {
@@ -66,6 +74,7 @@ export async function persistMediaUpload(input: {
   media: MediaUploadInput;
   folder: string;
   fallbackFileName: string;
+  bucket?: string;
 }) {
   if (input.media.url) {
     const asset = await persistAssetUrl({
@@ -94,6 +103,7 @@ export async function persistMediaUpload(input: {
     contentType: parsed.contentType,
     buffer: parsed.buffer,
     folder: input.folder,
+    bucket: input.bucket,
   });
 
   return asset.publicUrl;

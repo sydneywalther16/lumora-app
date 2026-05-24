@@ -742,6 +742,11 @@ export type ApiHealthDiagnostics = {
   selfVerificationVideoPresent?: boolean;
   selfVerificationConsentPresent?: boolean;
   seedanceVideoReferenceCanaryStatus?: string | null;
+  verificationStatus?: string | null;
+  obsoleteManualReferenceCount?: number;
+  savedLumoraReferenceCount?: number;
+  exactLikenessCanaryStatus?: string | null;
+  recommendedNextAction?: string;
   seedanceImageReferenceBlocked?: boolean;
   likenessProviderCanary?: {
     textSelfGuidanceAvailable: boolean;
@@ -1078,6 +1083,9 @@ export type SelfVerificationVideoPayload = {
   consentConfirmed: boolean;
   sourceUploadAssetId?: string | null;
   sourceVideoUrl?: string | null;
+  sourceFileName?: string | null;
+  sourceContentType?: string | null;
+  sourceSizeBytes?: number | null;
   verificationAudioPresent?: boolean;
 };
 
@@ -1307,6 +1315,36 @@ export const api = {
       character: CharacterProfile | null;
     }>('/api/characters/self/verification-video', {
       method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  getSelfVerificationVideoStatus: () =>
+    request<{
+      ok: boolean;
+      verificationVideoPresent: boolean;
+      verificationAudioPresent: boolean;
+      verificationConsentPresent: boolean;
+      verificationStatus: string | null;
+      verificationPrompt: string | null;
+      videoReferenceRouteStatus: string | null;
+      videoReferenceProvider: string | null;
+      verificationVideoUrlRedacted: string | null;
+      recommendedNextAction: string;
+    }>('/api/characters/self/verification-video/status'),
+
+  deleteSelfVerificationVideo: (payload: { userId?: string | null; characterId?: string | null }) =>
+    request<{
+      ok: boolean;
+      verificationVideoPresent: boolean;
+      verificationAudioPresent: boolean;
+      verificationConsentPresent: boolean;
+      verificationStatus: string | null;
+      verificationPrompt: string | null;
+      videoReferenceRouteStatus: string | null;
+      message: string;
+      character: CharacterProfile | null;
+    }>('/api/characters/self/verification-video', {
+      method: 'DELETE',
       body: JSON.stringify(payload),
     }),
 

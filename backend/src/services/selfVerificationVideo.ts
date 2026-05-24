@@ -32,6 +32,9 @@ export type SelfVerificationVideoDiagnostics = {
   recommendedNextAction: string;
 };
 
+export const SELF_VERIFICATION_VIDEO_MAX_SIZE_BYTES = 100 * 1024 * 1024;
+const allowedVerificationVideoExtensions = ['.mp4', '.webm', '.mov'];
+
 type VerificationRow = {
   verificationVideoUrl: string | null;
   verificationVideoAssetId: string | null;
@@ -72,6 +75,48 @@ export function validateSelfVerificationVideoConsent(input: { consentConfirmed?:
   }
 }
 
+function hasAllowedVideoExtension(fileName: string) {
+  const lower = fileName.toLowerCase();
+  return allowedVerificationVideoExtensions.some((extension) => lower.endsWith(extension));
+}
+
+export function validateSelfVerificationVideoUpload(input: {
+  consentConfirmed?: boolean | null;
+  contentType?: string | null;
+  fileName?: string | null;
+  sizeBytes?: number | null;
+}) {
+  validateSelfVerificationVideoConsent({ consentConfirmed: input.consentConfirmed });
+
+  const contentType = textValue(input.contentType).toLowerCase();
+  const fileName = textValue(input.fileName).toLowerCase();
+  const sizeBytes = typeof input.sizeBytes === 'number' ? input.sizeBytes : null;
+
+  if (sizeBytes !== null && sizeBytes > SELF_VERIFICATION_VIDEO_MAX_SIZE_BYTES) {
+    throw Object.assign(new Error('Self verification video is too large. Upload a video under 100 MB.'), {
+      statusCode: 413,
+      code: 'verification_video_too_large',
+    });
+  }
+
+  if (contentType.startsWith('image/') || contentType.startsWith('audio/')) {
+    throw Object.assign(new Error('Upload a video file for self verification, not an image or audio-only file.'), {
+      statusCode: 400,
+      code: 'verification_video_invalid_type',
+    });
+  }
+
+  const contentTypeLooksVideo = contentType.startsWith('video/');
+  const fileNameLooksVideo = hasAllowedVideoExtension(fileName);
+  const genericUploadType = !contentType || contentType === 'application/octet-stream';
+  if (!contentTypeLooksVideo && !(genericUploadType && fileNameLooksVideo)) {
+    throw Object.assign(new Error('Use an mp4, webm, or mov video for self verification.'), {
+      statusCode: 400,
+      code: 'verification_video_invalid_type',
+    });
+  }
+}
+
 export function buildSelfVerificationVideoPatch(input: {
   sourceVideoUrl: string;
   sourceUploadAssetId?: string | null;
@@ -96,6 +141,20 @@ export function buildSelfVerificationVideoPatch(input: {
     verificationLastTestedAt: null,
     videoReferenceRouteStatus: 'not_tested',
     videoReferenceProvider: 'seedance',
+  };
+}
+
+export function buildClearedSelfVerificationVideoPatch(): SelfVerificationVideoPatch {
+  return {
+    verificationVideoUrl: null,
+    verificationVideoAssetId: null,
+    verificationAudioPresent: false,
+    verificationConsentAt: null,
+    verificationStatus: 'missing',
+    verificationPrompt: null,
+    verificationLastTestedAt: null,
+    videoReferenceRouteStatus: null,
+    videoReferenceProvider: null,
   };
 }
 
@@ -296,6 +355,17 @@ export async function updateSelfCharacterVerificationVideoForUser(input: {
     verificationLastTestedAt: input.patch.verificationLastTestedAt,
     videoReferenceRouteStatus: input.patch.videoReferenceRouteStatus,
     videoReferenceProvider: input.patch.videoReferenceProvider,
+  });
+}
+
+export async function clearSelfCharacterVerificationVideoForUser(input: {
+  ownerUserId: string;
+  characterId?: string | null;
+}) {
+  return updateSelfCharacterVerificationVideoForUser({
+    ownerUserId: input.ownerUserId,
+    characterId: input.characterId,
+    patch: buildClearedSelfVerificationVideoPatch(),
   });
 }
 

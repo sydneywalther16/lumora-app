@@ -21,6 +21,12 @@ import {
   type CharacterReferenceEntry,
   type ReferenceRepairSlot,
 } from '../lib/referenceRepair';
+import {
+  createSelfCharacterStatusCopy,
+  exactLikenessRouteStatusLabel,
+  selfVerificationVideoStatusLabel,
+  validateSelfVerificationVideoFile,
+} from '../lib/selfCharacterSetup';
 
 type CharacterHubProps = {
   open: boolean;
@@ -140,6 +146,31 @@ function providerIdentityStatusCopy(character: CharacterProfile) {
   if (character.providerCharacterStatus === 'failed') return 'Provider character setup could not run with the current configuration.';
   if (character.providerCharacterStatus === 'disabled') return 'OpenAI video character routing is not configured yet.';
   return 'Create a verified provider character only after uploading a consented self video.';
+}
+
+function readVideoDurationSeconds(file: File): Promise<number | null> {
+  if (typeof document === 'undefined' || typeof URL === 'undefined') return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    const objectUrl = URL.createObjectURL(file);
+    const cleanup = () => {
+      URL.revokeObjectURL(objectUrl);
+      video.removeAttribute('src');
+      video.load();
+    };
+
+    video.preload = 'metadata';
+    video.onloadedmetadata = () => {
+      const duration = Number.isFinite(video.duration) ? video.duration : null;
+      cleanup();
+      resolve(duration);
+    };
+    video.onerror = () => {
+      cleanup();
+      resolve(null);
+    };
+    video.src = objectUrl;
+  });
 }
 
 function likenessRegistryEntry(diagnostics: ApiHealthDiagnostics | null, id: string) {
@@ -368,6 +399,7 @@ export default function CharacterHub({
   const [likenessLabStatus, setLikenessLabStatus] = useState('');
   const [likenessCanaryBusy, setLikenessCanaryBusy] = useState<'runway' | 'kling' | 'seedance-video' | null>(null);
   const referenceRepairInputRef = useRef<HTMLInputElement | null>(null);
+  const verificationVideoInputRef = useRef<HTMLInputElement | null>(null);
   const atCharacterLimit = characters.length >= characterLimit;
 
   useEffect(() => {
@@ -648,6 +680,29 @@ export default function CharacterHub({
     }
   }
 
+  async function handleVerificationVideoFile(file: File | null | undefined) {
+    const validationError = validateSelfVerificationVideoFile(file);
+    if (validationError) {
+      setVerificationVideoFile(null);
+      setVerificationVideoStatus(validationError);
+      if (verificationVideoInputRef.current) verificationVideoInputRef.current.value = '';
+      return;
+    }
+
+    if (file) {
+      const duration = await readVideoDurationSeconds(file);
+      if (duration !== null && duration > 30) {
+        setVerificationVideoFile(null);
+        setVerificationVideoStatus('Use a short 6 to 15 second verification video. This file is too long.');
+        if (verificationVideoInputRef.current) verificationVideoInputRef.current.value = '';
+        return;
+      }
+    }
+
+    setVerificationVideoFile(file ?? null);
+    setVerificationVideoStatus(file ? `${file.name} selected. Confirm consent, then save.` : '');
+  }
+
   async function handleCreateSoraSelfCharacter() {
     if (!selectedCharacter || !selectedIsSelf) return;
     if (!authUser) {
@@ -726,13 +781,18 @@ export default function CharacterHub({
       setVerificationVideoStatus('Upload a short self verification video first.');
       return;
     }
+    const validationError = validateSelfVerificationVideoFile(verificationVideoFile);
+    if (validationError) {
+      setVerificationVideoStatus(validationError);
+      return;
+    }
 
     setVerificationVideoSaving(true);
     setVerificationVideoStatus('Saving private self verification video...');
     try {
       const upload = await uploadLumoraMedia({
         userId: authUser.id,
-        bucket: 'lumora-assets',
+        bucket: 'self-capture-videos',
         file: verificationVideoFile,
         folder: `self-verification/${selectedCharacter.id}`,
         usage: 'self_verification_video',
@@ -745,6 +805,9 @@ export default function CharacterHub({
         consentConfirmed: verificationVideoConsent,
         sourceUploadAssetId: upload.objectPath,
         sourceVideoUrl: upload.url,
+        sourceFileName: verificationVideoFile.name,
+        sourceContentType: verificationVideoFile.type,
+        sourceSizeBytes: verificationVideoFile.size,
         verificationAudioPresent,
       });
       const fallbackUpdatedCharacter: CharacterProfile = {
@@ -770,9 +833,57 @@ export default function CharacterHub({
       setVerificationVideoStatus(response.message || 'Self verification video saved privately.');
       setVerificationVideoFile(null);
       setVerificationVideoConsent(false);
+      if (verificationVideoInputRef.current) verificationVideoInputRef.current.value = '';
       await refreshLikenessDiagnostics();
     } catch (error) {
       setVerificationVideoStatus(error instanceof Error ? error.message : 'Unable to save self verification video yet.');
+    } finally {
+      setVerificationVideoSaving(false);
+    }
+  }
+
+  async function handleRemoveSelfVerificationVideo() {
+    if (!selectedCharacter || !selectedIsSelf) return;
+    if (!authUser) {
+      setVerificationVideoStatus('Sign in to remove your self verification video.');
+      return;
+    }
+
+    setVerificationVideoSaving(true);
+    setVerificationVideoStatus('Removing private self verification video...');
+    try {
+      const response = await api.deleteSelfVerificationVideo({
+        userId: authUser.id,
+        characterId: selectedCharacter.characterId ?? selectedCharacter.id,
+      });
+      const fallbackUpdatedCharacter: CharacterProfile = {
+        ...selectedCharacter,
+        verificationVideoUrl: null,
+        verificationVideoPresent: false,
+        verificationVideoAssetId: null,
+        verificationAudioPresent: false,
+        verificationConsentAt: null,
+        verificationConsentPresent: false,
+        verificationStatus: response.verificationStatus,
+        verificationPrompt: null,
+        verificationLastTestedAt: null,
+        videoReferenceRouteStatus: null,
+        videoReferenceProvider: null,
+      };
+      const nextCharacter = response.character ?? fallbackUpdatedCharacter;
+      await onRefresh(characters.map((character) => (
+        character.id === selectedCharacter.id || character.characterId === selectedCharacter.characterId
+          ? nextCharacter
+          : character
+      )));
+      setSelectedCharacterId(nextCharacter.id);
+      setVerificationVideoFile(null);
+      setVerificationVideoConsent(false);
+      if (verificationVideoInputRef.current) verificationVideoInputRef.current.value = '';
+      setVerificationVideoStatus(response.message || 'Self verification video removed.');
+      await refreshLikenessDiagnostics();
+    } catch (error) {
+      setVerificationVideoStatus(error instanceof Error ? error.message : 'Unable to remove self verification video yet.');
     } finally {
       setVerificationVideoSaving(false);
     }
@@ -976,6 +1087,23 @@ export default function CharacterHub({
       },
       characters: [selectedCharacter],
     });
+    const exactRouteReady = Boolean(likenessDiagnostics?.exactLikenessRouter?.exactLikeness) ||
+      selectedCharacter.videoReferenceRouteStatus === 'canary_succeeded' ||
+      (selectedCharacter.providerCharacterStatus === 'ready' && selectedCharacter.likenessProviderStatus === 'canary_succeeded');
+    const verificationStatusLabel = selfVerificationVideoStatusLabel(selectedCharacter);
+    const exactStatusLabel = exactLikenessRouteStatusLabel(selectedCharacter, exactRouteReady);
+    const seedanceVideoEntry = likenessRegistryEntry(likenessDiagnostics, 'seedance_video_reference');
+    const probeEnabled = Boolean(likenessDiagnostics?.renderSuccessEngine?.probeEnabled);
+    const exactCanaryAvailable = Boolean(
+      probeEnabled &&
+      selectedCharacter.verificationVideoPresent &&
+      seedanceVideoEntry?.implementationStatus === 'configured_ready_for_canary',
+    );
+    const exactCanaryUnavailableCopy = !probeEnabled
+      ? 'Exact likeness testing is not available yet.'
+      : !selectedCharacter.verificationVideoPresent
+        ? 'Upload a self verification video before testing exact likeness routes.'
+        : 'Exact likeness testing is not available yet.';
 
     return (
       <CharacterHubFrame onClose={onClose}>
@@ -1026,6 +1154,40 @@ export default function CharacterHub({
           <CreatorIdentityCard card={selectedIdentityCard} compact />
         ) : null}
 
+        {selectedIsSelf ? (
+          <section className="self-setup-wizard" aria-labelledby="self-character-setup-title">
+            <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+              <div>
+                <span className="eyebrow">private identity setup</span>
+                <h3 id="self-character-setup-title">Self Character Setup</h3>
+              </div>
+              <span className="tiny-pill">{exactRouteReady ? 'Exact route ready' : 'Soft guidance ready'}</span>
+            </div>
+            <div className="self-setup-card-grid">
+              <article className="self-setup-status-card">
+                <strong>Saved Look</strong>
+                <span>{savedRefs.length ? `${savedRefs.length} photo reference${savedRefs.length === 1 ? '' : 's'}` : 'Needs photos'}</span>
+                <p>Saved photos stay private and help future likeness routes.</p>
+              </article>
+              <article className="self-setup-status-card">
+                <strong>Self Verification Video</strong>
+                <span>{verificationStatusLabel}</span>
+                <p>Private identity material for stronger self-character canaries.</p>
+              </article>
+              <article className="self-setup-status-card">
+                <strong>Exact Likeness Route</strong>
+                <span>{exactStatusLabel}</span>
+                <p>{providerIdentityStatusCopy(selectedCharacter)}</p>
+              </article>
+              <article className="self-setup-status-card is-ready">
+                <strong>Soft Self Guidance</strong>
+                <span>Ready</span>
+                <p>Lumora can generate text-first AI cast videos now.</p>
+              </article>
+            </div>
+          </section>
+        ) : null}
+
         <div className="character-detail-sections">
           <CharacterDetailSection
             id="identity"
@@ -1054,35 +1216,44 @@ export default function CharacterHub({
           {selectedIsSelf ? (
             <CharacterDetailSection
               id="providerIdentity"
-              title="Self Character Identity"
-              summary={`Verified provider character: ${providerIdentityStatusLabel(selectedCharacter)}`}
+              title="Self Verification Video"
+              summary={`Status: ${verificationStatusLabel}`}
               expanded={detailSectionIsOpen('providerIdentity')}
               onToggle={toggleDetailSection}
             >
               <div className="character-compact-form">
-                <div className="character-memory-viewer character-section-card">
-                  {metadataLine('Saved visual references', savedRefs.length ? `${savedRefs.length} saved` : 'No saved references yet')}
-                  {metadataLine('Soft text guidance', selectedCharacter.appearanceSummary || selectedCharacter.identityProfile?.appearanceSummary ? 'Available' : 'Needs appearance details')}
-                  {metadataLine('Self verification video', selectedCharacter.verificationVideoPresent ? (selectedCharacter.videoReferenceRouteStatus === 'canary_succeeded' ? 'Route ready' : selectedCharacter.verificationStatus || 'Uploaded') : 'Missing')}
-                  {metadataLine('Exact likeness', providerIdentityStatusLabel(selectedCharacter))}
-                  {metadataLine('Seedance photo references', savedRefs.length ? 'Saved but blocked for this renderer' : 'No saved references yet')}
-                  {metadataLine('Consent', selectedCharacter.likenessConsentAt ? 'Confirmed' : 'Not confirmed')}
-                  <p className="muted">{providerIdentityStatusCopy(selectedCharacter)}</p>
-                </div>
-                <div className="character-memory-viewer character-section-card">
-                  <strong>Record self verification video</strong>
-                  <p className="muted">
-                    Look forward, say 3 pairs of two-digit numbers, turn slightly right, turn slightly left, return to center,
-                    keep a neutral expression, stay fully clothed, use clear lighting, and avoid filters.
-                  </p>
-                  <label className="field-block">
-                    <span>Private verification video</span>
-                    <input
-                      type="file"
-                      accept="video/*"
-                      onChange={(event) => setVerificationVideoFile(event.target.files?.[0] ?? null)}
-                    />
-                  </label>
+                <div className="self-verification-panel character-section-card">
+                  <div>
+                    <span className="eyebrow">private self character media</span>
+                    <h4>Self Verification Video</h4>
+                    <p className="muted">
+                      Record a short private video so Lumora can test stronger self-character likeness routes.
+                    </p>
+                  </div>
+                  <ul className="self-verification-instructions">
+                    <li>Look forward at the camera</li>
+                    <li>Say 3 pairs of two-digit numbers</li>
+                    <li>Turn your head slightly right</li>
+                    <li>Turn your head slightly left</li>
+                    <li>Return to center</li>
+                    <li>Use clear lighting</li>
+                    <li>No filters</li>
+                    <li>Fully clothed</li>
+                  </ul>
+                  <div className="self-verification-status-row">
+                    <span>Status</span>
+                    <strong>{verificationStatusLabel}</strong>
+                  </div>
+                  {verificationVideoFile ? (
+                    <p className="muted">Selected: {verificationVideoFile.name}</p>
+                  ) : null}
+                  <input
+                    ref={verificationVideoInputRef}
+                    type="file"
+                    accept="video/mp4,video/webm,video/quicktime,video/*"
+                    style={{ display: 'none' }}
+                    onChange={(event) => void handleVerificationVideoFile(event.target.files?.[0])}
+                  />
                   <label className="checkbox-row" style={{ alignItems: 'flex-start' }}>
                     <input
                       type="checkbox"
@@ -1099,7 +1270,23 @@ export default function CharacterHub({
                     />
                     <span>I confirm this is me and I consent to using this recording to create my Lumora self character.</span>
                   </label>
-                  <div className="button-row">
+                  <div className="button-row self-verification-actions">
+                    <button
+                      type="button"
+                      className="ghost-btn"
+                      disabled
+                      title="Browser recording is coming soon. Upload is available now."
+                    >
+                      Record video
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost-btn"
+                      disabled={verificationVideoSaving}
+                      onClick={() => verificationVideoInputRef.current?.click()}
+                    >
+                      {selectedCharacter.verificationVideoPresent ? 'Replace video' : 'Upload video'}
+                    </button>
                     <button
                       type="button"
                       className="ghost-btn"
@@ -1108,37 +1295,54 @@ export default function CharacterHub({
                     >
                       {verificationVideoSaving ? 'Saving video...' : 'Save verification video'}
                     </button>
+                    {selectedCharacter.verificationVideoPresent ? (
+                      <button
+                        type="button"
+                        className="text-btn"
+                        disabled={verificationVideoSaving}
+                        onClick={() => void handleRemoveSelfVerificationVideo()}
+                      >
+                        Remove video
+                      </button>
+                    ) : null}
                   </div>
                   {verificationVideoStatus ? <p className="muted">{verificationVideoStatus}</p> : null}
+                  <p className="muted">Verification videos stay private. They are never published or used as thumbnails.</p>
                 </div>
-                <label className="field-block">
-                  <span>Provider identity video</span>
-                  <input
-                    type="file"
-                    accept="video/*"
-                    onChange={(event) => setSoraIdentityFile(event.target.files?.[0] ?? null)}
-                  />
-                </label>
-                <label className="checkbox-row" style={{ alignItems: 'flex-start' }}>
-                  <input
-                    type="checkbox"
-                    checked={soraIdentityConsent}
-                    onChange={(event) => setSoraIdentityConsent(event.target.checked)}
-                  />
-                  <span>I confirm this is me and I consent to using this recording to create my Lumora self character.</span>
-                </label>
-                <div className="button-row">
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    disabled={soraIdentitySaving}
-                    onClick={() => void handleCreateSoraSelfCharacter()}
-                  >
-                    {soraIdentitySaving ? 'Checking route...' : 'Create verified self character'}
-                  </button>
+                <div className="character-memory-viewer character-section-card">
+                  <strong>Exact provider character</strong>
+                  <p className="muted">
+                    This is separate from the private verification video. Use it only when a configured provider supports a verified self-character setup route.
+                  </p>
+                  <label className="field-block">
+                    <span>Provider identity video</span>
+                    <input
+                      type="file"
+                      accept="video/*"
+                      onChange={(event) => setSoraIdentityFile(event.target.files?.[0] ?? null)}
+                    />
+                  </label>
+                  <label className="checkbox-row" style={{ alignItems: 'flex-start' }}>
+                    <input
+                      type="checkbox"
+                      checked={soraIdentityConsent}
+                      onChange={(event) => setSoraIdentityConsent(event.target.checked)}
+                    />
+                    <span>I confirm this is me and I consent to using this recording to create my Lumora self character.</span>
+                  </label>
+                  <div className="button-row">
+                    <button
+                      type="button"
+                      className="ghost-btn"
+                      disabled={soraIdentitySaving}
+                      onClick={() => void handleCreateSoraSelfCharacter()}
+                    >
+                      {soraIdentitySaving ? 'Checking route...' : 'Create verified self character'}
+                    </button>
+                  </div>
+                  {soraIdentityStatus ? <p className="muted">{soraIdentityStatus}</p> : null}
+                  <p className="muted">Provider deletion is unavailable until the configured provider exposes a supported delete route.</p>
                 </div>
-                {soraIdentityStatus ? <p className="muted">{soraIdentityStatus}</p> : null}
-                <p className="muted">Provider deletion is unavailable until the configured provider exposes a supported delete route.</p>
               </div>
             </CharacterDetailSection>
           ) : null}
@@ -1173,30 +1377,18 @@ export default function CharacterHub({
                   </p>
                 </div>
                 <div className="button-row">
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    disabled={likenessCanaryBusy !== null || !selectedCharacter.verificationVideoPresent}
-                    onClick={() => void handleSeedanceVideoReferenceCanary()}
-                  >
-                    {likenessCanaryBusy === 'seedance-video' ? 'Checking video...' : 'Test Seedance video likeness'}
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    disabled={likenessCanaryBusy !== null}
-                    onClick={() => void handleRunwayLikenessCanary()}
-                  >
-                    {likenessCanaryBusy === 'runway' ? 'Testing Runway...' : 'Test Runway likeness'}
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    disabled={likenessCanaryBusy !== null}
-                    onClick={() => void handleKlingLikenessCanary()}
-                  >
-                    {likenessCanaryBusy === 'kling' ? 'Checking Kling...' : 'Test Kling likeness'}
-                  </button>
+                  {exactCanaryAvailable ? (
+                    <button
+                      type="button"
+                      className="ghost-btn"
+                      disabled={likenessCanaryBusy !== null}
+                      onClick={() => void handleSeedanceVideoReferenceCanary()}
+                    >
+                      {likenessCanaryBusy === 'seedance-video' ? 'Checking route...' : 'Run exact likeness canary'}
+                    </button>
+                  ) : (
+                    <span className="muted">{exactCanaryUnavailableCopy}</span>
+                  )}
                   <button
                     type="button"
                     className="ghost-btn"
@@ -1342,42 +1534,82 @@ export default function CharacterHub({
             expanded={detailSectionIsOpen('references')}
             onToggle={toggleDetailSection}
           >
+            <p className="muted" style={{ marginTop: 0 }}>
+              Photo references are private saved-look assets. They are different from the Self Verification Video and are never public posts.
+            </p>
             {refs.length ? (
               <div className="character-reference-grid">
-                {refs.map((entry) => (
-                  <div key={entry.slot} className={`character-reference-item ${entry.status.kind}`}>
-                    {entry.url ? (
-                      <img src={entry.url} alt={`${displayName(selectedCharacter)} ${entry.label}`} />
-                    ) : (
-                      <div className="reference-placeholder">{entry.optional ? 'Optional' : 'Missing'}</div>
-                    )}
-                    <span>{entry.label}</span>
-                    <span className={`reference-status-badge ${entry.status.kind}`}>{entry.status.label}</span>
-                    <small>{entry.status.detail}</small>
-                    <button
-                      type="button"
-                      className="text-btn"
-                      disabled={referenceRepairSaving}
-                      onClick={() => startReferenceRepair(entry)}
-                    >
-                      {selectedIsSelf ? 'Edit references' : 'Replace'}
-                    </button>
-                    {entry.removable ? (
-                      <button
-                        type="button"
-                        className="text-btn"
-                        disabled={referenceRepairSaving}
-                        onClick={() => void handleRemoveReference(entry)}
-                      >
-                        Remove old reference
-                      </button>
-                    ) : null}
-                  </div>
-                ))}
+                {refs.map((entry) => {
+                  const manualOverride = entry.slot === 'manualReferenceImageUrl';
+                  return (
+                    <div key={entry.slot} className={`character-reference-item ${entry.status.kind} ${manualOverride ? 'is-manual-override' : ''}`}>
+                      {entry.url ? (
+                        <img src={entry.url} alt={`${displayName(selectedCharacter)} ${entry.label}`} />
+                      ) : (
+                        <div className="reference-placeholder">{entry.optional ? 'Optional' : 'Missing'}</div>
+                      )}
+                      <div className="reference-card-copy">
+                        <span>{manualOverride ? 'Old temporary reference' : entry.label}</span>
+                        <span className={`reference-status-badge ${entry.status.kind}`}>{entry.status.label}</span>
+                        <small>
+                          {manualOverride
+                            ? 'This override is no longer required. Remove it without deleting saved Lumora photos.'
+                            : entry.status.detail}
+                        </small>
+                      </div>
+                      <div className="reference-card-actions">
+                        {!manualOverride ? (
+                          <button
+                            type="button"
+                            className="text-btn"
+                            disabled={referenceRepairSaving}
+                            onClick={() => startReferenceRepair(entry)}
+                          >
+                            {selectedIsSelf ? 'View status' : 'Replace'}
+                          </button>
+                        ) : null}
+                        {entry.removable ? (
+                          <button
+                            type="button"
+                            className="text-btn"
+                            disabled={referenceRepairSaving}
+                            onClick={() => void handleRemoveReference(entry)}
+                          >
+                            {manualOverride ? 'Remove old reference' : 'Remove'}
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <p className="muted">No reference photos saved yet.</p>
             )}
+            {selectedIsSelf ? (
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => void onEditSelf()}
+                >
+                  Edit saved look photos
+                </button>
+                {refs.some((entry) => entry.slot === 'manualReferenceImageUrl' && entry.removable) ? (
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    disabled={referenceRepairSaving}
+                    onClick={() => {
+                      const manualEntry = refs.find((entry) => entry.slot === 'manualReferenceImageUrl' && entry.removable);
+                      if (manualEntry) void handleRemoveReference(manualEntry);
+                    }}
+                  >
+                    Remove old manual reference override
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
             <input
               ref={referenceRepairInputRef}
               type="file"

@@ -21,8 +21,11 @@ import {
 } from '../services/providers/openaiSoraProvider';
 import {
   buildSelfVerificationVideoPatch,
+  clearSelfCharacterVerificationVideoForUser,
+  getSelfVerificationVideoDiagnostics,
   updateSelfCharacterVerificationVideoForUser,
   validateSelfVerificationVideoConsent,
+  validateSelfVerificationVideoUpload,
 } from '../services/selfVerificationVideo';
 
 const visibilitySchema = z.enum(['private', 'approved_only', 'public']);
@@ -99,6 +102,9 @@ const selfVerificationVideoSchema = z.object({
   consent_confirmed: z.boolean().optional(),
   sourceUploadAssetId: z.string().min(1).optional().nullable(),
   sourceVideoUrl: z.string().url().optional().nullable(),
+  sourceFileName: z.string().min(1).optional().nullable(),
+  sourceContentType: z.string().min(1).optional().nullable(),
+  sourceSizeBytes: z.number().nonnegative().optional().nullable(),
   verificationAudioPresent: z.boolean().optional().default(false),
   verificationVideo: mediaUploadSchema.optional().nullable(),
 });
@@ -125,6 +131,7 @@ function creatorSafeCharacter<T extends {
     providerCharacterId: null,
     providerCharacterIdPresent: Boolean(character.providerCharacterId),
     verificationVideoUrl: null,
+    verificationVideoAssetId: null,
     verificationVideoPresent: Boolean(character.verificationVideoUrl || character.verificationVideoAssetId),
     verificationConsentPresent: Boolean(character.verificationConsentAt),
   };
@@ -237,7 +244,12 @@ charactersRouter.post('/self/verification-video', async (req: AuthedRequest, res
   const consentConfirmed = payload.consentConfirmed ?? payload.consent_confirmed ?? false;
 
   try {
-    validateSelfVerificationVideoConsent({ consentConfirmed });
+    validateSelfVerificationVideoUpload({
+      consentConfirmed,
+      contentType: payload.sourceContentType ?? payload.verificationVideo?.contentType ?? null,
+      fileName: payload.sourceFileName ?? payload.verificationVideo?.fileName ?? payload.sourceUploadAssetId ?? payload.sourceVideoUrl ?? null,
+      sizeBytes: payload.sourceSizeBytes ?? null,
+    });
   } catch (error) {
     const statusCode = typeof (error as { statusCode?: unknown })?.statusCode === 'number'
       ? (error as { statusCode: number }).statusCode
@@ -276,6 +288,7 @@ charactersRouter.post('/self/verification-video', async (req: AuthedRequest, res
       media: payload.verificationVideo,
       folder: `characters/${character?.id ?? characterId}/self-verification`,
       fallbackFileName: 'lumora-self-verification-video',
+      bucket: 'self-capture-videos',
     });
     sourceUploadAssetId = sourceUploadAssetId ?? sourceVideoUrl;
   }
@@ -309,6 +322,59 @@ charactersRouter.post('/self/verification-video', async (req: AuthedRequest, res
     verificationPrompt: diagnostics.verificationPrompt,
     videoReferenceRouteStatus: diagnostics.seedanceVideoReferenceCanaryStatus,
     message: 'Self verification video saved privately.',
+    character: updated ? creatorSafeCharacter(updated) : null,
+  });
+});
+
+charactersRouter.get('/self/verification-video/status', async (req: AuthedRequest, res) => {
+  const diagnostics = await getSelfVerificationVideoDiagnostics({
+    userId: req.userId!,
+    characterId: null,
+  });
+
+  res.status(diagnostics.schemaReady ? 200 : 500).json({
+    ok: diagnostics.schemaReady,
+    verificationVideoPresent: diagnostics.selfVerificationVideoPresent,
+    verificationAudioPresent: diagnostics.verificationAudioPresent,
+    verificationConsentPresent: diagnostics.selfVerificationConsentPresent,
+    verificationStatus: diagnostics.verificationStatus,
+    verificationPrompt: diagnostics.verificationPrompt,
+    videoReferenceRouteStatus: diagnostics.seedanceVideoReferenceCanaryStatus,
+    videoReferenceProvider: diagnostics.videoReferenceProvider,
+    verificationVideoUrlRedacted: diagnostics.verificationVideoUrlRedacted,
+    recommendedNextAction: diagnostics.recommendedNextAction,
+  });
+});
+
+charactersRouter.delete('/self/verification-video', async (req: AuthedRequest, res) => {
+  const payload = z.object({
+    userId: z.string().min(1).optional().nullable(),
+    characterId: z.string().min(1).optional().nullable(),
+  }).parse(req.body ?? {});
+
+  if (payload.userId && payload.userId !== req.userId) {
+    res.status(403).json({
+      error: 'verification_owner_mismatch',
+      message: 'Only the authenticated owner can remove their self verification video.',
+    });
+    return;
+  }
+
+  const diagnostics = await clearSelfCharacterVerificationVideoForUser({
+    ownerUserId: req.userId!,
+    characterId: payload.characterId ?? 'creator-self',
+  });
+  const updated = await getCharacterProfileForUser(req.userId!, payload.characterId ?? 'creator-self');
+
+  res.json({
+    ok: true,
+    verificationVideoPresent: diagnostics.selfVerificationVideoPresent,
+    verificationAudioPresent: diagnostics.verificationAudioPresent,
+    verificationConsentPresent: diagnostics.selfVerificationConsentPresent,
+    verificationStatus: diagnostics.verificationStatus,
+    verificationPrompt: diagnostics.verificationPrompt,
+    videoReferenceRouteStatus: diagnostics.seedanceVideoReferenceCanaryStatus,
+    message: 'Self verification video removed. Saved photo references were kept.',
     character: updated ? creatorSafeCharacter(updated) : null,
   });
 });

@@ -102,6 +102,26 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
     const exactLikeness = await resolveExactLikenessRoute();
     const selfVerificationVideo = await getSelfVerificationVideoDiagnostics();
     const referenceRouteStatus = await getReferenceRouteSummary({});
+    const referenceCleanup = await safeHealthDiagnostic('referenceCleanup', buildReferenceCleanupDiagnostics);
+    const referenceCleanupRecord = referenceCleanup && typeof referenceCleanup === 'object'
+      ? referenceCleanup as Record<string, unknown>
+      : {};
+    const obsoleteManualReferenceCount = typeof referenceCleanupRecord.obsoleteExternalReferenceCount === 'number'
+      ? referenceCleanupRecord.obsoleteExternalReferenceCount
+      : typeof referenceCleanupRecord.manualReferenceOverrideCount === 'number'
+        ? referenceCleanupRecord.manualReferenceOverrideCount
+      : 0;
+    const savedLumoraReferenceCount = typeof referenceCleanupRecord.savedLumoraReferenceCount === 'number'
+      ? referenceCleanupRecord.savedLumoraReferenceCount
+      : 0;
+    const exactLikenessCanaryStatus = exactLikeness.canaryStatus ?? null;
+    const recommendedNextAction = !selfVerificationVideo.selfVerificationVideoPresent
+      ? 'Upload self verification video'
+      : obsoleteManualReferenceCount > 0
+        ? 'Remove old manual reference override'
+        : exactLikenessCanaryStatus && exactLikenessCanaryStatus !== 'canary_succeeded'
+          ? 'Run exact likeness canary'
+          : 'Continue using soft self guidance';
     res.json({
       service: 'lumora-api',
       checkedAt,
@@ -109,13 +129,18 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
       database: await safeHealthDiagnostic('database', buildDatabaseDiagnostics),
       assetPersistence: await safeHealthDiagnostic('assetPersistence', buildAssetPersistenceDiagnostics),
       aiCastPosts: await safeHealthDiagnostic('aiCastStudio', buildAiCastPostDiagnostics),
-      referenceCleanup: await safeHealthDiagnostic('referenceCleanup', buildReferenceCleanupDiagnostics),
+      referenceCleanup,
       providerFallback: await safeHealthDiagnostic('providerFallback', buildProviderFallbackDiagnostics),
       renderSuccessEngine: await safeHealthDiagnostic('renderSuccessEngine', buildRenderSuccessDiagnostics),
       referenceRouteStatus,
       selfVerificationVideo,
       selfVerificationVideoPresent: selfVerificationVideo.selfVerificationVideoPresent,
       selfVerificationConsentPresent: selfVerificationVideo.selfVerificationConsentPresent,
+      verificationStatus: selfVerificationVideo.verificationStatus,
+      obsoleteManualReferenceCount,
+      savedLumoraReferenceCount,
+      exactLikenessCanaryStatus,
+      recommendedNextAction,
       seedanceVideoReferenceCanaryStatus: selfVerificationVideo.seedanceVideoReferenceCanaryStatus,
       seedanceImageReferenceBlocked: referenceRouteStatus.seedanceReferenceRoutesBlocked,
       exactLikenessRouter: exactLikeness,

@@ -4294,13 +4294,14 @@ button {
 
 .character-reference-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
 }
 
 .character-reference-item {
   display: grid;
-  gap: 6px;
+  gap: 8px;
+  align-content: start;
 }
 
 .character-reference-item img {
@@ -4320,6 +4321,100 @@ button {
   color: var(--soft-text);
   font-size: 0.72rem;
   line-height: 1.25;
+}
+
+.reference-card-copy,
+.reference-card-actions {
+  display: grid;
+  gap: 6px;
+}
+
+.reference-card-actions {
+  align-items: center;
+}
+
+.character-reference-item.is-manual-override {
+  border-style: dashed;
+}
+
+.self-setup-wizard,
+.self-verification-panel {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--lumora-radius-card);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
+    var(--card-background, rgba(20, 20, 26, 0.78));
+  box-shadow: var(--lumora-shadow-card);
+}
+
+.self-setup-wizard h3,
+.self-verification-panel h4 {
+  margin: 4px 0 0;
+}
+
+.self-setup-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.self-setup-status-card {
+  display: grid;
+  gap: 7px;
+  min-height: 132px;
+  padding: 12px;
+  border: 1px solid var(--surface-border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.self-setup-status-card span,
+.self-verification-status-row strong {
+  color: var(--text-primary);
+  font-size: 0.82rem;
+}
+
+.self-setup-status-card p {
+  margin: 0;
+  color: var(--muted-text);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.self-setup-status-card.is-ready {
+  border-color: rgba(126, 231, 216, 0.28);
+}
+
+.self-verification-instructions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 6px 12px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted-text);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.self-verification-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--surface-border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--muted-text);
+  font-size: 0.82rem;
+}
+
+.self-verification-actions .ghost-btn,
+.self-verification-actions .text-btn {
+  min-height: 38px;
 }
 
 .character-detail-save-row {
