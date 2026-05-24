@@ -53,6 +53,7 @@ const REFERENCE_CANARY_MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const VERIFICATION_VIDEO_BUCKET = 'self-capture-videos';
 const VERIFICATION_VIDEO_SIGNED_URL_TTL_SECONDS = 60 * 60;
 const VERIFICATION_VIDEO_PAYLOAD_PLACEHOLDER_URL = 'https://private.lumora.local/self-verification-video.mp4';
+const VIDEO_REFERENCE_TRANSIENT_RETRY_DELAY_MS = 15 * 60 * 1000;
 const activeCanaryProcessors = new Set<string>();
 
 type CanaryKind = 'text' | 'reference' | 'video_reference';
@@ -410,6 +411,16 @@ function classifyProviderFailure(value: unknown) {
   return 'provider';
 }
 
+function isTransientProviderUnavailableText(value: string) {
+  const lower = value.toLowerCase();
+  return /\be004\b/i.test(value) ||
+    lower.includes('service is temporarily unavailable') ||
+    lower.includes('temporarily unavailable') ||
+    lower.includes('try again later') ||
+    lower.includes('provider unavailable') ||
+    lower.includes('upstream unavailable');
+}
+
 export function classifyReferenceCanaryFailure(value: unknown, providerStatus?: string | null) {
   const raw = typeof value === 'string' ? value : errorText(value);
   const lower = raw.toLowerCase();
@@ -429,6 +440,7 @@ export function classifyReferenceCanaryFailure(value: unknown, providerStatus?: 
 export function classifyVideoReferenceCanaryFailure(value: unknown, providerStatus?: string | null) {
   const raw = typeof value === 'string' ? value : errorText(value);
   const lower = raw.toLowerCase();
+  if (isTransientProviderUnavailableText(raw)) return 'video_reference_provider_unavailable';
   if (lower.includes('flagged as sensitive') || lower.includes('input or output was flagged') || /\be005\b/i.test(raw)) return 'video_reference_moderation_block';
   if (lower.includes('moderation') || lower.includes('safety') || lower.includes('policy') || lower.includes('nsfw')) return 'video_reference_moderation_block';
   if (lower.includes('unknown field') || lower.includes('schema') || lower.includes('validation') || lower.includes('invalid input') || lower.includes('reference_videos')) return 'video_reference_input_schema';
@@ -440,6 +452,21 @@ export function classifyVideoReferenceCanaryFailure(value: unknown, providerStat
   }
   if (lower.includes('output') || lower.includes('video url')) return 'video_reference_output_missing';
   return 'video_reference_provider_failed';
+}
+
+function isVideoReferenceTransientUnavailable(category: string | null | undefined) {
+  return category === 'video_reference_provider_unavailable';
+}
+
+function videoReferenceRetryLaterInfo() {
+  return {
+    retryAfterSeconds: Math.ceil(VIDEO_REFERENCE_TRANSIENT_RETRY_DELAY_MS / 1000),
+    retryAvailableAt: new Date(Date.now() + VIDEO_REFERENCE_TRANSIENT_RETRY_DELAY_MS).toISOString(),
+  };
+}
+
+function videoReferenceRouteStatusForFailure(category: string) {
+  return isVideoReferenceTransientUnavailable(category) ? 'transient_unavailable' : category;
 }
 
 function classifyCanaryFailure(kind: CanaryKind, value: unknown, providerStatus?: string | null) {
@@ -1575,7 +1602,9 @@ async function processSeedanceCanaryJob(jobId: string, options: { pollUntilTermi
           ? prediction.error
           : prediction.logs ?? `Prediction ${prediction.status}.`;
         const category = classifyCanaryFailure(metadata.kind, detail, prediction.status);
-        if (metadata.kind === 'reference' || metadata.kind === 'video_reference') {
+        const transientVideoReferenceFailure = metadata.kind === 'video_reference' && isVideoReferenceTransientUnavailable(category);
+        const retryLater = transientVideoReferenceFailure ? videoReferenceRetryLaterInfo() : null;
+        if (metadata.kind === 'reference' || (metadata.kind === 'video_reference' && !transientVideoReferenceFailure)) {
           await persistReferenceRouteResult({
             userId: metadata.userId,
             characterId: metadata.characterId,
@@ -1594,7 +1623,7 @@ async function processSeedanceCanaryJob(jobId: string, options: { pollUntilTermi
           await markSeedanceVideoReferenceCanaryResult({
             userId: metadata.userId,
             characterId: metadata.characterId,
-            routeStatus: category,
+            routeStatus: videoReferenceRouteStatusForFailure(category),
             provider: 'seedance',
           });
         }
@@ -1603,6 +1632,8 @@ async function processSeedanceCanaryJob(jobId: string, options: { pollUntilTermi
           providerStatus: prediction.status,
           errorMessage: redactMessage(detail),
           errorCategory: category,
+          retryAfterSeconds: retryLater?.retryAfterSeconds ?? null,
+          retryAvailableAt: retryLater?.retryAvailableAt ?? null,
           outputShapeSummaryValue: outputShapeSummary(prediction.output),
           providerFailure: providerFailureDiagnostics({ prediction, category }),
         });
@@ -1622,7 +1653,9 @@ async function processSeedanceCanaryJob(jobId: string, options: { pollUntilTermi
         });
       }
       const category = classifyCanaryFailure(metadata.kind, error);
-      if (metadata.kind === 'reference' || metadata.kind === 'video_reference') {
+      const transientVideoReferenceFailure = metadata.kind === 'video_reference' && isVideoReferenceTransientUnavailable(category);
+      const retryLater = transientVideoReferenceFailure ? videoReferenceRetryLaterInfo() : null;
+      if (metadata.kind === 'reference' || (metadata.kind === 'video_reference' && !transientVideoReferenceFailure)) {
         await persistReferenceRouteResult({
           userId: metadata.userId,
           characterId: metadata.characterId,
@@ -1641,7 +1674,7 @@ async function processSeedanceCanaryJob(jobId: string, options: { pollUntilTermi
         await markSeedanceVideoReferenceCanaryResult({
           userId: metadata.userId,
           characterId: metadata.characterId,
-          routeStatus: category,
+          routeStatus: videoReferenceRouteStatusForFailure(category),
           provider: 'seedance',
         });
       }
@@ -1649,6 +1682,8 @@ async function processSeedanceCanaryJob(jobId: string, options: { pollUntilTermi
         status: 'failed',
         errorMessage: redactMessage(errorText(error)),
         errorCategory: category,
+        retryAfterSeconds: retryLater?.retryAfterSeconds ?? null,
+        retryAvailableAt: retryLater?.retryAvailableAt ?? null,
       });
     }
   } finally {
@@ -2324,6 +2359,17 @@ export async function getSeedanceCanaryStatus(jobId: string) {
   return formatSeedanceCanaryStatus(job);
 }
 
+export async function getLatestSeedanceVideoReferenceCanaryStatus() {
+  const result = await query<Record<string, unknown>>(
+    `select ${canaryJobSelect}
+     from generation_jobs
+     where render_mode = 'seedance_video_reference_canary'
+     order by updated_at desc nulls last, created_at desc
+     limit 1`,
+  );
+  return result.rows[0] ? formatSeedanceCanaryStatus(mapCanaryRow(result.rows[0])) : null;
+}
+
 export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
   const metadata = canaryMetadata(job);
   const providerFailure = metadata?.providerFailure ?? null;
@@ -2341,6 +2387,7 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
     if (status === 'rendering') return job.providerPredictionId ? 'poll_provider_prediction' : 'create_provider_prediction';
     if (status === 'queued') return 'create_provider_prediction';
     if (status === 'failed') {
+      if (job.errorCategory === 'video_reference_provider_unavailable') return 'retry_later';
       if (job.errorCategory === 'input_schema_invalid' || job.errorCategory === 'video_reference_input_schema') return 'fix_provider_payload_schema';
       if (job.errorCategory === 'reference_asset_access' || job.errorCategory === 'verification_video_asset_access') return 'fix_reference_asset_access';
       if (
@@ -2360,6 +2407,14 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
     }
     return 'none';
   })();
+  const canaryStatus = status === 'completed' && outputParse.ok
+    ? 'canary_succeeded'
+    : job.errorCategory === 'video_reference_provider_unavailable'
+      ? 'retry_later'
+      : status;
+  const recommendedNextAction = job.errorCategory === 'video_reference_provider_unavailable'
+    ? 'Retry Seedance video reference canary later'
+    : nextAction;
 
   return {
     canaryJobId: job.id,
@@ -2373,6 +2428,7 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
     providerStatus: job.providerStatus,
     lifecycleStatus: status,
     status,
+    canaryStatus,
     outputUrlPresent: Boolean(job.outputUrl ?? job.resultAssetUrl),
     outputPresent: Boolean(job.outputUrl ?? job.resultAssetUrl),
     parsedOutputUrlPresent: outputParse.ok,
@@ -2388,6 +2444,7 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
     retryAfterSeconds: retryAfter ?? null,
     retryAvailableAt: job.retryAvailableAt,
     nextAction,
+    recommendedNextAction,
     payloadSummary: metadata?.payloadSummary ?? null,
     canaryVariant: metadata?.canaryVariant ?? null,
     promptContainsImageToken: metadata?.providerInput
@@ -2413,6 +2470,8 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
       ? 'Seedance canary succeeded with a verified video URL.'
       : status === 'rate_limited'
         ? 'Rate limited. Waiting before retrying the same canary job.'
+        : job.errorCategory === 'video_reference_provider_unavailable'
+          ? 'Seedance video reference route reached the provider, but the provider was temporarily unavailable.'
         : status === 'failed'
           ? 'Seedance canary failed before a verified video URL was returned.'
           : 'Seedance canary is running.',
@@ -2657,6 +2716,7 @@ export async function buildRenderPathCompareDiagnostics() {
       payloadFields: Object.keys(videoReferencePayload),
       status: videoReferenceCanaryRow?.status ?? null,
       providerStatus: videoReferenceCanaryRow?.providerStatus ?? null,
+      retryAvailableAt: videoReferenceCanaryRow?.retryAvailableAt ?? null,
       errorCategory: videoReferenceCanaryRow?.errorCategory ?? null,
     } : null;
     const routeChoice = chooseCreateRouteFromReferenceSummary({
@@ -2719,6 +2779,7 @@ export async function buildRenderPathCompareDiagnostics() {
       seedanceVideoReferenceCanaryStatus: selfVerificationVideo.seedanceVideoReferenceCanaryStatus,
       seedanceVideoReferenceLastFailureCategory: selfVerificationVideo.seedanceVideoReferenceLastFailureCategory,
       seedanceVideoReferenceProviderStatus: selfVerificationVideo.seedanceVideoReferenceProviderStatus,
+      seedanceVideoReferenceRetryAvailableAt: videoReferenceCanaryRow?.retryAvailableAt ?? null,
       seedanceImageReferenceBlocked: referenceRouteSummary.seedanceReferenceRoutesBlocked,
       selectedLikenessMode,
       alternateLikenessProvidersConfigured: alternateLikenessProvidersConfigured().map((provider) => provider.provider),

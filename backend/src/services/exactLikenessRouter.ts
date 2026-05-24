@@ -199,7 +199,9 @@ export function chooseExactLikenessRoute(input: {
     canaryStatus: seedanceVideoReference?.canaryStatus ?? openAI?.canaryStatus ?? null,
     fallbackRoute: 'seedance_text_guidance',
     providerRegistry: registry,
-    recommendedNextAction: blocked
+    recommendedNextAction: seedanceVideoReference?.canaryStatus === 'retry_later'
+      ? 'Retry Seedance video reference canary later.'
+      : blocked
       ? 'Continue using Seedance text-first and configure an alternate likeness provider.'
       : seedanceVideoReference?.recommendedNextAction ?? setup[0] ?? 'Run a canary for a configured exact likeness provider.',
   };

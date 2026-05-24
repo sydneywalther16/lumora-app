@@ -32,6 +32,7 @@ import {
 import {
   buildRenderPathCompareDiagnostics,
   getSeedanceCanaryStatus,
+  getLatestSeedanceVideoReferenceCanaryStatus,
   getReferenceRouteSummary,
   SelfReferenceCanarySelectionError,
   startSeedanceCanary,
@@ -105,6 +106,7 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
     const posterBackfillRuntime = getPosterBackfillRuntimeDiagnostics();
     const exactLikeness = await resolveExactLikenessRoute();
     const selfVerificationVideo = await getSelfVerificationVideoDiagnostics();
+    const latestSeedanceVideoReferenceCanary = await getLatestSeedanceVideoReferenceCanaryStatus();
     const referenceRouteStatus = await getReferenceRouteSummary({});
     const referenceCleanup = await safeHealthDiagnostic('referenceCleanup', buildReferenceCleanupDiagnostics);
     const referenceCleanupRecord = referenceCleanup && typeof referenceCleanup === 'object'
@@ -152,6 +154,7 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
       seedanceVideoReferenceCanaryStatus: selfVerificationVideo.seedanceVideoReferenceCanaryStatus,
       seedanceVideoReferenceLastFailureCategory: selfVerificationVideo.seedanceVideoReferenceLastFailureCategory,
       seedanceVideoReferenceProviderStatus: selfVerificationVideo.seedanceVideoReferenceProviderStatus,
+      seedanceVideoReferenceRetryAvailableAt: latestSeedanceVideoReferenceCanary?.retryAvailableAt ?? null,
       seedanceImageReferenceBlocked: referenceRouteStatus.seedanceReferenceRoutesBlocked,
       exactLikenessRouter: exactLikeness,
       likenessProviderRegistry: exactLikeness.providerRegistry,

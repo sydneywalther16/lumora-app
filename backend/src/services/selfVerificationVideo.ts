@@ -187,7 +187,14 @@ function diagnosticsFromRow(row: VerificationRow | null, schemaReady = true): Se
   );
   const videoPresent = newVideoPresent || oldSelfCapturePresent;
   const consentPresent = Boolean(row?.verificationConsentAt || oldSelfCapturePresent);
-  const routeStatus = textValue(row?.videoReferenceRouteStatus) || (oldSelfCapturePresent ? 'not_tested' : null);
+  const rawRouteStatus = textValue(row?.videoReferenceRouteStatus) || (oldSelfCapturePresent ? 'not_tested' : null);
+  const routeStatus = rawRouteStatus === 'transient_unavailable' ? 'retry_later' : rawRouteStatus;
+  const routeFailureCategory = rawRouteStatus === 'transient_unavailable'
+    ? 'video_reference_provider_unavailable'
+    : routeStatus &&
+      !['not_tested', 'canary_succeeded', 'succeeded', 'configured_ready_for_canary', 'retry_later'].includes(routeStatus)
+      ? routeStatus
+      : null;
   const migratedFromOldSelfCapture = oldSelfCapturePresent && !newVideoPresent;
   const recommendedNextAction = !schemaReady
     ? 'Apply the self verification video migration.'
@@ -199,6 +206,8 @@ function diagnosticsFromRow(row: VerificationRow | null, schemaReady = true): Se
         ? 'Confirm self verification consent.'
         : routeStatus === 'canary_succeeded'
           ? 'Use Seedance video reference route for exact self character tests.'
+          : routeStatus === 'retry_later'
+            ? 'Retry Seedance video reference canary later.'
           : routeStatus === 'blocked'
             ? 'Continue using soft self guidance or test another exact likeness provider.'
             : routeStatus === 'configured_not_implemented'
@@ -215,10 +224,7 @@ function diagnosticsFromRow(row: VerificationRow | null, schemaReady = true): Se
     verificationPrompt: textValue(row?.verificationPrompt) || (oldSelfCapturePresent ? SELF_VERIFICATION_PROMPT : null),
     verificationLastTestedAt: row?.verificationLastTestedAt ?? null,
     seedanceVideoReferenceCanaryStatus: routeStatus,
-    seedanceVideoReferenceLastFailureCategory: routeStatus &&
-      !['not_tested', 'canary_succeeded', 'succeeded', 'configured_ready_for_canary'].includes(routeStatus)
-      ? routeStatus
-      : null,
+    seedanceVideoReferenceLastFailureCategory: routeFailureCategory,
     seedanceVideoReferenceProviderStatus: textValue(row?.videoReferenceProvider) === 'seedance' && routeStatus
       ? routeStatus
       : null,

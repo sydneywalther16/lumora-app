@@ -763,6 +763,7 @@ export type ApiHealthDiagnostics = {
   seedanceVideoReferenceCanaryStatus?: string | null;
   seedanceVideoReferenceLastFailureCategory?: string | null;
   seedanceVideoReferenceProviderStatus?: string | null;
+  seedanceVideoReferenceRetryAvailableAt?: string | null;
   verificationStatus?: string | null;
   obsoleteManualReferenceCount?: number;
   savedLumoraReferenceCount?: number;

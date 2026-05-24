@@ -246,6 +246,38 @@ try {
   assert.equal(videoReferenceExact.route, 'seedance_video_reference');
   assert.equal(videoReferenceExact.exactLikeness, true);
 
+  const videoReferenceRetryLaterRegistry = buildLikenessProviderRegistry({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: blockedReferenceSummary,
+    selfVerificationVideo: {
+      schemaReady: true,
+      oldSelfCapturePresent: false,
+      selfVerificationVideoPresent: true,
+      selfVerificationConsentPresent: true,
+      verificationAudioPresent: true,
+      verificationStatus: 'uploaded',
+      verificationPrompt: 'Look forward and turn.',
+      verificationLastTestedAt: '2026-05-23T00:00:00.000Z',
+      seedanceVideoReferenceCanaryStatus: 'retry_later',
+      seedanceVideoReferenceLastFailureCategory: 'video_reference_provider_unavailable',
+      seedanceVideoReferenceProviderStatus: 'retry_later',
+      videoReferenceProvider: 'seedance',
+      verificationVideoUrlRedacted: '[private-verification-video-present]',
+      migratedFromOldSelfCapture: false,
+      recommendedNextAction: 'Retry Seedance video reference canary later.',
+    },
+  });
+  const videoReferenceRetryLater = chooseExactLikenessRoute({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: blockedReferenceSummary,
+    providerRegistry: videoReferenceRetryLaterRegistry,
+  });
+  assert.equal(videoReferenceRetryLater.route, 'seedance_text_guidance');
+  assert.equal(videoReferenceRetryLater.exactLikeness, false);
+  assert.equal(videoReferenceRetryLater.recommendedNextAction, 'Retry Seedance video reference canary later.');
+
   console.log('exactLikenessRouter unit tests passed');
 } finally {
   restoreEnv();

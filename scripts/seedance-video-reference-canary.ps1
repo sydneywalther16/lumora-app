@@ -29,6 +29,14 @@ function Print-CanaryStatus {
   if ($null -eq $failureCategory) { $failureCategory = $Result.errorCategory }
   if ($null -eq $failureCategory) { $failureCategory = $Result.error }
   Write-Host "failure category: $failureCategory"
+  if ($failureCategory -eq "video_reference_provider_unavailable") {
+    Write-Host "Provider accepted the request and began processing."
+    Write-Host "Seedance video-reference route was not proven or disproven."
+    Write-Host "Provider was temporarily unavailable."
+    Write-Host "Wait and retry later."
+    Write-Host "Transient provider outage. Do not rerun immediately unless you want to spend another provider attempt."
+  }
+  if ($Result.retryAvailableAt) { Write-Host "retry available at: $($Result.retryAvailableAt)" }
   if ($Result.providerErrorSummary) { Write-Host "provider error summary: $($Result.providerErrorSummary)" }
   if ($Result.redactedErrorDetail) { Write-Host "error detail: $($Result.redactedErrorDetail)" }
   if ($Result.recommendedNextAction) { Write-Host "recommended next action: $($Result.recommendedNextAction)" }

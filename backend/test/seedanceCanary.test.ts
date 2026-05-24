@@ -190,6 +190,8 @@ assert.equal(classifyReferenceCanaryFailure('Prediction failed.', 'failed'), 're
 assert.equal(classifyReferenceCanaryFailure('seedance backend failed with no video', 'failed'), 'reference_provider_failed');
 assert.equal(classifyReferenceCanaryFailure('provider succeeded but output missing', 'succeeded'), 'reference_output_missing');
 assert.equal(classifyVideoReferenceCanaryFailure('E005: input or output was flagged as sensitive', 'failed'), 'video_reference_moderation_block');
+assert.equal(classifyVideoReferenceCanaryFailure('ModelError: Service is temporarily unavailable. Please try again later. (E004)', 'failed'), 'video_reference_provider_unavailable');
+assert.equal(classifyVideoReferenceCanaryFailure('upstream unavailable, try again later', 'failed'), 'video_reference_provider_unavailable');
 assert.equal(classifyVideoReferenceCanaryFailure('unknown field reference_videos'), 'video_reference_input_schema');
 assert.equal(classifyVideoReferenceCanaryFailure('403 asset access denied'), 'verification_video_asset_access');
 assert.equal(classifyVideoReferenceCanaryFailure('provider succeeded but output missing', 'succeeded'), 'video_reference_output_missing');
