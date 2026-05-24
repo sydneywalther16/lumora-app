@@ -109,7 +109,7 @@ export function createSelfCharacterStatusCopy(input: {
   }
 
   if (hasEffectiveSelfVerificationVideo(character)) {
-    return 'Self verification video saved. Exact likeness route still needs a provider canary.';
+    return 'Self Verification Video saved. Exact likeness route still needs a canary.';
   }
 
   return 'Soft self guidance is active. Add a self verification video in Your AI Cast to test stronger likeness later.';

@@ -215,6 +215,29 @@ function providerLabStatus(diagnostics: ApiHealthDiagnostics | null, id: string,
   return entry.readinessStatus.replace(/_/g, ' ');
 }
 
+function selfVerificationVideoLabStatus(diagnostics: ApiHealthDiagnostics | null, hasVerificationVideo: boolean) {
+  if (!hasVerificationVideo) return 'Record video to test';
+
+  const entry = likenessRegistryEntry(diagnostics, 'seedance_video_reference');
+  const canaryStatus = entry?.canaryStatus?.toLowerCase();
+  const readinessStatus = entry?.readinessStatus?.toLowerCase();
+  const implementationStatus = entry?.implementationStatus?.toLowerCase();
+
+  if (
+    !entry ||
+    canaryStatus === 'not_tested' ||
+    canaryStatus === 'pending' ||
+    readinessStatus === 'not_tested' ||
+    readinessStatus === 'configured_ready_for_canary' ||
+    implementationStatus === 'configured_ready_for_canary'
+  ) {
+    return 'Ready to test';
+  }
+
+  const status = providerLabStatus(diagnostics, 'seedance_video_reference');
+  return status === 'not tested' ? 'Ready to test' : status;
+}
+
 function uniqueSceneCount(character: CharacterProfile) {
   const sceneKeys = new Set(
     (character.memorySnapshots ?? [])
@@ -1165,16 +1188,53 @@ export default function CharacterHub({
     const exactStatusLabel = exactLikenessRouteStatusLabel(selectedCharacter, exactRouteReady);
     const seedanceVideoEntry = likenessRegistryEntry(likenessDiagnostics, 'seedance_video_reference');
     const probeEnabled = Boolean(likenessDiagnostics?.renderSuccessEngine?.probeEnabled);
+    const seedanceVideoCanaryRetryLater = selectedCharacter.videoReferenceRouteStatus === 'retry_later' ||
+      seedanceVideoEntry?.canaryStatus === 'retry_later' ||
+      seedanceVideoEntry?.readinessStatus === 'retry_later';
+    const seedanceVideoCanaryReadyToTest = Boolean(
+      effectiveVerificationVideoPresent &&
+      !seedanceVideoCanaryRetryLater &&
+      (
+        seedanceVideoEntry?.implementationStatus === 'configured_ready_for_canary' ||
+        seedanceVideoEntry?.readinessStatus === 'configured_ready_for_canary' ||
+        seedanceVideoEntry?.canaryStatus === 'not_tested'
+      ),
+    );
     const exactCanaryAvailable = Boolean(
       probeEnabled &&
-      effectiveVerificationVideoPresent &&
-      seedanceVideoEntry?.implementationStatus === 'configured_ready_for_canary',
+      seedanceVideoCanaryReadyToTest,
     );
     const exactCanaryUnavailableCopy = !probeEnabled
-      ? 'Exact likeness testing is not available yet.'
+      ? 'Enable diagnostic probe to run this paid canary.'
       : !effectiveVerificationVideoPresent
         ? 'Upload a self verification video before testing exact likeness routes.'
-        : 'Exact likeness testing is not available yet.';
+        : seedanceVideoCanaryRetryLater
+          ? 'Provider temporarily unavailable. Try this canary again later.'
+          : 'Video-reference canary is not available for this provider route yet.';
+    const openAISoraProvider = likenessDiagnostics?.openaiSoraProvider;
+    const openAIProviderConfigured = Boolean(
+      openAISoraProvider?.openaiVideoEnabled &&
+      openAISoraProvider?.openaiCharacterEnabled,
+    );
+    const openAIProviderCharacterUploadEnabled = Boolean(
+      openAIProviderConfigured &&
+      openAISoraProvider?.characterCreationSupported &&
+      openAISoraProvider?.characterVideoUsageMapped,
+    );
+    const openAIProviderCharacterStatusLabel = !openAIProviderConfigured
+      ? 'Not configured'
+      : !openAISoraProvider?.characterCreationSupported
+        ? 'Character creation unavailable'
+        : !openAISoraProvider.characterVideoUsageMapped
+          ? 'Video route unmapped'
+          : 'Ready for setup';
+    const exactProviderCharacterUnavailableCopy = !openAIProviderConfigured
+      ? effectiveVerificationVideoPresent
+        ? 'Exact provider character is not configured yet. Your Self Verification Video is saved and can be used for canary testing when a provider route is available.'
+        : 'Exact provider character is not configured yet. Add a Self Verification Video above first; Lumora will use it for canary testing when a provider route is available.'
+      : !openAISoraProvider?.characterVideoUsageMapped
+        ? 'Exact provider character setup is disabled because this provider character video route is not mapped yet. Your Self Verification Video remains the private canary asset.'
+        : 'Exact provider character setup is disabled until the configured provider supports character creation for this route.';
     const uploadVerificationButtonLabel = effectiveVerificationVideoPresent
       ? 'Replace video'
       : 'Upload self verification video';
@@ -1404,38 +1464,54 @@ export default function CharacterHub({
             >
               <div className="character-compact-form">
                 <div className="character-memory-viewer character-section-card">
-                  <strong>Exact provider character</strong>
-                  <p className="muted">
-                    This is separate from the private verification video. Use it only when a configured provider supports a verified self-character setup route.
-                  </p>
-                  <label className="field-block">
-                    <span>Provider identity video</span>
-                    <input
-                      type="file"
-                      accept="video/*"
-                      onChange={(event) => setSoraIdentityFile(event.target.files?.[0] ?? null)}
-                    />
-                  </label>
-                  <label className="checkbox-row" style={{ alignItems: 'flex-start' }}>
-                    <input
-                      type="checkbox"
-                      checked={soraIdentityConsent}
-                      onChange={(event) => setSoraIdentityConsent(event.target.checked)}
-                    />
-                    <span>I confirm this is me and I consent to using this recording to create my Lumora self character.</span>
-                  </label>
-                  <div className="button-row">
-                    <button
-                      type="button"
-                      className="ghost-btn"
-                      disabled={soraIdentitySaving}
-                      onClick={() => void handleCreateSoraSelfCharacter()}
-                    >
-                      {soraIdentitySaving ? 'Checking route...' : 'Create verified self character'}
-                    </button>
+                  <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                    <div>
+                      <strong>Exact provider character</strong>
+                      <p className="muted">
+                        Separate from your Self Verification Video. This only appears when a configured provider can create and route a stored self character.
+                      </p>
+                    </div>
+                    <span className="tiny-pill">{openAIProviderCharacterStatusLabel}</span>
                   </div>
-                  {soraIdentityStatus ? <p className="muted">{soraIdentityStatus}</p> : null}
-                  <p className="muted">Provider deletion is unavailable until the configured provider exposes a supported delete route.</p>
+                  {openAIProviderCharacterUploadEnabled ? (
+                    <>
+                      <label className="field-block">
+                        <span>Provider identity video</span>
+                        <input
+                          type="file"
+                          accept="video/*"
+                          onChange={(event) => setSoraIdentityFile(event.target.files?.[0] ?? null)}
+                        />
+                      </label>
+                      <label className="checkbox-row" style={{ alignItems: 'flex-start' }}>
+                        <input
+                          type="checkbox"
+                          checked={soraIdentityConsent}
+                          onChange={(event) => setSoraIdentityConsent(event.target.checked)}
+                        />
+                        <span>I confirm this is me and I consent to using this recording to create my Lumora self character.</span>
+                      </label>
+                      <div className="button-row">
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          disabled={soraIdentitySaving}
+                          onClick={() => void handleCreateSoraSelfCharacter()}
+                        >
+                          {soraIdentitySaving ? 'Checking route...' : 'Create verified self character'}
+                        </button>
+                      </div>
+                      {soraIdentityStatus ? <p className="muted">{soraIdentityStatus}</p> : null}
+                      <p className="muted">Provider deletion is unavailable until the configured provider exposes a supported delete route.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="muted">{exactProviderCharacterUnavailableCopy}</p>
+                      <p className="muted">
+                        Lumora will not ask for another provider identity upload until that exact provider route is configured, mapped, and safe to test.
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
             </CharacterDetailSection>
@@ -1454,9 +1530,7 @@ export default function CharacterHub({
                   {metadataLine('Soft self guidance', 'Available')}
                   {metadataLine(
                     'Self verification video',
-                    effectiveVerificationVideoPresent
-                      ? providerLabStatus(likenessDiagnostics, 'seedance_video_reference')
-                      : 'Record video to test',
+                    selfVerificationVideoLabStatus(likenessDiagnostics, effectiveVerificationVideoPresent),
                   )}
                   {metadataLine(
                     'Seedance references',
@@ -1478,7 +1552,7 @@ export default function CharacterHub({
                       disabled={likenessCanaryBusy !== null}
                       onClick={() => void handleSeedanceVideoReferenceCanary()}
                     >
-                      {likenessCanaryBusy === 'seedance-video' ? 'Checking route...' : 'Run exact likeness canary'}
+                      {likenessCanaryBusy === 'seedance-video' ? 'Checking route...' : 'Run video-reference canary from diagnostics'}
                     </button>
                   ) : (
                     <span className="muted">{exactCanaryUnavailableCopy}</span>
