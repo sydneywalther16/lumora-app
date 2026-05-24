@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { env } from '../lib/env';
 import { getEnvironmentDiagnostics } from '../lib/envDiagnostics';
 import { buildAssetPersistenceDiagnostics } from '../services/assetPersistence';
+import { buildAiCastPostDiagnostics } from '../services/aiCastPostDiagnostics';
 import { buildProviderFallbackDiagnostics } from '../services/providerFallbackOrchestrator';
 import { buildLastRenderDiagnostics } from '../services/renderDiagnostics';
 import { buildAsyncRenderJobDiagnostics } from '../services/renderJobPoller';
@@ -92,6 +93,7 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
     ...getEnvironmentDiagnostics(),
     database: await buildDatabaseDiagnostics(),
     assetPersistence: await buildAssetPersistenceDiagnostics(),
+    aiCastPosts: await buildAiCastPostDiagnostics(),
     referenceCleanup: await buildReferenceCleanupDiagnostics(),
     providerFallback: await buildProviderFallbackDiagnostics(),
     renderSuccessEngine: await buildRenderSuccessDiagnostics(),

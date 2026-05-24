@@ -7,7 +7,9 @@ const createPostSchema = z.object({
   title: z.string().min(1),
   prompt: z.string().optional().nullable(),
   imageUrl: z.string().optional().nullable(),
-  sourceGenerationId: z.string().uuid().optional().nullable(),
+  videoUrl: z.string().url().optional().nullable(),
+  sourceGenerationId: z.string().min(1).optional().nullable(),
+  sourceProjectId: z.string().optional().nullable(),
 });
 
 export const postsRouter = Router();
@@ -29,6 +31,16 @@ postsRouter.post('/', async (req, res) => {
   }
 
   const payload = createPostSchema.parse(req.body);
-  const post = await createPost(payload);
-  res.status(201).json({ post });
+  try {
+    const post = await createPost(payload);
+    res.status(201).json({ post });
+  } catch (error) {
+    const statusCode = typeof (error as { statusCode?: unknown })?.statusCode === 'number'
+      ? (error as { statusCode: number }).statusCode
+      : 500;
+    res.status(statusCode).json({
+      error: (error as { code?: string })?.code ?? 'post_create_failed',
+      message: error instanceof Error ? error.message : 'Unable to create post.',
+    });
+  }
 });

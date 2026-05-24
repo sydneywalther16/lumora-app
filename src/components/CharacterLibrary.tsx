@@ -72,7 +72,7 @@ export default function CharacterLibrary({
 
         if (!active) return;
         setCharacters(fictionalCharacters);
-        setStatus(fictionalCharacters.length ? '' : 'Build your reusable cinematic cast from Characters.');
+        setStatus(fictionalCharacters.length ? '' : 'Build your reusable AI cast from Your AI Cast.');
       } catch (error) {
         if (!active) return;
         setCharacters([]);

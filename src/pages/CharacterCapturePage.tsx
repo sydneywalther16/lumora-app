@@ -12,7 +12,7 @@ export default function CharacterCapturePage() {
           <span className="eyebrow">capture</span>
           <h2>Cast capture</h2>
         </div>
-        <p>Add scene references and optional media for reusable cinematic cast members.</p>
+        <p>Add private setup references and optional media for reusable AI cast members.</p>
       </section>
 
       <CharacterCapture onCreated={() => setRefreshKey((current) => current + 1)} />

@@ -355,7 +355,7 @@ export default function CreatePage() {
       <div className="page lumora-page">
         <section className="headline-card lumora-card lumora-card-hero">
           <span className="eyebrow">cast</span>
-          <h2>Waking up your creator identity...</h2>
+          <h2>Waking up your AI cast...</h2>
         </section>
       </div>
     );
@@ -382,7 +382,7 @@ export default function CreatePage() {
           compact
         />
         <button type="button" className="quiet-btn focused-cast-manage" onClick={openCharactersHub}>
-          Open Characters
+          Open Your AI Cast
         </button>
       </section>
 
@@ -398,7 +398,7 @@ export default function CreatePage() {
         referenceImageUrls={effectiveReferenceImageUrls}
         additionalReferenceImageUrls={effectiveAdditionalReferenceImageUrls}
         referenceLoading={referenceLoading}
-        referenceLabel={remixProject ? 'Remixed scene reference' : manualReferenceImageUrl && effectiveReferenceImageUrl === manualReferenceImageUrl ? 'Backup scene reference' : identityProfile ? 'Saved cinematic self' : null}
+        referenceLabel={remixProject ? 'Remixed scene reference' : manualReferenceImageUrl && effectiveReferenceImageUrl === manualReferenceImageUrl ? 'Private setup reference' : identityProfile ? 'Saved self character' : null}
         forceSelfMode={effectiveIsDefaultSelfCharacter}
         isHydrated={isHydrated}
         identityProfile={effectiveIsDefaultSelfCharacter ? identityProfile : null}

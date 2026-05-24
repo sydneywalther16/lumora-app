@@ -1,4 +1,5 @@
 import type { LumoraPost } from './api';
+import { filterAiCastPublicPosts, withLumoraGeneratedPostFields } from './aiCastMedia';
 import { getBestPoster, getBestThumbnail, resolveGeneratedVideoMedia } from './mediaThumbnail';
 
 const STORAGE_KEY = 'lumora_posts';
@@ -25,7 +26,7 @@ export function loadPostedPublications(): LumoraPost[] {
           typeof item.id === 'string' &&
           typeof item.createdAt === 'string' &&
           (typeof item.caption === 'string' || typeof item.title === 'string') &&
-          (typeof item.videoUrl === 'string' || typeof item.imageUrl === 'string')
+          typeof item.videoUrl === 'string'
         );
       })
       .map((post) => {
@@ -40,7 +41,7 @@ export function loadPostedPublications(): LumoraPost[] {
           thumbnailSource: generatedMedia.thumbnailSource,
         };
       })
-      .filter((post) => post.status === 'published' && post.privacy !== 'private')
+      .filter((post) => filterAiCastPublicPosts([post]).length > 0)
       .sort((a, b) => new Date(b.publishedAt ?? b.createdAt).getTime() - new Date(a.publishedAt ?? a.createdAt).getTime());
   } catch {
     return [];
@@ -50,24 +51,27 @@ export function loadPostedPublications(): LumoraPost[] {
 export function savePostedItem(post: LumoraPost) {
   if (typeof window === 'undefined') return;
 
+  const generatedPost = withLumoraGeneratedPostFields(post);
+  if (!generatedPost.videoUrl || !generatedPost.sourceGenerationId) return;
+
   const existing = loadPostedPublications();
   const next = [
     ...existing,
     {
-      ...post,
+      ...generatedPost,
       ...(() => {
-        const generatedMedia = resolveGeneratedVideoMedia(post);
+        const generatedMedia = resolveGeneratedVideoMedia(generatedPost);
         return {
-          thumbnailUrl: cleanMediaUrl(generatedMedia.hasVerifiedVideo ? generatedMedia.thumbnailUrl : getBestThumbnail(post)),
-          posterUrl: cleanMediaUrl(generatedMedia.hasVerifiedVideo ? generatedMedia.posterUrl : getBestPoster(post)),
+          thumbnailUrl: cleanMediaUrl(generatedMedia.hasVerifiedVideo ? generatedMedia.thumbnailUrl : getBestThumbnail(generatedPost)),
+          posterUrl: cleanMediaUrl(generatedMedia.hasVerifiedVideo ? generatedMedia.posterUrl : getBestPoster(generatedPost)),
           thumbnailSource: generatedMedia.thumbnailSource,
         };
       })(),
-      imageUrl: cleanMediaUrl(post.imageUrl),
-      videoUrl: cleanMediaUrl(post.videoUrl),
-      characterAvatar: cleanMediaUrl(post.characterAvatar),
-      creatorAvatar: cleanMediaUrl(post.creatorAvatar),
-      avatar: cleanMediaUrl(post.avatar),
+      imageUrl: null,
+      videoUrl: cleanMediaUrl(generatedPost.videoUrl),
+      characterAvatar: cleanMediaUrl(generatedPost.characterAvatar),
+      creatorAvatar: cleanMediaUrl(generatedPost.creatorAvatar),
+      avatar: cleanMediaUrl(generatedPost.avatar),
       status: 'published',
       privacy: post.privacy ?? 'public',
       publishedAt: post.publishedAt ?? new Date().toISOString(),

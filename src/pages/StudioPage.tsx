@@ -27,7 +27,7 @@ function mockDraftJobs(): GenerationJob[] {
       id: 'mock-focused-completed-draft',
       projectId: 'mock-focused-completed-draft',
       characterId: 'mock-cast',
-      characterName: 'Cinematic self',
+      characterName: 'Self character',
       characterAvatar: '/demo-placeholder.jpg',
       isDefaultSelfCharacter: true,
       creatorName: 'Lumora Creator',
@@ -104,7 +104,7 @@ export default function StudioPage() {
         if (!active) return;
         const mappedJobs = mapProjectsToJobs(projects);
         setJobs(mappedJobs);
-        setStatus(mappedJobs.length ? '' : 'Your cinematic scenes will appear here.');
+        setStatus(mappedJobs.length ? '' : 'Your AI scenes in progress will appear here.');
       } catch (error) {
         if (!active) return;
         const fallbackJobs = mapProjectsToJobs(loadStudioProjects().filter(isUnpublishedDraftProject));
@@ -185,9 +185,9 @@ export default function StudioPage() {
       <section className="headline-card lumora-card lumora-card-hero luxury-page-hero drafts-workbench-hero">
         <div>
           <span className="eyebrow">drafts</span>
-          <h2>Your cinematic workbench</h2>
+          <h2>Your AI scenes in progress</h2>
         </div>
-        <p>Private scenes, active renders, and paused moments gather here until they are ready to join your profile.</p>
+        <p>Private render jobs, paused scenes, and completed AI cast videos gather here until they are ready to publish.</p>
       </section>
       {status ? <p className="muted">{status}</p> : null}
       <StudioList
@@ -195,7 +195,7 @@ export default function StudioPage() {
         onPublished={(jobId) => {
           setJobs((current) => {
             const nextJobs = current.filter((job) => job.id !== jobId && job.projectId !== jobId);
-            setStatus(nextJobs.length ? '' : 'Your cinematic scenes will appear here.');
+            setStatus(nextJobs.length ? '' : 'Your AI scenes in progress will appear here.');
             return nextJobs;
           });
         }}

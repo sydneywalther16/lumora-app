@@ -276,7 +276,7 @@ export function getBestVideo(item: unknown): string | null {
 
 export function normalizeMediaCard(item: unknown): NormalizedMediaCard {
   const record = readRecord(item);
-  const title = readString(record.title, record.caption, record.prompt, record.name) ?? 'Untitled Lumora video';
+  const title = readString(record.title, record.caption, record.prompt, record.name) ?? 'Untitled AI cast video';
   const caption = readString(record.caption, record.prompt, record.finalPrompt, record.final_prompt) ?? '';
 
   return {

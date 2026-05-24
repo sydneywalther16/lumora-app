@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import FeedVideoCard from '../components/FeedVideoCard';
 import GeneratedVideoPreview from '../components/GeneratedVideoPreview';
-import { posts as demoPosts, type Post } from '../data/mockData';
 import type { LumoraPost } from '../lib/api';
 import { loadPostedPublications } from '../lib/postStorage';
 import { listForYouFeed } from '../lib/supabaseAppData';
@@ -14,7 +13,7 @@ type FeedPost = LumoraPost & {
   stylePreset?: string | null;
 };
 
-const searchPlaceholder = 'Search videos, creators, characters...';
+const searchPlaceholder = 'Search AI cast videos, creators, characters...';
 
 function mockForYouVideoPost(): FeedPost {
   const now = new Date().toISOString();
@@ -43,6 +42,12 @@ function mockForYouVideoPost(): FeedPost {
     commentCount: 4,
     tags: ['cinematic'],
     stylePreset: 'Cinematic',
+    sourceGenerationId: 'mock-for-you-generated-ai-cast-video',
+    sourceGenerationJobId: 'mock-for-you-generated-ai-cast-video',
+    sourceProjectId: 'mock-for-you-generated-ai-cast-video',
+    sourceType: 'lumora_generated',
+    isAiGenerated: true,
+    mediaOrigin: 'generated',
   };
 }
 
@@ -51,15 +56,6 @@ function formatCompactCount(value: number | null | undefined) {
   if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
   if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
   return String(count);
-}
-
-function demoCount(value: string) {
-  const normalized = value.trim().toUpperCase();
-  const numeric = Number(normalized.replace(/[KM]/g, ''));
-  if (!Number.isFinite(numeric)) return 0;
-  if (normalized.endsWith('M')) return Math.round(numeric * 1_000_000);
-  if (normalized.endsWith('K')) return Math.round(numeric * 1_000);
-  return Math.round(numeric);
 }
 
 function feedSearchText(post: FeedPost) {
@@ -82,33 +78,6 @@ function matchesSearch(post: FeedPost, query: string) {
   return !query || feedSearchText(post).includes(query.toLowerCase());
 }
 
-function demoToFeedPost(post: Post, index: number): FeedPost {
-  const now = Date.now();
-  return {
-    id: `demo-${post.id}`,
-    title: post.stylePreset,
-    caption: post.caption,
-    prompt: post.prompt,
-    createdAt: new Date(now - (index + 1) * 3_600_000).toISOString(),
-    publishedAt: new Date(now - (index + 1) * 3_600_000).toISOString(),
-    updatedAt: new Date(now - (index + 1) * 3_600_000).toISOString(),
-    status: 'published',
-    privacy: 'public',
-    visibility: 'public',
-    creatorName: post.userHandle.replace(/^@/, ''),
-    creatorUsername: post.userHandle.replace(/^@/, ''),
-    displayName: post.userHandle.replace(/^@/, ''),
-    username: post.userHandle.replace(/^@/, ''),
-    provider: 'demo',
-    viewCount: demoCount(post.stats.likes) * 8,
-    likeCount: demoCount(post.stats.likes),
-    commentCount: demoCount(post.stats.remix),
-    shareCount: demoCount(post.stats.saves),
-    tags: post.tags,
-    stylePreset: post.stylePreset,
-  };
-}
-
 function scoreFallbackPost(post: FeedPost, index: number) {
   const ageHours = Math.max(1, (Date.now() - new Date(post.publishedAt ?? post.createdAt).getTime()) / 36e5);
   const recencyScore = Math.max(0, 48 - Math.min(48, ageHours)) / 48;
@@ -124,9 +93,9 @@ function scoreFallbackPost(post: FeedPost, index: number) {
 
 function recommendationReason(post: FeedPost, index: number) {
   if (post.characterName) return `Recurring cast: ${post.characterName}`;
-  if ((post.likeCount ?? 0) + (post.shareCount ?? 0) > 50) return 'Trending cinematic story';
-  if (index < 3) return 'Because you watched cinematic worlds';
-  return 'Fresh creator scene';
+  if ((post.likeCount ?? 0) + (post.shareCount ?? 0) > 50) return 'AI cast video';
+  if (index < 3) return 'Story world pick';
+  return 'Generated with Lumora';
 }
 
 function whyThisPost(post: FeedPost, index = 0) {
@@ -138,8 +107,7 @@ function whyThisPost(post: FeedPost, index = 0) {
 
 function localForYouFeed(query: string) {
   const localPosts = loadPostedPublications() as FeedPost[];
-  const demoFeed = demoPosts.map(demoToFeedPost);
-  return [...localPosts, ...demoFeed]
+  return localPosts
     .filter((post) => {
       const status = (post.status || 'published').toLowerCase();
       const visibility = (post.visibility || post.privacy || 'public').toLowerCase();
@@ -199,8 +167,8 @@ function ForYouCard({
   preview?: boolean;
   onSelect: (post: FeedPost) => void;
 }) {
-  const title = post.title || post.caption || 'Lumora video';
-  const caption = post.caption || post.prompt || 'Cinematic Lumora post';
+  const title = post.title || post.caption || 'Lumora AI cast video';
+  const caption = post.caption || post.prompt || 'Generated with Lumora';
   const creatorName = post.creatorName || post.displayName || post.username || 'Lumora Creator';
   const creatorAvatar = post.creatorAvatar || post.avatar || post.characterAvatar || null;
   const statsText = `${formatCompactCount(post.likeCount)} likes`;
@@ -235,7 +203,7 @@ function ForYouPreviewModal({
   onSocialAction: (action: 'like' | 'save' | 'follow', post: FeedPost) => void;
   socialState: Record<string, boolean>;
 }) {
-  const title = post.title || post.caption || 'Lumora video';
+  const title = post.title || post.caption || 'Lumora AI cast video';
   const bodyText = post.caption || post.prompt || '';
   const creatorName = post.creatorName || post.displayName || post.username || 'Lumora Creator';
   const creatorUsername = post.creatorUsername || post.username || 'lumora.creator';
@@ -381,9 +349,9 @@ export default function TrendsPage() {
   }, [authUser?.id, configured, debouncedQuery]);
 
   const resultCopy = useMemo(() => {
-    if (loading) return 'Finding cinematic recommendations...';
-    if (debouncedQuery) return feed.length ? `${feed.length} result${feed.length === 1 ? '' : 's'}` : 'No matching videos yet';
-    return feed.length ? 'Recommended for you' : 'No public posts yet';
+    if (loading) return 'Finding generated cast scenes...';
+    if (debouncedQuery) return feed.length ? `${feed.length} result${feed.length === 1 ? '' : 's'}` : 'No matching AI cast videos yet';
+    return feed.length ? 'AI cast videos for you' : 'No public AI cast videos yet';
   }, [debouncedQuery, feed.length, loading]);
   const discoveryHighlights = useMemo(() => feed.slice(0, 3), [feed]);
   const shouldPrioritizeVideoGrid = useMemo(() => feed.some((post) => Boolean(post.videoUrl)), [feed]);
@@ -445,7 +413,7 @@ export default function TrendsPage() {
       >
         <div>
           <span className="eyebrow">for you</span>
-          <h2 style={{ margin: '6px 0 0' }}>Discover cinematic worlds</h2>
+          <h2 style={{ margin: '6px 0 0' }}>Discover AI cast worlds</h2>
         </div>
         <label className="field-block" style={{ margin: 0 }}>
           <span className="eyebrow">Search</span>
@@ -473,7 +441,7 @@ export default function TrendsPage() {
             {discoveryHighlights.map((post, index) => (
               <button key={post.id} type="button" className="discovery-reason-chip" onClick={() => openPost(post)}>
                 <strong>{recommendationReason(post, index)}</strong>
-                <span>{post.caption || post.title || 'Cinematic scene'}</span>
+                <span>{post.caption || post.title || 'Generated scene'}</span>
               </button>
             ))}
           </div>
@@ -501,7 +469,7 @@ export default function TrendsPage() {
           {!debouncedQuery && !shouldPrioritizeVideoGrid ? (
             <div className="chip-row wrap" aria-label="For You story sections">
               <span className="tiny-pill">Because you follow creators like this</span>
-              <span className="tiny-pill">Recently published</span>
+              <span className="tiny-pill">Recently generated</span>
               <span className="tiny-pill">Popular cast moments</span>
               <span className="tiny-pill">Continue watching</span>
             </div>
@@ -524,13 +492,13 @@ export default function TrendsPage() {
       ) : (
         <article className="list-card lumora-card lumora-empty-state luxury-empty-state" style={{ borderRadius: '24px' }}>
           <div className="row-between">
-            <h3>{debouncedQuery ? 'No matches yet' : 'No public videos yet'}</h3>
+            <h3>{debouncedQuery ? 'No matches yet' : 'No public AI cast videos yet'}</h3>
             <span className="tiny-pill status-drafting">Explore</span>
           </div>
           <p>
             {debouncedQuery
               ? 'Try a creator, character, title, prompt, or tag.'
-              : 'Discover cinematic creators and evolving story worlds as soon as public scenes arrive.'}
+              : 'Discover generated scenes from reusable Lumora characters as soon as creators publish them.'}
           </p>
           {!debouncedQuery ? (
             <button type="button" className="primary-btn" onClick={() => setQuery('cinematic')} style={{ width: 'fit-content', flex: 'unset' }}>

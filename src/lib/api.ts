@@ -648,6 +648,17 @@ export type ApiHealthDiagnostics = {
     warning?: string | null;
     error?: unknown;
   };
+  aiCastPosts?: {
+    ok: boolean;
+    publicPostsAllGenerated: boolean;
+    publicPublishedPostsChecked?: number | null;
+    rawUploadPostsCount: number | null;
+    referenceMediaPublishedCount: number | null;
+    verificationMediaPublishedCount: number | null;
+    postsMissingGenerationSourceCount: number | null;
+    violatingPostIdsRedacted?: string[];
+    error?: unknown;
+  };
   providerFallback?: {
     ok: boolean;
     configured: Record<string, boolean>;
@@ -1117,6 +1128,11 @@ export type LumoraPost = {
   posterUrl?: string | null;
   thumbnailSource?: string | null;
   sourceGenerationId?: string | null;
+  sourceGenerationJobId?: string | null;
+  sourceProjectId?: string | null;
+  sourceType?: string | null;
+  isAiGenerated?: boolean | null;
+  mediaOrigin?: string | null;
   createdAt: string;
   updatedAt?: string | null;
   publishedAt?: string | null;

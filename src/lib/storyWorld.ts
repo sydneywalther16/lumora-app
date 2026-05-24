@@ -59,7 +59,7 @@ export function buildCreatorIdentityCard(input: {
     compactPreference(stylePreferences['everydayStyle']),
     compactPreference(stylePreferences['glamStyle']),
     input.profile.creatorSelfStylePreferences?.everydayStyle,
-    'Cinematic realism with a personal creator glow',
+    'Cinematic AI cast realism with a personal creator glow',
   );
   const mood = firstText(
     selfCharacter?.emotionalTendencies,
@@ -76,7 +76,7 @@ export function buildCreatorIdentityCard(input: {
     selfCharacter?.wardrobeTendencies,
     compactPreference(stylePreferences['videoWardrobe']),
     input.profile.creatorSelfStylePreferences?.videoWardrobe,
-    'Polished cinematic styling that can evolve scene by scene',
+    'Polished AI cast styling that can evolve scene by scene',
   );
   const seed = firstText(
     selfCharacter?.continuityState?.previousSceneSummary,
@@ -85,7 +85,7 @@ export function buildCreatorIdentityCard(input: {
   );
 
   return {
-    title: input.profile.displayName ? `${input.profile.displayName}'s cinematic identity` : 'Your cinematic identity',
+    title: input.profile.displayName ? `${input.profile.displayName}'s AI cast identity` : 'Your AI cast identity',
     cinematicStyle: style,
     recurringMood: mood,
     characterVibe: vibe,
@@ -124,9 +124,9 @@ export function buildStoryWorldProgress(input: {
   ];
   const completionPercent = Math.round((milestones.filter(Boolean).length / milestones.length) * 100);
   const headline = firstPublishCompleted
-    ? `${input.posts.length} published moment${input.posts.length === 1 ? '' : 's'} in your cinematic universe.`
+    ? `${input.posts.length} published AI cast video${input.posts.length === 1 ? '' : 's'} in your story world.`
     : input.drafts.length
-      ? 'Your first cinematic scene is waiting in Drafts.'
+      ? 'Your first generated scene is waiting in Drafts.'
       : 'Your story world is just beginning.';
 
   return {

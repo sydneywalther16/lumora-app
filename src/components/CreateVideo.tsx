@@ -1213,14 +1213,14 @@ export default function CreateVideo({
   const generatedReferenceThumbnailUrl = renderableReferenceImageUrl(generatedReferenceImageUrl);
   const identityStatusLabel = !identityProfile
     ? 'Needs references'
-    : identityProfile.status === 'building'
-      ? 'Building cinematic self'
+  : identityProfile.status === 'building'
+      ? 'Building self character'
     : (identityProfile.feedbackIterations ?? 0) > 0
-        ? 'Cinematic self learning'
+        ? 'Self guidance learning'
         : (identityProfile.identityStrength ?? 0) >= 70
-          ? 'Cinematic self stabilized'
+          ? 'Self character stabilized'
           : identityProfile.status === 'ready'
-            ? 'Cinematic self ready'
+            ? 'Self character ready'
             : 'Needs references';
   const seedanceVideoReferenceReady =
     selfReferenceMode &&
@@ -1420,7 +1420,7 @@ export default function CreateVideo({
       ? 'Add reference before generating'
     : providerSelfCharacterReady
       ? 'Generate with My Self Character'
-    : 'Generate Cinematic Scene';
+    : 'Generate AI Cast Video';
   const showCinematicStructure = Boolean(
     !activeSuccessFirstWithoutOutput && (
       creativePlanLoading ||
@@ -2229,7 +2229,7 @@ export default function CreateVideo({
         setGenerationError('');
         setSceneExecutionError('');
         setReferenceRepair(null);
-        setRepairStatus('This old reference was skipped for this scene. Open Characters to remove it permanently.');
+        setRepairStatus('This old reference was skipped for this scene. Open Your AI Cast to remove it permanently.');
         return;
       }
 
@@ -2274,7 +2274,7 @@ export default function CreateVideo({
 
     const slot = activeReferenceRepair.slot;
     if (!slot) {
-      setRepairStatus('Open Characters to replace this reference in the right cast slot.');
+      setRepairStatus('Open Your AI Cast to replace this reference in the right cast slot.');
       return;
     }
 
@@ -2284,7 +2284,7 @@ export default function CreateVideo({
     }
 
     if (!characterProfile) {
-      setRepairStatus('Open Characters to choose the cast member before replacing this reference.');
+      setRepairStatus('Open Your AI Cast to choose the cast member before replacing this reference.');
       return;
     }
 
@@ -2371,7 +2371,7 @@ export default function CreateVideo({
         ) : null}
         {onResaveReferencePhoto ? (
           <button type="button" className="ghost-btn" onClick={onResaveReferencePhoto}>
-            Open Characters
+            Open Your AI Cast
           </button>
         ) : null}
       </div>
@@ -3243,7 +3243,7 @@ export default function CreateVideo({
       ) : null}
       <section className="editor-card lumora-card create-luxury-card">
         <div>
-          <h3>Create a cinematic moment</h3>
+          <h3>Create an AI cast video</h3>
         </div>
 
         {schemaWarning ? (
@@ -3284,7 +3284,7 @@ export default function CreateVideo({
             value={activePrompt}
             onChange={(event) => setActivePrompt(event.target.value)}
             rows={5}
-            placeholder="Describe the scene you want to create..."
+            placeholder="Describe the generated scene for your cast member..."
           />
         </label>
 
@@ -3602,7 +3602,7 @@ export default function CreateVideo({
             ))}
           </div>
           {renderPreference === 'success_first' ? (
-            <small className="muted">Success First helps Lumora land the first cinematic draft before adding complexity.</small>
+            <small className="muted">Success First helps Lumora land the first generated AI cast video before adding complexity.</small>
           ) : null}
         </div>
 
@@ -3668,8 +3668,8 @@ export default function CreateVideo({
         </details>
 
         <details className="advanced-create-details renderer-details">
-          <summary>Cinematic renderer</summary>
-          <div className="provider-grid" role="radiogroup" aria-label="Cinematic renderer">
+          <summary>AI cast renderer</summary>
+          <div className="provider-grid" role="radiogroup" aria-label="AI cast renderer">
             {providerOptions.map((option) => (
               <button
                 key={option.engine}

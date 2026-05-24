@@ -227,7 +227,7 @@ function CharacterHubFrame({
 }) {
   return (
     <div className="character-hub-overlay" role="presentation">
-      <div className="character-hub-panel lumora-panel" role="dialog" aria-modal="true" aria-label="Characters">
+      <div className="character-hub-panel lumora-panel" role="dialog" aria-modal="true" aria-label="Your AI Cast">
         <div className="character-hub-scroll">
           {children}
         </div>
@@ -890,7 +890,7 @@ export default function CharacterHub({
             <span className="eyebrow">cast</span>
             <h2 style={{ marginTop: '8px' }}>Create Cast Member</h2>
             <p className="muted" style={{ margin: '8px 0 0' }}>
-              Add a reusable cast member to your cinematic world.
+              Add a reusable AI cast member for generated scenes and Story Memory.
             </p>
           </div>
           <button type="button" className="text-btn" onClick={returnToList}>
@@ -920,7 +920,7 @@ export default function CharacterHub({
               <span className="tiny-pill">Self</span>
               <h2 style={{ margin: '8px 0 0' }}>Create your self character</h2>
               <p className="character-hero-summary">
-                Build the pinned cinematic self Lumora can bring back across scenes.
+                Build the pinned self character Lumora can bring back across generated scenes.
               </p>
               <div className="character-quick-stats" aria-label="Self character setup stats">
                 <span><strong>New</strong> story</span>
@@ -1464,10 +1464,10 @@ export default function CharacterHub({
     <section className="character-hub-view character-list-view">
       <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div>
-          <span className="eyebrow">cast</span>
-          <h2 style={{ marginTop: '8px' }}>Characters</h2>
+          <span className="eyebrow">AI cast studio</span>
+          <h2 style={{ marginTop: '8px' }}>Your AI Cast</h2>
           <p className="muted" style={{ margin: '8px 0 0' }}>
-            Your reusable cinematic cast. Cast members can return across scenes, and Story Memory helps keep them consistent.
+            Reusable AI cast members for generated scenes. Self character media stays private; public posts are Lumora-generated videos only.
           </p>
         </div>
       </div>
@@ -1476,7 +1476,7 @@ export default function CharacterHub({
         <span className="tiny-pill">{Math.min(characters.length, characterLimit)} / {characterLimit}</span>
         {!atCharacterLimit ? (
           <button type="button" className="ghost-btn" style={{ flex: 'unset' }} onClick={() => setCreatingCharacter(true)}>
-            Create character
+            Create cast member
           </button>
         ) : (
           <span className="muted">You've reached the 25 character limit.</span>
@@ -1484,6 +1484,7 @@ export default function CharacterHub({
       </div>
 
       <div className="character-list-stack">
+        <span className="eyebrow">Self Character</span>
         {selfCharacter ? (
           <button
             type="button"
@@ -1508,6 +1509,9 @@ export default function CharacterHub({
           </button>
         )}
 
+        {visibleCharacters.some((character) => !characterIsSelf(character)) ? (
+          <span className="eyebrow">Cast Members</span>
+        ) : null}
         {visibleCharacters.filter((character) => !characterIsSelf(character)).map((character) => (
           <button
             key={character.id}
@@ -1523,8 +1527,8 @@ export default function CharacterHub({
 
         {!visibleCharacters.length ? (
           <article className="list-card lumora-card lumora-empty-state" style={{ borderRadius: '22px', padding: '16px' }}>
-            <h3>Build your reusable cinematic cast.</h3>
-            <p className="muted">Create self and cast members you can bring back across scenes.</p>
+            <h3>Build your reusable AI cast.</h3>
+            <p className="muted">Create a self character and cast members you can bring back across story worlds.</p>
           </article>
         ) : null}
       </div>

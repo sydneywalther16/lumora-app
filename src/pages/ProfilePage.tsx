@@ -138,8 +138,8 @@ function mockProfileVideoPosts(): LumoraPost[] {
       caption: 'Published garden preview smoke',
       prompt: 'A woman walks through a garden.',
       videoUrl: MOCK_GENERATED_VIDEO_URL,
-      thumbnailUrl: MOCK_REFERENCE_IMAGE_URL,
-      posterUrl: MOCK_REFERENCE_IMAGE_URL,
+      thumbnailUrl: null,
+      posterUrl: null,
       characterAvatar: MOCK_REFERENCE_IMAGE_URL,
       creatorName: 'Lumora Creator',
       creatorUsername: 'lumora.creator',
@@ -147,6 +147,12 @@ function mockProfileVideoPosts(): LumoraPost[] {
       privacy: 'public',
       visibility: 'public',
       isDefaultSelfCharacter: true,
+      sourceGenerationId: 'mock-profile-generated-video',
+      sourceGenerationJobId: 'mock-profile-generated-video',
+      sourceProjectId: 'mock-profile-generated-video',
+      sourceType: 'lumora_generated',
+      isAiGenerated: true,
+      mediaOrigin: 'generated',
       createdAt: now,
       publishedAt: now,
       updatedAt: now,
@@ -1401,7 +1407,7 @@ function ProfileMenuDetail({
       {item.id === 'about' ? (
         <MenuSectionCard title="Lumora">
           <p style={mutedTextStyle}>
-            Lumora is a creator workspace for character-led short video concepts, self-character creation, and social publishing.
+            Lumora is an AI Cast Studio for reusable characters, generated scenes, Story Memory, and AI cast videos only.
           </p>
         </MenuSectionCard>
       ) : null}
@@ -1410,9 +1416,9 @@ function ProfileMenuDetail({
         <MenuSectionCard title="Quick steps">
           {[
             'Create or sync your self character',
-            'Generate a concept',
-            'Edit caption and privacy',
-            'Post from Drafts',
+            'Cast a character into a generated scene',
+            'Review the verified video in Drafts',
+            'Publish the AI cast video',
           ].map((step) => (
             <p key={step} style={mutedTextStyle}>
               {step}
@@ -1432,9 +1438,9 @@ function ProfileMenuDetail({
         <MenuSectionCard title="Privacy basics">
           {[
             'Private drafts stay private',
-            'Public posts appear in feed',
-            'Self character media is account-owned',
-            'Users control what they publish',
+            'Reference and verification media stay private',
+            'Public posts are AI-generated scenes, not raw uploads',
+            'Only verified Lumora renders can appear in public feeds',
           ].map((line) => (
             <p key={line} style={mutedTextStyle}>
               {line}
@@ -1447,9 +1453,9 @@ function ProfileMenuDetail({
         <MenuSectionCard title="Terms preview">
           {[
             'Use Lumora responsibly',
-            'Only upload media you have permission to use',
-            'Do not impersonate people without consent',
-            'Final legal terms coming soon',
+            'Only create a self character from yourself',
+            'Do not create or cast people without consent',
+            'Public posts are Lumora-generated AI cast scenes',
           ].map((line) => (
             <p key={line} style={mutedTextStyle}>
               {line}
@@ -1958,13 +1964,13 @@ export default function ProfilePage() {
   const identityLifecycleLabel = !creatorIdentityProfile
     ? 'Needs references'
     : creatorIdentityProfile.status === 'building'
-      ? 'Building cinematic self'
+      ? 'Building self character'
     : (creatorIdentityProfile.feedbackIterations ?? 0) > 0
-        ? 'Cinematic self learning'
+        ? 'Self guidance learning'
         : ((creatorIdentityProfile.keyframeUrl && creatorIdentityProfile.keyframeUrl !== creatorIdentityProfile.frontFaceUrl) || identityConfidence >= 70)
-          ? 'Cinematic self stabilized'
+          ? 'Self character stabilized'
           : creatorIdentityProfile.status === 'ready'
-            ? 'Cinematic self ready'
+            ? 'Self character ready'
             : 'Needs references';
   const storyWorldProgress = buildStoryWorldProgress({
     drafts,
@@ -2514,12 +2520,12 @@ export default function ProfilePage() {
     const fullBodyUrl = resolvedSelfReferenceSource(selfForm, 'fullBody');
 
     if (!primaryReference) {
-      setIdentityBuildStatus('Add or re-save a public front photo before building your cinematic self.');
+      setIdentityBuildStatus('Add or re-save a private front reference before building your self character.');
       return;
     }
 
     setBuildingIdentity(true);
-    setIdentityBuildStatus('Building cinematic self...');
+    setIdentityBuildStatus('Building self character...');
 
     try {
       const response = await fetch('/api/lumora/build-identity', {
@@ -2551,23 +2557,23 @@ export default function ProfilePage() {
       } : {};
 
       if (!response.ok || !data.identityProfile) {
-        throw new Error(data.error || 'Unable to build your cinematic self.');
+        throw new Error(data.error || 'Unable to build your self character.');
       }
 
       await persistSelfCharacterReferences(
         selfForm,
         data.identityProfile.keyframeUrl && !data.warnings?.length
-          ? 'Cinematic self stabilized. Master frame saved.'
-          : 'Cinematic self saved. Image animation remains available.',
+          ? 'Self character stabilized. Master frame saved.'
+          : 'Self character saved. Image animation remains available.',
         data.identityProfile,
       );
       setIdentityBuildStatus(
         data.warnings?.length
-          ? `Cinematic self learning. ${data.warnings[0]}`
-          : 'Cinematic self stabilized.',
+          ? `Self guidance learning. ${data.warnings[0]}`
+          : 'Self character stabilized.',
       );
     } catch (error) {
-      setIdentityBuildStatus(error instanceof Error ? error.message : 'Unable to build your cinematic self.');
+      setIdentityBuildStatus(error instanceof Error ? error.message : 'Unable to build your self character.');
     } finally {
       setBuildingIdentity(false);
     }
@@ -2949,7 +2955,7 @@ export default function ProfilePage() {
       <div className="page lumora-page" style={{ minHeight: '70vh', display: 'grid', placeItems: 'center' }}>
         <section className="headline-card lumora-card lumora-card-hero" style={{ width: 'min(420px, 100%)', textAlign: 'center' }}>
           <span className="eyebrow">identity</span>
-          <h1 style={{ marginTop: '8px' }}>Waking up your creator identity...</h1>
+          <h1 style={{ marginTop: '8px' }}>Waking up your AI cast...</h1>
         </section>
       </div>
     );
@@ -3016,7 +3022,7 @@ export default function ProfilePage() {
           </div>
 
           <p className="profile-creator-signal">
-            Your profile is becoming a cinematic universe: cast, published moments, and the style your audience can follow.
+            Your profile is becoming an AI cast universe: reusable characters, published scenes, and the story worlds your audience can follow.
           </p>
 
           <div className="profile-memory-pulse" aria-label="Profile story signal">
@@ -3029,7 +3035,7 @@ export default function ProfilePage() {
               Edit profile
             </button>
             <button type="button" className="ghost-btn lumora-secondary-action" onClick={openCharactersHub}>
-              Characters
+              Your AI Cast
             </button>
           </div>
 
@@ -3257,9 +3263,9 @@ export default function ProfilePage() {
 
             <div style={{ display: 'grid', gap: '12px', padding: '16px', borderRadius: '18px', background: 'var(--panel-background)' }}>
               <div>
-              <span className="eyebrow">Backup scene reference</span>
+              <span className="eyebrow">Private setup reference</span>
                 <p className="muted" style={{ margin: '8px 0 0' }}>
-                  Optional public HTTPS image URL used only when the saved front photo is not available.
+                  Optional HTTPS image URL used only as private cast setup material when the saved front photo is not available.
                 </p>
               </div>
               <label className="field-group">
@@ -3348,7 +3354,7 @@ export default function ProfilePage() {
                       checked={selfForm.selfCaptureConsent}
                       onChange={(event) => handleSelfCaptureConsent(event.target.checked)}
                     />
-                    <span>I confirm I own or have permission to use these reference images/videos.</span>
+                <span>I confirm this is me and I consent to using these private reference images/videos to create my Lumora self character.</span>
                   </label>
                 </>
               ) : (
@@ -3446,12 +3452,12 @@ export default function ProfilePage() {
               Save changes to your self character photos, voice, features, and style.
             </p>
             <div style={{ display: 'grid', gap: '10px', padding: '16px', borderRadius: '18px', background: 'var(--panel-background)' }}>
-              <span className="eyebrow">Build my cinematic self</span>
+              <span className="eyebrow">Build my self character</span>
               <strong>
-                {buildingIdentity ? 'Building cinematic self' : selfCharacterReferencesReady ? 'Cinematic self ready' : 'Needs references'}
+                {buildingIdentity ? 'Building self character' : selfCharacterReferencesReady ? 'Self character ready' : 'Needs references'}
               </strong>
               <p className="muted" style={{ margin: 0 }}>
-                Build a reusable cinematic character from your reference photos and videos.
+                Build a reusable AI cast member from your private reference photos and videos.
               </p>
               <p className="muted" style={{ margin: 0 }}>
                 Lumora will use your feedback to improve future prompts and character consistency.
@@ -3462,7 +3468,7 @@ export default function ProfilePage() {
                 onClick={() => void handleBuildIdentityCharacter()}
                 disabled={buildingIdentity}
               >
-                {buildingIdentity ? 'Building cinematic self...' : creatorIdentityProfile?.keyframeUrl ? 'Improve My Character' : 'Build My Cinematic Self'}
+                {buildingIdentity ? 'Building self character...' : creatorIdentityProfile?.keyframeUrl ? 'Improve My Character' : 'Build My Self Character'}
               </button>
               {identityBuildStatus ? <p className="muted" style={{ margin: 0 }}>{identityBuildStatus}</p> : null}
             </div>
@@ -3478,7 +3484,7 @@ export default function ProfilePage() {
         ) : null}
       </CharacterHub>
 
-      <SectionCard title="Published moments">
+      <SectionCard title="AI cast videos">
         {posts.length ? (
           <div
             className="profile-published-grid"
@@ -3494,8 +3500,8 @@ export default function ProfilePage() {
           </div>
         ) : (
           <article className="list-card lumora-card lumora-empty-state luxury-empty-state" style={{ borderRadius: '28px', padding: '18px' }}>
-            <h3>Your published cinematic moments will appear here.</h3>
-            <p className="muted">Create a draft, post it when it feels right, and your profile becomes a living story grid.</p>
+            <h3>Your published AI cast videos will appear here.</h3>
+            <p className="muted">Generate a scene, publish the verified video from Drafts, and your profile becomes a living story grid.</p>
             <button type="button" className="primary-btn" onClick={() => { window.location.href = '/create'; }} style={{ width: 'fit-content', flex: 'unset' }}>
               Create your first scene
             </button>

@@ -1,4 +1,5 @@
 import type { CreatorSelfStylePreferences, LumoraPost } from './api';
+import { filterAiCastPublicPosts } from './aiCastMedia';
 import { getBestPoster, getBestThumbnail, resolveGeneratedVideoMedia } from './mediaThumbnail';
 import type { StudioProject } from './projectStorage';
 
@@ -254,7 +255,7 @@ export function loadProfilePosts(): LumoraPost[] {
         item &&
         typeof item.id === 'string' &&
         (typeof item.caption === 'string' || typeof item.title === 'string') &&
-        (typeof item.videoUrl === 'string' || typeof item.imageUrl === 'string') &&
+        typeof item.videoUrl === 'string' &&
         typeof item.createdAt === 'string'
       );
     })
@@ -274,7 +275,7 @@ export function loadProfilePosts(): LumoraPost[] {
       .filter((post) => {
         const status = (post.status || 'published').toLowerCase();
         const visibility = (post.visibility || post.privacy || 'public').toLowerCase();
-        return status === 'published' && visibility !== 'private';
+        return status === 'published' && visibility !== 'private' && filterAiCastPublicPosts([post]).length > 0;
       })
       .sort((a, b) => {
         const aDate = new Date(a.publishedAt ?? a.createdAt).getTime();

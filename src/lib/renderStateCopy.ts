@@ -227,7 +227,7 @@ export function creatorRenderStateCopy(status: CreatorRenderStatus, cooldownSeco
         title: 'One reference needs to be re-uploaded.',
         body: 'Upload the image directly so Lumora can save it safely.',
         primaryActionLabel: 'Replace reference',
-        secondaryActionLabel: 'Open Characters',
+        secondaryActionLabel: 'Open Your AI Cast',
         tertiaryActionLabel: 'Save draft',
         tone: 'repair',
       };

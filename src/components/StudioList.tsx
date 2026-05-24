@@ -13,6 +13,7 @@ import {
 } from '../lib/supabaseAppData';
 import type { GenerationJob, LumoraPost, PrivacySetting } from '../lib/api';
 import GeneratedVideoPreview from './GeneratedVideoPreview';
+import { withLumoraGeneratedPostFields } from '../lib/aiCastMedia';
 import { resolveGeneratedVideoMedia } from '../lib/mediaThumbnail';
 import { openContinueStory } from '../lib/continueStory';
 import { trackCreatorEvent } from '../lib/creatorEvents';
@@ -48,8 +49,8 @@ function draftStateCopy(job: GenerationJob) {
   if (status === 'rendering' || status === 'processing') return 'Rendering your cinematic moment.';
   if (status === 'verifying_output') return 'Checking that a playable video URL was saved.';
   if (status === 'paused' || status === 'failed') return 'Your scene is saved. Try a gentler cinematic direction.';
-  if (hasVerifiedVideoOutput(job as unknown as Record<string, unknown>)) return 'Scene ready for its next move.';
-  return 'Lumora is still shaping this scene.';
+  if (hasVerifiedVideoOutput(job as unknown as Record<string, unknown>)) return 'AI cast video ready for its next move.';
+  return 'Lumora is still shaping this AI scene.';
 }
 
 function primaryDraftAction(job: GenerationJob) {
@@ -251,10 +252,15 @@ export default function StudioList({ jobs, onPublished }: Props) {
     const post: LumoraPost = {
       id: createLocalPostId(),
       sourceGenerationId: job.id,
-      title: job.title || null,
+      title: job.title || 'AI cast video',
       caption: captionText,
       prompt: job.prompt || '',
       videoUrl: verifiedVideoUrl,
+      sourceGenerationJobId: job.id,
+      sourceProjectId: job.projectId ?? job.id,
+      sourceType: 'lumora_generated',
+      isAiGenerated: true,
+      mediaOrigin: 'generated',
       characterId: isDefaultSelfCharacter ? CREATOR_SELF_CHARACTER_ID : job.characterId || null,
       characterName,
       characterAvatar,
@@ -277,13 +283,15 @@ export default function StudioList({ jobs, onPublished }: Props) {
       updatedAt: publishedAt,
     };
 
-    if (!post.id || !post.videoUrl) {
-      setPublishError('Missing required data to post.');
+    const aiPost = withLumoraGeneratedPostFields(post);
+
+    if (!aiPost.id || !aiPost.videoUrl || !aiPost.sourceGenerationId) {
+      setPublishError('Only verified Lumora-generated AI cast videos can be published.');
       return;
     }
 
     if (isPosted(job.id)) {
-      setPublishMessage('This scene is already live on your cinematic profile.');
+      setPublishMessage('This AI cast video is already live on your Lumora profile.');
       return;
     }
 
@@ -295,11 +303,11 @@ export default function StudioList({ jobs, onPublished }: Props) {
         await publishDraft({
           userId: authUser.id,
           projectId: job.projectId ?? job.id,
-          post,
+          post: aiPost,
           privacy: publishPrivacy,
         });
       } else {
-        savePostedItem(post);
+        savePostedItem(aiPost);
         markStudioProjectPublished(job.id, publishPrivacy);
       }
 
@@ -307,7 +315,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
         current.includes(job.id) ? current : [job.id, ...current]
       );
       void trackCreatorEvent('draft_published', { source: 'drafts', draftId: job.id, privacy: publishPrivacy }, authUser?.id ?? null);
-      setPublishMessage('Your scene is live. This moment joined your cinematic profile.');
+      setPublishMessage('Your AI cast video is live on your Lumora profile.');
       onPublished?.(job.id);
     } catch (error) {
       setHiddenJobIds((current) => {
@@ -413,7 +421,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
         <section className="list-stack">
           <article className="list-card lumora-card lumora-empty-state luxury-empty-state">
             <div className="row-between">
-              <h3>{jobs.length ? 'Posting your scene...' : 'Your cinematic scenes will appear here.'}</h3>
+              <h3>{jobs.length ? 'Publishing your AI cast video...' : 'Your AI scenes in progress will appear here.'}</h3>
               <span className="tiny-pill status-drafting">Ready</span>
             </div>
             <p>

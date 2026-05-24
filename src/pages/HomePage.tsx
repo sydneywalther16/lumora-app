@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react';
 import FeedVideoCard from '../components/FeedVideoCard';
 import GeneratedVideoPreview from '../components/GeneratedVideoPreview';
-import SwipeFeed from '../components/SwipeFeed';
-import { posts } from '../data/mockData';
 import { type LumoraPost } from '../lib/api';
 import { loadPostedPublications } from '../lib/postStorage';
 import { loadLumoraProfile } from '../lib/profileStorage';
@@ -27,6 +25,12 @@ function homeMockVideoPost(): LumoraPost {
     createdAt: now,
     publishedAt: now,
     updatedAt: now,
+    sourceGenerationId: 'mock-generated-ai-cast-video',
+    sourceGenerationJobId: 'mock-generated-ai-cast-video',
+    sourceProjectId: 'mock-generated-ai-cast-video',
+    sourceType: 'lumora_generated',
+    isAiGenerated: true,
+    mediaOrigin: 'generated',
     creatorName: 'Lumora Creator',
     creatorUsername: 'lumora.creator',
     displayName: 'Lumora Creator',
@@ -45,8 +49,8 @@ type HomeFeedCardProps = {
 };
 
 function HomeFeedCard({ post, fallbackAuthorAvatar, onSelect }: HomeFeedCardProps) {
-  const title = post.title || post.caption || 'Untitled Lumora post';
-  const bodyText = post.caption || post.prompt || 'Posted from Drafts';
+  const title = post.title || post.caption || 'AI cast video';
+  const bodyText = post.caption || post.prompt || 'Generated with Lumora';
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
   const authorUsername = post.creatorUsername || post.username || 'lumora.creator';
   const authorAvatar = post.creatorAvatar || post.avatar || fallbackAuthorAvatar;
@@ -60,7 +64,7 @@ function HomeFeedCard({ post, fallbackAuthorAvatar, onSelect }: HomeFeedCardProp
       creatorName={authorName}
       creatorUsername={authorUsername}
       creatorAvatar={authorAvatar}
-      badges={[featuring].filter((badge): badge is string => Boolean(badge))}
+      badges={['AI Cast Video', featuring].filter((badge): badge is string => Boolean(badge))}
       variant="hero"
       autoPlayMuted={Boolean(post.videoUrl)}
       onOpen={() => onSelect(post)}
@@ -77,7 +81,7 @@ function HomePostModal({
   fallbackAuthorAvatar?: string | null;
   onClose: () => void;
 }) {
-  const title = post.title || post.caption || 'Lumora video';
+  const title = post.title || post.caption || 'Lumora AI cast video';
   const bodyText = post.caption || post.prompt || '';
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
   const authorUsername = post.creatorUsername || post.username || 'lumora.creator';
@@ -194,12 +198,12 @@ export default function HomePage() {
           : loadPostedPublications();
         if (!active) return;
         setLocalPosts(savedPosts);
-        setFeedMessage(savedPosts.length ? '' : 'Post a public concept from Drafts to add it to Home.');
+        setFeedMessage(savedPosts.length ? '' : 'Generate and publish an AI cast video from Drafts to add it to Home.');
       } catch {
         const savedPosts = loadPostedPublications();
         if (!active) return;
         setLocalPosts(savedPosts);
-        setFeedMessage(savedPosts.length ? '' : 'Post a concept from Drafts to add it to Home.');
+        setFeedMessage(savedPosts.length ? '' : 'Generate and publish an AI cast video from Drafts to add it to Home.');
       }
     }
 
@@ -213,7 +217,8 @@ export default function HomePage() {
   return (
     <div className="page lumora-page cinematic-feed-page">
       <header className="home-feed-header">
-        <p>Cinematic moments from your world</p>
+        <h1>Lumora</h1>
+        <p>AI cast videos from reusable characters and story worlds</p>
       </header>
 
       {feedMessage ? <p className="muted">{feedMessage}</p> : null}
@@ -229,16 +234,14 @@ export default function HomePage() {
             />
           ))}
         </section>
-      ) : posts.length ? (
-        <SwipeFeed posts={posts} />
       ) : !localPosts.length ? (
         <section className="list-stack">
           <article className="list-card lumora-card lumora-empty-state">
             <div className="row-between">
-              <h3>No videos yet</h3>
+              <h3>No AI cast videos yet</h3>
               <span className="tiny-pill status-drafting">Ready</span>
             </div>
-            <p>Post a public concept from Drafts to add it to Home.</p>
+            <p>Generate a Lumora scene, publish the verified video, and it can appear here.</p>
           </article>
         </section>
       ) : null}

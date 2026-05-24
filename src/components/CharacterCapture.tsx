@@ -106,7 +106,7 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
     }
 
     if (!consentConfirmed) {
-      setStatus('Confirm I am uploading myself or I have explicit permission to create this character.');
+      setStatus('Confirm this is you or that you have explicit permission to create this private cast reference.');
       return;
     }
 
@@ -313,7 +313,7 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
         <span className="eyebrow">capture</span>
         <h3>Character capture</h3>
         <p className="muted" style={{ margin: '8px 0 0' }}>
-          Build a reusable cinematic character from your reference photos and videos.
+          Build a reusable AI cast member from private reference photos and videos.
         </p>
       </div>
 
@@ -459,7 +459,7 @@ export default function CharacterCapture({ onCreated }: CharacterCaptureProps) {
           checked={consentConfirmed}
           onChange={(event) => setConsentConfirmed(event.target.checked)}
         />
-        <span>I confirm I own or have permission to use these reference images/videos.</span>
+        <span>I confirm I own or have permission to use these private reference images/videos for AI cast generation.</span>
       </label>
 
       <button type="button" className="primary-btn full-width" onClick={handleSubmit} disabled={busy}>

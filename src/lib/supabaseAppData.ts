@@ -13,6 +13,12 @@ import type {
   VideoEngine,
 } from './api';
 import {
+  filterAiCastPublicPosts,
+  LUMORA_GENERATED_MEDIA_ORIGIN,
+  LUMORA_GENERATED_SOURCE_TYPE,
+  withLumoraGeneratedPostFields,
+} from './aiCastMedia';
+import {
   getBestPoster,
   getBestThumbnail,
   repairMissingThumbnailIfNeeded,
@@ -21,6 +27,9 @@ import {
 import type { LumoraProfile } from './profileStorage';
 import type { StudioProject } from './projectStorage';
 import { supabase } from './supabase';
+
+const AI_CAST_SOURCE_FILTER = 'source_generation_id.not.is.null,source_generation_job_id.not.is.null,source_project_id.not.is.null';
+const AI_CAST_GENERATED_MARKER_FILTER = 'is_ai_generated.eq.true,source_type.eq.lumora_generated,media_origin.eq.generated';
 
 export type LumoraDraft = {
   id: string;
@@ -1887,11 +1896,14 @@ export async function loadSupabaseProfilePosts(userId: string): Promise<LumoraPo
     .select('*')
     .eq('user_id', userId)
     .eq('status', 'published')
+    .not('video_url', 'is', null)
+    .or(AI_CAST_SOURCE_FILTER)
+    .or(AI_CAST_GENERATED_MARKER_FILTER)
     .order('published_at', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false });
 
   if (error) throw error;
-  return (data ?? []).map(mapPostRow);
+  return filterAiCastPublicPosts((data ?? []).map(mapPostRow));
 }
 
 async function getPublishedLikeSum(userId: string): Promise<number | null> {
@@ -1900,7 +1912,10 @@ async function getPublishedLikeSum(userId: string): Promise<number | null> {
     .from('posts')
     .select('like_count')
     .eq('user_id', userId)
-    .eq('status', 'published');
+    .eq('status', 'published')
+    .not('video_url', 'is', null)
+    .or(AI_CAST_SOURCE_FILTER)
+    .or(AI_CAST_GENERATED_MARKER_FILTER);
 
   if (error) return null;
 
@@ -1997,11 +2012,14 @@ export async function loadSupabasePublicPosts(): Promise<LumoraPost[]> {
     .select('*')
     .eq('privacy', 'public')
     .eq('status', 'published')
+    .not('video_url', 'is', null)
+    .or(AI_CAST_SOURCE_FILTER)
+    .or(AI_CAST_GENERATED_MARKER_FILTER)
     .order('created_at', { ascending: false })
     .limit(50);
 
   if (error) throw error;
-  return (data ?? []).map(mapPostRow);
+  return filterAiCastPublicPosts((data ?? []).map(mapPostRow));
 }
 
 async function loadFollowedUserIds(userId: string | null | undefined): Promise<Set<string>> {
@@ -2073,6 +2091,9 @@ export async function listForYouFeed(input: {
       .select('*')
       .eq('privacy', 'public')
       .eq('status', 'published')
+      .not('video_url', 'is', null)
+      .or(AI_CAST_SOURCE_FILTER)
+      .or(AI_CAST_GENERATED_MARKER_FILTER)
       .order('published_at', { ascending: false, nullsFirst: false })
       .limit(120),
     loadFollowedUserIds(input.currentUserId),
@@ -2082,6 +2103,7 @@ export async function listForYouFeed(input: {
 
   return (data ?? [])
     .map(mapPostRow)
+    .filter((post) => filterAiCastPublicPosts([post]).length > 0)
     .filter((post) => !query || postSearchText(post).includes(query))
     .sort((left, right) => (
       scorePost(right, { ...input, followedUserIds }) - scorePost(left, { ...input, followedUserIds })
@@ -2104,14 +2126,17 @@ export async function publishDraft(input: {
   privacy?: PrivacySetting;
 }): Promise<LumoraPost> {
   const privacy = input.privacy ?? (input.post.privacy as PrivacySetting | undefined) ?? 'public';
-  return saveSupabasePost(input.userId, {
+  const generatedPost = withLumoraGeneratedPostFields({
     ...input.post,
     sourceGenerationId: input.projectId ?? input.post.sourceGenerationId ?? null,
+    sourceGenerationJobId: input.post.sourceGenerationJobId ?? input.post.sourceGenerationId ?? null,
+    sourceProjectId: input.projectId ?? input.post.sourceProjectId ?? input.post.sourceGenerationId ?? null,
     privacy,
     visibility: input.post.visibility ?? privacy,
     status: 'published',
     publishedAt: input.post.publishedAt ?? new Date().toISOString(),
   });
+  return saveSupabasePost(input.userId, generatedPost);
 }
 
 export const listProfilePosts = loadSupabaseProfilePosts;
@@ -2120,20 +2145,32 @@ export { repairMissingThumbnailIfNeeded };
 export async function saveSupabasePost(userId: string, post: LumoraPost): Promise<LumoraPost> {
   const client = getClient();
   const publishedAt = post.publishedAt ?? new Date().toISOString();
-  const generatedMedia = resolveGeneratedVideoMedia(post);
+  const aiPost = withLumoraGeneratedPostFields(post);
+  const generatedMedia = resolveGeneratedVideoMedia(aiPost);
+  if (!generatedMedia.hasVerifiedVideo) {
+    throw new Error('Public Lumora posts require a verified generated AI cast video.');
+  }
+  if (!aiPost.sourceGenerationId && !aiPost.sourceGenerationJobId && !aiPost.sourceProjectId) {
+    throw new Error('Public Lumora posts require a Lumora generation source.');
+  }
   const thumbnailUrl = generatedMedia.hasVerifiedVideo ? generatedMedia.thumbnailUrl : getBestThumbnail(post);
   const posterUrl = generatedMedia.hasVerifiedVideo ? generatedMedia.posterUrl : getBestPoster(post);
   const payload = {
     user_id: userId,
-    title: post.title || post.caption || 'Lumora post',
-    caption: post.caption ?? null,
-    prompt: post.prompt ?? null,
-    image_url: storageUrl(post.imageUrl, 'Post image'),
-    video_url: storageUrl(post.videoUrl, 'Post video'),
+    title: aiPost.title || aiPost.caption || 'AI cast video',
+    caption: aiPost.caption ?? null,
+    prompt: aiPost.prompt ?? null,
+    image_url: null,
+    video_url: storageUrl(aiPost.videoUrl, 'Post video'),
     thumbnail_url: storageUrl(thumbnailUrl, 'Post thumbnail'),
     poster_url: storageUrl(posterUrl, 'Post poster'),
     thumbnail_source: generatedMedia.thumbnailSource,
-    source_generation_id: post.sourceGenerationId ?? null,
+    source_generation_id: aiPost.sourceGenerationId ?? aiPost.sourceGenerationJobId ?? aiPost.sourceProjectId ?? null,
+    source_generation_job_id: aiPost.sourceGenerationJobId ?? aiPost.sourceGenerationId ?? null,
+    source_project_id: aiPost.sourceProjectId ?? aiPost.sourceGenerationId ?? null,
+    source_type: LUMORA_GENERATED_SOURCE_TYPE,
+    is_ai_generated: true,
+    media_origin: LUMORA_GENERATED_MEDIA_ORIGIN,
     privacy: post.privacy ?? post.visibility ?? 'public',
     visibility: post.visibility ?? post.privacy ?? 'public',
     character_id: post.characterId ?? null,
@@ -2153,12 +2190,12 @@ export async function saveSupabasePost(userId: string, post: LumoraPost): Promis
     updated_at: new Date().toISOString(),
   };
 
-  const existingPost = post.sourceGenerationId
+  const existingPost = payload.source_generation_id
     ? await client
         .from('posts')
         .select('id')
         .eq('user_id', userId)
-        .eq('source_generation_id', post.sourceGenerationId)
+        .eq('source_generation_id', payload.source_generation_id)
         .maybeSingle()
     : null;
 
@@ -2182,7 +2219,7 @@ export async function saveSupabasePost(userId: string, post: LumoraPost): Promis
 
   if (error) throw error;
 
-  if (post.sourceGenerationId) {
+  if (payload.source_generation_id) {
     await client
       .from('projects')
       .update({
@@ -2197,7 +2234,7 @@ export async function saveSupabasePost(userId: string, post: LumoraPost): Promis
         thumbnail_source: generatedMedia.thumbnailSource,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', post.sourceGenerationId)
+      .eq('id', payload.source_project_id ?? payload.source_generation_id)
       .eq('user_id', userId);
   }
 
@@ -2234,6 +2271,11 @@ function mapPostRow(row: DbRow): LumoraPost {
     posterUrl,
     thumbnailSource: generatedMedia.thumbnailSource,
     sourceGenerationId: nullableString(row.source_generation_id),
+    sourceGenerationJobId: nullableString(row.source_generation_job_id),
+    sourceProjectId: nullableString(row.source_project_id),
+    sourceType: nullableString(row.source_type),
+    isAiGenerated: booleanValue(row.is_ai_generated),
+    mediaOrigin: nullableString(row.media_origin),
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
     publishedAt: nullableString(row.published_at) ?? toIso(row.created_at),
