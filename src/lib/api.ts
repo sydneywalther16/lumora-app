@@ -650,6 +650,9 @@ export type ApiHealthDiagnostics = {
   };
   aiCastPosts?: {
     ok: boolean;
+    key?: string;
+    message?: string;
+    missing?: string[];
     publicPostsAllGenerated: boolean;
     publicPublishedPostsChecked?: number | null;
     rawUploadPostsCount: number | null;

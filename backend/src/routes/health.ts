@@ -7,7 +7,7 @@ import { buildAiCastPostDiagnostics } from '../services/aiCastPostDiagnostics';
 import { buildProviderFallbackDiagnostics } from '../services/providerFallbackOrchestrator';
 import { buildLastRenderDiagnostics } from '../services/renderDiagnostics';
 import { buildAsyncRenderJobDiagnostics } from '../services/renderJobPoller';
-import { buildDatabaseDiagnostics } from '../services/schemaDiagnostics';
+import { buildDatabaseDiagnostics, serializeDiagnosticError } from '../services/schemaDiagnostics';
 import { buildReferenceCleanupDiagnostics } from '../services/referenceCleanup';
 import { startSeedanceReferenceMatrixCanary } from '../services/referenceMatrixCanary';
 import { buildRenderSuccessDiagnostics } from '../services/renderSuccessEngine';
@@ -77,47 +77,80 @@ const canaryRouteInventory = {
   renderPathCompareRouteMounted: true,
 };
 
+export async function safeHealthDiagnostic<T>(key: string, run: () => T | Promise<T>) {
+  try {
+    return await run();
+  } catch (error) {
+    return {
+      ok: false,
+      key,
+      message: `${key} diagnostic failed`,
+      error: serializeDiagnosticError(error),
+    };
+  }
+}
+
 healthRouter.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'lumora-api' });
 });
 
 healthRouter.get('/api/health/diagnostics', async (_req, res) => {
-  const posterGenerationAvailability = await getPosterGenerationAvailability();
-  const posterBackfillRuntime = getPosterBackfillRuntimeDiagnostics();
-  const exactLikeness = await resolveExactLikenessRoute();
-  const selfVerificationVideo = await getSelfVerificationVideoDiagnostics();
-  const referenceRouteStatus = await getReferenceRouteSummary({});
-  res.json({
-    service: 'lumora-api',
-    checkedAt: new Date().toISOString(),
-    ...getEnvironmentDiagnostics(),
-    database: await buildDatabaseDiagnostics(),
-    assetPersistence: await buildAssetPersistenceDiagnostics(),
-    aiCastPosts: await buildAiCastPostDiagnostics(),
-    referenceCleanup: await buildReferenceCleanupDiagnostics(),
-    providerFallback: await buildProviderFallbackDiagnostics(),
-    renderSuccessEngine: await buildRenderSuccessDiagnostics(),
-    referenceRouteStatus,
-    selfVerificationVideo,
-    selfVerificationVideoPresent: selfVerificationVideo.selfVerificationVideoPresent,
-    selfVerificationConsentPresent: selfVerificationVideo.selfVerificationConsentPresent,
-    seedanceVideoReferenceCanaryStatus: selfVerificationVideo.seedanceVideoReferenceCanaryStatus,
-    seedanceImageReferenceBlocked: referenceRouteStatus.seedanceReferenceRoutesBlocked,
-    exactLikenessRouter: exactLikeness,
-    likenessProviderRegistry: exactLikeness.providerRegistry,
-    runwayLikenessProvider: exactLikeness.providerRegistry.find((provider) => provider.id === 'runway_gen4_reference') ?? getRunwayProviderReadiness(),
-    klingLikenessProvider: exactLikeness.providerRegistry.find((provider) => provider.id === 'kling_reference') ?? getKlingProviderReadiness(),
-    lumoraIdentityPackStatus: 'research_only',
-    openaiSoraProvider: getOpenAISoraProviderReadiness(),
-    likenessProviderCanary: {
-      textSelfGuidanceAvailable: true,
-      alternateLikenessProvidersConfigured: alternateLikenessProvidersConfigured().map((provider) => provider.provider),
-      alternateLikenessProviderCanaryStatus: buildAlternateLikenessProviderCanaryStatus(),
-    },
-    renderReliability: await buildRenderReliabilityDiagnostics(),
-    asyncRenderJobs: await buildAsyncRenderJobDiagnostics(),
-    videoThumbnails: await buildVideoThumbnailDiagnostics({ posterGenerationAvailability, posterBackfillRuntime }),
-  });
+  const checkedAt = new Date().toISOString();
+  try {
+    const posterGenerationAvailability = await getPosterGenerationAvailability();
+    const posterBackfillRuntime = getPosterBackfillRuntimeDiagnostics();
+    const exactLikeness = await resolveExactLikenessRoute();
+    const selfVerificationVideo = await getSelfVerificationVideoDiagnostics();
+    const referenceRouteStatus = await getReferenceRouteSummary({});
+    res.json({
+      service: 'lumora-api',
+      checkedAt,
+      ...getEnvironmentDiagnostics(),
+      database: await safeHealthDiagnostic('database', buildDatabaseDiagnostics),
+      assetPersistence: await safeHealthDiagnostic('assetPersistence', buildAssetPersistenceDiagnostics),
+      aiCastPosts: await safeHealthDiagnostic('aiCastStudio', buildAiCastPostDiagnostics),
+      referenceCleanup: await safeHealthDiagnostic('referenceCleanup', buildReferenceCleanupDiagnostics),
+      providerFallback: await safeHealthDiagnostic('providerFallback', buildProviderFallbackDiagnostics),
+      renderSuccessEngine: await safeHealthDiagnostic('renderSuccessEngine', buildRenderSuccessDiagnostics),
+      referenceRouteStatus,
+      selfVerificationVideo,
+      selfVerificationVideoPresent: selfVerificationVideo.selfVerificationVideoPresent,
+      selfVerificationConsentPresent: selfVerificationVideo.selfVerificationConsentPresent,
+      seedanceVideoReferenceCanaryStatus: selfVerificationVideo.seedanceVideoReferenceCanaryStatus,
+      seedanceImageReferenceBlocked: referenceRouteStatus.seedanceReferenceRoutesBlocked,
+      exactLikenessRouter: exactLikeness,
+      likenessProviderRegistry: exactLikeness.providerRegistry,
+      runwayLikenessProvider: exactLikeness.providerRegistry.find((provider) => provider.id === 'runway_gen4_reference') ?? getRunwayProviderReadiness(),
+      klingLikenessProvider: exactLikeness.providerRegistry.find((provider) => provider.id === 'kling_reference') ?? getKlingProviderReadiness(),
+      lumoraIdentityPackStatus: 'research_only',
+      openaiSoraProvider: getOpenAISoraProviderReadiness(),
+      likenessProviderCanary: {
+        textSelfGuidanceAvailable: true,
+        alternateLikenessProvidersConfigured: alternateLikenessProvidersConfigured().map((provider) => provider.provider),
+        alternateLikenessProviderCanaryStatus: buildAlternateLikenessProviderCanaryStatus(),
+      },
+      renderReliability: await safeHealthDiagnostic('renderReliability', buildRenderReliabilityDiagnostics),
+      asyncRenderJobs: await safeHealthDiagnostic('asyncRenderJobs', buildAsyncRenderJobDiagnostics),
+      videoThumbnails: await safeHealthDiagnostic(
+        'videoThumbnails',
+        () => buildVideoThumbnailDiagnostics({ posterGenerationAvailability, posterBackfillRuntime }),
+      ),
+    });
+  } catch (error) {
+    res.json({
+      service: 'lumora-api',
+      checkedAt,
+      ok: false,
+      ...getEnvironmentDiagnostics(),
+      diagnosticsError: {
+        ok: false,
+        key: 'health.diagnostics',
+        message: 'Health diagnostics failed before all checks could run.',
+        error: serializeDiagnosticError(error),
+      },
+      aiCastPosts: await safeHealthDiagnostic('aiCastStudio', buildAiCastPostDiagnostics),
+    });
+  }
 });
 
 healthRouter.get('/api/diagnostics/render-last', async (_req, res) => {
