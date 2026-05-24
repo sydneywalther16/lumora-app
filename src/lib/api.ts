@@ -728,6 +728,7 @@ export type ApiHealthDiagnostics = {
   };
   selfVerificationVideo?: {
     schemaReady: boolean;
+    oldSelfCapturePresent: boolean;
     selfVerificationVideoPresent: boolean;
     selfVerificationConsentPresent: boolean;
     verificationAudioPresent: boolean;
@@ -737,10 +738,13 @@ export type ApiHealthDiagnostics = {
     seedanceVideoReferenceCanaryStatus: string | null;
     videoReferenceProvider: string | null;
     verificationVideoUrlRedacted: string | null;
+    migratedFromOldSelfCapture: boolean;
     recommendedNextAction: string;
   };
   selfVerificationVideoPresent?: boolean;
   selfVerificationConsentPresent?: boolean;
+  oldSelfCapturePresent?: boolean;
+  migratedFromOldSelfCapture?: boolean;
   seedanceVideoReferenceCanaryStatus?: string | null;
   verificationStatus?: string | null;
   obsoleteManualReferenceCount?: number;
@@ -1329,6 +1333,8 @@ export const api = {
       videoReferenceRouteStatus: string | null;
       videoReferenceProvider: string | null;
       verificationVideoUrlRedacted: string | null;
+      oldSelfCapturePresent?: boolean;
+      migratedFromOldSelfCapture?: boolean;
       recommendedNextAction: string;
     }>('/api/characters/self/verification-video/status'),
 

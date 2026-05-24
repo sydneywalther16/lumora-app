@@ -340,6 +340,8 @@ charactersRouter.get('/self/verification-video/status', async (req: AuthedReques
     verificationStatus: diagnostics.verificationStatus,
     verificationPrompt: diagnostics.verificationPrompt,
     videoReferenceRouteStatus: diagnostics.seedanceVideoReferenceCanaryStatus,
+    oldSelfCapturePresent: diagnostics.oldSelfCapturePresent,
+    migratedFromOldSelfCapture: diagnostics.migratedFromOldSelfCapture,
     videoReferenceProvider: diagnostics.videoReferenceProvider,
     verificationVideoUrlRedacted: diagnostics.verificationVideoUrlRedacted,
     recommendedNextAction: diagnostics.recommendedNextAction,

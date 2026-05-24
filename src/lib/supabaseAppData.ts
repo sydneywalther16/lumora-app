@@ -105,6 +105,22 @@ function booleanValue(value: unknown): boolean {
   return value === true;
 }
 
+function oldSelfCaptureIsUsable(input: {
+  sourceCaptureVideoUrl?: string | null;
+  consentConfirmed?: boolean | null;
+  selfCaptureConsent?: boolean | null;
+  selfCaptureCompleted?: boolean | null;
+}) {
+  return Boolean(
+    nullableString(input.sourceCaptureVideoUrl) &&
+    (
+      input.selfCaptureConsent === true ||
+      input.selfCaptureCompleted === true ||
+      input.consentConfirmed === true
+    ),
+  );
+}
+
 function isMissingColumnError(error: unknown, columnName: string): boolean {
   if (!isObject(error)) return false;
 
@@ -824,6 +840,17 @@ function cleanReferenceImageUrls(value: ReferenceImageUrls): ReferenceImageUrls 
 
 function mapCharacterRow(row: DbRow): CharacterProfile {
   const stylePreferences = jsonRecord(row.style_preferences);
+  const sourceCaptureVideoUrl = nullableString(row.source_capture_video_url);
+  const verificationVideoPresent = Boolean(
+    nullableString(row.verification_video_url) ||
+    nullableString(row.verification_video_asset_id) ||
+    oldSelfCaptureIsUsable({
+      sourceCaptureVideoUrl,
+      consentConfirmed: booleanValue(row.consent_confirmed),
+      selfCaptureConsent: booleanValue(stylePreferences.selfCaptureConsent),
+      selfCaptureCompleted: booleanValue(stylePreferences.selfCaptureCompleted),
+    }),
+  );
 
   return {
     id: stringValue(row.id),
@@ -837,7 +864,7 @@ function mapCharacterRow(row: DbRow): CharacterProfile {
     stylePreferences,
     referenceImageUrls: mapReferenceImages(row.reference_image_urls),
     referencePhotoNames: mapReferencePhotoNames(row.reference_photo_names),
-    sourceCaptureVideoUrl: nullableString(row.source_capture_video_url),
+    sourceCaptureVideoUrl,
     sourceCaptureVideoPath: nullableString(jsonRecord(row.style_preferences).selfieVideoPath),
     sourceCaptureVideo2Url: nullableString(jsonRecord(row.style_preferences).selfieVideo2Url),
     sourceCaptureVideo2Path: nullableString(jsonRecord(row.style_preferences).selfieVideo2Path),
@@ -865,7 +892,7 @@ function mapCharacterRow(row: DbRow): CharacterProfile {
     likenessConsentAt: nullableString(row.likeness_consent_at),
     providerCharacterSourceAssetId: nullableString(row.provider_character_source_asset_id),
     verificationVideoUrl: null,
-    verificationVideoPresent: Boolean(nullableString(row.verification_video_url) || nullableString(row.verification_video_asset_id)),
+    verificationVideoPresent,
     verificationVideoAssetId: nullableString(row.verification_video_asset_id),
     verificationAudioPresent: booleanValue(row.verification_audio_present),
     verificationConsentAt: nullableString(row.verification_consent_at),
@@ -920,6 +947,17 @@ function mapSelfCharacterRow(row: DbRow): CharacterProfile {
     selfCaptureCompleted: booleanValue(row.self_capture_completed),
     selfVoiceSampleConsent: booleanValue(row.voice_sample_consent),
   };
+  const sourceCaptureVideoUrl = nullableString(row.source_capture_video_url);
+  const verificationVideoPresent = Boolean(
+    nullableString(row.verification_video_url) ||
+    nullableString(row.verification_video_asset_id) ||
+    oldSelfCaptureIsUsable({
+      sourceCaptureVideoUrl,
+      consentConfirmed: booleanValue(row.consent_confirmed),
+      selfCaptureConsent: booleanValue(row.self_capture_consent),
+      selfCaptureCompleted: booleanValue(row.self_capture_completed),
+    }),
+  );
 
   return {
     id: CREATOR_SELF_CHARACTER_ID,
@@ -933,7 +971,7 @@ function mapSelfCharacterRow(row: DbRow): CharacterProfile {
     stylePreferences,
     referenceImageUrls: mapReferenceImages(row.reference_image_urls),
     referencePhotoNames: mapReferencePhotoNames(row.reference_photo_names),
-    sourceCaptureVideoUrl: nullableString(row.source_capture_video_url),
+    sourceCaptureVideoUrl,
     sourceCaptureVideoPath: nullableString(stylePreferences.selfieVideoPath),
     sourceCaptureVideo2Url: nullableString(stylePreferences.selfieVideo2Url),
     sourceCaptureVideo2Path: nullableString(stylePreferences.selfieVideo2Path),
@@ -963,7 +1001,7 @@ function mapSelfCharacterRow(row: DbRow): CharacterProfile {
     likenessConsentAt: nullableString(row.likeness_consent_at),
     providerCharacterSourceAssetId: nullableString(row.provider_character_source_asset_id),
     verificationVideoUrl: null,
-    verificationVideoPresent: Boolean(nullableString(row.verification_video_url) || nullableString(row.verification_video_asset_id)),
+    verificationVideoPresent,
     verificationVideoAssetId: nullableString(row.verification_video_asset_id),
     verificationAudioPresent: booleanValue(row.verification_audio_present),
     verificationConsentAt: nullableString(row.verification_consent_at),

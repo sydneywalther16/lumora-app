@@ -24,6 +24,8 @@ import {
 import {
   createSelfCharacterStatusCopy,
   exactLikenessRouteStatusLabel,
+  hasEffectiveSelfVerificationVideo,
+  hasLegacySelfCaptureVideo,
   selfVerificationVideoStatusLabel,
   validateSelfVerificationVideoFile,
 } from '../lib/selfCharacterSetup';
@@ -114,8 +116,8 @@ function latestContinuityConfidence(character: CharacterProfile) {
 
 function providerIdentityStatusLabel(character: CharacterProfile) {
   if (character.videoReferenceRouteStatus === 'canary_succeeded') return 'Video likeness ready';
-  if (character.verificationVideoPresent && character.videoReferenceRouteStatus === 'configured_not_implemented') return 'Video route unmapped';
-  if (character.verificationVideoPresent) return 'Verification video saved';
+  if (hasEffectiveSelfVerificationVideo(character) && character.videoReferenceRouteStatus === 'configured_not_implemented') return 'Video route unmapped';
+  if (hasEffectiveSelfVerificationVideo(character)) return 'Verification video saved';
   if (character.providerCharacterStatus === 'ready' && character.likenessProviderStatus === 'canary_succeeded') return 'Exact likeness ready';
   if (character.providerCharacterStatus === 'ready' && character.likenessProviderStatus === 'character_created_needs_canary') return 'Needs canary';
   if (character.providerCharacterStatus === 'ready' && character.likenessProviderStatus === 'character_created_usage_unmapped') return 'Provider unavailable';
@@ -130,10 +132,13 @@ function providerIdentityStatusCopy(character: CharacterProfile) {
   if (character.videoReferenceRouteStatus === 'canary_succeeded') {
     return 'Seedance video-reference likeness route is canary-tested and ready.';
   }
-  if (character.verificationVideoPresent && character.videoReferenceRouteStatus === 'configured_not_implemented') {
+  if (hasEffectiveSelfVerificationVideo(character) && character.videoReferenceRouteStatus === 'configured_not_implemented') {
     return 'Self verification video is saved privately; the Seedance video-reference provider field is not mapped yet.';
   }
-  if (character.verificationVideoPresent) return 'Self verification video is saved privately for future video likeness canaries.';
+  if (hasLegacySelfCaptureVideo(character) && !character.verificationVideoPresent) {
+    return 'Your previous self capture is now treated as the private verification video for future likeness canaries.';
+  }
+  if (hasEffectiveSelfVerificationVideo(character)) return 'Self verification video is saved privately for future video likeness canaries.';
   if (character.providerCharacterStatus === 'ready' && character.likenessProviderStatus === 'canary_succeeded') {
     return 'Exact self character route is canary-tested and ready.';
   }
@@ -877,6 +882,16 @@ export default function CharacterHub({
       });
       const fallbackUpdatedCharacter: CharacterProfile = {
         ...selectedCharacter,
+        stylePreferences: {
+          ...(selectedCharacter.stylePreferences ?? {}),
+          selfCaptureConsent: false,
+          selfCaptureCompleted: false,
+        },
+        sourceCaptureVideoUrl: null,
+        sourceCaptureVideoPath: null,
+        sourceCaptureVideo2Url: null,
+        sourceCaptureVideo2Path: null,
+        sourceCaptureVideo2Name: null,
         verificationVideoUrl: null,
         verificationVideoPresent: false,
         verificationVideoAssetId: null,
@@ -1109,21 +1124,23 @@ export default function CharacterHub({
     const exactRouteReady = Boolean(likenessDiagnostics?.exactLikenessRouter?.exactLikeness) ||
       selectedCharacter.videoReferenceRouteStatus === 'canary_succeeded' ||
       (selectedCharacter.providerCharacterStatus === 'ready' && selectedCharacter.likenessProviderStatus === 'canary_succeeded');
+    const effectiveVerificationVideoPresent = hasEffectiveSelfVerificationVideo(selectedCharacter);
+    const usingLegacySelfCapture = hasLegacySelfCaptureVideo(selectedCharacter) && !selectedCharacter.verificationVideoPresent;
     const verificationStatusLabel = selfVerificationVideoStatusLabel(selectedCharacter);
     const exactStatusLabel = exactLikenessRouteStatusLabel(selectedCharacter, exactRouteReady);
     const seedanceVideoEntry = likenessRegistryEntry(likenessDiagnostics, 'seedance_video_reference');
     const probeEnabled = Boolean(likenessDiagnostics?.renderSuccessEngine?.probeEnabled);
     const exactCanaryAvailable = Boolean(
       probeEnabled &&
-      selectedCharacter.verificationVideoPresent &&
+      effectiveVerificationVideoPresent &&
       seedanceVideoEntry?.implementationStatus === 'configured_ready_for_canary',
     );
     const exactCanaryUnavailableCopy = !probeEnabled
       ? 'Exact likeness testing is not available yet.'
-      : !selectedCharacter.verificationVideoPresent
+      : !effectiveVerificationVideoPresent
         ? 'Upload a self verification video before testing exact likeness routes.'
         : 'Exact likeness testing is not available yet.';
-    const uploadVerificationButtonLabel = selectedCharacter.verificationVideoPresent
+    const uploadVerificationButtonLabel = effectiveVerificationVideoPresent
       ? 'Replace video'
       : 'Upload self verification video';
     const selfVerificationPanel = selectedIsSelf ? (
@@ -1156,6 +1173,13 @@ export default function CharacterHub({
           <span>Status</span>
           <strong>{verificationStatusLabel}</strong>
         </div>
+        {effectiveVerificationVideoPresent ? (
+          <p className="muted">
+            {usingLegacySelfCapture
+              ? 'Private verification video saved from your previous self capture. Replace it here any time.'
+              : 'Private verification video saved.'}
+          </p>
+        ) : null}
         {verificationVideoFile ? (
           <p className="muted">Selected: {verificationVideoFile.name}</p>
         ) : null}
@@ -1185,7 +1209,7 @@ export default function CharacterHub({
         <div className="button-row self-verification-actions">
           <button
             type="button"
-            className={selectedCharacter.verificationVideoPresent ? 'ghost-btn self-verification-upload-btn' : 'primary-btn self-verification-upload-btn'}
+            className={effectiveVerificationVideoPresent ? 'ghost-btn self-verification-upload-btn' : 'primary-btn self-verification-upload-btn'}
             disabled={verificationVideoSaving}
             onClick={() => verificationVideoInputRef.current?.click()}
           >
@@ -1194,7 +1218,7 @@ export default function CharacterHub({
           <button
             type="button"
             className="ghost-btn"
-            disabled={verificationVideoSaving}
+            disabled={verificationVideoSaving || !verificationVideoFile || !verificationVideoConsent}
             onClick={() => void handleSaveSelfVerificationVideo()}
           >
             {verificationVideoSaving ? 'Saving video...' : 'Save private verification video'}
@@ -1207,7 +1231,7 @@ export default function CharacterHub({
           >
             Record video coming soon
           </button>
-          {selectedCharacter.verificationVideoPresent ? (
+          {effectiveVerificationVideoPresent ? (
             <button
               type="button"
               className="text-btn"
@@ -1387,7 +1411,7 @@ export default function CharacterHub({
                   {metadataLine('Soft self guidance', 'Available')}
                   {metadataLine(
                     'Self verification video',
-                    selectedCharacter.verificationVideoPresent
+                    effectiveVerificationVideoPresent
                       ? providerLabStatus(likenessDiagnostics, 'seedance_video_reference')
                       : 'Record video to test',
                   )}

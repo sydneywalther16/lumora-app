@@ -72,7 +72,7 @@ import {
   getVerifiedVideoOutputUrl,
   normalizeVerifiedVideoOutputUrl,
 } from '../lib/renderCompletion';
-import { createSelfCharacterStatusCopy } from '../lib/selfCharacterSetup';
+import { createSelfCharacterStatusCopy, hasEffectiveSelfVerificationVideo } from '../lib/selfCharacterSetup';
 
 type CreateVideoProps = {
   refreshKey?: number;
@@ -1234,11 +1234,12 @@ export default function CreateVideo({
     characterProfile.providerCharacterStatus === 'ready' &&
     characterProfile.likenessProviderStatus === 'canary_succeeded';
   const providerSelfCharacterReady = openAIProviderSelfCharacterReady || seedanceVideoReferenceReady;
+  const effectiveVerificationVideoPresent = hasEffectiveSelfVerificationVideo(characterProfile);
   const providerSelfCharacterSetupStarted =
     selfReferenceMode &&
     Boolean(
       (characterProfile?.providerIdentityProvider === 'openai_sora' && characterProfile.providerCharacterStatus) ||
-      characterProfile?.verificationVideoPresent ||
+      effectiveVerificationVideoPresent ||
       characterProfile?.videoReferenceRouteStatus,
     );
   const selfCharacterProviderStatusLabel = providerSelfCharacterReady
@@ -1246,7 +1247,7 @@ export default function CreateVideo({
     : providerSelfCharacterSetupStarted
       ? characterProfile?.videoReferenceRouteStatus === 'blocked' || characterProfile?.videoReferenceRouteStatus === 'reference_moderation_block'
         ? 'Video likeness route blocked'
-        : characterProfile?.verificationVideoPresent === false
+        : !effectiveVerificationVideoPresent
           ? 'Record self verification video'
           : characterProfile?.providerCharacterStatus === 'failed'
         ? 'Self character route unavailable'
@@ -3724,7 +3725,7 @@ export default function CreateVideo({
               <div style={{ display: 'grid', gap: '6px', marginTop: '10px' }}>
                 <span className="tiny-pill" style={{ width: 'fit-content' }}>{selfCharacterProviderStatusLabel}</span>
                 <span className="muted">{selfCharacterProviderStatusCopy}</span>
-                {!characterProfile?.verificationVideoPresent && onOpenSelfVerificationSetup ? (
+                {!effectiveVerificationVideoPresent && onOpenSelfVerificationSetup ? (
                   <button
                     type="button"
                     className="text-btn"

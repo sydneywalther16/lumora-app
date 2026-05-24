@@ -271,6 +271,21 @@ function textValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function booleanRecordValue(record: Record<string, unknown> | null | undefined, key: string) {
+  return record?.[key] === true;
+}
+
+function legacySelfCaptureIsUsable(row: Pick<CharacterProfileRow, 'sourceCaptureVideoUrl' | 'consentConfirmed'>, stylePreferences: Record<string, unknown>) {
+  return Boolean(
+    textValue(row.sourceCaptureVideoUrl) &&
+    (
+      row.consentConfirmed === true ||
+      booleanRecordValue(stylePreferences, 'selfCaptureConsent') ||
+      booleanRecordValue(stylePreferences, 'selfCaptureCompleted')
+    ),
+  );
+}
+
 function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -330,6 +345,11 @@ function rowToCharacterProfile(row: CharacterProfileRow): CharacterProfile {
   const referenceImageUrls = normalizeReferenceImages(row.referenceImageUrls);
   const appearanceSummary = textValue(row.appearanceSummary) || textValue(stylePreferences.appearanceSummary);
   const displayName = textValue(row.displayName) || row.name;
+  const oldSelfCaptureUsable = legacySelfCaptureIsUsable(row, stylePreferences);
+  const verificationVideoUrl = textValue(row.verificationVideoUrl) || (oldSelfCaptureUsable ? textValue(row.sourceCaptureVideoUrl) : '');
+  const verificationConsentAt = row.verificationConsentAt ?? (oldSelfCaptureUsable ? row.updatedAt : null);
+  const verificationStatus = textValue(row.verificationStatus) || (oldSelfCaptureUsable ? 'uploaded' : '');
+  const videoReferenceRouteStatus = textValue(row.videoReferenceRouteStatus) || (oldSelfCaptureUsable ? 'not_tested' : '');
 
   return {
     id: row.id,
@@ -362,14 +382,14 @@ function rowToCharacterProfile(row: CharacterProfileRow): CharacterProfile {
     likenessProviderStatus: textValue(row.likenessProviderStatus) || null,
     likenessConsentAt: row.likenessConsentAt,
     providerCharacterSourceAssetId: textValue(row.providerCharacterSourceAssetId) || null,
-    verificationVideoUrl: textValue(row.verificationVideoUrl) || null,
+    verificationVideoUrl: verificationVideoUrl || null,
     verificationVideoAssetId: textValue(row.verificationVideoAssetId) || null,
     verificationAudioPresent: Boolean(row.verificationAudioPresent),
-    verificationConsentAt: row.verificationConsentAt,
-    verificationStatus: textValue(row.verificationStatus) || null,
+    verificationConsentAt,
+    verificationStatus: verificationStatus || null,
     verificationPrompt: textValue(row.verificationPrompt) || null,
     verificationLastTestedAt: row.verificationLastTestedAt,
-    videoReferenceRouteStatus: textValue(row.videoReferenceRouteStatus) || null,
+    videoReferenceRouteStatus: videoReferenceRouteStatus || null,
     videoReferenceProvider: textValue(row.videoReferenceProvider) || null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

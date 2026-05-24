@@ -20,6 +20,7 @@ export type SelfVerificationVideoPatch = {
 
 export type SelfVerificationVideoDiagnostics = {
   schemaReady: boolean;
+  oldSelfCapturePresent: boolean;
   selfVerificationVideoPresent: boolean;
   selfVerificationConsentPresent: boolean;
   verificationAudioPresent: boolean;
@@ -29,6 +30,7 @@ export type SelfVerificationVideoDiagnostics = {
   seedanceVideoReferenceCanaryStatus: string | null;
   videoReferenceProvider: string | null;
   verificationVideoUrlRedacted: string | null;
+  migratedFromOldSelfCapture: boolean;
   recommendedNextAction: string;
 };
 
@@ -45,6 +47,10 @@ type VerificationRow = {
   verificationLastTestedAt: string | null;
   videoReferenceRouteStatus: string | null;
   videoReferenceProvider: string | null;
+  oldSelfCaptureVideoUrl?: string | null;
+  oldSelfCaptureConsent?: boolean | null;
+  oldSelfCaptureCompleted?: boolean | null;
+  oldSelfCaptureCapturedAt?: string | null;
 };
 
 function optionalVerificationSchemaError(error: unknown) {
@@ -159,11 +165,19 @@ export function buildClearedSelfVerificationVideoPatch(): SelfVerificationVideoP
 }
 
 function diagnosticsFromRow(row: VerificationRow | null, schemaReady = true): SelfVerificationVideoDiagnostics {
-  const videoPresent = Boolean(textValue(row?.verificationVideoUrl) || textValue(row?.verificationVideoAssetId));
-  const consentPresent = Boolean(row?.verificationConsentAt);
-  const routeStatus = textValue(row?.videoReferenceRouteStatus) || null;
+  const newVideoPresent = Boolean(textValue(row?.verificationVideoUrl) || textValue(row?.verificationVideoAssetId));
+  const oldSelfCapturePresent = Boolean(
+    textValue(row?.oldSelfCaptureVideoUrl) &&
+    (row?.oldSelfCaptureConsent === true || row?.oldSelfCaptureCompleted === true),
+  );
+  const videoPresent = newVideoPresent || oldSelfCapturePresent;
+  const consentPresent = Boolean(row?.verificationConsentAt || oldSelfCapturePresent);
+  const routeStatus = textValue(row?.videoReferenceRouteStatus) || (oldSelfCapturePresent ? 'not_tested' : null);
+  const migratedFromOldSelfCapture = oldSelfCapturePresent && !newVideoPresent;
   const recommendedNextAction = !schemaReady
     ? 'Apply the self verification video migration.'
+    : migratedFromOldSelfCapture
+      ? 'Migrate old self capture into verification video.'
     : !videoPresent
       ? 'Record self verification video.'
       : !consentPresent
@@ -178,17 +192,28 @@ function diagnosticsFromRow(row: VerificationRow | null, schemaReady = true): Se
 
   return {
     schemaReady,
+    oldSelfCapturePresent,
     selfVerificationVideoPresent: videoPresent,
     selfVerificationConsentPresent: consentPresent,
     verificationAudioPresent: Boolean(row?.verificationAudioPresent),
-    verificationStatus: textValue(row?.verificationStatus) || null,
-    verificationPrompt: textValue(row?.verificationPrompt) || null,
+    verificationStatus: textValue(row?.verificationStatus) || (oldSelfCapturePresent ? 'uploaded' : null),
+    verificationPrompt: textValue(row?.verificationPrompt) || (oldSelfCapturePresent ? SELF_VERIFICATION_PROMPT : null),
     verificationLastTestedAt: row?.verificationLastTestedAt ?? null,
     seedanceVideoReferenceCanaryStatus: routeStatus,
     videoReferenceProvider: textValue(row?.videoReferenceProvider) || null,
-    verificationVideoUrlRedacted: redactVerificationVideoUrl(row?.verificationVideoUrl),
+    verificationVideoUrlRedacted: redactVerificationVideoUrl(row?.verificationVideoUrl || row?.oldSelfCaptureVideoUrl),
+    migratedFromOldSelfCapture,
     recommendedNextAction,
   };
+}
+
+function rowHasVerificationSignal(row: VerificationRow | null | undefined) {
+  return Boolean(
+    textValue(row?.verificationVideoUrl) ||
+    textValue(row?.verificationVideoAssetId) ||
+    textValue(row?.videoReferenceRouteStatus) ||
+    textValue(row?.oldSelfCaptureVideoUrl),
+  );
 }
 
 async function firstSelfVerificationRow(input: {
@@ -218,7 +243,11 @@ async function firstSelfVerificationRow(input: {
        verification_prompt as "verificationPrompt",
        verification_last_tested_at as "verificationLastTestedAt",
        video_reference_route_status as "videoReferenceRouteStatus",
-       video_reference_provider as "videoReferenceProvider"
+       video_reference_provider as "videoReferenceProvider",
+       source_capture_video_url as "oldSelfCaptureVideoUrl",
+       consent_confirmed as "oldSelfCaptureConsent",
+       false as "oldSelfCaptureCompleted",
+       updated_at as "oldSelfCaptureCapturedAt"
      from character_profiles
      where ${filters.map((filter) => `(${filter})`).join(' and ')}
      order by is_self desc, updated_at desc
@@ -246,14 +275,19 @@ async function firstSelfVerificationRow(input: {
        verification_prompt as "verificationPrompt",
        verification_last_tested_at as "verificationLastTestedAt",
        video_reference_route_status as "videoReferenceRouteStatus",
-       video_reference_provider as "videoReferenceProvider"
+       video_reference_provider as "videoReferenceProvider",
+       source_capture_video_url as "oldSelfCaptureVideoUrl",
+       self_capture_consent as "oldSelfCaptureConsent",
+       self_capture_completed as "oldSelfCaptureCompleted",
+       self_capture_captured_at as "oldSelfCaptureCapturedAt"
      from self_characters
      ${selfFilters.length ? `where ${selfFilters.join(' and ')}` : ''}
      order by updated_at desc
      limit 1`,
     selfParams,
   );
-  return selfResult.rows[0] ?? characterRow;
+  const selfRow = selfResult.rows[0] ?? null;
+  return rowHasVerificationSignal(selfRow) ? selfRow : characterRow;
 }
 
 export async function getSelfVerificationVideoDiagnostics(input: {
@@ -362,11 +396,49 @@ export async function clearSelfCharacterVerificationVideoForUser(input: {
   ownerUserId: string;
   characterId?: string | null;
 }) {
-  return updateSelfCharacterVerificationVideoForUser({
+  const diagnostics = await updateSelfCharacterVerificationVideoForUser({
     ownerUserId: input.ownerUserId,
     characterId: input.characterId,
     patch: buildClearedSelfVerificationVideoPatch(),
   });
+
+  const characterId = input.characterId ?? 'creator-self';
+  try {
+    await query(
+      `update character_profiles
+       set source_capture_video_url = null,
+           updated_at = now()
+       where owner_user_id = $1 and (id::text = $2 or character_id = $2 or coalesce(is_self, false) = true)`,
+      [input.ownerUserId, characterId],
+    );
+  } catch (error) {
+    if (!optionalVerificationSchemaError(error)) throw error;
+  }
+
+  try {
+    await query(
+      `update self_characters
+       set source_capture_video_url = null,
+           source_capture_video_name = null,
+           self_capture_consent = false,
+           self_capture_completed = false,
+           self_capture_captured_at = null,
+           updated_at = now()
+       where user_id = $1`,
+      [input.ownerUserId],
+    );
+  } catch (error) {
+    if (!optionalVerificationSchemaError(error)) throw error;
+  }
+
+  return {
+    ...diagnostics,
+    oldSelfCapturePresent: false,
+    selfVerificationVideoPresent: false,
+    selfVerificationConsentPresent: false,
+    migratedFromOldSelfCapture: false,
+    recommendedNextAction: 'Record self verification video.',
+  };
 }
 
 export async function markSeedanceVideoReferenceCanaryUnmapped(input: {
@@ -392,10 +464,10 @@ export async function markSeedanceVideoReferenceCanaryUnmapped(input: {
       characterId: input.characterId,
       patch: {
         ...patch,
-        verificationVideoUrl: existing?.verificationVideoUrl ?? null,
+        verificationVideoUrl: existing?.verificationVideoUrl ?? existing?.oldSelfCaptureVideoUrl ?? null,
         verificationVideoAssetId: existing?.verificationVideoAssetId ?? null,
         verificationAudioPresent: Boolean(existing?.verificationAudioPresent),
-        verificationConsentAt: existing?.verificationConsentAt ?? null,
+        verificationConsentAt: existing?.verificationConsentAt ?? existing?.oldSelfCaptureCapturedAt ?? null,
         verificationStatus: existing?.verificationStatus ?? 'uploaded',
         verificationPrompt: existing?.verificationPrompt ?? SELF_VERIFICATION_PROMPT,
       },

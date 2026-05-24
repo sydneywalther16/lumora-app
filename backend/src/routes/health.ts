@@ -115,7 +115,9 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
       ? referenceCleanupRecord.savedLumoraReferenceCount
       : 0;
     const exactLikenessCanaryStatus = exactLikeness.canaryStatus ?? null;
-    const recommendedNextAction = !selfVerificationVideo.selfVerificationVideoPresent
+    const recommendedNextAction = selfVerificationVideo.migratedFromOldSelfCapture
+      ? 'Migrate old self capture into verification video.'
+      : !selfVerificationVideo.selfVerificationVideoPresent
       ? 'Upload self verification video'
       : obsoleteManualReferenceCount > 0
         ? 'Remove old manual reference override'
@@ -137,6 +139,8 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
       selfVerificationVideoPresent: selfVerificationVideo.selfVerificationVideoPresent,
       selfVerificationConsentPresent: selfVerificationVideo.selfVerificationConsentPresent,
       verificationStatus: selfVerificationVideo.verificationStatus,
+      oldSelfCapturePresent: selfVerificationVideo.oldSelfCapturePresent,
+      migratedFromOldSelfCapture: selfVerificationVideo.migratedFromOldSelfCapture,
       obsoleteManualReferenceCount,
       savedLumoraReferenceCount,
       exactLikenessCanaryStatus,

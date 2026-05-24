@@ -3366,13 +3366,13 @@ export default function ProfilePage() {
               ) : (
                 <div style={{ display: 'grid', gap: '12px', padding: '16px', borderRadius: '18px', background: 'var(--panel-background)' }}>
                   <div>
-                    <strong>Self capture complete</strong>
+                    <strong>Self verification video saved</strong>
                     <p className="muted" style={{ marginTop: '8px' }}>
-                      Your selfie video and consent are saved.
+                      Your previous self capture is now managed in the Self Verification Video panel above.
                     </p>
                   </div>
                   <button type="button" className="ghost-btn" onClick={() => setShowSelfCaptureRedo(true)}>
-                    Redo self capture
+                    Update legacy self capture
                   </button>
                 </div>
               )}

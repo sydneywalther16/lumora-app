@@ -8,6 +8,8 @@ import {
 } from '../src/services/selfVerificationVideo';
 import {
   createSelfCharacterStatusCopy,
+  hasEffectiveSelfVerificationVideo,
+  hasLegacySelfCaptureVideo,
   selfVerificationVideoStatusLabel,
   validateSelfVerificationVideoFile,
 } from '../../src/lib/selfCharacterSetup';
@@ -85,6 +87,17 @@ assert.equal(referencesAfterManualRemoval.rightAngleUrl, 'https://demo.supabase.
 assert.equal(selfVerificationVideoStatusLabel({ verificationVideoPresent: false }), 'Missing');
 assert.equal(selfVerificationVideoStatusLabel({ verificationVideoPresent: true }), 'Uploaded');
 assert.equal(selfVerificationVideoStatusLabel({ verificationVideoPresent: true, videoReferenceRouteStatus: 'canary_succeeded' }), 'Tested');
+const oldSelfCaptureCharacter = {
+  verificationVideoPresent: false,
+  sourceCaptureVideoUrl: 'https://demo.supabase.co/storage/v1/object/sign/self-capture-videos/private/self.mp4?token=secret',
+  stylePreferences: {
+    selfCaptureConsent: true,
+    selfCaptureCompleted: true,
+  },
+};
+assert.equal(hasLegacySelfCaptureVideo(oldSelfCaptureCharacter), true);
+assert.equal(hasEffectiveSelfVerificationVideo(oldSelfCaptureCharacter), true);
+assert.equal(selfVerificationVideoStatusLabel(oldSelfCaptureCharacter), 'Uploaded');
 
 assert.equal(
   createSelfCharacterStatusCopy({ character: null, exactRouteReady: false }),
@@ -92,6 +105,10 @@ assert.equal(
 );
 assert.equal(
   createSelfCharacterStatusCopy({ character: { verificationVideoPresent: true }, exactRouteReady: false }),
+  'Self verification video saved. Exact likeness route still needs a provider canary.',
+);
+assert.equal(
+  createSelfCharacterStatusCopy({ character: oldSelfCaptureCharacter, exactRouteReady: false }),
   'Self verification video saved. Exact likeness route still needs a provider canary.',
 );
 assert.equal(
@@ -103,5 +120,9 @@ const characterHubSource = readFileSync(new URL('../../src/components/CharacterH
 assert.match(characterHubSource, /Upload self verification video/);
 assert.match(characterHubSource, /id="self-verification-video-panel"/);
 assert.equal(characterHubSource.includes('View status'), false);
+
+const migrationSource = readFileSync(new URL('../supabase/migrations/20260523_unify_self_capture_verification_video.sql', import.meta.url), 'utf8');
+assert.match(migrationSource, /source_capture_video_url/);
+assert.match(migrationSource, /verification_video_url = source_capture_video_url/);
 
 console.log('self character setup unit tests passed');
