@@ -330,6 +330,14 @@ export default function CreatePage() {
     window.location.href = '/profile';
   }
 
+  function openSelfVerificationSetup() {
+    void trackCreatorEvent('character_opened', { source: 'create_self_verification' }, authUserId);
+    localStorage.setItem('lumora_open_characters_hub', '1');
+    localStorage.setItem('lumora_characters_hub_context', 'create');
+    localStorage.setItem('lumora_characters_hub_focus', 'self-verification');
+    window.location.href = '/profile';
+  }
+
   function handleCastSelection(character: CharacterProfile | null) {
     setSelectedCharacter(character);
     setCastConfirmation(character ? `${character.displayName || character.name} is cast for this scene` : '');
@@ -407,6 +415,7 @@ export default function CreatePage() {
         onResaveReferencePhoto={() => {
           openCharactersHub();
         }}
+        onOpenSelfVerificationSetup={openSelfVerificationSetup}
       />
 
     </div>

@@ -36,6 +36,7 @@ type CharacterHubProps = {
   onRefresh: (characters?: CharacterProfile[]) => void | Promise<void>;
   castMode?: boolean;
   onCast?: (character: CharacterProfile) => void;
+  initialFocus?: 'self-verification' | null;
   children?: ReactNode;
 };
 
@@ -286,7 +287,7 @@ function CharacterDetailSection({
   children: ReactNode;
 }) {
   return (
-    <section className={`character-accordion-section${expanded ? ' is-open' : ''}`}>
+    <section className={`character-accordion-section character-section-${id}${expanded ? ' is-open' : ''}`}>
       <button
         type="button"
         className="character-accordion-trigger"
@@ -348,6 +349,7 @@ export default function CharacterHub({
   onRefresh,
   castMode = false,
   onCast,
+  initialFocus = null,
   children,
 }: CharacterHubProps) {
   const { user, session } = useSession();
@@ -400,6 +402,7 @@ export default function CharacterHub({
   const [likenessCanaryBusy, setLikenessCanaryBusy] = useState<'runway' | 'kling' | 'seedance-video' | null>(null);
   const referenceRepairInputRef = useRef<HTMLInputElement | null>(null);
   const verificationVideoInputRef = useRef<HTMLInputElement | null>(null);
+  const initialFocusHandledRef = useRef(false);
   const atCharacterLimit = characters.length >= characterLimit;
 
   useEffect(() => {
@@ -419,8 +422,24 @@ export default function CharacterHub({
       setLikenessDiagnostics(null);
       setLikenessLabStatus('');
       setLikenessCanaryBusy(null);
+      initialFocusHandledRef.current = false;
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open || initialFocusHandledRef.current || initialFocus !== 'self-verification' || !selfCharacter) return;
+    initialFocusHandledRef.current = true;
+    setSelectedCharacterId(selfCharacter.id);
+    setCreatingCharacter(false);
+    setSelfSetupOpen(false);
+    setActionsOpen(false);
+    setConfirmDeleteOpen(false);
+    setExpandedSections(['likenessLab', 'references']);
+    window.setTimeout(() => {
+      document.getElementById('self-verification-video-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 90);
+    void onEditSelf();
+  }, [initialFocus, onEditSelf, open, selfCharacter]);
 
   useEffect(() => {
     if (!open || typeof document === 'undefined') return undefined;
@@ -464,7 +483,7 @@ export default function CharacterHub({
     );
     setEditorStatus('');
     setDeleteStatus('');
-    setExpandedSections(characterIsSelf(selectedCharacter) ? ['memory'] : ['appearance', 'memory']);
+    setExpandedSections(characterIsSelf(selectedCharacter) ? ['likenessLab', 'references'] : ['appearance', 'memory']);
   }, [selectedCharacter]);
 
   useEffect(() => {
@@ -774,7 +793,7 @@ export default function CharacterHub({
       return;
     }
     if (!verificationVideoConsent) {
-      setVerificationVideoStatus('Consent is required before saving a self verification video.');
+      setVerificationVideoStatus('Please confirm this is you before uploading your self verification video.');
       return;
     }
     if (!verificationVideoFile) {
@@ -1043,7 +1062,7 @@ export default function CharacterHub({
           </div>
         </article>
 
-        <div className="character-detail-sections">
+        <div className={`character-detail-sections${selectedIsSelf ? ' self-character-section-order' : ''}`}>
           <CharacterDetailSection
             id="identity"
             title="Identity"
@@ -1104,6 +1123,105 @@ export default function CharacterHub({
       : !selectedCharacter.verificationVideoPresent
         ? 'Upload a self verification video before testing exact likeness routes.'
         : 'Exact likeness testing is not available yet.';
+    const uploadVerificationButtonLabel = selectedCharacter.verificationVideoPresent
+      ? 'Replace video'
+      : 'Upload self verification video';
+    const selfVerificationPanel = selectedIsSelf ? (
+      <section
+        id="self-verification-video-panel"
+        className="self-verification-panel self-verification-panel-feature"
+        aria-labelledby="self-verification-video-title"
+      >
+        <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div>
+            <span className="eyebrow">private self character media</span>
+            <h3 id="self-verification-video-title">Self Verification Video</h3>
+            <p className="muted">
+              Upload a short private video so Lumora can test stronger self-character likeness routes.
+            </p>
+          </div>
+          <span className="tiny-pill">{verificationStatusLabel}</span>
+        </div>
+        <ul className="self-verification-instructions">
+          <li>Look forward at the camera</li>
+          <li>Say 3 pairs of two-digit numbers</li>
+          <li>Turn your head slightly right</li>
+          <li>Turn your head slightly left</li>
+          <li>Return to center</li>
+          <li>Use clear lighting</li>
+          <li>No filters</li>
+          <li>Fully clothed</li>
+        </ul>
+        <div className="self-verification-status-row">
+          <span>Status</span>
+          <strong>{verificationStatusLabel}</strong>
+        </div>
+        {verificationVideoFile ? (
+          <p className="muted">Selected: {verificationVideoFile.name}</p>
+        ) : null}
+        <input
+          ref={verificationVideoInputRef}
+          type="file"
+          accept="video/mp4,video/webm,video/quicktime,video/*"
+          style={{ display: 'none' }}
+          onChange={(event) => void handleVerificationVideoFile(event.target.files?.[0])}
+        />
+        <label className="checkbox-row" style={{ alignItems: 'flex-start' }}>
+          <input
+            type="checkbox"
+            checked={verificationAudioPresent}
+            onChange={(event) => setVerificationAudioPresent(event.target.checked)}
+          />
+          <span>Audio is present in this verification video.</span>
+        </label>
+        <label className="checkbox-row" style={{ alignItems: 'flex-start' }}>
+          <input
+            type="checkbox"
+            checked={verificationVideoConsent}
+            onChange={(event) => setVerificationVideoConsent(event.target.checked)}
+          />
+          <span>I confirm this is me and I consent to using this recording to create my Lumora self character.</span>
+        </label>
+        <div className="button-row self-verification-actions">
+          <button
+            type="button"
+            className={selectedCharacter.verificationVideoPresent ? 'ghost-btn self-verification-upload-btn' : 'primary-btn self-verification-upload-btn'}
+            disabled={verificationVideoSaving}
+            onClick={() => verificationVideoInputRef.current?.click()}
+          >
+            {uploadVerificationButtonLabel}
+          </button>
+          <button
+            type="button"
+            className="ghost-btn"
+            disabled={verificationVideoSaving}
+            onClick={() => void handleSaveSelfVerificationVideo()}
+          >
+            {verificationVideoSaving ? 'Saving video...' : 'Save private verification video'}
+          </button>
+          <button
+            type="button"
+            className="ghost-btn"
+            disabled
+            title="Browser recording is coming soon. Upload is available now."
+          >
+            Record video coming soon
+          </button>
+          {selectedCharacter.verificationVideoPresent ? (
+            <button
+              type="button"
+              className="text-btn"
+              disabled={verificationVideoSaving}
+              onClick={() => void handleRemoveSelfVerificationVideo()}
+            >
+              Remove video
+            </button>
+          ) : null}
+        </div>
+        {verificationVideoStatus ? <p className="muted">{verificationVideoStatus}</p> : null}
+        <p className="muted">Verification videos stay private. They are never published or used as thumbnails.</p>
+      </section>
+    ) : null;
 
     return (
       <CharacterHubFrame onClose={onClose}>
@@ -1188,21 +1306,17 @@ export default function CharacterHub({
           </section>
         ) : null}
 
+        {selfVerificationPanel}
+
         <div className="character-detail-sections">
-          <CharacterDetailSection
-            id="identity"
-            title="Identity"
-            summary={`${selectedCharacter.status} / ${selectedCharacter.visibility.replace('_', ' ')}`}
-            expanded={detailSectionIsOpen('identity')}
-            onToggle={toggleDetailSection}
-          >
-            {selectedIsSelf ? (
-              children || (
-                <article className="list-card lumora-card-soft" style={{ borderRadius: '18px', padding: '14px' }}>
-                  <p className="muted">Loading self character editor...</p>
-                </article>
-              )
-            ) : (
+          {!selectedIsSelf ? (
+            <CharacterDetailSection
+              id="identity"
+              title="Identity"
+              summary={`${selectedCharacter.status} / ${selectedCharacter.visibility.replace('_', ' ')}`}
+              expanded={detailSectionIsOpen('identity')}
+              onToggle={toggleDetailSection}
+            >
               <div className="character-compact-form">
                 <label className="field-block">
                   <span>Display name</span>
@@ -1210,105 +1324,18 @@ export default function CharacterHub({
                 </label>
                 {metadataLine('Profile', `${selectedCharacter.status} / ${selectedCharacter.visibility.replace('_', ' ')}`)}
               </div>
-            )}
-          </CharacterDetailSection>
+            </CharacterDetailSection>
+          ) : null}
 
           {selectedIsSelf ? (
             <CharacterDetailSection
               id="providerIdentity"
-              title="Self Verification Video"
-              summary={`Status: ${verificationStatusLabel}`}
+              title="Exact Provider Character"
+              summary={`Exact route: ${exactStatusLabel}`}
               expanded={detailSectionIsOpen('providerIdentity')}
               onToggle={toggleDetailSection}
             >
               <div className="character-compact-form">
-                <div className="self-verification-panel character-section-card">
-                  <div>
-                    <span className="eyebrow">private self character media</span>
-                    <h4>Self Verification Video</h4>
-                    <p className="muted">
-                      Record a short private video so Lumora can test stronger self-character likeness routes.
-                    </p>
-                  </div>
-                  <ul className="self-verification-instructions">
-                    <li>Look forward at the camera</li>
-                    <li>Say 3 pairs of two-digit numbers</li>
-                    <li>Turn your head slightly right</li>
-                    <li>Turn your head slightly left</li>
-                    <li>Return to center</li>
-                    <li>Use clear lighting</li>
-                    <li>No filters</li>
-                    <li>Fully clothed</li>
-                  </ul>
-                  <div className="self-verification-status-row">
-                    <span>Status</span>
-                    <strong>{verificationStatusLabel}</strong>
-                  </div>
-                  {verificationVideoFile ? (
-                    <p className="muted">Selected: {verificationVideoFile.name}</p>
-                  ) : null}
-                  <input
-                    ref={verificationVideoInputRef}
-                    type="file"
-                    accept="video/mp4,video/webm,video/quicktime,video/*"
-                    style={{ display: 'none' }}
-                    onChange={(event) => void handleVerificationVideoFile(event.target.files?.[0])}
-                  />
-                  <label className="checkbox-row" style={{ alignItems: 'flex-start' }}>
-                    <input
-                      type="checkbox"
-                      checked={verificationAudioPresent}
-                      onChange={(event) => setVerificationAudioPresent(event.target.checked)}
-                    />
-                    <span>Audio is present in this verification video.</span>
-                  </label>
-                  <label className="checkbox-row" style={{ alignItems: 'flex-start' }}>
-                    <input
-                      type="checkbox"
-                      checked={verificationVideoConsent}
-                      onChange={(event) => setVerificationVideoConsent(event.target.checked)}
-                    />
-                    <span>I confirm this is me and I consent to using this recording to create my Lumora self character.</span>
-                  </label>
-                  <div className="button-row self-verification-actions">
-                    <button
-                      type="button"
-                      className="ghost-btn"
-                      disabled
-                      title="Browser recording is coming soon. Upload is available now."
-                    >
-                      Record video
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost-btn"
-                      disabled={verificationVideoSaving}
-                      onClick={() => verificationVideoInputRef.current?.click()}
-                    >
-                      {selectedCharacter.verificationVideoPresent ? 'Replace video' : 'Upload video'}
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost-btn"
-                      disabled={verificationVideoSaving}
-                      onClick={() => void handleSaveSelfVerificationVideo()}
-                    >
-                      {verificationVideoSaving ? 'Saving video...' : 'Save verification video'}
-                    </button>
-                    {selectedCharacter.verificationVideoPresent ? (
-                      <button
-                        type="button"
-                        className="text-btn"
-                        disabled={verificationVideoSaving}
-                        onClick={() => void handleRemoveSelfVerificationVideo()}
-                      >
-                        Remove video
-                      </button>
-                    ) : null}
-                  </div>
-                  {verificationVideoStatus ? <p className="muted">{verificationVideoStatus}</p> : null}
-                  <p className="muted">Verification videos stay private. They are never published or used as thumbnails.</p>
-                </div>
                 <div className="character-memory-viewer character-section-card">
                   <strong>Exact provider character</strong>
                   <p className="muted">
@@ -1558,14 +1585,14 @@ export default function CharacterHub({
                         </small>
                       </div>
                       <div className="reference-card-actions">
-                        {!manualOverride ? (
+                        {!manualOverride && !selectedIsSelf ? (
                           <button
                             type="button"
                             className="text-btn"
                             disabled={referenceRepairSaving}
                             onClick={() => startReferenceRepair(entry)}
                           >
-                            {selectedIsSelf ? 'View status' : 'Replace'}
+                            Replace
                           </button>
                         ) : null}
                         {entry.removable ? (
@@ -1591,7 +1618,13 @@ export default function CharacterHub({
                 <button
                   type="button"
                   className="ghost-btn"
-                  onClick={() => void onEditSelf()}
+                  onClick={() => {
+                    setExpandedSections((current): DetailSectionKey[] => {
+                      const next: DetailSectionKey[] = ['identity', ...current.filter((section) => section !== 'identity')];
+                      return next.slice(0, 2);
+                    });
+                    void onEditSelf();
+                  }}
                 >
                   Edit saved look photos
                 </button>
@@ -1619,6 +1652,22 @@ export default function CharacterHub({
             />
             {referenceRepairStatus ? <p className="muted">{referenceRepairStatus}</p> : null}
           </CharacterDetailSection>
+
+          {selectedIsSelf ? (
+            <CharacterDetailSection
+              id="identity"
+              title="Saved Look Editor"
+              summary="Reference photos and profile setup"
+              expanded={detailSectionIsOpen('identity')}
+              onToggle={toggleDetailSection}
+            >
+              {children || (
+                <article className="list-card lumora-card-soft" style={{ borderRadius: '18px', padding: '14px' }}>
+                  <p className="muted">Loading self character editor...</p>
+                </article>
+              )}
+            </CharacterDetailSection>
+          ) : null}
 
           {!selectedIsSelf ? (
             <div className="character-detail-save-row">

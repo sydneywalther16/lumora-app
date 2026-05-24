@@ -4205,6 +4205,29 @@ button {
   gap: 10px;
 }
 
+.self-character-section-order .character-section-likenessLab {
+  order: 1;
+}
+
+.self-character-section-order .character-section-providerIdentity {
+  order: 2;
+}
+
+.self-character-section-order .character-section-references {
+  order: 3;
+}
+
+.self-character-section-order .character-section-memory {
+  order: 4;
+}
+
+.self-character-section-order .character-section-appearance,
+.self-character-section-order .character-section-style,
+.self-character-section-order .character-section-voice,
+.self-character-section-order .character-section-identity {
+  order: 5;
+}
+
 .character-accordion-section {
   overflow: hidden;
   border: 1px solid var(--surface-border);
@@ -4350,6 +4373,10 @@ button {
   box-shadow: var(--lumora-shadow-card);
 }
 
+.self-verification-panel-feature {
+  border-color: color-mix(in srgb, var(--selected-outline) 50%, var(--surface-border));
+}
+
 .self-setup-wizard h3,
 .self-verification-panel h4 {
   margin: 4px 0 0;
@@ -4414,7 +4441,12 @@ button {
 
 .self-verification-actions .ghost-btn,
 .self-verification-actions .text-btn {
-  min-height: 38px;
+  min-height: 44px;
+}
+
+.self-verification-upload-btn {
+  min-height: 48px;
+  font-weight: 800;
 }
 
 .character-detail-save-row {
@@ -4502,7 +4534,7 @@ button {
   }
 
   .character-hub-scroll {
-    padding: 18px 16px 24px;
+    padding: 18px 16px max(104px, calc(28px + env(safe-area-inset-bottom)));
   }
 
   .character-list-view,
@@ -4516,6 +4548,21 @@ button {
 
   .character-quick-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .self-setup-card-grid,
+  .self-verification-instructions {
+    grid-template-columns: 1fr;
+  }
+
+  .self-verification-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .self-verification-actions .primary-btn,
+  .self-verification-actions .ghost-btn,
+  .self-verification-actions .text-btn {
+    width: 100%;
   }
 
   .draft-action-row {

@@ -92,6 +92,7 @@ type CreateVideoProps = {
   identityProfile?: LumoraIdentityProfile | null;
   onLikenessFeedback?: (feedback: LumoraIdentityFeedback) => void | Promise<void>;
   onResaveReferencePhoto?: () => void;
+  onOpenSelfVerificationSetup?: () => void;
   onCharacterUpdated?: (character: CharacterProfile) => void;
 };
 
@@ -1060,6 +1061,7 @@ export default function CreateVideo({
   identityProfile,
   onLikenessFeedback,
   onResaveReferencePhoto,
+  onOpenSelfVerificationSetup,
   onCharacterUpdated,
 }: CreateVideoProps) {
   const { user, session, loading: sessionLoading, configured } = useSession();
@@ -3722,6 +3724,16 @@ export default function CreateVideo({
               <div style={{ display: 'grid', gap: '6px', marginTop: '10px' }}>
                 <span className="tiny-pill" style={{ width: 'fit-content' }}>{selfCharacterProviderStatusLabel}</span>
                 <span className="muted">{selfCharacterProviderStatusCopy}</span>
+                {!characterProfile?.verificationVideoPresent && onOpenSelfVerificationSetup ? (
+                  <button
+                    type="button"
+                    className="text-btn"
+                    style={{ width: 'fit-content', padding: 0 }}
+                    onClick={onOpenSelfVerificationSetup}
+                  >
+                    Add self verification video
+                  </button>
+                ) : null}
               </div>
             ) : null}
             {isSeedanceEngine && seedanceReferenceCount > 0 ? (

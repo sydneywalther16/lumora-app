@@ -1702,6 +1702,7 @@ export default function ProfilePage() {
   const [editingSelfCharacter, setEditingSelfCharacter] = useState(false);
   const [characterHubOpen, setCharacterHubOpen] = useState(false);
   const [characterHubSource, setCharacterHubSource] = useState<'profile' | 'create'>('profile');
+  const [characterHubFocus, setCharacterHubFocus] = useState<'self-verification' | null>(null);
   const [selfForm, setSelfForm] = useState<SelfCharacterForm>(() => buildSelfCharacterForm(loadLumoraProfile(), null));
   const [captureChecklist, setCaptureChecklist] = useState({
     readNumbers: false,
@@ -1769,6 +1770,8 @@ export default function ProfilePage() {
     localStorage.removeItem('lumora_open_characters_hub');
     setCharacterHubSource(localStorage.getItem('lumora_characters_hub_context') === 'create' ? 'create' : 'profile');
     localStorage.removeItem('lumora_characters_hub_context');
+    setCharacterHubFocus(localStorage.getItem('lumora_characters_hub_focus') === 'self-verification' ? 'self-verification' : null);
+    localStorage.removeItem('lumora_characters_hub_focus');
     setCharacterHubOpen(true);
     setEditingSelfCharacter(false);
   }, [isHydrated]);
@@ -2002,12 +2005,14 @@ export default function ProfilePage() {
 
   function closeCharactersHub() {
     setCharacterHubOpen(false);
+    setCharacterHubFocus(null);
     setEditingSelfCharacter(false);
   }
 
   function openCharactersHub() {
     void trackCreatorEvent('character_opened', { source: 'profile' }, authUserId);
     setCharacterHubSource('profile');
+    setCharacterHubFocus(null);
     setCharacterHubOpen(true);
     setEditingSelfCharacter(false);
   }
@@ -3162,6 +3167,7 @@ export default function ProfilePage() {
         onRefresh={(nextCharacters) => void handleCharacterHubRefresh(nextCharacters)}
         castMode={characterHubSource === 'create'}
         onCast={handleCastCharacterFromHub}
+        initialFocus={characterHubFocus}
       >
         {editingSelfCharacter && isHydrated ? (
         <section

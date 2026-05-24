@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   buildClearedSelfVerificationVideoPatch,
   buildSelfVerificationVideoPatch,
@@ -97,5 +98,10 @@ assert.equal(
   createSelfCharacterStatusCopy({ character: { verificationVideoPresent: true }, exactRouteReady: true }),
   'Verified self character ready.',
 );
+
+const characterHubSource = readFileSync(new URL('../../src/components/CharacterHub.tsx', import.meta.url), 'utf8');
+assert.match(characterHubSource, /Upload self verification video/);
+assert.match(characterHubSource, /id="self-verification-video-panel"/);
+assert.equal(characterHubSource.includes('View status'), false);
 
 console.log('self character setup unit tests passed');
