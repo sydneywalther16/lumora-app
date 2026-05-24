@@ -191,6 +191,8 @@ function diagnosticsFromRow(row: VerificationRow | null, schemaReady = true): Se
   const routeStatus = rawRouteStatus === 'transient_unavailable' ? 'retry_later' : rawRouteStatus;
   const routeFailureCategory = rawRouteStatus === 'transient_unavailable'
     ? 'video_reference_provider_unavailable'
+    : rawRouteStatus === 'input_needs_repair'
+      ? 'video_reference_input_invalid'
     : routeStatus &&
       !['not_tested', 'canary_succeeded', 'succeeded', 'configured_ready_for_canary', 'retry_later'].includes(routeStatus)
       ? routeStatus
@@ -210,6 +212,8 @@ function diagnosticsFromRow(row: VerificationRow | null, schemaReady = true): Se
             ? 'Retry Seedance video reference canary later.'
           : routeStatus === 'blocked'
             ? 'Continue using soft self guidance or test another exact likeness provider.'
+            : routeStatus === 'input_needs_repair'
+              ? 'Normalize verification video or try a schema variant.'
             : routeStatus === 'configured_not_implemented'
               ? 'Run Seedance video reference canary now that the provider video-reference field is mapped.'
               : 'Run Seedance video reference canary.';

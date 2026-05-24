@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import {
   buildSeedanceCanaryPayload,
+  buildSeedanceInputSchemaDiagnostics,
   buildReferenceRouteSummaryFromRows,
   buildReferenceImagePrompt,
   buildSeedanceVerificationVideoCanaryPayload,
+  buildSeedanceVideoReferencePrompt,
   canaryRateLimitStatus,
   chooseCreateRouteFromReferenceSummary,
   classifyReferenceCanaryFailure,
@@ -26,6 +28,8 @@ import {
   SEEDANCE_VIDEO_REFERENCE_PROMPT,
   validateSelfVerificationVideoConsent,
 } from '../src/services/selfVerificationVideo';
+import { validateVerificationVideoMetadata } from '../src/services/verificationVideoNormalizer';
+import { env } from '../src/lib/env';
 
 const textPayload = buildSeedanceCanaryPayload();
 
@@ -50,6 +54,58 @@ assert.equal(verificationVideoPayload.generate_audio, false);
 assert.equal(validateSeedanceProviderPayload(verificationVideoPayload).ok, true);
 assert.equal(JSON.stringify(verificationVideoPayload).includes('reference_images'), false);
 assert.equal(/Sydney|photoshoot|model|glamour|influencer|celebrity|public figure/i.test(verificationVideoPayload.prompt), false);
+const atTokenPayload = buildSeedanceVerificationVideoCanaryPayload('https://signed.example.com/private-self.mp4?token=secret', 'reference_videos_at');
+assert.equal(atTokenPayload.prompt, buildSeedanceVideoReferencePrompt('reference_videos_at'));
+assert.equal(atTokenPayload.prompt.includes('@Video1'), true);
+assert.deepEqual(atTokenPayload.reference_videos, ['https://signed.example.com/private-self.mp4?token=secret']);
+assert.equal('video_urls' in atTokenPayload, false);
+const videoUrlsPayload = buildSeedanceVerificationVideoCanaryPayload('https://signed.example.com/private-self.mp4?token=secret', 'video_urls_at');
+assert.equal(videoUrlsPayload.prompt.includes('@Video1'), true);
+assert.deepEqual(videoUrlsPayload.video_urls, ['https://signed.example.com/private-self.mp4?token=secret']);
+assert.equal('reference_videos' in videoUrlsPayload, false);
+assert.equal(validateSeedanceProviderPayload(videoUrlsPayload).ok, true);
+
+const validVideoMetadata = validateVerificationVideoMetadata({
+  durationSeconds: 8,
+  width: 720,
+  height: 1280,
+  container: 'mov',
+  videoCodec: 'h264',
+  audioCodec: 'aac',
+  fileSizeBytes: 8 * 1024 * 1024,
+  hasVideoStream: true,
+  hasAudioStream: true,
+  ffprobeAvailable: true,
+});
+assert.equal(validVideoMetadata.preflightOk, true);
+assert.equal(validVideoMetadata.needsNormalization, false);
+const nonVideoMetadata = validateVerificationVideoMetadata({
+  ...validVideoMetadata,
+  hasVideoStream: false,
+});
+assert.equal(nonVideoMetadata.preflightOk, false);
+assert.equal(nonVideoMetadata.preflightFailureReason, 'no_readable_video_stream');
+const tooShortMetadata = validateVerificationVideoMetadata({
+  ...validVideoMetadata,
+  durationSeconds: 1.5,
+});
+assert.equal(tooShortMetadata.preflightOk, false);
+assert.equal(tooShortMetadata.preflightFailureReason, 'duration_too_short');
+const tooLongMetadata = validateVerificationVideoMetadata({
+  ...validVideoMetadata,
+  durationSeconds: 22,
+});
+assert.equal(tooLongMetadata.preflightOk, false);
+assert.equal(tooLongMetadata.needsNormalization, true);
+assert.equal(tooLongMetadata.preflightFailureReason, 'duration_too_long');
+const webmMetadata = validateVerificationVideoMetadata({
+  ...validVideoMetadata,
+  container: 'matroska',
+  videoCodec: 'vp9',
+});
+assert.equal(webmMetadata.preflightOk, false);
+assert.equal(webmMetadata.needsNormalization, true);
+assert.equal(webmMetadata.preflightFailureReason, 'provider_unsafe_container');
 
 assert.throws(
   () => validateSelfVerificationVideoConsent({ consentConfirmed: false }),
@@ -193,6 +249,7 @@ assert.equal(classifyVideoReferenceCanaryFailure('E005: input or output was flag
 assert.equal(classifyVideoReferenceCanaryFailure('ModelError: Service is temporarily unavailable. Please try again later. (E004)', 'failed'), 'video_reference_provider_unavailable');
 assert.equal(classifyVideoReferenceCanaryFailure('upstream unavailable, try again later', 'failed'), 'video_reference_provider_unavailable');
 assert.equal(classifyVideoReferenceCanaryFailure('unknown field reference_videos'), 'video_reference_input_schema');
+assert.equal(classifyVideoReferenceCanaryFailure('ModelError: The input was invalid. Please try again with different inputs. (E006)', 'failed'), 'video_reference_input_invalid');
 assert.equal(classifyVideoReferenceCanaryFailure('403 asset access denied'), 'verification_video_asset_access');
 assert.equal(classifyVideoReferenceCanaryFailure('provider succeeded but output missing', 'succeeded'), 'video_reference_output_missing');
 assert.equal(classifyVideoReferenceCanaryFailure('Prediction failed.', 'failed'), 'video_reference_provider_failed');
@@ -300,5 +357,16 @@ assert.deepEqual(redacted, {
   nested: { videoUrl: '[redacted-url]' },
   list: ['[redacted-url]'],
 });
+
+const originalReplicateToken = env.REPLICATE_API_TOKEN;
+env.REPLICATE_API_TOKEN = undefined;
+const schemaDiagnostics = await buildSeedanceInputSchemaDiagnostics();
+env.REPLICATE_API_TOKEN = originalReplicateToken;
+assert.equal(schemaDiagnostics.privateUrlsExposed, false);
+assert.equal(schemaDiagnostics.fields.reference_videos, true);
+assert.equal(schemaDiagnostics.fields.video_urls, true);
+assert.equal(schemaDiagnostics.variants.some((variant) => variant.id === 'reference_videos_bracket'), true);
+assert.equal(schemaDiagnostics.variants.some((variant) => variant.id === 'reference_videos_at'), true);
+assert.equal(schemaDiagnostics.variants.some((variant) => variant.id === 'video_urls_at'), true);
 
 console.log('seedanceCanary unit tests passed');

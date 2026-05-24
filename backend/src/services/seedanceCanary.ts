@@ -36,6 +36,11 @@ import {
   markSeedanceVideoReferenceCanaryResult,
   SEEDANCE_VIDEO_REFERENCE_PROMPT,
 } from './selfVerificationVideo';
+import {
+  prepareVerificationVideoForProvider,
+  type VerificationVideoNormalizationDiagnostics,
+  type VerificationVideoPreflightMetadata,
+} from './verificationVideoNormalizer';
 
 export const SEEDANCE_CANARY_PROMPT =
   'A peaceful sunlit garden path with flowers swaying gently in the breeze, soft storybook cinematic style, calm natural motion.';
@@ -56,9 +61,40 @@ const VERIFICATION_VIDEO_PAYLOAD_PLACEHOLDER_URL = 'https://private.lumora.local
 const VIDEO_REFERENCE_TRANSIENT_RETRY_DELAY_MS = 15 * 60 * 1000;
 const activeCanaryProcessors = new Set<string>();
 
+const SEEDANCE_VIDEO_REFERENCE_VARIANT_SPECS = {
+  reference_videos_bracket: {
+    fieldName: 'reference_videos',
+    promptToken: '[Video1]',
+    promptTokenStyle: 'bracket',
+    enabledByLocalReplicateMapping: true,
+    documentationSource: 'replicate_seedance_fast_reference_videos',
+  },
+  reference_videos_at: {
+    fieldName: 'reference_videos',
+    promptToken: '@Video1',
+    promptTokenStyle: 'at',
+    enabledByLocalReplicateMapping: true,
+    documentationSource: 'seedance_multimodal_at_token_docs',
+  },
+  video_urls_at: {
+    fieldName: 'video_urls',
+    promptToken: '@Video1',
+    promptTokenStyle: 'at',
+    enabledByLocalReplicateMapping: true,
+    documentationSource: 'seedance_fal_style_video_urls_docs',
+  },
+} as const satisfies Record<string, {
+  fieldName: 'reference_videos' | 'video_urls';
+  promptToken: '[Video1]' | '@Video1';
+  promptTokenStyle: 'bracket' | 'at';
+  enabledByLocalReplicateMapping: boolean;
+  documentationSource: string;
+}>;
+
 type CanaryKind = 'text' | 'reference' | 'video_reference';
 type CanaryLifecycleStatus = 'queued' | 'rendering' | 'rate_limited' | 'completed' | 'failed' | 'canceled';
-type CanaryVariant = 'text_only' | 'reference_images' | 'verification_video_reference';
+export type SeedanceVideoReferenceCanaryVariant = 'reference_videos_bracket' | 'reference_videos_at' | 'video_urls_at';
+type CanaryVariant = 'text_only' | 'reference_images' | 'verification_video_reference' | SeedanceVideoReferenceCanaryVariant;
 export type SeedanceReferenceMatrixVariant = CanaryVariant | 'image_to_video';
 
 type ProviderFailureDiagnostics = {
@@ -177,6 +213,15 @@ export type CanaryVerificationVideoDiagnostics = {
   accessStatus?: number | null;
   accessError?: string | null;
   source: 'verification_video_asset_id' | 'verification_video_url' | 'none';
+  variant?: SeedanceVideoReferenceCanaryVariant | null;
+  referenceFieldName?: 'reference_videos' | 'video_urls' | null;
+  promptTokenStyle?: 'bracket' | 'at' | null;
+  normalizedAssetUsed?: boolean | null;
+  normalizedStatus?: VerificationVideoNormalizationDiagnostics['normalizedStatus'] | null;
+  preflight?: VerificationVideoPreflightMetadata | null;
+  normalizedPreflight?: VerificationVideoPreflightMetadata | null;
+  preflightOk?: boolean | null;
+  preflightFailureReason?: string | null;
 };
 
 type CanaryVerificationVideoRuntime = {
@@ -443,7 +488,9 @@ export function classifyVideoReferenceCanaryFailure(value: unknown, providerStat
   if (isTransientProviderUnavailableText(raw)) return 'video_reference_provider_unavailable';
   if (lower.includes('flagged as sensitive') || lower.includes('input or output was flagged') || /\be005\b/i.test(raw)) return 'video_reference_moderation_block';
   if (lower.includes('moderation') || lower.includes('safety') || lower.includes('policy') || lower.includes('nsfw')) return 'video_reference_moderation_block';
-  if (lower.includes('unknown field') || lower.includes('schema') || lower.includes('validation') || lower.includes('invalid input') || lower.includes('reference_videos')) return 'video_reference_input_schema';
+  if (lower.includes('unknown field') || lower.includes('unrecognized field') || lower.includes('unsupported field') || lower.includes('schema')) return 'video_reference_input_schema';
+  if (/\be006\b/i.test(raw) || lower.includes('the input was invalid') || lower.includes('different inputs') || lower.includes('invalid input')) return 'video_reference_input_invalid';
+  if (lower.includes('validation') || lower.includes('reference_videos') || lower.includes('video_urls')) return 'video_reference_input_schema';
   if (lower.includes('403') || lower.includes('404') || lower.includes('asset') || lower.includes('download') || lower.includes('access')) return 'verification_video_asset_access';
   const normalizedStatus = (providerStatus ?? '').toLowerCase();
   if (normalizedStatus === 'failed' || normalizedStatus === 'canceled') {
@@ -466,6 +513,13 @@ function videoReferenceRetryLaterInfo() {
 }
 
 function videoReferenceRouteStatusForFailure(category: string) {
+  if (
+    category === 'video_reference_input_invalid' ||
+    category === 'verification_video_preflight_failed' ||
+    category === 'video_reference_input_schema'
+  ) {
+    return 'input_needs_repair';
+  }
   return isVideoReferenceTransientUnavailable(category) ? 'transient_unavailable' : category;
 }
 
@@ -483,11 +537,23 @@ function imageTokens(referenceCount: number) {
   return Array.from({ length: referenceCount }, (_item, index) => `[Image${index + 1}]`);
 }
 
+function videoTokens(referenceCount: number, style: 'bracket' | 'at' = 'bracket') {
+  return Array.from({ length: referenceCount }, (_item, index) => (
+    style === 'at' ? `@Video${index + 1}` : `[Video${index + 1}]`
+  ));
+}
+
 export function buildReferenceImagePrompt(referenceImages: SeedanceReferenceImage[]) {
   const tokens = imageTokens(referenceImages.length);
   if (!tokens.length) return SEEDANCE_CANARY_PROMPT;
   const tokenText = tokens.join(', ');
   return `The character from ${tokenText} walks slowly through a peaceful sunlit garden, natural movement, fully clothed, soft storybook cinematic style, gentle camera motion.`;
+}
+
+export function buildSeedanceVideoReferencePrompt(variant: SeedanceVideoReferenceCanaryVariant = 'reference_videos_bracket') {
+  const spec = SEEDANCE_VIDEO_REFERENCE_VARIANT_SPECS[variant] ?? SEEDANCE_VIDEO_REFERENCE_VARIANT_SPECS.reference_videos_bracket;
+  if (spec.promptToken === '[Video1]') return SEEDANCE_VIDEO_REFERENCE_PROMPT;
+  return `The verified self character from ${spec.promptToken} walks slowly through a peaceful sunlit garden, natural movement, fully clothed, soft storybook cinematic style, gentle camera motion.`;
 }
 
 function promptContainsAllImageTokens(prompt: string, referenceCount: number) {
@@ -497,8 +563,10 @@ function promptContainsAllImageTokens(prompt: string, referenceCount: number) {
 
 function promptContainsAllVideoTokens(prompt: string, referenceCount: number) {
   if (referenceCount <= 0) return false;
-  return Array.from({ length: referenceCount }, (_item, index) => `[Video${index + 1}]`)
-    .every((token) => prompt.includes(token));
+  const bracketTokens = videoTokens(referenceCount, 'bracket');
+  const atTokens = videoTokens(referenceCount, 'at');
+  return bracketTokens.every((token) => prompt.includes(token)) ||
+    atTokens.every((token) => prompt.includes(token));
 }
 
 export function buildSeedanceCanaryPayload(input: {
@@ -519,18 +587,27 @@ export function buildSeedanceCanaryPayload(input: {
   return payload;
 }
 
-export function buildSeedanceVerificationVideoCanaryPayload(referenceVideoUrl = VERIFICATION_VIDEO_PAYLOAD_PLACEHOLDER_URL): SeedanceProviderPayload {
+export function buildSeedanceVerificationVideoCanaryPayload(
+  referenceVideoUrl = VERIFICATION_VIDEO_PAYLOAD_PLACEHOLDER_URL,
+  variant: SeedanceVideoReferenceCanaryVariant = 'reference_videos_bracket',
+): SeedanceProviderPayload {
+  const spec = SEEDANCE_VIDEO_REFERENCE_VARIANT_SPECS[variant] ?? SEEDANCE_VIDEO_REFERENCE_VARIANT_SPECS.reference_videos_bracket;
   const sanitizer = sanitizeProviderPrompt({
-    prompt: SEEDANCE_VIDEO_REFERENCE_PROMPT,
+    prompt: buildSeedanceVideoReferencePrompt(variant),
   });
-  return {
+  const payload: SeedanceProviderPayload = {
     prompt: sanitizer.prompt,
     duration: SEEDANCE_CANARY_DURATION_SECONDS,
     aspect_ratio: SEEDANCE_CANARY_ASPECT_RATIO,
     resolution: SEEDANCE_CANARY_RESOLUTION,
     generate_audio: SEEDANCE_CANARY_GENERATE_AUDIO,
-    reference_videos: [referenceVideoUrl],
   };
+  if (spec.fieldName === 'video_urls') {
+    payload.video_urls = [referenceVideoUrl];
+  } else {
+    payload.reference_videos = [referenceVideoUrl];
+  }
+  return payload;
 }
 
 export function selectPrimaryCanaryReference(references: SeedanceReferenceImage[]) {
@@ -917,7 +994,15 @@ function verificationVideoDiagnostics(input: {
   signedUrlGenerated?: boolean;
   access?: VerificationVideoAccessDiagnostics | null;
   source?: CanaryVerificationVideoDiagnostics['source'];
+  variant?: SeedanceVideoReferenceCanaryVariant | null;
+  normalization?: VerificationVideoNormalizationDiagnostics | null;
 }): CanaryVerificationVideoDiagnostics {
+  const spec = input.variant
+    ? SEEDANCE_VIDEO_REFERENCE_VARIANT_SPECS[input.variant]
+    : null;
+  const selectedPreflight = input.normalization?.normalizedAssetUsed
+    ? input.normalization.normalized ?? input.normalization.original
+    : input.normalization?.original ?? null;
   return {
     selected: Boolean(input.objectPath),
     bucket: input.bucket ?? null,
@@ -930,6 +1015,15 @@ function verificationVideoDiagnostics(input: {
     accessStatus: input.access?.status ?? null,
     accessError: input.access?.error ?? null,
     source: input.source ?? 'none',
+    variant: input.variant ?? null,
+    referenceFieldName: spec?.fieldName ?? null,
+    promptTokenStyle: spec?.promptTokenStyle ?? null,
+    normalizedAssetUsed: input.normalization?.normalizedAssetUsed ?? null,
+    normalizedStatus: input.normalization?.normalizedStatus ?? null,
+    preflight: input.normalization?.original ?? null,
+    normalizedPreflight: input.normalization?.normalized ?? null,
+    preflightOk: selectedPreflight?.preflightOk ?? null,
+    preflightFailureReason: input.normalization?.failureReason ?? selectedPreflight?.preflightFailureReason ?? null,
   };
 }
 
@@ -1073,13 +1167,17 @@ async function insertCanaryJob(input: {
   referenceImages?: SeedanceReferenceImage[];
   selectedReference?: CanaryReferenceDiagnostics | null;
   verificationVideo?: CanaryVerificationVideoRuntime | null;
+  videoReferenceVariant?: SeedanceVideoReferenceCanaryVariant;
   saveAsDraft?: boolean;
 }) {
   const references = input.kind === 'reference'
     ? selectPrimaryCanaryReference(input.referenceImages ?? [])
     : [];
   const providerInput = input.kind === 'video_reference'
-    ? buildSeedanceVerificationVideoCanaryPayload()
+    ? buildSeedanceVerificationVideoCanaryPayload(
+        VERIFICATION_VIDEO_PAYLOAD_PLACEHOLDER_URL,
+        input.videoReferenceVariant ?? 'reference_videos_bracket',
+      )
     : buildSeedanceCanaryPayload({ referenceImages: references });
   const validation = validateSeedanceProviderPayload(providerInput);
   if (!validation.ok) {
@@ -1087,7 +1185,7 @@ async function insertCanaryJob(input: {
   }
   const userId = isUuidLike(input.userId) ? input.userId as string : CANARY_USER_ID;
   const canaryVariant: CanaryVariant = input.kind === 'video_reference'
-    ? 'verification_video_reference'
+    ? input.videoReferenceVariant ?? 'reference_videos_bracket'
     : references.length
       ? 'reference_images'
       : 'text_only';
@@ -1243,10 +1341,17 @@ async function runtimeCanaryProviderInput(metadata: CanaryMetadata): Promise<See
       code: 'verification_video_asset_access',
     });
   }
-  return {
+  const providerInput: SeedanceProviderPayload = {
     ...metadata.providerInput,
-    reference_videos: [signedUrl],
   };
+  if (metadata.providerInput.video_urls?.length) {
+    delete providerInput.reference_videos;
+    providerInput.video_urls = [signedUrl];
+  } else {
+    delete providerInput.video_urls;
+    providerInput.reference_videos = [signedUrl];
+  }
+  return providerInput;
 }
 
 function fingerprint(value: string) {
@@ -1542,7 +1647,7 @@ async function processSeedanceCanaryJob(jobId: string, options: { pollUntilTermi
             await markSeedanceVideoReferenceCanaryResult({
               userId: metadata.userId,
               characterId: metadata.characterId,
-              routeStatus: 'video_reference_input_schema',
+              routeStatus: videoReferenceRouteStatusForFailure('video_reference_input_schema'),
               provider: 'seedance',
             });
           }
@@ -2255,7 +2360,9 @@ async function resolveSelfVerificationVideoRuntime(input: {
 export async function startSeedanceVideoReferenceCanary(input: {
   userId?: string | null;
   saveAsDraft?: boolean;
+  variant?: SeedanceVideoReferenceCanaryVariant;
 }) {
+  const variant = input.variant ?? 'reference_videos_bracket';
   const resolved = await resolveSelfVerificationVideoRuntime({
     userId: input.userId,
     characterId: null,
@@ -2296,15 +2403,82 @@ export async function startSeedanceVideoReferenceCanary(input: {
     };
   }
 
+  const prepared = await prepareVerificationVideoForProvider({
+    bucket: resolved.runtime.bucket,
+    objectPath: resolved.runtime.objectPath,
+    userId: input.userId,
+  });
+  let selectedRuntime: CanaryVerificationVideoRuntime = prepared.ok
+    ? {
+        bucket: prepared.bucket,
+        objectPath: prepared.objectPath,
+        diagnostics: verificationVideoDiagnostics({
+          bucket: prepared.bucket,
+          objectPath: prepared.objectPath,
+          source: 'verification_video_asset_id',
+          variant,
+          normalization: prepared.diagnostics,
+        }),
+      }
+    : {
+        ...resolved.runtime,
+        diagnostics: verificationVideoDiagnostics({
+          bucket: resolved.runtime.bucket,
+          objectPath: resolved.runtime.objectPath,
+          source: resolved.runtime.diagnostics.source,
+          variant,
+          normalization: prepared.diagnostics,
+        }),
+      };
+
+  if (prepared.ok === false) {
+    const job = await insertCanaryJob({
+      kind: 'video_reference',
+      saveAsDraft: input.saveAsDraft,
+      userId: input.userId,
+      characterId: 'creator-self',
+      verificationVideo: selectedRuntime,
+      videoReferenceVariant: variant,
+    });
+    if (isUuidLike(input.userId)) {
+      await markSeedanceVideoReferenceCanaryResult({
+        userId: input.userId,
+        characterId: null,
+        routeStatus: videoReferenceRouteStatusForFailure(prepared.errorCategory),
+        provider: 'seedance',
+      });
+    }
+    const failed = await updateCanaryJob(job.id, {
+      status: 'failed',
+      providerStatus: prepared.errorCategory,
+      errorMessage: prepared.message,
+      errorCategory: prepared.errorCategory,
+    });
+    return formatSeedanceCanaryStatus(failed ?? job);
+  }
+
+  const signedSelectedUrl = await signedVerificationVideoUrl(selectedRuntime);
+  const selectedAccess = await verifyVerificationVideoAssetAccess(signedSelectedUrl, { signedUrlGenerated: true });
+  selectedRuntime.diagnostics = verificationVideoDiagnostics({
+    bucket: selectedRuntime.bucket,
+    objectPath: selectedRuntime.objectPath,
+    source: 'verification_video_asset_id',
+    variant,
+    signedUrlGenerated: true,
+    access: selectedAccess,
+    normalization: prepared.diagnostics,
+  });
+
   const job = await insertCanaryJob({
     kind: 'video_reference',
     saveAsDraft: input.saveAsDraft,
     userId: input.userId,
     characterId: 'creator-self',
-    verificationVideo: resolved.runtime,
+    verificationVideo: selectedRuntime,
+    videoReferenceVariant: variant,
   });
 
-  if (!resolved.access.reachable) {
+  if (!selectedAccess.reachable) {
     await persistReferenceRouteResult({
       userId: input.userId,
       characterId: 'creator-self',
@@ -2312,14 +2486,15 @@ export async function startSeedanceVideoReferenceCanary(input: {
       referenceLabel: 'Self verification video',
       provider: 'seedance-fast',
       providerModel: SEEDANCE_FAST_MODEL,
-      variant: 'verification_video_reference',
+      variant,
       succeeded: false,
       failureCategory: 'verification_video_asset_access',
       providerErrorCategory: 'verification_video_asset_access',
       outputUrlPresent: false,
       notes: {
         selectedVerificationVideoReachable: false,
-        selectedVerificationVideoContentType: resolved.runtime.diagnostics.contentType,
+        selectedVerificationVideoContentType: selectedRuntime.diagnostics.contentType,
+        normalizedAssetUsed: selectedRuntime.diagnostics.normalizedAssetUsed,
       },
     });
     if (isUuidLike(input.userId)) {
@@ -2333,7 +2508,7 @@ export async function startSeedanceVideoReferenceCanary(input: {
     const failed = await updateCanaryJob(job.id, {
       status: 'failed',
       providerStatus: 'verification_video_asset_access',
-      errorMessage: verificationVideoAssetErrorMessage(resolved.access),
+      errorMessage: verificationVideoAssetErrorMessage(selectedAccess),
       errorCategory: 'verification_video_asset_access',
     });
     return formatSeedanceCanaryStatus(failed ?? job);
@@ -2388,6 +2563,7 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
     if (status === 'queued') return 'create_provider_prediction';
     if (status === 'failed') {
       if (job.errorCategory === 'video_reference_provider_unavailable') return 'retry_later';
+      if (job.errorCategory === 'video_reference_input_invalid' || job.errorCategory === 'verification_video_preflight_failed') return 'normalize_video_or_try_schema_variant';
       if (job.errorCategory === 'input_schema_invalid' || job.errorCategory === 'video_reference_input_schema') return 'fix_provider_payload_schema';
       if (job.errorCategory === 'reference_asset_access' || job.errorCategory === 'verification_video_asset_access') return 'fix_reference_asset_access';
       if (
@@ -2411,9 +2587,13 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
     ? 'canary_succeeded'
     : job.errorCategory === 'video_reference_provider_unavailable'
       ? 'retry_later'
+      : job.errorCategory === 'video_reference_input_invalid' || job.errorCategory === 'verification_video_preflight_failed'
+        ? 'input_needs_repair'
       : status;
   const recommendedNextAction = job.errorCategory === 'video_reference_provider_unavailable'
     ? 'Retry Seedance video reference canary later'
+    : job.errorCategory === 'video_reference_input_invalid' || job.errorCategory === 'verification_video_preflight_failed'
+      ? 'Normalize verification video or try a schema variant'
     : nextAction;
 
   return {
@@ -2451,13 +2631,25 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
       ? promptContainsAllImageTokens(metadata.providerInput.prompt, metadata.providerInput.reference_images?.length ?? 0)
       : false,
     promptContainsVideoToken: metadata?.providerInput
-      ? promptContainsAllVideoTokens(metadata.providerInput.prompt, metadata.providerInput.reference_videos?.length ?? 0)
+      ? promptContainsAllVideoTokens(
+          metadata.providerInput.prompt,
+          metadata.providerInput.reference_videos?.length ?? metadata.providerInput.video_urls?.length ?? 0,
+        )
       : false,
     referenceFieldName: metadata?.providerInput?.reference_videos?.length
       ? 'reference_videos'
-      : metadata?.providerInput?.reference_images?.length
-        ? 'reference_images'
-        : 'omitted',
+      : metadata?.providerInput?.video_urls?.length
+        ? 'video_urls'
+        : metadata?.providerInput?.reference_images?.length
+          ? 'reference_images'
+          : 'omitted',
+    promptTokenStyle: metadata?.kind === 'video_reference'
+      ? SEEDANCE_VIDEO_REFERENCE_VARIANT_SPECS[
+          (metadata.canaryVariant as SeedanceVideoReferenceCanaryVariant) in SEEDANCE_VIDEO_REFERENCE_VARIANT_SPECS
+            ? metadata.canaryVariant as SeedanceVideoReferenceCanaryVariant
+            : 'reference_videos_bracket'
+        ].promptTokenStyle
+      : null,
     verificationVideoPresent: metadata?.kind === 'video_reference' ? true : undefined,
     verificationConsentPresent: metadata?.kind === 'video_reference' ? true : undefined,
     referenceAssetReachable: metadata?.selectedReference?.reachable ?? null,
@@ -2472,6 +2664,10 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
         ? 'Rate limited. Waiting before retrying the same canary job.'
         : job.errorCategory === 'video_reference_provider_unavailable'
           ? 'Seedance video reference route reached the provider, but the provider was temporarily unavailable.'
+        : job.errorCategory === 'video_reference_input_invalid'
+          ? 'Seedance reached the provider, but the video-reference input needs repair or a schema variant.'
+        : job.errorCategory === 'verification_video_preflight_failed'
+          ? 'Verification video needs a provider-safe format before Seedance can test it.'
         : status === 'failed'
           ? 'Seedance canary failed before a verified video URL was returned.'
           : 'Seedance canary is running.',
@@ -2513,12 +2709,90 @@ function payloadReferenceFieldShape(payload: SeedanceProviderPayload | null) {
       ? `reference_videos array<string>(length=${payload.reference_videos.length})`
       : `reference_videos ${typeof payload.reference_videos}`;
   }
+  if ('video_urls' in payload) {
+    return Array.isArray(payload.video_urls)
+      ? `video_urls array<string>(length=${payload.video_urls.length})`
+      : `video_urls ${typeof payload.video_urls}`;
+  }
   if ('reference_images' in payload) {
     return Array.isArray(payload.reference_images)
       ? `reference_images array<string>(length=${payload.reference_images.length})`
       : `reference_images ${typeof payload.reference_images}`;
   }
   return 'omitted';
+}
+
+function schemaTextHasField(schema: unknown, field: string) {
+  return new RegExp(`"${field}"`).test(JSON.stringify(schema ?? {}));
+}
+
+export async function buildSeedanceInputSchemaDiagnostics() {
+  const localSupportedInputFields = [
+    'prompt',
+    'duration',
+    'aspect_ratio',
+    'resolution',
+    'generate_audio',
+    'reference_images',
+    'reference_videos',
+    'video_urls',
+  ];
+  let fetchedSchema: unknown = null;
+  let providerSchemaFetchAvailable = false;
+  let providerSchemaFetchError: string | null = null;
+
+  if (env.REPLICATE_API_TOKEN) {
+    try {
+      const response = await fetch(`https://api.replicate.com/v1/models/${SEEDANCE_FAST_MODEL}`, {
+        headers: {
+          authorization: `Bearer ${env.REPLICATE_API_TOKEN}`,
+          accept: 'application/json',
+        },
+      });
+      providerSchemaFetchAvailable = response.ok;
+      if (response.ok) {
+        const body = await response.json() as Record<string, unknown>;
+        fetchedSchema = body.latest_version ?? body;
+      } else {
+        providerSchemaFetchError = `Replicate schema fetch returned HTTP ${response.status}.`;
+      }
+    } catch (error) {
+      providerSchemaFetchError = redactMessage(errorText(error));
+    }
+  }
+
+  const fields = {
+    reference_videos: localSupportedInputFields.includes('reference_videos') || schemaTextHasField(fetchedSchema, 'reference_videos'),
+    video_urls: localSupportedInputFields.includes('video_urls') || schemaTextHasField(fetchedSchema, 'video_urls'),
+    image_urls: schemaTextHasField(fetchedSchema, 'image_urls'),
+    reference_images: localSupportedInputFields.includes('reference_images') || schemaTextHasField(fetchedSchema, 'reference_images'),
+    audio_urls: schemaTextHasField(fetchedSchema, 'audio_urls'),
+  };
+  const variants = Object.entries(SEEDANCE_VIDEO_REFERENCE_VARIANT_SPECS).map(([id, spec]) => ({
+    id,
+    fieldName: spec.fieldName,
+    promptTokenStyle: spec.promptTokenStyle,
+    promptToken: spec.promptToken,
+    enabled: spec.enabledByLocalReplicateMapping,
+    documentationSource: spec.documentationSource,
+  }));
+  const recommendedVariant = fields.reference_videos
+    ? 'reference_videos_bracket'
+    : fields.video_urls
+      ? 'video_urls_at'
+      : null;
+
+  return {
+    ok: true,
+    modelId: SEEDANCE_FAST_MODEL,
+    knownSupportedInputFields: localSupportedInputFields,
+    providerSchemaFetchAvailable,
+    providerSchemaFetchError,
+    fields,
+    variants,
+    recommendedVariant,
+    privateUrlsExposed: false,
+  };
 }
 
 function hasManualOverrideText(value: unknown) {
@@ -2693,8 +2967,12 @@ export async function buildRenderPathCompareDiagnostics() {
       provider: 'seedance-fast',
       providerModel: SEEDANCE_FAST_MODEL,
       references: true,
-      referenceCount: videoReferencePayload.reference_videos?.length ?? 0,
-      referenceFieldName: videoReferencePayload.reference_videos?.length ? 'reference_videos' : 'omitted',
+      referenceCount: videoReferencePayload.reference_videos?.length ?? videoReferencePayload.video_urls?.length ?? 0,
+      referenceFieldName: videoReferencePayload.reference_videos?.length
+        ? 'reference_videos'
+        : videoReferencePayload.video_urls?.length
+          ? 'video_urls'
+          : 'omitted',
       referenceAssetReachable: videoReferenceCanaryMetadata?.selectedVerificationVideo?.reachable ?? null,
       selectedReferenceContentType: videoReferenceCanaryMetadata?.selectedVerificationVideo?.contentType ?? null,
       duration: videoReferencePayload.duration,
@@ -2702,7 +2980,10 @@ export async function buildRenderPathCompareDiagnostics() {
       aspect_ratio: videoReferencePayload.aspect_ratio,
       generate_audio: videoReferencePayload.generate_audio ?? 'omitted',
       promptLength: videoReferencePayload.prompt.length,
-      promptContainsVideoToken: promptContainsAllVideoTokens(videoReferencePayload.prompt, videoReferencePayload.reference_videos?.length ?? 0),
+      promptContainsVideoToken: promptContainsAllVideoTokens(
+        videoReferencePayload.prompt,
+        videoReferencePayload.reference_videos?.length ?? videoReferencePayload.video_urls?.length ?? 0,
+      ),
       promptRiskTerms: promptRiskTerms(videoReferencePayload.prompt),
       displayNamePresent: false,
       storyMemoryIncluded: false,
@@ -2711,6 +2992,9 @@ export async function buildRenderPathCompareDiagnostics() {
       externalUrlsIncluded: false,
       referenceFieldShape: payloadReferenceFieldShape(videoReferencePayload),
       selectedVerificationVideo: videoReferenceCanaryMetadata?.selectedVerificationVideo ?? null,
+      preflightMetadata: videoReferenceCanaryMetadata?.selectedVerificationVideo?.preflight ?? null,
+      normalizedPreflightMetadata: videoReferenceCanaryMetadata?.selectedVerificationVideo?.normalizedPreflight ?? null,
+      normalizedAssetUsed: videoReferenceCanaryMetadata?.selectedVerificationVideo?.normalizedAssetUsed ?? null,
       providerErrorSummary: videoReferenceCanaryMetadata?.providerFailure?.providerErrorSummary ?? redactMessage(videoReferenceCanaryRow?.errorMessage ?? null),
       canaryVariant: videoReferenceCanaryMetadata?.canaryVariant ?? null,
       payloadFields: Object.keys(videoReferencePayload),

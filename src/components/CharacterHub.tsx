@@ -133,6 +133,7 @@ function latestContinuityConfidence(character: CharacterProfile) {
 function providerIdentityStatusLabel(character: CharacterProfile) {
   if (character.videoReferenceRouteStatus === 'canary_succeeded') return 'Video likeness ready';
   if (hasEffectiveSelfVerificationVideo(character) && character.videoReferenceRouteStatus === 'retry_later') return 'Provider temporarily unavailable';
+  if (hasEffectiveSelfVerificationVideo(character) && character.videoReferenceRouteStatus === 'input_needs_repair') return 'Needs video prep';
   if (hasEffectiveSelfVerificationVideo(character) && character.videoReferenceRouteStatus === 'configured_not_implemented') return 'Video route needs canary';
   if (hasEffectiveSelfVerificationVideo(character)) return 'Verification video saved';
   if (character.providerCharacterStatus === 'ready' && character.likenessProviderStatus === 'canary_succeeded') return 'Exact likeness ready';
@@ -151,6 +152,9 @@ function providerIdentityStatusCopy(character: CharacterProfile) {
   }
   if (hasEffectiveSelfVerificationVideo(character) && character.videoReferenceRouteStatus === 'retry_later') {
     return 'Provider temporarily unavailable. Try this canary again later.';
+  }
+  if (hasEffectiveSelfVerificationVideo(character) && character.videoReferenceRouteStatus === 'input_needs_repair') {
+    return 'Verification video needs a provider-safe format or schema variant.';
   }
   if (hasEffectiveSelfVerificationVideo(character) && character.videoReferenceRouteStatus === 'configured_not_implemented') {
     return 'Self verification video is saved privately; run the Seedance video-reference canary before Create can use it.';
@@ -235,6 +239,7 @@ function selfVerificationVideoLabStatus(diagnostics: ApiHealthDiagnostics | null
   }
 
   const status = providerLabStatus(diagnostics, 'seedance_video_reference');
+  if (status === 'input needs repair') return 'Prepare verification video';
   return status === 'not tested' ? 'Ready to test' : status;
 }
 

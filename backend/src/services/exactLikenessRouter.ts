@@ -201,6 +201,8 @@ export function chooseExactLikenessRoute(input: {
     providerRegistry: registry,
     recommendedNextAction: seedanceVideoReference?.canaryStatus === 'retry_later'
       ? 'Retry Seedance video reference canary later.'
+      : seedanceVideoReference?.canaryStatus === 'input_needs_repair'
+        ? 'Normalize verification video or try a schema variant.'
       : blocked
       ? 'Continue using Seedance text-first and configure an alternate likeness provider.'
       : seedanceVideoReference?.recommendedNextAction ?? setup[0] ?? 'Run a canary for a configured exact likeness provider.',

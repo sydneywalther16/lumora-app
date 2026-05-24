@@ -83,6 +83,7 @@ export function selfVerificationVideoStatusLabel(character: SelfCharacterSetupSt
     return 'Blocked';
   }
   if (routeStatus === 'configured_not_implemented') return 'Ready for canary';
+  if (routeStatus === 'input_needs_repair') return 'Needs video prep';
   if (routeStatus === 'failed') return 'Needs replacement';
   return 'Uploaded';
 }
@@ -106,6 +107,10 @@ export function createSelfCharacterStatusCopy(input: {
   const character = input.character;
   if (character?.videoReferenceRouteStatus === 'blocked' || character?.videoReferenceRouteStatus === 'reference_moderation_block') {
     return 'Video likeness route blocked. Using soft self guidance.';
+  }
+
+  if (character?.videoReferenceRouteStatus === 'input_needs_repair') {
+    return 'Verification video needs a provider-safe format or schema variant.';
   }
 
   if (hasEffectiveSelfVerificationVideo(character)) {

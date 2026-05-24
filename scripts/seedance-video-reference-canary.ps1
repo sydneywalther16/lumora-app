@@ -1,6 +1,8 @@
 param(
   [string]$ApiBaseUrl = "http://localhost:8787",
   [string]$UserId = "",
+  [ValidateSet("reference_videos_bracket", "reference_videos_at", "video_urls_at")]
+  [string]$Variant = "reference_videos_bracket",
   [int]$TimeoutSeconds = 180
 )
 
@@ -18,6 +20,20 @@ function Print-CanaryStatus {
   Write-Host "verification video present: $($Result.verificationVideoPresent)"
   Write-Host "verification consent present: $($Result.verificationConsentPresent)"
   Write-Host "provider prediction created: $($Result.providerPredictionCreated)"
+  if ($Result.canaryVariant) { Write-Host "variant: $($Result.canaryVariant)" }
+  if ($Result.referenceFieldName) { Write-Host "field name: $($Result.referenceFieldName)" }
+  if ($Result.promptTokenStyle) { Write-Host "prompt token style: $($Result.promptTokenStyle)" }
+  if ($Result.selectedVerificationVideo) {
+    Write-Host "normalized asset used: $($Result.selectedVerificationVideo.normalizedAssetUsed)"
+    if ($Result.selectedVerificationVideo.preflight) {
+      $meta = $Result.selectedVerificationVideo.preflight
+      Write-Host ("preflight: duration={0}s size={1} width={2} height={3} container={4} videoCodec={5} audioCodec={6} ok={7} reason={8}" -f $meta.durationSeconds, $meta.fileSizeBytes, $meta.width, $meta.height, $meta.container, $meta.videoCodec, $meta.audioCodec, $meta.preflightOk, $meta.preflightFailureReason)
+    }
+    if ($Result.selectedVerificationVideo.normalizedPreflight) {
+      $meta = $Result.selectedVerificationVideo.normalizedPreflight
+      Write-Host ("normalized preflight: duration={0}s size={1} width={2} height={3} container={4} videoCodec={5} audioCodec={6} ok={7} reason={8}" -f $meta.durationSeconds, $meta.fileSizeBytes, $meta.width, $meta.height, $meta.container, $meta.videoCodec, $meta.audioCodec, $meta.preflightOk, $meta.preflightFailureReason)
+    }
+  }
   Write-Host "provider status: $($Result.providerStatus)"
   $outputPresent = $Result.outputPresent
   if ($null -eq $outputPresent) { $outputPresent = $Result.outputUrlPresent }
@@ -35,6 +51,13 @@ function Print-CanaryStatus {
     Write-Host "Provider was temporarily unavailable."
     Write-Host "Wait and retry later."
     Write-Host "Transient provider outage. Do not rerun immediately unless you want to spend another provider attempt."
+  }
+  if ($failureCategory -eq "video_reference_input_invalid") {
+    Write-Host "Provider reached Seedance, but the video-reference input was invalid."
+    Write-Host "Do not retry the same payload blindly. Normalize the video or try one schema variant at a time."
+  }
+  if ($failureCategory -eq "verification_video_preflight_failed") {
+    Write-Host "Verification video failed local preflight. Prepare a provider-safe MP4 before spending another attempt."
   }
   if ($Result.retryAvailableAt) { Write-Host "retry available at: $($Result.retryAvailableAt)" }
   if ($Result.providerErrorSummary) { Write-Host "provider error summary: $($Result.providerErrorSummary)" }
@@ -74,10 +97,12 @@ $startPath = "/api/diagnostics/seedance-video-reference-canary/self"
 $startUrl = Join-ApiUrl $ApiBaseUrl $startPath
 $body = @{}
 if (-not [string]::IsNullOrWhiteSpace($UserId)) { $body.userId = $UserId }
+$body.variant = $Variant
 
 Write-Host "Starting Seedance video-reference canary..."
 Write-Host "API: $ApiBaseUrl"
 Write-Host "Route: $startPath"
+Write-Host "Variant: $Variant"
 Write-Host "Warning: this may consume provider credits."
 
 try {

@@ -1265,7 +1265,7 @@ export const api = {
       timeoutMs: 60_000,
     }),
 
-  startSeedanceVideoReferenceCanary: (payload: { userId?: string | null } = {}) =>
+  startSeedanceVideoReferenceCanary: (payload: { userId?: string | null; variant?: 'reference_videos_bracket' | 'reference_videos_at' | 'video_urls_at' } = {}) =>
     request<ExactLikenessCanaryResponse>('/api/diagnostics/seedance-video-reference-canary/self', {
       method: 'POST',
       body: JSON.stringify(payload),

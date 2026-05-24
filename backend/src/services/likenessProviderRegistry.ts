@@ -166,6 +166,8 @@ export function buildLikenessProviderRegistry(input: {
         ? 'Use Seedance verification video reference route.'
         : videoReferenceStatus === 'retry_later'
           ? 'Retry Seedance video reference canary later.'
+        : videoReferenceStatus === 'input_needs_repair'
+          ? 'Normalize verification video or try a schema variant.'
         : input.selfVerificationVideo?.selfVerificationVideoPresent
           ? input.selfVerificationVideo.recommendedNextAction
           : 'Record self verification video before testing video references.',

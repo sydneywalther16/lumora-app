@@ -39,6 +39,7 @@ import {
   startSeedanceReferenceCanary,
   startSeedanceSelfReferenceCanary,
   startSeedanceVideoReferenceCanary,
+  buildSeedanceInputSchemaDiagnostics,
 } from '../services/seedanceCanary';
 import {
   getSelfVerificationVideoDiagnostics,
@@ -53,6 +54,9 @@ export const healthRouter = Router();
 const canarySchema = z.object({
   userId: z.string().optional().nullable(),
   saveAsDraft: z.boolean().optional().default(false),
+});
+const videoReferenceCanarySchema = canarySchema.extend({
+  variant: z.enum(['reference_videos_bracket', 'reference_videos_at', 'video_urls_at']).optional().default('reference_videos_bracket'),
 });
 const referenceCanarySchema = canarySchema.extend({
   characterId: z.string().min(1),
@@ -74,6 +78,7 @@ const canaryRouteInventory = {
   referenceCanaryRouteMounted: true,
   referenceMatrixRouteMounted: true,
   videoReferenceCanaryRouteMounted: true,
+  seedanceInputSchemaRouteMounted: true,
   soraCharacterCanaryRouteMounted: true,
   exactLikenessCanaryRouteMounted: true,
   runwayLikenessCanaryRouteMounted: true,
@@ -233,6 +238,7 @@ healthRouter.get('/api/diagnostics/canary-routes', (_req, res) => {
       referenceCanary: 'POST /api/diagnostics/seedance-reference-canary/self',
       referenceMatrix: 'POST /api/diagnostics/seedance-reference-matrix/self',
       videoReferenceCanary: 'POST /api/diagnostics/seedance-video-reference-canary/self',
+      seedanceInputSchema: 'GET /api/diagnostics/seedance-input-schema',
       soraCharacterCanary: 'POST /api/diagnostics/sora-character-canary/self',
       exactLikenessCanary: 'POST /api/diagnostics/exact-likeness-canary/self',
       runwayLikenessCanary: 'POST /api/diagnostics/runway-likeness-canary/self',
@@ -242,6 +248,17 @@ healthRouter.get('/api/diagnostics/canary-routes', (_req, res) => {
     },
     ...canaryRouteInventory,
   });
+});
+
+healthRouter.get('/api/diagnostics/seedance-input-schema', async (_req, res) => {
+  if (!env.ENABLE_RENDER_PROBE) {
+    res.status(403).json({
+      error: 'Seedance input schema diagnostics disabled. Set ENABLE_RENDER_PROBE=true to inspect provider schema mapping.',
+    });
+    return;
+  }
+
+  res.json(await buildSeedanceInputSchemaDiagnostics());
 });
 
 healthRouter.get('/api/diagnostics/self-character-ownership', requireAuth, async (req: AuthedRequest, res) => {
@@ -531,11 +548,12 @@ healthRouter.post('/api/diagnostics/seedance-video-reference-canary/self', async
     return;
   }
 
-  const payload = canarySchema.parse(req.body ?? {});
+  const payload = videoReferenceCanarySchema.parse(req.body ?? {});
   const userId = payload.userId ?? req.header('x-lumora-user-id') ?? null;
   const status = await startSeedanceVideoReferenceCanary({
     userId,
     saveAsDraft: payload.saveAsDraft,
+    variant: payload.variant,
   });
   res.status('ok' in status && status.ok === false ? 200 : 202).json({
     ...status,

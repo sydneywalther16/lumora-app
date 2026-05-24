@@ -106,11 +106,15 @@ assert.equal(
 );
 assert.equal(
   createSelfCharacterStatusCopy({ character: { verificationVideoPresent: true }, exactRouteReady: false }),
-  'Self verification video saved. Exact likeness route still needs a provider canary.',
+  'Self Verification Video saved. Exact likeness route still needs a canary.',
 );
 assert.equal(
   createSelfCharacterStatusCopy({ character: oldSelfCaptureCharacter, exactRouteReady: false }),
-  'Self verification video saved. Exact likeness route still needs a provider canary.',
+  'Self Verification Video saved. Exact likeness route still needs a canary.',
+);
+assert.equal(
+  createSelfCharacterStatusCopy({ character: { verificationVideoPresent: true, videoReferenceRouteStatus: 'input_needs_repair' }, exactRouteReady: false }),
+  'Verification video needs a provider-safe format or schema variant.',
 );
 assert.equal(
   createSelfCharacterStatusCopy({ character: { verificationVideoPresent: true }, exactRouteReady: true }),

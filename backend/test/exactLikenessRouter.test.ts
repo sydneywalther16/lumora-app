@@ -278,6 +278,38 @@ try {
   assert.equal(videoReferenceRetryLater.exactLikeness, false);
   assert.equal(videoReferenceRetryLater.recommendedNextAction, 'Retry Seedance video reference canary later.');
 
+  const videoReferenceInputNeedsRepairRegistry = buildLikenessProviderRegistry({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: blockedReferenceSummary,
+    selfVerificationVideo: {
+      schemaReady: true,
+      oldSelfCapturePresent: false,
+      selfVerificationVideoPresent: true,
+      selfVerificationConsentPresent: true,
+      verificationAudioPresent: true,
+      verificationStatus: 'uploaded',
+      verificationPrompt: 'Look forward and turn.',
+      verificationLastTestedAt: '2026-05-23T00:00:00.000Z',
+      seedanceVideoReferenceCanaryStatus: 'input_needs_repair',
+      seedanceVideoReferenceLastFailureCategory: 'video_reference_input_invalid',
+      seedanceVideoReferenceProviderStatus: 'input_needs_repair',
+      videoReferenceProvider: 'seedance',
+      verificationVideoUrlRedacted: '[private-verification-video-present]',
+      migratedFromOldSelfCapture: false,
+      recommendedNextAction: 'Normalize verification video or try a schema variant.',
+    },
+  });
+  const videoReferenceInputNeedsRepair = chooseExactLikenessRoute({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: blockedReferenceSummary,
+    providerRegistry: videoReferenceInputNeedsRepairRegistry,
+  });
+  assert.equal(videoReferenceInputNeedsRepair.route, 'seedance_text_guidance');
+  assert.equal(videoReferenceInputNeedsRepair.exactLikeness, false);
+  assert.equal(videoReferenceInputNeedsRepair.recommendedNextAction, 'Normalize verification video or try a schema variant.');
+
   console.log('exactLikenessRouter unit tests passed');
 } finally {
   restoreEnv();
