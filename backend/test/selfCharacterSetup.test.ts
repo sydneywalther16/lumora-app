@@ -14,6 +14,7 @@ import {
   validateSelfVerificationVideoFile,
 } from '../../src/lib/selfCharacterSetup';
 import { cleanupReferenceImageUrls } from '../src/services/referenceCleanup';
+import { ownershipMismatchResponse, redactOwnerId } from '../src/services/selfCharacterOwnership';
 
 assert.throws(
   () => validateSelfVerificationVideoUpload({
@@ -120,9 +121,41 @@ const characterHubSource = readFileSync(new URL('../../src/components/CharacterH
 assert.match(characterHubSource, /Upload self verification video/);
 assert.match(characterHubSource, /id="self-verification-video-panel"/);
 assert.equal(characterHubSource.includes('View status'), false);
+assert.match(characterHubSource, /Repair account link/);
 
 const migrationSource = readFileSync(new URL('../supabase/migrations/20260523_unify_self_capture_verification_video.sql', import.meta.url), 'utf8');
 assert.match(migrationSource, /source_capture_video_url/);
 assert.match(migrationSource, /verification_video_url = source_capture_video_url/);
+
+const apiSource = readFileSync(new URL('../../src/lib/api.ts', import.meta.url), 'utf8');
+assert.match(apiSource, /Authorization/);
+assert.match(apiSource, /supabase\.auth\.getSession/);
+
+const authMiddlewareSource = readFileSync(new URL('../src/middleware/auth.ts', import.meta.url), 'utf8');
+assert.match(authMiddlewareSource, /supabaseAdmin\.auth\.getUser/);
+assert.match(authMiddlewareSource, /auth_required/);
+
+const charactersRouteSource = readFileSync(new URL('../src/routes/characters.ts', import.meta.url), 'utf8');
+assert.match(charactersRouteSource, /resolveSelfCharacterForAuthenticatedUser\(ownerUserId/);
+assert.match(charactersRouteSource, /const characterId = ownership\.writableTarget\.characterId;/);
+
+assert.equal(redactOwnerId('12345678-1234-4000-8000-123456789abc'), '12345678...');
+assert.deepEqual(
+  ownershipMismatchResponse({
+    authUserId: '12345678-1234-4000-8000-123456789abc',
+    sourceTable: 'character_profiles',
+    sourceId: '87654321-1234-4000-8000-123456789abc',
+    ownerVerified: false,
+    profileRowPresent: true,
+    selfCharactersRowPresent: false,
+    characterProfilesSelfRowPresent: true,
+    legacyCreatorSelfPresent: true,
+    writableTargetFound: false,
+    mismatchDetected: true,
+    writableTarget: null,
+    recommendedNextAction: 'Repair self character ownership.',
+  }).message,
+  'This self character is not linked to the current signed-in user.',
+);
 
 console.log('self character setup unit tests passed');

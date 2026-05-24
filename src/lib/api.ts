@@ -1,9 +1,21 @@
+import { supabase } from './supabase';
+
 const baseUrl = import.meta.env.VITE_API_BASE_URL ?? import.meta.env.VITE_API_URL ?? '';
 
-function buildRequestHeaders(headers: HeadersInit | undefined) {
+async function buildRequestHeaders(headers: HeadersInit | undefined) {
   const requestHeaders = new Headers(headers);
   if (!requestHeaders.has('Content-Type')) {
     requestHeaders.set('Content-Type', 'application/json');
+  }
+  if (!requestHeaders.has('Authorization') && supabase) {
+    const { data } = await supabase.auth.getSession();
+    const accessToken = data.session?.access_token;
+    if (accessToken) {
+      requestHeaders.set('Authorization', `Bearer ${accessToken}`);
+      if (data.session?.user?.id && !requestHeaders.has('x-lumora-user-id')) {
+        requestHeaders.set('x-lumora-user-id', data.session.user.id);
+      }
+    }
   }
   return requestHeaders;
 }
@@ -33,10 +45,11 @@ async function request<T>(path: string, init: RequestInitWithTimeout = {}): Prom
 
   let response: Response;
   try {
+    const headers = await buildRequestHeaders(init.headers);
     response = await fetch(
       `${baseUrl}${path}`,
       Object.assign({}, fetchInit, {
-        headers: buildRequestHeaders(init.headers),
+        headers,
         signal: signal ?? controller?.signal,
       }),
     );
@@ -884,6 +897,27 @@ export type ApiHealthDiagnostics = {
   };
 };
 
+export type SelfCharacterOwnershipDiagnostic = {
+  authUserPresent: boolean;
+  authUserIdRedacted: string | null;
+  profileRowPresent: boolean;
+  selfCharactersRowPresent: boolean;
+  characterProfilesSelfRowPresent: boolean;
+  legacyCreatorSelfPresent: boolean;
+  writableVerificationTargetFound: boolean;
+  mismatchDetected: boolean;
+  ownerVerified: boolean;
+  selfCharacterSource: string | null;
+  sourceIdRedacted: string | null;
+  writableTarget: {
+    table: string;
+    characterIdRedacted: string | null;
+    sourceIdRedacted: string | null;
+    writableFields: string[];
+  } | null;
+  recommendedNextAction: string;
+};
+
 export type MediaUploadInput = {
   url?: string;
   dataUrl?: string;
@@ -1337,6 +1371,19 @@ export const api = {
       migratedFromOldSelfCapture?: boolean;
       recommendedNextAction: string;
     }>('/api/characters/self/verification-video/status'),
+
+  getSelfCharacterOwnershipDiagnostic: () =>
+    request<{ ok: boolean } & SelfCharacterOwnershipDiagnostic>('/api/diagnostics/self-character-ownership'),
+
+  repairSelfCharacterOwnership: () =>
+    request<{
+      ok: boolean;
+      ownership: SelfCharacterOwnershipDiagnostic;
+      message: string;
+    }>('/api/characters/self/repair-ownership', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
 
   deleteSelfVerificationVideo: (payload: { userId?: string | null; characterId?: string | null }) =>
     request<{

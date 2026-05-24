@@ -27,6 +27,12 @@ import {
   validateSelfVerificationVideoConsent,
   validateSelfVerificationVideoUpload,
 } from '../services/selfVerificationVideo';
+import {
+  ownershipMismatchResponse,
+  publicSelfCharacterOwnershipDiagnostic,
+  repairSelfCharacterOwnershipForAuthenticatedUser,
+  resolveSelfCharacterForAuthenticatedUser,
+} from '../services/selfCharacterOwnership';
 
 const visibilitySchema = z.enum(['private', 'approved_only', 'public']);
 const statusSchema = z.enum(['draft', 'processing', 'ready', 'failed']);
@@ -140,6 +146,17 @@ function creatorSafeCharacter<T extends {
 charactersRouter.get('/', async (req: AuthedRequest, res) => {
   const characters = await listCharacterProfilesForUser(req.userId!);
   res.json({ characters: characters.map(creatorSafeCharacter) });
+});
+
+charactersRouter.post('/self/repair-ownership', async (req: AuthedRequest, res) => {
+  const resolution = await repairSelfCharacterOwnershipForAuthenticatedUser(req.userId!);
+  res.status(resolution.writableTargetFound ? 200 : 409).json({
+    ok: resolution.writableTargetFound,
+    ownership: publicSelfCharacterOwnershipDiagnostic(resolution),
+    message: resolution.writableTargetFound
+      ? 'Self character ownership is ready for private verification media.'
+      : 'Lumora could not safely repair self character ownership.',
+  });
 });
 
 charactersRouter.post('/self/sora-character', async (req: AuthedRequest, res) => {
@@ -270,15 +287,13 @@ charactersRouter.post('/self/verification-video', async (req: AuthedRequest, res
   }
 
   const ownerUserId = req.userId!;
-  const characterId = payload.characterId ?? 'creator-self';
-  const character = await getCharacterProfileForUser(ownerUserId, characterId);
-  if (!character && characterId !== 'creator-self') {
-    res.status(404).json({
-      error: 'self_character_not_found',
-      message: 'Create your Lumora self character before saving a verification video.',
-    });
+  const ownership = await resolveSelfCharacterForAuthenticatedUser(ownerUserId, { createIfMissing: true });
+  if (!ownership.writableTargetFound || !ownership.writableTarget) {
+    res.status(409).json(ownershipMismatchResponse(ownership));
     return;
   }
+  const characterId = ownership.writableTarget.characterId;
+  const character = await getCharacterProfileForUser(ownerUserId, characterId);
 
   let sourceVideoUrl = payload.sourceVideoUrl ?? null;
   let sourceUploadAssetId = payload.sourceUploadAssetId ?? null;
@@ -286,7 +301,7 @@ charactersRouter.post('/self/verification-video', async (req: AuthedRequest, res
     sourceVideoUrl = await persistMediaUpload({
       userId: ownerUserId,
       media: payload.verificationVideo,
-      folder: `characters/${character?.id ?? characterId}/self-verification`,
+      folder: `characters/${ownership.writableTarget.sourceId ?? character?.id ?? characterId}/self-verification`,
       fallbackFileName: 'lumora-self-verification-video',
       bucket: 'self-capture-videos',
     });
@@ -327,6 +342,7 @@ charactersRouter.post('/self/verification-video', async (req: AuthedRequest, res
 });
 
 charactersRouter.get('/self/verification-video/status', async (req: AuthedRequest, res) => {
+  const ownership = await resolveSelfCharacterForAuthenticatedUser(req.userId!, { createIfMissing: false });
   const diagnostics = await getSelfVerificationVideoDiagnostics({
     userId: req.userId!,
     characterId: null,
@@ -342,6 +358,7 @@ charactersRouter.get('/self/verification-video/status', async (req: AuthedReques
     videoReferenceRouteStatus: diagnostics.seedanceVideoReferenceCanaryStatus,
     oldSelfCapturePresent: diagnostics.oldSelfCapturePresent,
     migratedFromOldSelfCapture: diagnostics.migratedFromOldSelfCapture,
+    ownership: publicSelfCharacterOwnershipDiagnostic(ownership),
     videoReferenceProvider: diagnostics.videoReferenceProvider,
     verificationVideoUrlRedacted: diagnostics.verificationVideoUrlRedacted,
     recommendedNextAction: diagnostics.recommendedNextAction,
@@ -362,11 +379,17 @@ charactersRouter.delete('/self/verification-video', async (req: AuthedRequest, r
     return;
   }
 
+  const ownership = await resolveSelfCharacterForAuthenticatedUser(req.userId!, { createIfMissing: false });
+  if (!ownership.writableTargetFound || !ownership.writableTarget) {
+    res.status(409).json(ownershipMismatchResponse(ownership));
+    return;
+  }
+
   const diagnostics = await clearSelfCharacterVerificationVideoForUser({
     ownerUserId: req.userId!,
-    characterId: payload.characterId ?? 'creator-self',
+    characterId: ownership.writableTarget.characterId,
   });
-  const updated = await getCharacterProfileForUser(req.userId!, payload.characterId ?? 'creator-self');
+  const updated = await getCharacterProfileForUser(req.userId!, ownership.writableTarget.characterId);
 
   res.json({
     ok: true,

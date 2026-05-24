@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { api, type ApiHealthDiagnostics, type CharacterProfile, type CharacterRelationshipMemory } from '../lib/api';
+import { api, ApiRequestError, type ApiHealthDiagnostics, type CharacterProfile, type CharacterRelationshipMemory } from '../lib/api';
 import { deleteLocalCharacterProfile, updateLocalCharacterProfile } from '../lib/characterStorage';
 import { getBestThumbnail } from '../lib/mediaThumbnail';
 import {
@@ -73,6 +73,22 @@ function characterProfileEditorError(error: unknown) {
   }
 
   return error instanceof Error ? error.message : 'Unable to save cast member.';
+}
+
+function selfVerificationVideoError(error: unknown) {
+  if (error instanceof ApiRequestError) {
+    const payload = error.payload && typeof error.payload === 'object'
+      ? error.payload as Record<string, unknown>
+      : {};
+    if (payload.error === 'verification_owner_mismatch' || payload.error === 'self_character_not_found') {
+      return 'Lumora could not link this self character to your account yet. Try repairing self character ownership from Your AI Cast.';
+    }
+    if (typeof payload.message === 'string' && payload.message.trim()) {
+      return payload.message;
+    }
+  }
+
+  return error instanceof Error ? error.message : 'Unable to save self verification video yet.';
 }
 
 function displayName(character: CharacterProfile | null | undefined) {
@@ -824,8 +840,6 @@ export default function CharacterHub({
         entityId: selectedCharacter.id,
       });
       const response = await api.saveSelfVerificationVideo({
-        userId: authUser.id,
-        characterId: selectedCharacter.characterId ?? selectedCharacter.id,
         consentConfirmed: verificationVideoConsent,
         sourceUploadAssetId: upload.objectPath,
         sourceVideoUrl: upload.url,
@@ -860,7 +874,7 @@ export default function CharacterHub({
       if (verificationVideoInputRef.current) verificationVideoInputRef.current.value = '';
       await refreshLikenessDiagnostics();
     } catch (error) {
-      setVerificationVideoStatus(error instanceof Error ? error.message : 'Unable to save self verification video yet.');
+      setVerificationVideoStatus(selfVerificationVideoError(error));
     } finally {
       setVerificationVideoSaving(false);
     }
@@ -877,8 +891,6 @@ export default function CharacterHub({
     setVerificationVideoStatus('Removing private self verification video...');
     try {
       const response = await api.deleteSelfVerificationVideo({
-        userId: authUser.id,
-        characterId: selectedCharacter.characterId ?? selectedCharacter.id,
       });
       const fallbackUpdatedCharacter: CharacterProfile = {
         ...selectedCharacter,
@@ -917,7 +929,26 @@ export default function CharacterHub({
       setVerificationVideoStatus(response.message || 'Self verification video removed.');
       await refreshLikenessDiagnostics();
     } catch (error) {
-      setVerificationVideoStatus(error instanceof Error ? error.message : 'Unable to remove self verification video yet.');
+      setVerificationVideoStatus(selfVerificationVideoError(error));
+    } finally {
+      setVerificationVideoSaving(false);
+    }
+  }
+
+  async function handleRepairSelfVerificationOwnership() {
+    if (!authUser) {
+      setVerificationVideoStatus('Sign in to repair your self character account link.');
+      return;
+    }
+
+    setVerificationVideoSaving(true);
+    setVerificationVideoStatus('Repairing self character account link...');
+    try {
+      const response = await api.repairSelfCharacterOwnership();
+      setVerificationVideoStatus(response.message || 'Self character ownership is ready for private verification media.');
+      await refreshLikenessDiagnostics();
+    } catch (error) {
+      setVerificationVideoStatus(selfVerificationVideoError(error));
     } finally {
       setVerificationVideoSaving(false);
     }
@@ -1230,6 +1261,14 @@ export default function CharacterHub({
             title="Browser recording is coming soon. Upload is available now."
           >
             Record video coming soon
+          </button>
+          <button
+            type="button"
+            className="text-btn"
+            disabled={verificationVideoSaving}
+            onClick={() => void handleRepairSelfVerificationOwnership()}
+          >
+            Repair account link
           </button>
           {effectiveVerificationVideoPresent ? (
             <button

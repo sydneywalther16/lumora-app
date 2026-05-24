@@ -43,6 +43,11 @@ import {
   markSeedanceVideoReferenceCanaryUnmapped,
   SEEDANCE_VIDEO_REFERENCE_PROMPT,
 } from '../services/selfVerificationVideo';
+import { requireAuth, type AuthedRequest } from '../middleware/auth';
+import {
+  publicSelfCharacterOwnershipDiagnostic,
+  resolveSelfCharacterForAuthenticatedUser,
+} from '../services/selfCharacterOwnership';
 
 export const healthRouter = Router();
 const canarySchema = z.object({
@@ -232,6 +237,14 @@ healthRouter.get('/api/diagnostics/canary-routes', (_req, res) => {
       renderPathCompare: 'GET /api/diagnostics/render-path-compare',
     },
     ...canaryRouteInventory,
+  });
+});
+
+healthRouter.get('/api/diagnostics/self-character-ownership', requireAuth, async (req: AuthedRequest, res) => {
+  const resolution = await resolveSelfCharacterForAuthenticatedUser(req.userId!, { createIfMissing: false });
+  res.json({
+    ok: true,
+    ...publicSelfCharacterOwnershipDiagnostic(resolution),
   });
 });
 
