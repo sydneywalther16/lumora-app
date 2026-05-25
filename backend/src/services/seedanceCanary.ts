@@ -226,6 +226,7 @@ export type CanaryVerificationVideoDiagnostics = {
   normalizationStdoutExcerpt?: string | null;
   normalizationFfmpegArgs?: string[] | null;
   normalizationEncoderFallbackUsed?: boolean | null;
+  normalizationResolutionFallbackUsed?: boolean | null;
   preflight?: VerificationVideoPreflightMetadata | null;
   normalizedPreflight?: VerificationVideoPreflightMetadata | null;
   preflightOk?: boolean | null;
@@ -1036,6 +1037,7 @@ function verificationVideoDiagnostics(input: {
     normalizationStdoutExcerpt: input.normalization?.normalizationStdoutExcerpt ?? null,
     normalizationFfmpegArgs: input.normalization?.normalizationFfmpegArgs ?? null,
     normalizationEncoderFallbackUsed: input.normalization?.normalizationEncoderFallbackUsed ?? null,
+    normalizationResolutionFallbackUsed: input.normalization?.normalizationResolutionFallbackUsed ?? null,
     preflight: input.normalization?.original ?? null,
     normalizedPreflight: input.normalization?.normalized ?? null,
     preflightOk: selectedPreflight?.preflightOk ?? null,
@@ -2604,6 +2606,7 @@ export async function normalizeSeedanceVerificationVideoForDiagnostics(input: {
       normalizationStdoutExcerpt: selectedVerificationVideo.normalizationStdoutExcerpt,
       normalizationFfmpegArgs: selectedVerificationVideo.normalizationFfmpegArgs,
       normalizationEncoderFallbackUsed: selectedVerificationVideo.normalizationEncoderFallbackUsed,
+      normalizationResolutionFallbackUsed: selectedVerificationVideo.normalizationResolutionFallbackUsed,
       normalizedPreflightMetadata: selectedVerificationVideo.normalizedPreflight,
       selectedVerificationVideo,
       failureCategory: null,
@@ -2628,6 +2631,7 @@ export async function normalizeSeedanceVerificationVideoForDiagnostics(input: {
     normalizationStdoutExcerpt: selectedVerificationVideo.normalizationStdoutExcerpt,
     normalizationFfmpegArgs: selectedVerificationVideo.normalizationFfmpegArgs,
     normalizationEncoderFallbackUsed: selectedVerificationVideo.normalizationEncoderFallbackUsed,
+    normalizationResolutionFallbackUsed: selectedVerificationVideo.normalizationResolutionFallbackUsed,
     normalizedPreflightMetadata: selectedVerificationVideo.normalizedPreflight,
     selectedVerificationVideo,
     failureCategory: failedPreparation.errorCategory,
@@ -2785,6 +2789,7 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
     normalizationStdoutExcerpt: metadata?.selectedVerificationVideo?.normalizationStdoutExcerpt ?? null,
     normalizationFfmpegArgs: metadata?.selectedVerificationVideo?.normalizationFfmpegArgs ?? null,
     normalizationEncoderFallbackUsed: metadata?.selectedVerificationVideo?.normalizationEncoderFallbackUsed ?? null,
+    normalizationResolutionFallbackUsed: metadata?.selectedVerificationVideo?.normalizationResolutionFallbackUsed ?? null,
     normalizedPreflightMetadata: metadata?.selectedVerificationVideo?.normalizedPreflight ?? null,
     message: status === 'completed' && outputParse.ok
       ? 'Seedance canary succeeded with a verified video URL.'

@@ -161,7 +161,8 @@ assert.deepEqual(
 );
 assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.container, 'mp4');
 assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.videoCodec, 'h264');
-assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.audioCodec, 'aac');
+assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.audioCodec, null);
+assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.audioIncluded, false);
 assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.pixelFormat, 'yuv420p');
 assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.videoProfile, 'high');
 assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.width, 720);
@@ -174,10 +175,47 @@ const ffmpegArgs = buildVerificationVideoFfmpegArgs('/tmp/private/input.mov', '/
 assert.equal(Array.isArray(ffmpegArgs), true);
 assert.equal(ffmpegArgs.includes('/tmp/private/input.mov'), true);
 assert.equal(ffmpegArgs[ffmpegArgs.length - 1], '/tmp/private/output.mp4');
+assert.equal(ffmpegArgs.includes('-ignore_unknown'), true);
+assert.equal(ffmpegArgs.includes('-an'), true);
+assert.equal(ffmpegArgs.includes('-dn'), true);
+assert.equal(ffmpegArgs.includes('-sn'), true);
+assert.equal(ffmpegArgs.includes('0:a?'), false);
 assert.equal(ffmpegArgs[ffmpegArgs.indexOf('-vf') + 1], 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,setsar=1');
 assert.equal(ffmpegArgs[ffmpegArgs.indexOf('-c:v') + 1], 'libx264');
 assert.equal(ffmpegArgs[ffmpegArgs.indexOf('-pix_fmt') + 1], 'yuv420p');
 assert.equal(ffmpegArgs[ffmpegArgs.indexOf('-movflags') + 1], '+faststart');
+const audioArgs = buildVerificationVideoFfmpegArgs('/tmp/private/input.mov', '/tmp/private/output.mp4', 'libx264', {
+  includeAudio: true,
+  audioStreamIndex: 1,
+});
+assert.equal(audioArgs.includes('-an'), false);
+assert.equal(audioArgs[audioArgs.indexOf('-map', audioArgs.indexOf('0:v:0') + 1) + 1], '0:1?');
+assert.equal(audioArgs[audioArgs.indexOf('-c:a') + 1], 'aac');
+const fallbackResolutionArgs = buildVerificationVideoFfmpegArgs('/tmp/private/input.mov', '/tmp/private/output.mp4', 'libx264', {
+  width: 480,
+  height: 854,
+});
+assert.equal(fallbackResolutionArgs[fallbackResolutionArgs.indexOf('-vf') + 1], 'scale=480:854:force_original_aspect_ratio=decrease,pad=480:854:(ow-iw)/2:(oh-ih)/2,setsar=1');
+const normalizedSilentMetadata = validateVerificationVideoMetadata({
+  durationSeconds: 8,
+  width: 720,
+  height: 1280,
+  container: 'mp4',
+  videoCodec: 'h264',
+  audioCodec: null,
+  audioIncluded: false,
+  skippedAudioReason: 'provider_reference_video_uses_silent_normalized_asset',
+  skippedUnknownStreams: true,
+  unknownStreamCodecs: ['audio:none'],
+  fileSizeBytes: 8 * 1024 * 1024,
+  hasVideoStream: true,
+  hasAudioStream: false,
+  ffprobeAvailable: true,
+});
+assert.equal(normalizedSilentMetadata.preflightOk, true);
+assert.equal(normalizedSilentMetadata.audioIncluded, false);
+assert.equal(normalizedSilentMetadata.skippedAudioReason, 'provider_reference_video_uses_silent_normalized_asset');
+assert.equal(normalizedSilentMetadata.skippedUnknownStreams, true);
 assert.equal(classifyFfmpegNormalizationFailure({ stderr: 'Unknown encoder libx264' }), 'ffmpeg_encoder_unavailable');
 assert.equal(classifyFfmpegNormalizationFailure({ stderr: 'Syntax error: unexpected token (' }), 'ffmpeg_shell_parse');
 assert.equal(classifyFfmpegNormalizationFailure({ stderr: 'moov atom not found' }), 'ffmpeg_input_decode_failed');
@@ -449,9 +487,13 @@ assert.match(videoCanaryScript, /ForceNormalize/);
 assert.match(videoCanaryScript, /normalized asset used/);
 assert.match(videoCanaryScript, /normalization reason/);
 assert.match(videoCanaryScript, /normalization error category/);
+assert.match(videoCanaryScript, /audio included/);
+assert.match(videoCanaryScript, /skipped audio reason/);
 const normalizeScript = readFileSync(new URL('../../scripts/normalize-verification-video.ps1', import.meta.url), 'utf8');
 assert.match(normalizeScript, /normalize-verification-video\/self/);
 assert.match(normalizeScript, /No provider prediction will be created/);
 assert.match(normalizeScript, /Force/);
+assert.match(normalizeScript, /audio included/);
+assert.match(normalizeScript, /unknown input streams detected/);
 
 console.log('seedanceCanary unit tests passed');

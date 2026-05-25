@@ -31,14 +31,19 @@ function Print-CanaryStatus {
     if ($Result.selectedVerificationVideo.normalizationErrorCategory) { Write-Host "normalization error category: $($Result.selectedVerificationVideo.normalizationErrorCategory)" }
     if ($null -ne $Result.selectedVerificationVideo.normalizationExitCode) { Write-Host "normalization exit code: $($Result.selectedVerificationVideo.normalizationExitCode)" }
     if ($Result.selectedVerificationVideo.normalizationEncoderFallbackUsed) { Write-Host "normalization encoder fallback used: $($Result.selectedVerificationVideo.normalizationEncoderFallbackUsed)" }
+    if ($Result.selectedVerificationVideo.normalizationResolutionFallbackUsed) { Write-Host "normalization resolution fallback used: $($Result.selectedVerificationVideo.normalizationResolutionFallbackUsed)" }
     if ($Result.selectedVerificationVideo.normalizationStderrExcerpt) { Write-Host "normalization stderr: $($Result.selectedVerificationVideo.normalizationStderrExcerpt)" }
     if ($Result.selectedVerificationVideo.preflight) {
       $meta = $Result.selectedVerificationVideo.preflight
       Write-Host ("preflight: duration={0}s size={1} width={2} height={3} container={4} videoCodec={5} audioCodec={6} ok={7} reason={8}" -f $meta.durationSeconds, $meta.fileSizeBytes, $meta.width, $meta.height, $meta.container, $meta.videoCodec, $meta.audioCodec, $meta.preflightOk, $meta.preflightFailureReason)
+      Write-Host "unknown input streams detected: $($meta.skippedUnknownStreams)"
     }
     if ($Result.selectedVerificationVideo.normalizedPreflight) {
       $meta = $Result.selectedVerificationVideo.normalizedPreflight
       Write-Host ("normalized preflight: duration={0}s size={1} width={2} height={3} container={4} videoCodec={5} audioCodec={6} ok={7} reason={8}" -f $meta.durationSeconds, $meta.fileSizeBytes, $meta.width, $meta.height, $meta.container, $meta.videoCodec, $meta.audioCodec, $meta.preflightOk, $meta.preflightFailureReason)
+      Write-Host "audio included: $($meta.audioIncluded)"
+      Write-Host "skipped audio reason: $($meta.skippedAudioReason)"
+      Write-Host "skipped unknown streams: $($meta.skippedUnknownStreams)"
     }
   }
   Write-Host "provider status: $($Result.providerStatus)"

@@ -24,13 +24,18 @@ function Print-NormalizationStatus {
   if ($Result.normalizationErrorCategory) { Write-Host "normalization error category: $($Result.normalizationErrorCategory)" }
   if ($null -ne $Result.normalizationExitCode) { Write-Host "normalization exit code: $($Result.normalizationExitCode)" }
   if ($Result.normalizationEncoderFallbackUsed) { Write-Host "normalization encoder fallback used: $($Result.normalizationEncoderFallbackUsed)" }
+  if ($Result.normalizationResolutionFallbackUsed) { Write-Host "normalization resolution fallback used: $($Result.normalizationResolutionFallbackUsed)" }
   if ($Result.selectedVerificationVideo -and $Result.selectedVerificationVideo.preflight) {
     $meta = $Result.selectedVerificationVideo.preflight
     Write-Host ("original preflight: duration={0}s size={1} width={2} height={3} container={4} videoCodec={5} audioCodec={6} ok={7} reason={8}" -f $meta.durationSeconds, $meta.fileSizeBytes, $meta.width, $meta.height, $meta.container, $meta.videoCodec, $meta.audioCodec, $meta.preflightOk, $meta.preflightFailureReason)
+    Write-Host "unknown input streams detected: $($meta.skippedUnknownStreams)"
   }
   if ($Result.selectedVerificationVideo -and $Result.selectedVerificationVideo.normalizedPreflight) {
     $meta = $Result.selectedVerificationVideo.normalizedPreflight
     Write-Host ("normalized preflight: duration={0}s size={1} width={2} height={3} container={4} videoCodec={5} audioCodec={6} ok={7} reason={8}" -f $meta.durationSeconds, $meta.fileSizeBytes, $meta.width, $meta.height, $meta.container, $meta.videoCodec, $meta.audioCodec, $meta.preflightOk, $meta.preflightFailureReason)
+    Write-Host "audio included: $($meta.audioIncluded)"
+    Write-Host "skipped audio reason: $($meta.skippedAudioReason)"
+    Write-Host "skipped unknown streams: $($meta.skippedUnknownStreams)"
   }
   if ($Result.normalizationStderrExcerpt) { Write-Host "normalization stderr: $($Result.normalizationStderrExcerpt)" }
   if ($Result.message) { Write-Host "message: $($Result.message)" }

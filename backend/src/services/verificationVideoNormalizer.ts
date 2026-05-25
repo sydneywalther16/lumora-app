@@ -19,11 +19,14 @@ const FFPROBE_TIMEOUT_MS = 8_000;
 export const VERIFICATION_VIDEO_NORMALIZATION_TARGET = {
   container: 'mp4',
   videoCodec: 'h264',
-  audioCodec: 'aac',
+  audioCodec: null,
+  audioIncluded: false,
   pixelFormat: 'yuv420p',
   videoProfile: 'high',
   width: 720,
   height: 1280,
+  fallbackWidth: 480,
+  fallbackHeight: 854,
   durationSeconds: 12,
   maxFileSizeBytes: VERIFICATION_VIDEO_PROVIDER_MAX_BYTES,
   faststart: true,
@@ -50,6 +53,10 @@ export type VerificationVideoPreflightMetadata = {
   container: string | null;
   videoCodec: string | null;
   audioCodec: string | null;
+  audioIncluded?: boolean;
+  skippedAudioReason?: string | null;
+  skippedUnknownStreams?: boolean;
+  unknownStreamCodecs?: string[];
   fileSizeBytes: number;
   hasVideoStream: boolean;
   hasAudioStream: boolean;
@@ -74,6 +81,7 @@ export type VerificationVideoNormalizationDiagnostics = {
   normalizationStdoutExcerpt?: string | null;
   normalizationFfmpegArgs?: string[] | null;
   normalizationEncoderFallbackUsed?: boolean | null;
+  normalizationResolutionFallbackUsed?: boolean | null;
 };
 
 export type VerificationVideoPreparationResult =
@@ -93,6 +101,7 @@ export type VerificationVideoPreparationResult =
     };
 
 type ProbeStream = {
+  index?: number;
   codec_type?: string;
   codec_name?: string;
   width?: number;
@@ -169,6 +178,26 @@ function isProviderSafeAudioCodec(value: string | null) {
   return !value || ['aac', 'mp4a'].includes(value);
 }
 
+function isKnownSafeInputAudioCodec(value: string | null) {
+  return Boolean(value && ['aac', 'mp3', 'opus', 'pcm_s16le', 'pcm_s24le'].includes(value));
+}
+
+function streamCodecName(stream: ProbeStream) {
+  return stream.codec_name?.trim().toLowerCase() || 'unknown';
+}
+
+function unknownStreamCodecs(streams: ProbeStream[] | undefined) {
+  return [...new Set((streams ?? [])
+    .filter((stream) => {
+      const codec = streamCodecName(stream);
+      return codec === 'none' ||
+        codec === 'unknown' ||
+        stream.codec_type === 'data' ||
+        (stream.codec_type === 'audio' && !isKnownSafeInputAudioCodec(codec));
+    })
+    .map((stream) => `${stream.codec_type ?? 'unknown'}:${streamCodecName(stream)}`))];
+}
+
 function hasProviderSafeResolution(width: number | null, height: number | null) {
   if (!width || !height) return false;
   const longSide = Math.max(width, height);
@@ -198,12 +227,12 @@ function validateNormalizedOutputMetadata(metadata: VerificationVideoPreflightMe
       preflightFailureReason: 'normalized_video_codec_mismatch',
     };
   }
-  if (metadata.hasAudioStream && !isProviderSafeAudioCodec(metadata.audioCodec)) {
+  if (metadata.hasAudioStream || metadata.audioIncluded) {
     return {
       ...metadata,
       preflightOk: false,
       needsNormalization: true,
-      preflightFailureReason: 'normalized_audio_codec_mismatch',
+      preflightFailureReason: 'normalized_audio_should_be_omitted',
     };
   }
   if (!hasNormalizedTargetResolution(metadata.width, metadata.height)) {
@@ -263,7 +292,11 @@ export function validateVerificationVideoMetadata(input: Omit<VerificationVideoP
   };
 }
 
-async function probeVideoFile(filePath: string, fallbackSizeBytes: number): Promise<VerificationVideoPreflightMetadata> {
+async function probeVideoFile(filePath: string, fallbackSizeBytes: number, options: {
+  audioIncluded?: boolean;
+  skippedAudioReason?: string | null;
+  skippedUnknownStreams?: boolean;
+} = {}): Promise<VerificationVideoPreflightMetadata> {
   try {
     const { stdout } = await execFileAsync(ffprobeBinary(), [
       '-v',
@@ -281,6 +314,7 @@ async function probeVideoFile(filePath: string, fallbackSizeBytes: number): Prom
     const parsed = JSON.parse(stdout) as ProbeOutput;
     const video = parsed.streams?.find((stream) => stream.codec_type === 'video') ?? null;
     const audio = parsed.streams?.find((stream) => stream.codec_type === 'audio') ?? null;
+    const unknownCodecs = unknownStreamCodecs(parsed.streams);
     const size = numericValue(parsed.format?.size) ?? fallbackSizeBytes;
     return validateVerificationVideoMetadata({
       durationSeconds: numericValue(parsed.format?.duration),
@@ -289,6 +323,10 @@ async function probeVideoFile(filePath: string, fallbackSizeBytes: number): Prom
       container: containerNameForPath(filePath, parsed.format?.format_name),
       videoCodec: video?.codec_name?.trim().toLowerCase() ?? null,
       audioCodec: audio?.codec_name?.trim().toLowerCase() ?? null,
+      audioIncluded: options.audioIncluded ?? Boolean(audio),
+      skippedAudioReason: options.skippedAudioReason ?? null,
+      skippedUnknownStreams: options.skippedUnknownStreams ?? unknownCodecs.length > 0,
+      unknownStreamCodecs: unknownCodecs,
       fileSizeBytes: size,
       hasVideoStream: Boolean(video),
       hasAudioStream: Boolean(audio),
@@ -302,6 +340,10 @@ async function probeVideoFile(filePath: string, fallbackSizeBytes: number): Prom
       container: null,
       videoCodec: null,
       audioCodec: null,
+      audioIncluded: false,
+      skippedAudioReason: null,
+      skippedUnknownStreams: false,
+      unknownStreamCodecs: [],
       fileSizeBytes: fallbackSizeBytes,
       hasVideoStream: false,
       hasAudioStream: false,
@@ -313,19 +355,32 @@ async function probeVideoFile(filePath: string, fallbackSizeBytes: number): Prom
   }
 }
 
-export function buildVerificationVideoFfmpegArgs(inputPath: string, outputPath: string, encoder = 'libx264') {
+export function buildVerificationVideoFfmpegArgs(inputPath: string, outputPath: string, encoder = 'libx264', options: {
+  width?: number;
+  height?: number;
+  includeAudio?: boolean;
+  audioStreamIndex?: number | null;
+} = {}) {
+  const width = options.width ?? VERIFICATION_VIDEO_NORMALIZATION_TARGET.width;
+  const height = options.height ?? VERIFICATION_VIDEO_NORMALIZATION_TARGET.height;
+  const includeAudio = options.includeAudio === true && typeof options.audioStreamIndex === 'number';
+  const audioArgs = includeAudio
+    ? ['-map', `0:${options.audioStreamIndex}?`, '-c:a', 'aac', '-b:a', '128k']
+    : ['-an'];
   return [
     '-y',
+    '-ignore_unknown',
     '-i',
     inputPath,
     '-t',
     String(VERIFICATION_VIDEO_NORMALIZATION_TARGET.durationSeconds),
     '-map',
     '0:v:0',
-    '-map',
-    '0:a?',
+    ...audioArgs,
+    '-dn',
+    '-sn',
     '-vf',
-    `scale=${VERIFICATION_VIDEO_NORMALIZATION_TARGET.width}:${VERIFICATION_VIDEO_NORMALIZATION_TARGET.height}:force_original_aspect_ratio=decrease,pad=${VERIFICATION_VIDEO_NORMALIZATION_TARGET.width}:${VERIFICATION_VIDEO_NORMALIZATION_TARGET.height}:(ow-iw)/2:(oh-ih)/2,setsar=1`,
+    `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`,
     '-r',
     '24',
     '-c:v',
@@ -340,10 +395,6 @@ export function buildVerificationVideoFfmpegArgs(inputPath: string, outputPath: 
     '23',
     '-movflags',
     '+faststart',
-    '-c:a',
-    'aac',
-    '-b:a',
-    '128k',
     outputPath,
   ];
 }
@@ -371,6 +422,17 @@ export function classifyFfmpegNormalizationFailure(input: {
     return 'ffmpeg_encoder_unavailable';
   }
   return 'ffmpeg_unknown';
+}
+
+function shouldTryFallbackResolution(input: {
+  category: VerificationVideoNormalizationErrorCategory;
+  stderr?: string | null;
+  stdout?: string | null;
+}) {
+  if (input.category === 'ffmpeg_encoder_unavailable' || input.category === 'ffmpeg_input_decode_failed') return false;
+  const combined = `${input.stderr ?? ''}\n${input.stdout ?? ''}`;
+  return /scale|pad|filter|Failed to configure|Error while filtering|Conversion failed/i.test(combined) ||
+    input.category === 'ffmpeg_unknown';
 }
 
 type FfmpegRunResult =
@@ -472,7 +534,7 @@ async function availableH264EncoderFallback() {
   }
 }
 
-async function normalizeVideoBuffer(buffer: Buffer, inputExtension = 'mov'): Promise<{
+async function normalizeVideoBuffer(buffer: Buffer, inputExtension = 'mov', inputMetadata?: VerificationVideoPreflightMetadata | null): Promise<{
   ok: true;
   buffer: Buffer;
   metadata: VerificationVideoPreflightMetadata;
@@ -482,6 +544,7 @@ async function normalizeVideoBuffer(buffer: Buffer, inputExtension = 'mov'): Pro
     stdoutExcerpt: string | null;
     args: string[];
     encoderFallbackUsed: boolean;
+    resolutionFallbackUsed: boolean;
   };
 } | {
   ok: false;
@@ -492,6 +555,7 @@ async function normalizeVideoBuffer(buffer: Buffer, inputExtension = 'mov'): Pro
   stdoutExcerpt: string | null;
   args: string[];
   encoderFallbackUsed: boolean;
+  resolutionFallbackUsed: boolean;
 }> {
   const tmpRoot = join(tmpdir(), `lumora-verification-${randomUUID()}`);
   const inputPath = join(tmpRoot, `input.${safeExtension(inputExtension)}`);
@@ -500,15 +564,43 @@ async function normalizeVideoBuffer(buffer: Buffer, inputExtension = 'mov'): Pro
     await mkdir(tmpRoot, { recursive: true });
     await writeFile(inputPath, buffer);
     let encoderFallbackUsed = false;
-    let args = buildVerificationVideoFfmpegArgs(inputPath, outputPath, 'libx264');
+    let resolutionFallbackUsed = false;
+    const runWithEncoder = async (encoder: string, dimensions: { width: number; height: number }) => {
+      const argsForRun = buildVerificationVideoFfmpegArgs(inputPath, outputPath, encoder, {
+        width: dimensions.width,
+        height: dimensions.height,
+        includeAudio: false,
+      });
+      return {
+        args: argsForRun,
+        result: await runFfmpegArgs(argsForRun),
+      };
+    };
+    let args = buildVerificationVideoFfmpegArgs(inputPath, outputPath, 'libx264', { includeAudio: false });
     let ffmpegResult = await runFfmpegArgs(args);
     if (isFfmpegRunFailure(ffmpegResult) && ffmpegResult.errorCategory === 'ffmpeg_encoder_unavailable') {
       const fallbackEncoder = await availableH264EncoderFallback();
       if (fallbackEncoder && fallbackEncoder !== 'libx264') {
         encoderFallbackUsed = true;
-        args = buildVerificationVideoFfmpegArgs(inputPath, outputPath, fallbackEncoder);
+        args = buildVerificationVideoFfmpegArgs(inputPath, outputPath, fallbackEncoder, { includeAudio: false });
         ffmpegResult = await runFfmpegArgs(args);
       }
+    }
+    if (isFfmpegRunFailure(ffmpegResult) && shouldTryFallbackResolution({
+      category: ffmpegResult.errorCategory,
+      stderr: ffmpegResult.stderr,
+      stdout: ffmpegResult.stdout,
+    })) {
+      resolutionFallbackUsed = true;
+      const fallbackRun = await runWithEncoder(
+        encoderFallbackUsed ? (args[args.indexOf('-c:v') + 1] ?? 'h264') : 'libx264',
+        {
+          width: VERIFICATION_VIDEO_NORMALIZATION_TARGET.fallbackWidth,
+          height: VERIFICATION_VIDEO_NORMALIZATION_TARGET.fallbackHeight,
+        },
+      );
+      args = fallbackRun.args;
+      ffmpegResult = fallbackRun.result;
     }
     if (isFfmpegRunFailure(ffmpegResult)) {
       const failed = ffmpegResult;
@@ -521,6 +613,7 @@ async function normalizeVideoBuffer(buffer: Buffer, inputExtension = 'mov'): Pro
         stdoutExcerpt: excerpt(failed.stdout, 1000),
         args: redactedFfmpegArgs(failed.args),
         encoderFallbackUsed,
+        resolutionFallbackUsed,
       };
     }
     const normalizedBuffer = await readFile(outputPath);
@@ -534,9 +627,14 @@ async function normalizeVideoBuffer(buffer: Buffer, inputExtension = 'mov'): Pro
         stdoutExcerpt: excerpt(ffmpegResult.stdout, 1000),
         args: redactedFfmpegArgs(ffmpegResult.args),
         encoderFallbackUsed,
+        resolutionFallbackUsed,
       };
     }
-    const metadata = validateNormalizedOutputMetadata(await probeVideoFile(outputPath, normalizedBuffer.length));
+    const metadata = validateNormalizedOutputMetadata(await probeVideoFile(outputPath, normalizedBuffer.length, {
+      audioIncluded: false,
+      skippedAudioReason: 'provider_reference_video_uses_silent_normalized_asset',
+      skippedUnknownStreams: Boolean(inputMetadata?.skippedUnknownStreams),
+    }));
     return {
       ok: true,
       buffer: normalizedBuffer,
@@ -547,6 +645,7 @@ async function normalizeVideoBuffer(buffer: Buffer, inputExtension = 'mov'): Pro
         stdoutExcerpt: excerpt(ffmpegResult.stdout, 1000),
         args: redactedFfmpegArgs(ffmpegResult.args),
         encoderFallbackUsed,
+        resolutionFallbackUsed,
       },
     };
   } catch (error) {
@@ -560,6 +659,7 @@ async function normalizeVideoBuffer(buffer: Buffer, inputExtension = 'mov'): Pro
       stdoutExcerpt: null,
       args: [],
       encoderFallbackUsed: false,
+      resolutionFallbackUsed: false,
     };
   } finally {
     await rm(tmpRoot, { recursive: true, force: true }).catch(() => null);
@@ -850,7 +950,7 @@ export async function prepareVerificationVideoForProvider(input: {
       };
     }
 
-    const normalized = await normalizeVideoBuffer(buffer, inputExtension);
+    const normalized = await normalizeVideoBuffer(buffer, inputExtension, original);
     if (normalized.ok === false || !normalized.metadata.preflightOk) {
       if (input.allowOriginalFallback && original.preflightOk) {
         return {
@@ -872,6 +972,7 @@ export async function prepareVerificationVideoForProvider(input: {
             normalizationStdoutExcerpt: normalized.ok === true ? null : normalized.stdoutExcerpt,
             normalizationFfmpegArgs: normalized.ok === true ? null : normalized.args,
             normalizationEncoderFallbackUsed: normalized.ok === true ? null : normalized.encoderFallbackUsed,
+            normalizationResolutionFallbackUsed: normalized.ok === true ? null : normalized.resolutionFallbackUsed,
           },
         };
       }
@@ -898,6 +999,7 @@ export async function prepareVerificationVideoForProvider(input: {
           normalizationStdoutExcerpt: normalized.ok === true ? null : normalized.stdoutExcerpt,
           normalizationFfmpegArgs: normalized.ok === true ? null : normalized.args,
           normalizationEncoderFallbackUsed: normalized.ok === true ? null : normalized.encoderFallbackUsed,
+          normalizationResolutionFallbackUsed: normalized.ok === true ? null : normalized.resolutionFallbackUsed,
         },
       };
     }
@@ -929,6 +1031,7 @@ export async function prepareVerificationVideoForProvider(input: {
           normalizationStdoutExcerpt: normalized.ffmpegDiagnostics.stdoutExcerpt,
           normalizationFfmpegArgs: normalized.ffmpegDiagnostics.args,
           normalizationEncoderFallbackUsed: normalized.ffmpegDiagnostics.encoderFallbackUsed,
+          normalizationResolutionFallbackUsed: normalized.ffmpegDiagnostics.resolutionFallbackUsed,
         },
       };
     }
@@ -959,6 +1062,7 @@ export async function prepareVerificationVideoForProvider(input: {
         normalizationStdoutExcerpt: normalized.ffmpegDiagnostics.stdoutExcerpt,
         normalizationFfmpegArgs: normalized.ffmpegDiagnostics.args,
         normalizationEncoderFallbackUsed: normalized.ffmpegDiagnostics.encoderFallbackUsed,
+        normalizationResolutionFallbackUsed: normalized.ffmpegDiagnostics.resolutionFallbackUsed,
       },
     };
   } finally {
