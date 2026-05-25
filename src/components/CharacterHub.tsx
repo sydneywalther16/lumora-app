@@ -1218,12 +1218,33 @@ export default function CharacterHub({
     const verificationStatusLabel = selfVerificationVideoStatusLabel(selectedCharacter);
     const exactStatusLabel = exactLikenessRouteStatusLabel(selectedCharacter, exactRouteReady);
     const seedanceVideoEntry = likenessRegistryEntry(likenessDiagnostics, 'seedance_video_reference');
+    const seedancePhotoEntry = likenessRegistryEntry(likenessDiagnostics, 'seedance_reference_images');
+    const seedanceVideoLabStatusText = providerLabStatus(likenessDiagnostics, 'seedance_video_reference');
+    const seedancePhotoLabStatusText = providerLabStatus(
+      likenessDiagnostics,
+      'seedance_reference_images',
+      likenessDiagnostics?.referenceRouteStatus?.seedanceReferenceRoutesBlocked ? 'blocked by provider safety' : 'Saved; needs route canary',
+    );
     const probeEnabled = Boolean(likenessDiagnostics?.renderSuccessEngine?.probeEnabled);
     const seedanceVideoCanaryRetryLater = selectedCharacter.videoReferenceRouteStatus === 'retry_later' ||
       seedanceVideoEntry?.canaryStatus === 'retry_later' ||
       seedanceVideoEntry?.readinessStatus === 'retry_later';
+    const seedancePhotoReferencesBlocked = Boolean(
+      seedancePhotoLabStatusText.toLowerCase().includes('blocked') ||
+      likenessDiagnostics?.referenceRouteStatus?.seedanceReferenceRoutesBlocked ||
+      seedancePhotoEntry?.implementationStatus === 'blocked' ||
+      seedancePhotoEntry?.lastFailureCategory === 'reference_moderation_block',
+    );
+    const seedanceVideoReferenceBlocked = Boolean(
+      seedanceVideoLabStatusText.toLowerCase().includes('blocked') ||
+      seedanceVideoEntry?.implementationStatus === 'blocked' ||
+      seedanceVideoEntry?.canaryStatus === 'failed_blocked' ||
+      seedanceVideoEntry?.lastFailureCategory === 'video_reference_moderation_block',
+    );
+    const seedanceExactRoutesBlocked = seedancePhotoReferencesBlocked && seedanceVideoReferenceBlocked;
     const seedanceVideoCanaryReadyToTest = Boolean(
       effectiveVerificationVideoPresent &&
+      !seedanceExactRoutesBlocked &&
       !seedanceVideoCanaryRetryLater &&
       (
         seedanceVideoEntry?.implementationStatus === 'configured_ready_for_canary' ||
@@ -1235,16 +1256,6 @@ export default function CharacterHub({
       probeEnabled &&
       seedanceVideoCanaryReadyToTest,
     );
-    const seedancePhotoReferencesBlocked = Boolean(
-      likenessDiagnostics?.referenceRouteStatus?.seedanceReferenceRoutesBlocked ||
-      likenessRegistryEntry(likenessDiagnostics, 'seedance_reference_images')?.implementationStatus === 'blocked',
-    );
-    const seedanceVideoReferenceBlocked = Boolean(
-      seedanceVideoEntry?.implementationStatus === 'blocked' ||
-      seedanceVideoEntry?.canaryStatus === 'failed_blocked' ||
-      seedanceVideoEntry?.lastFailureCategory === 'video_reference_moderation_block',
-    );
-    const seedanceExactRoutesBlocked = seedancePhotoReferencesBlocked && seedanceVideoReferenceBlocked;
     const exactCanaryUnavailableCopy = seedanceExactRoutesBlocked
       ? 'Configure Runway or Kling to test exact likeness, or keep using soft self guidance.'
       : !probeEnabled
@@ -1577,10 +1588,10 @@ export default function CharacterHub({
                     'Self verification video',
                     selfVerificationVideoLabStatus(likenessDiagnostics, effectiveVerificationVideoPresent),
                   )}
-                  {metadataLine('Seedance video reference', providerLabStatus(likenessDiagnostics, 'seedance_video_reference'))}
+                  {metadataLine('Seedance video reference', seedanceVideoLabStatusText)}
                   {metadataLine(
                     'Seedance photo references',
-                    providerLabStatus(likenessDiagnostics, 'seedance_reference_images', seedancePhotoReferencesBlocked ? 'blocked by provider safety' : 'Saved; needs route canary'),
+                    seedancePhotoLabStatusText,
                   )}
                   {metadataLine('Runway', providerLabStatus(likenessDiagnostics, 'runway_gen4_reference'))}
                   {metadataLine('Kling', providerLabStatus(likenessDiagnostics, 'kling_reference'))}

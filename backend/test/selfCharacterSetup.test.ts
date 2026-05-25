@@ -166,6 +166,8 @@ assert.match(characterHubSource, /Seedance photo references/);
 assert.equal(characterHubSource.includes("'Seedance references'"), false);
 assert.match(characterHubSource, /Configure Runway or Kling to test exact likeness, or keep using soft self guidance\./);
 assert.match(characterHubSource, /blocked by provider safety/);
+assert.match(characterHubSource, /!seedanceExactRoutesBlocked/);
+assert.match(characterHubSource, /seedancePhotoLabStatusText\.toLowerCase\(\)\.includes\('blocked'\)/);
 
 const migrationSource = readFileSync(new URL('../supabase/migrations/20260523_unify_self_capture_verification_video.sql', import.meta.url), 'utf8');
 assert.match(migrationSource, /source_capture_video_url/);
