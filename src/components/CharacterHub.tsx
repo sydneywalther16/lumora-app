@@ -1046,14 +1046,16 @@ export default function CharacterHub({
       setLikenessLabStatus('Sign in to run provider likeness tests.');
       return;
     }
-    if (!window.confirm('This may consume provider credits when Kling support is mapped. Test Kling likeness route?')) {
+    if (!window.confirm('This may consume provider credits. Run the Kling likeness canary?')) {
       return;
     }
     setLikenessCanaryBusy('kling');
-    setLikenessLabStatus('Checking Kling likeness route...');
+    setLikenessLabStatus('Starting Kling likeness canary...');
     try {
-      const result = await api.startKlingLikenessCanary({ userId: authUser.id });
-      setLikenessLabStatus(result.recommendedNextAction || result.failureCategory || 'Kling likeness route checked.');
+      const result = await api.startKlingLikenessCanary({ userId: authUser.id, saveAsDraft: false });
+      setLikenessLabStatus(result.ok
+        ? 'Kling likeness canary succeeded.'
+        : result.recommendedNextAction || result.failureCategory || 'Kling likeness canary did not complete.');
       await refreshLikenessDiagnostics();
     } catch (error) {
       setLikenessLabStatus(error instanceof Error ? error.message : 'Kling likeness route could not start.');
@@ -1219,6 +1221,8 @@ export default function CharacterHub({
     const exactStatusLabel = exactLikenessRouteStatusLabel(selectedCharacter, exactRouteReady);
     const seedanceVideoEntry = likenessRegistryEntry(likenessDiagnostics, 'seedance_video_reference');
     const seedancePhotoEntry = likenessRegistryEntry(likenessDiagnostics, 'seedance_reference_images');
+    const runwayEntry = likenessRegistryEntry(likenessDiagnostics, 'runway_gen4_reference');
+    const klingEntry = likenessRegistryEntry(likenessDiagnostics, 'kling_reference');
     const seedanceVideoLabStatusText = providerLabStatus(likenessDiagnostics, 'seedance_video_reference');
     const seedancePhotoLabStatusText = providerLabStatus(
       likenessDiagnostics,
@@ -1256,8 +1260,24 @@ export default function CharacterHub({
       probeEnabled &&
       seedanceVideoCanaryReadyToTest,
     );
+    const klingReadyToTest = Boolean(
+      probeEnabled &&
+      klingEntry?.configured &&
+      klingEntry.readinessStatus === 'configured_ready_for_canary',
+    );
+    const runwayReadyToTest = Boolean(
+      probeEnabled &&
+      runwayEntry?.configured &&
+      runwayEntry.readinessStatus === 'configured_ready_for_canary',
+    );
+    const alternateProviderConfigured = Boolean(klingEntry?.configured || runwayEntry?.configured);
+    const alternateProviderProbeCopy = alternateProviderConfigured && !probeEnabled
+      ? 'Enable diagnostic probe to run this paid canary.'
+      : !alternateProviderConfigured
+        ? 'Add provider credentials in Render to test this route.'
+        : null;
     const exactCanaryUnavailableCopy = seedanceExactRoutesBlocked
-      ? 'Configure Runway or Kling to test exact likeness, or keep using soft self guidance.'
+      ? alternateProviderProbeCopy || 'Configure Runway or Kling to test exact likeness, or keep using soft self guidance.'
       : !probeEnabled
         ? 'Enable diagnostic probe to run this paid canary.'
         : !effectiveVerificationVideoPresent
@@ -1602,6 +1622,26 @@ export default function CharacterHub({
                   </p>
                 </div>
                 <div className="button-row">
+                  {klingReadyToTest ? (
+                    <button
+                      type="button"
+                      className="ghost-btn"
+                      disabled={likenessCanaryBusy !== null}
+                      onClick={() => void handleKlingLikenessCanary()}
+                    >
+                      {likenessCanaryBusy === 'kling' ? 'Running Kling...' : 'Run Kling canary'}
+                    </button>
+                  ) : null}
+                  {runwayReadyToTest ? (
+                    <button
+                      type="button"
+                      className="ghost-btn"
+                      disabled={likenessCanaryBusy !== null}
+                      onClick={() => void handleRunwayLikenessCanary()}
+                    >
+                      {likenessCanaryBusy === 'runway' ? 'Running Runway...' : 'Run Runway canary'}
+                    </button>
+                  ) : null}
                   {exactCanaryAvailable ? (
                     <button
                       type="button"
@@ -1611,9 +1651,9 @@ export default function CharacterHub({
                     >
                       {likenessCanaryBusy === 'seedance-video' ? 'Checking route...' : 'Run video-reference canary from diagnostics'}
                     </button>
-                  ) : (
+                  ) : !klingReadyToTest && !runwayReadyToTest ? (
                     <span className="muted">{exactCanaryUnavailableCopy}</span>
-                  )}
+                  ) : null}
                   <button
                     type="button"
                     className="ghost-btn"

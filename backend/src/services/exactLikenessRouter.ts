@@ -84,6 +84,38 @@ export function chooseExactLikenessRoute(input: {
   });
   const openAI = registryEntry(registry, 'openai_sora_character');
 
+  const kling = registryEntry(registry, 'kling_reference');
+  if (kling?.configured && kling.supportsExactLikeness && kling.canaryStatus === 'canary_succeeded') {
+    return {
+      route: 'kling_reference',
+      provider: 'kling',
+      confidence: 'high',
+      exactLikeness: true,
+      reason: 'Kling reference route is configured and has a successful canary.',
+      requiredSetup: [],
+      canaryStatus: kling.canaryStatus,
+      fallbackRoute: 'seedance_text_guidance',
+      providerRegistry: registry,
+      recommendedNextAction: 'Use Kling exact likeness route.',
+    };
+  }
+
+  const runway = registryEntry(registry, 'runway_gen4_reference');
+  if (runway?.configured && runway.supportsExactLikeness && runway.canaryStatus === 'canary_succeeded') {
+    return {
+      route: 'runway_reference',
+      provider: 'runway',
+      confidence: 'high',
+      exactLikeness: true,
+      reason: 'Runway reference route is configured and has a successful canary.',
+      requiredSetup: [],
+      canaryStatus: runway.canaryStatus,
+      fallbackRoute: 'seedance_text_guidance',
+      providerRegistry: registry,
+      recommendedNextAction: 'Use Runway exact likeness route.',
+    };
+  }
+
   if (hasOpenAIExactRoute({
     readiness: input.openAISoraReadiness,
     identity: input.selfProviderCharacter,
@@ -119,38 +151,6 @@ export function chooseExactLikenessRoute(input: {
       fallbackRoute: 'seedance_text_guidance',
       providerRegistry: registry,
       recommendedNextAction: 'Use Seedance video reference route for self-character likeness.',
-    };
-  }
-
-  const runway = registryEntry(registry, 'runway_gen4_reference');
-  if (runway?.configured && runway.supportsExactLikeness && runway.canaryStatus === 'canary_succeeded') {
-    return {
-      route: 'runway_reference',
-      provider: 'runway',
-      confidence: 'high',
-      exactLikeness: true,
-      reason: 'Runway reference route is configured and has a successful canary.',
-      requiredSetup: [],
-      canaryStatus: runway.canaryStatus,
-      fallbackRoute: 'seedance_text_guidance',
-      providerRegistry: registry,
-      recommendedNextAction: 'Use Runway exact likeness route.',
-    };
-  }
-
-  const kling = registryEntry(registry, 'kling_reference');
-  if (kling?.configured && kling.supportsExactLikeness && kling.canaryStatus === 'canary_succeeded') {
-    return {
-      route: 'kling_reference',
-      provider: 'kling',
-      confidence: 'high',
-      exactLikeness: true,
-      reason: 'Kling reference route is configured and has a successful canary.',
-      requiredSetup: [],
-      canaryStatus: kling.canaryStatus,
-      fallbackRoute: 'seedance_text_guidance',
-      providerRegistry: registry,
-      recommendedNextAction: 'Use Kling exact likeness route.',
     };
   }
 
@@ -243,19 +243,12 @@ export async function resolveExactLikenessRoute(input: {
 }
 
 export function exactLikenessCanaryCandidate(input: ExactLikenessRouterResult) {
-  const seedanceVideoReference = registryEntry(input.providerRegistry, 'seedance_video_reference');
-  if (
-    seedanceVideoReference?.configured &&
-    seedanceVideoReference.implementationStatus !== 'blocked' &&
-    seedanceVideoReference.canaryStatus !== 'failed_blocked' &&
-    seedanceVideoReference.lastFailureCategory !== 'video_reference_moderation_block' &&
-    seedanceVideoReference.canaryStatus !== 'succeeded' &&
-    seedanceVideoReference.canaryStatus !== 'canary_succeeded'
-  ) {
+  const kling = registryEntry(input.providerRegistry, 'kling_reference');
+  if (kling?.configured && kling.readinessStatus === 'configured_ready_for_canary') {
     return {
-      provider: 'seedance',
-      route: 'seedance_video_reference' as const,
-      status: seedanceVideoReference.canaryStatus,
+      provider: 'kling',
+      route: 'kling_reference' as const,
+      status: 'configured_ready_for_canary',
     };
   }
 
@@ -264,15 +257,6 @@ export function exactLikenessCanaryCandidate(input: ExactLikenessRouterResult) {
     return {
       provider: 'runway',
       route: 'runway_reference' as const,
-      status: 'configured_ready_for_canary',
-    };
-  }
-
-  const kling = registryEntry(input.providerRegistry, 'kling_reference');
-  if (kling?.configured && kling.readinessStatus === 'configured_ready_for_canary') {
-    return {
-      provider: 'kling',
-      route: 'kling_reference' as const,
       status: 'configured_ready_for_canary',
     };
   }
@@ -287,6 +271,22 @@ export function exactLikenessCanaryCandidate(input: ExactLikenessRouterResult) {
       provider: 'openai_sora',
       route: 'openai_sora_character' as const,
       status: 'needs_canary',
+    };
+  }
+
+  const seedanceVideoReference = registryEntry(input.providerRegistry, 'seedance_video_reference');
+  if (
+    seedanceVideoReference?.configured &&
+    seedanceVideoReference.implementationStatus !== 'blocked' &&
+    seedanceVideoReference.canaryStatus !== 'failed_blocked' &&
+    seedanceVideoReference.lastFailureCategory !== 'video_reference_moderation_block' &&
+    seedanceVideoReference.canaryStatus !== 'succeeded' &&
+    seedanceVideoReference.canaryStatus !== 'canary_succeeded'
+  ) {
+    return {
+      provider: 'seedance',
+      route: 'seedance_video_reference' as const,
+      status: seedanceVideoReference.canaryStatus,
     };
   }
 

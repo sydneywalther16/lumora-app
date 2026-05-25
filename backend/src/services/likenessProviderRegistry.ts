@@ -109,7 +109,10 @@ export function buildLikenessProviderRegistry(input: {
   );
   const runwayStatus = getAlternateProviderStatus(input.alternateProviderStatuses, 'runway_gen4_reference');
   const klingStatus = getAlternateProviderStatus(input.alternateProviderStatuses, 'kling_reference');
-  const runwayReadiness = getRunwayProviderReadiness({ canaryStatus: runwayStatus?.status ?? null });
+  const runwayReadiness = getRunwayProviderReadiness({
+    canaryStatus: runwayStatus?.status ?? null,
+    lastFailureCategory: runwayStatus?.lastFailureCategory ?? null,
+  });
   const klingReadiness = getKlingProviderReadiness({ statuses: input.alternateProviderStatuses });
   const runwayExactReady = runwayReadiness.status === 'canary_succeeded';
   const klingExactReady = klingReadiness.status === 'canary_succeeded';
@@ -253,7 +256,11 @@ export function buildLikenessProviderRegistry(input: {
       implementationStatus: klingExactReady
         ? 'ready'
         : klingReadiness.configured
-          ? 'configured_not_implemented'
+          ? klingReadiness.status === 'configured_not_implemented'
+            ? 'configured_not_implemented'
+            : klingReadiness.status === 'blocked'
+              ? 'blocked'
+              : 'configured_ready_for_canary'
           : 'not_configured',
       recommendedNextAction: klingReadiness.recommendedNextAction,
     },

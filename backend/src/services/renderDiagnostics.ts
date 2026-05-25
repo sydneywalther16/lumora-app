@@ -147,6 +147,8 @@ async function exactLikenessDiagnostics(row: LatestRenderRow | null) {
     characterId: row?.characterId ?? null,
   });
   const latestSeedanceVideoReferenceCanary = await getLatestSeedanceVideoReferenceCanaryStatus();
+  const runwayProvider = choice.providerRegistry.find((provider) => provider.id === 'runway_gen4_reference') ?? null;
+  const klingProvider = choice.providerRegistry.find((provider) => provider.id === 'kling_reference') ?? null;
 
   return {
     exactLikenessRouterChoice: {
@@ -173,10 +175,14 @@ async function exactLikenessDiagnostics(row: LatestRenderRow | null) {
       selfVerificationVideo.seedanceVideoReferenceLastFailureCategory === 'video_reference_moderation_block',
     seedanceVideoReferenceRetryAvailableAt: latestSeedanceVideoReferenceCanary?.retryAvailableAt ?? null,
     alternateProvidersConfigured: choice.providerRegistry.filter((provider) => provider.configured).map((provider) => provider.id),
-    runwayConfigured: Boolean(choice.providerRegistry.find((provider) => provider.id === 'runway_gen4_reference')?.configured),
-    runwayCanaryStatus: choice.providerRegistry.find((provider) => provider.id === 'runway_gen4_reference')?.canaryStatus ?? 'not_configured',
-    klingConfigured: Boolean(choice.providerRegistry.find((provider) => provider.id === 'kling_reference')?.configured),
-    klingCanaryStatus: choice.providerRegistry.find((provider) => provider.id === 'kling_reference')?.canaryStatus ?? 'not_configured',
+    runwayConfigured: Boolean(runwayProvider?.configured),
+    runwayReadinessStatus: runwayProvider?.readinessStatus ?? 'not_configured',
+    runwayCanaryStatus: runwayProvider?.canaryStatus ?? 'not_configured',
+    runwayLastFailureCategory: runwayProvider?.lastFailureCategory ?? null,
+    klingConfigured: Boolean(klingProvider?.configured),
+    klingReadinessStatus: klingProvider?.readinessStatus ?? 'not_configured',
+    klingCanaryStatus: klingProvider?.canaryStatus ?? 'not_configured',
+    klingLastFailureCategory: klingProvider?.lastFailureCategory ?? null,
     seedanceReferenceBlocked: Boolean(choice.providerRegistry.find((provider) => provider.id === 'seedance_reference_images')?.implementationStatus === 'blocked'),
     openaiSoraDeprecated: Boolean(choice.providerRegistry.find((provider) => provider.id === 'openai_sora_character')?.deprecated),
     lumoraIdentityPackStatus: 'research_only',

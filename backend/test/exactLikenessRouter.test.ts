@@ -164,7 +164,7 @@ try {
   assert.equal(registry.find((provider) => provider.id === 'openai_sora_character')?.deprecated, true);
   assert.equal(registry.find((provider) => provider.id === 'openai_sora_character')?.shutdownDate, '2026-09-24');
   assert.equal(registry.find((provider) => provider.id === 'seedance_video_reference')?.implementationStatus, 'not_configured');
-  assert.equal(registry.find((provider) => provider.id === 'kling_reference')?.implementationStatus, 'configured_not_implemented');
+  assert.equal(registry.find((provider) => provider.id === 'kling_reference')?.implementationStatus, 'configured_ready_for_canary');
   assert.equal(registry.find((provider) => provider.id === 'runway_gen4_reference')?.implementationStatus, 'configured_ready_for_canary');
   assert.equal(registry.find((provider) => provider.id === 'lumora_identity_pack')?.implementationStatus, 'research_only');
   const registryText = JSON.stringify(registry);
@@ -180,6 +180,44 @@ try {
   });
   assert.equal(configuredButUntested.route, 'seedance_text_guidance');
   assert.equal(configuredButUntested.exactLikeness, false);
+
+  const klingSucceededRegistry = buildLikenessProviderRegistry({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: blockedReferenceSummary,
+    alternateProviderStatuses: [
+      {
+        provider: 'kling_reference',
+        providerModel: 'kling-reference-model',
+        status: 'canary_succeeded',
+        referenceRole: 'front_angle',
+        referenceLabel: 'Primary front face',
+        lastSuccessAt: '2026-05-23T00:00:00.000Z',
+        lastFailureAt: null,
+        lastFailureCategory: null,
+        outputUrlPresent: true,
+      },
+      {
+        provider: 'runway_gen4_reference',
+        providerModel: 'gen4.5',
+        status: 'canary_succeeded',
+        referenceRole: 'front_angle',
+        referenceLabel: 'Primary front face',
+        lastSuccessAt: '2026-05-23T00:00:00.000Z',
+        lastFailureAt: null,
+        lastFailureCategory: null,
+        outputUrlPresent: true,
+      },
+    ],
+  });
+  const klingExact = chooseExactLikenessRoute({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: blockedReferenceSummary,
+    providerRegistry: klingSucceededRegistry,
+  });
+  assert.equal(klingExact.route, 'kling_reference');
+  assert.equal(klingExact.exactLikeness, true);
 
   const runwaySucceededRegistry = buildLikenessProviderRegistry({
     openAISoraReadiness: readiness,
@@ -225,17 +263,6 @@ try {
       verificationVideoUrlRedacted: '[private-verification-video-present]',
       recommendedNextAction: 'Use Seedance video reference route.',
     },
-    alternateProviderStatuses: [{
-      provider: 'runway_gen4_reference',
-      providerModel: 'gen4.5',
-      status: 'canary_succeeded',
-      referenceRole: 'front_angle',
-      referenceLabel: 'Primary front face',
-      lastSuccessAt: '2026-05-23T00:00:00.000Z',
-      lastFailureAt: null,
-      lastFailureCategory: null,
-      outputUrlPresent: true,
-    }],
   });
   const videoReferenceExact = chooseExactLikenessRoute({
     openAISoraReadiness: readiness,

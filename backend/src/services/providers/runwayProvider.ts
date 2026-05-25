@@ -4,19 +4,20 @@ import { persistAlternateExactLikenessCanaryResult } from '../alternateLikenessP
 import { persistCompletedGeneration } from '../generationPersistence';
 import { parseProviderVideoOutput } from '../providerOutputParser';
 import { serializeDiagnosticError } from '../schemaDiagnostics';
-import { listSelfReferenceMatrixCandidates } from '../seedanceCanary';
+import { listSelfReferenceMatrixCandidates, verifyReferenceAssetAccess } from '../seedanceCanary';
 
 const RUNWAY_API_BASE_URL = 'https://api.dev.runwayml.com';
 const RUNWAY_API_VERSION = '2024-11-06';
-const RUNWAY_CANARY_PROMPT =
-  'The character walks slowly through a peaceful sunlit garden, natural movement, fully clothed, soft cinematic storybook style.';
+export const RUNWAY_CANARY_PROMPT =
+  'The referenced self character walks slowly through a peaceful sunlit garden, natural movement, fully clothed, soft cinematic storybook style, gentle camera motion.';
 
 export type RunwayReadinessStatus =
   | 'not_configured'
   | 'configured_not_implemented'
   | 'configured_ready_for_canary'
   | 'canary_succeeded'
-  | 'canary_failed';
+  | 'canary_failed'
+  | 'provider_unavailable';
 
 type RunwayTask = {
   id: string;
@@ -29,6 +30,7 @@ type RunwayTask = {
 
 export function getRunwayProviderReadiness(input: {
   canaryStatus?: 'canary_succeeded' | 'canary_failed' | 'not_tested' | null;
+  lastFailureCategory?: string | null;
 } = {}) {
   const referenceModel = env.RUNWAY_REFERENCE_MODEL ?? env.RUNWAY_MODEL ?? null;
   const configured = Boolean(env.RUNWAY_ENABLED && env.RUNWAY_API_KEY && referenceModel);
@@ -37,6 +39,8 @@ export function getRunwayProviderReadiness(input: {
     ? 'not_configured'
     : canaryStatus === 'canary_succeeded'
       ? 'canary_succeeded'
+      : input.lastFailureCategory === 'runway_provider_unavailable'
+        ? 'provider_unavailable'
       : canaryStatus === 'canary_failed'
         ? 'canary_failed'
         : 'configured_ready_for_canary';
@@ -52,11 +56,13 @@ export function getRunwayProviderReadiness(input: {
     status,
     implemented: true,
     canarySucceeded: status === 'canary_succeeded',
-    canaryFailed: status === 'canary_failed',
+    canaryFailed: status === 'canary_failed' || status === 'provider_unavailable',
     recommendedNextAction: !configured
       ? 'Set RUNWAY_ENABLED=true, RUNWAY_API_KEY, and RUNWAY_REFERENCE_MODEL to test Runway likeness.'
       : status === 'canary_succeeded'
         ? 'Runway canary succeeded; router may use it for exact likeness.'
+        : status === 'provider_unavailable'
+          ? 'Runway provider was temporarily unavailable. Retry later if you want to spend another canary attempt.'
         : status === 'canary_failed'
           ? 'Inspect the last Runway canary failure before production routing.'
           : 'Run the Runway likeness canary before production routing.',
@@ -75,12 +81,26 @@ function redactRunwayError(value: unknown) {
     .slice(0, 280);
 }
 
-function classifyRunwayFailure(input: {
+export function classifyRunwayFailure(input: {
   statusCode?: number | null;
   detail?: unknown;
 }) {
   const detail = redactRunwayError(input.detail);
   const lower = detail.toLowerCase();
+  if (
+    input.statusCode === 429 ||
+    input.statusCode === 502 ||
+    input.statusCode === 503 ||
+    input.statusCode === 504 ||
+    lower.includes('temporarily unavailable') ||
+    lower.includes('try again later') ||
+    lower.includes('provider unavailable') ||
+    lower.includes('upstream unavailable') ||
+    lower.includes('timeout') ||
+    lower.includes('rate limit')
+  ) {
+    return { category: 'runway_provider_unavailable', detail };
+  }
   if (input.statusCode === 401 || input.statusCode === 403 || lower.includes('permission') || lower.includes('unauthorized')) {
     return { category: 'runway_access_denied', detail };
   }
@@ -127,6 +147,20 @@ async function runwayJson<T>(input: {
   return payload as T;
 }
 
+export function buildRunwayImageToVideoPayload(input: {
+  promptImage: string;
+  promptText: string;
+  model: string;
+}) {
+  return {
+    promptImage: input.promptImage,
+    promptText: input.promptText,
+    model: input.model,
+    ratio: '768:1280',
+    duration: 5,
+  };
+}
+
 async function createRunwayImageToVideoTask(input: {
   promptImage: string;
   promptText: string;
@@ -135,13 +169,7 @@ async function createRunwayImageToVideoTask(input: {
   return runwayJson<RunwayTask>({
     path: '/v1/image_to_video',
     method: 'POST',
-    body: {
-      promptImage: input.promptImage,
-      promptText: input.promptText,
-      model: input.model,
-      ratio: '768:1280',
-      duration: 5,
-    },
+    body: buildRunwayImageToVideoPayload(input),
   });
 }
 
@@ -193,7 +221,10 @@ export async function startRunwaySelfLikenessCanary(input: {
       readinessStatus: readiness.status,
       canaryStatus: readiness.status,
       outputUrlPresent: false,
+      parsedVideoUrlPresent: false,
       verifiedVideoPresent: false,
+      verifiedPersistedVideo: false,
+      providerJobCreated: false,
       failureCategory: 'not_configured',
       recommendedNextAction: readiness.recommendedNextAction,
     };
@@ -213,11 +244,55 @@ export async function startRunwaySelfLikenessCanary(input: {
       readinessStatus: readiness.status,
       canaryStatus: 'canary_failed',
       outputUrlPresent: false,
+      parsedVideoUrlPresent: false,
       verifiedVideoPresent: false,
+      verifiedPersistedVideo: false,
+      providerJobCreated: false,
       failureCategory: 'no_saved_self_reference',
       sourcesChecked: matrix.sourcesChecked,
       sourceErrors: matrix.sourceErrors,
       recommendedNextAction: 'Open Create or Characters and re-save the self reference photos to Lumora storage, then rerun the Runway canary.',
+    };
+  }
+
+  const referenceAccess = await verifyReferenceAssetAccess(candidate.reference.url);
+  if (!referenceAccess.reachable) {
+    await persistAlternateExactLikenessCanaryResult({
+      userId: candidate.userId,
+      characterId: candidate.characterId,
+      provider: 'runway_gen4_reference',
+      providerModel: readiness.referenceModel,
+      referenceRole: candidate.referenceRole,
+      referenceLabel: candidate.referenceLabel,
+      succeeded: false,
+      failureCategory: 'runway_asset_access',
+      providerErrorCategory: 'runway_asset_access',
+      outputUrlPresent: false,
+      notes: {
+        referenceHost: referenceAccess.host,
+        referenceStatus: referenceAccess.status,
+        referenceContentType: referenceAccess.contentType,
+      },
+    });
+    return {
+      ok: false,
+      provider: 'runway',
+      route: 'runway_reference',
+      configured: true,
+      readinessStatus: 'canary_failed',
+      canaryStatus: 'canary_failed',
+      selectedReferenceRole: candidate.referenceRole,
+      selectedReferenceLabel: candidate.referenceLabel,
+      referenceCount: 1,
+      verificationVideoUsed: false,
+      providerJobCreated: false,
+      outputUrlPresent: false,
+      parsedVideoUrlPresent: false,
+      verifiedVideoPresent: false,
+      verifiedPersistedVideo: false,
+      failureCategory: 'runway_asset_access',
+      providerErrorSummary: referenceAccess.error,
+      recommendedNextAction: 'A saved Lumora reference was not provider-reachable. Repair references before testing Runway again.',
     };
   }
 
@@ -257,11 +332,16 @@ export async function startRunwaySelfLikenessCanary(input: {
         readinessStatus: 'canary_failed',
         canaryStatus: 'canary_failed',
         providerTaskIdPresent: Boolean(taskId),
+        providerJobCreated: true,
         providerStatus: finalTask.status ?? null,
+        referenceCount: 1,
         selectedReferenceRole: candidate.referenceRole,
         selectedReferenceLabel: candidate.referenceLabel,
+        verificationVideoUsed: false,
         outputUrlPresent: false,
+        parsedVideoUrlPresent: false,
         verifiedVideoPresent: false,
+        verifiedPersistedVideo: false,
         outputShapeSummary: outputShapeSummary(finalTask.output),
         failureCategory: failure.category,
         providerErrorSummary: failure.detail,
@@ -313,11 +393,16 @@ export async function startRunwaySelfLikenessCanary(input: {
       readinessStatus: 'canary_succeeded',
       canaryStatus: 'canary_succeeded',
       providerTaskIdPresent: Boolean(taskId),
+      providerJobCreated: true,
       providerStatus: finalTask.status ?? null,
+      referenceCount: 1,
       selectedReferenceRole: candidate.referenceRole,
       selectedReferenceLabel: candidate.referenceLabel,
+      verificationVideoUsed: false,
       outputUrlPresent: true,
+      parsedVideoUrlPresent: true,
       verifiedVideoPresent: true,
+      verifiedPersistedVideo: Boolean(persisted?.storagePath || persisted?.projectId),
       outputShapeSummary: outputShapeSummary(finalTask.output),
       projectId: persisted?.projectId ?? null,
       storagePathPresent: Boolean(persisted?.storagePath),
@@ -346,10 +431,15 @@ export async function startRunwaySelfLikenessCanary(input: {
       configured: true,
       readinessStatus: 'canary_failed',
       canaryStatus: 'canary_failed',
+      providerJobCreated: false,
+      referenceCount: 1,
       selectedReferenceRole: candidate.referenceRole,
       selectedReferenceLabel: candidate.referenceLabel,
+      verificationVideoUsed: false,
       outputUrlPresent: false,
+      parsedVideoUrlPresent: false,
       verifiedVideoPresent: false,
+      verifiedPersistedVideo: false,
       failureCategory,
       providerErrorSummary: typeof (error as { failureDetail?: unknown }).failureDetail === 'string'
         ? (error as { failureDetail: string }).failureDetail

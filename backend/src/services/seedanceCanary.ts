@@ -3120,6 +3120,8 @@ export async function buildRenderPathCompareDiagnostics() {
       referenceRouteSummary,
       alternateProviderStatuses,
     });
+    const runwayProvider = likenessProviderRegistry.find((provider) => provider.id === 'runway_gen4_reference') ?? null;
+    const klingProvider = likenessProviderRegistry.find((provider) => provider.id === 'kling_reference') ?? null;
     const exactLikenessRouterChoice = chooseExactLikenessRoute({
       openAISoraReadiness: openaiSoraReadiness,
       selfProviderCharacter: openaiSoraIdentity,
@@ -3320,10 +3322,14 @@ export async function buildRenderPathCompareDiagnostics() {
       softGuidanceAvailable: true,
       likenessProviderRegistry,
       alternateProvidersConfigured: likenessProviderRegistry.filter((provider) => provider.configured).map((provider) => provider.id),
-      runwayConfigured: Boolean(likenessProviderRegistry.find((provider) => provider.id === 'runway_gen4_reference')?.configured),
-      runwayCanaryStatus: likenessProviderRegistry.find((provider) => provider.id === 'runway_gen4_reference')?.canaryStatus ?? 'not_configured',
-      klingConfigured: Boolean(likenessProviderRegistry.find((provider) => provider.id === 'kling_reference')?.configured),
-      klingCanaryStatus: likenessProviderRegistry.find((provider) => provider.id === 'kling_reference')?.canaryStatus ?? 'not_configured',
+      runwayConfigured: Boolean(runwayProvider?.configured),
+      runwayReadinessStatus: runwayProvider?.readinessStatus ?? 'not_configured',
+      runwayCanaryStatus: runwayProvider?.canaryStatus ?? 'not_configured',
+      runwayLastFailureCategory: runwayProvider?.lastFailureCategory ?? null,
+      klingConfigured: Boolean(klingProvider?.configured),
+      klingReadinessStatus: klingProvider?.readinessStatus ?? 'not_configured',
+      klingCanaryStatus: klingProvider?.canaryStatus ?? 'not_configured',
+      klingLastFailureCategory: klingProvider?.lastFailureCategory ?? null,
       openaiSoraDeprecated: openaiSoraReadiness.openaiVideosDeprecated,
       lumoraIdentityPackStatus: 'research_only',
       recommendedNextAction: exactLikenessRouterChoice.recommendedNextAction,
@@ -3352,16 +3358,24 @@ export async function buildRenderPathCompareDiagnostics() {
           lastReferenceResult: null,
         },
         runway: {
-          configured: Boolean(env.RUNWAY_ENABLED && env.RUNWAY_API_KEY),
-          referenceCapable: false,
-          canaryTested: false,
-          lastReferenceResult: null,
+          configured: Boolean(runwayProvider?.configured),
+          referenceCapable: Boolean(runwayProvider?.configured),
+          canaryTested: runwayProvider?.canaryStatus === 'canary_succeeded' || runwayProvider?.canaryStatus === 'canary_failed',
+          lastReferenceResult: runwayProvider ? {
+            status: runwayProvider.canaryStatus,
+            failureCategory: runwayProvider.lastFailureCategory,
+            lastSuccessAt: runwayProvider.lastSuccessAt,
+          } : null,
         },
         klingReference: {
-          configured: Boolean(env.KLING_ENABLED && env.KLING_API_KEY && env.KLING_REFERENCE_MODEL),
-          referenceCapable: false,
-          canaryTested: false,
-          lastReferenceResult: null,
+          configured: Boolean(klingProvider?.configured),
+          referenceCapable: Boolean(klingProvider?.configured),
+          canaryTested: klingProvider?.canaryStatus === 'canary_succeeded' || klingProvider?.canaryStatus === 'canary_failed',
+          lastReferenceResult: klingProvider ? {
+            status: klingProvider.canaryStatus,
+            failureCategory: klingProvider.lastFailureCategory,
+            lastSuccessAt: klingProvider.lastSuccessAt,
+          } : null,
         },
       },
       differences: realPath ? {

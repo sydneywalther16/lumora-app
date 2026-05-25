@@ -1259,11 +1259,11 @@ export const api = {
       timeoutMs: 180_000,
     }),
 
-  startKlingLikenessCanary: (payload: { userId?: string | null } = {}) =>
+  startKlingLikenessCanary: (payload: { userId?: string | null; saveAsDraft?: boolean } = {}) =>
     request<ExactLikenessCanaryResponse>('/api/diagnostics/kling-likeness-canary/self', {
       method: 'POST',
       body: JSON.stringify(payload),
-      timeoutMs: 60_000,
+      timeoutMs: 180_000,
     }),
 
   startSeedanceVideoReferenceCanary: (payload: { userId?: string | null; variant?: 'reference_videos_bracket' | 'reference_videos_at' | 'video_urls_at'; forceNormalize?: boolean; allowOriginalFallback?: boolean; forceRetest?: boolean } = {}) =>

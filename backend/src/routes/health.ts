@@ -137,6 +137,8 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
       ? referenceCleanupRecord.savedLumoraReferenceCount
       : 0;
     const exactLikenessCanaryStatus = exactLikeness.canaryStatus ?? null;
+    const runwayProviderEntry = exactLikeness.providerRegistry.find((provider) => provider.id === 'runway_gen4_reference') ?? null;
+    const klingProviderEntry = exactLikeness.providerRegistry.find((provider) => provider.id === 'kling_reference') ?? null;
     const recommendedNextAction = selfVerificationVideo.migratedFromOldSelfCapture
       ? 'Migrate old self capture into verification video.'
       : !selfVerificationVideo.selfVerificationVideoPresent
@@ -179,8 +181,16 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
       seedanceImageReferenceBlocked: referenceRouteStatus.seedanceReferenceRoutesBlocked,
       exactLikenessRouter: exactLikeness,
       likenessProviderRegistry: exactLikeness.providerRegistry,
-      runwayLikenessProvider: exactLikeness.providerRegistry.find((provider) => provider.id === 'runway_gen4_reference') ?? getRunwayProviderReadiness(),
-      klingLikenessProvider: exactLikeness.providerRegistry.find((provider) => provider.id === 'kling_reference') ?? getKlingProviderReadiness(),
+      runwayConfigured: Boolean(runwayProviderEntry?.configured),
+      runwayReadinessStatus: runwayProviderEntry?.readinessStatus ?? 'not_configured',
+      runwayCanaryStatus: runwayProviderEntry?.canaryStatus ?? 'not_configured',
+      runwayLastFailureCategory: runwayProviderEntry?.lastFailureCategory ?? null,
+      klingConfigured: Boolean(klingProviderEntry?.configured),
+      klingReadinessStatus: klingProviderEntry?.readinessStatus ?? 'not_configured',
+      klingCanaryStatus: klingProviderEntry?.canaryStatus ?? 'not_configured',
+      klingLastFailureCategory: klingProviderEntry?.lastFailureCategory ?? null,
+      runwayLikenessProvider: runwayProviderEntry ?? getRunwayProviderReadiness(),
+      klingLikenessProvider: klingProviderEntry ?? getKlingProviderReadiness(),
       lumoraIdentityPackStatus: 'research_only',
       openaiSoraProvider: getOpenAISoraProviderReadiness(),
       likenessProviderCanary: {
@@ -358,8 +368,11 @@ healthRouter.post('/api/diagnostics/exact-likeness-canary/self', async (req, res
   }
 
   if (candidate.route === 'kling_reference') {
-    const status = await startKlingSelfLikenessCanary();
-    res.status(status.failureCategory === 'configured_not_implemented' ? 501 : status.failureCategory === 'not_configured' ? 403 : 200).json({
+    const status = await startKlingSelfLikenessCanary({
+      userId,
+      saveAsDraft: false,
+    });
+    res.status(status.ok ? 202 : status.failureCategory === 'configured_not_implemented' ? 501 : status.failureCategory === 'not_configured' ? 403 : 200).json({
       ...status,
       exactLikenessRouterChoice: routerChoice,
       warning: 'This may consume provider credits when enabled.',
@@ -433,6 +446,12 @@ healthRouter.post('/api/diagnostics/runway-likeness-canary/self', async (req, re
     });
     return;
   }
+  if (!env.RUNWAY_API_KEY) {
+    res.status(403).json({
+      error: 'Runway API key missing. Set RUNWAY_API_KEY to run a paid canary.',
+    });
+    return;
+  }
 
   const payload = canarySchema.parse(req.body ?? {});
   const status = await startRunwaySelfLikenessCanary({
@@ -445,7 +464,7 @@ healthRouter.post('/api/diagnostics/runway-likeness-canary/self', async (req, re
   });
 });
 
-healthRouter.post('/api/diagnostics/kling-likeness-canary/self', async (_req, res) => {
+healthRouter.post('/api/diagnostics/kling-likeness-canary/self', async (req, res) => {
   if (!env.ENABLE_RENDER_PROBE) {
     res.status(403).json({
       error: 'Render probe disabled. Set ENABLE_RENDER_PROBE=true to run a paid Kling likeness canary.',
@@ -458,11 +477,21 @@ healthRouter.post('/api/diagnostics/kling-likeness-canary/self', async (_req, re
     });
     return;
   }
+  if (!env.KLING_API_KEY) {
+    res.status(403).json({
+      error: 'Kling API key missing. Set KLING_API_KEY to run a paid canary.',
+    });
+    return;
+  }
 
-  const status = await startKlingSelfLikenessCanary();
-  res.status(status.failureCategory === 'configured_not_implemented' ? 501 : status.failureCategory === 'not_configured' ? 403 : 200).json({
+  const payload = canarySchema.parse(req.body ?? {});
+  const status = await startKlingSelfLikenessCanary({
+    userId: payload.userId ?? req.header('x-lumora-user-id') ?? null,
+    saveAsDraft: payload.saveAsDraft,
+  });
+  res.status(status.ok ? 202 : status.failureCategory === 'configured_not_implemented' ? 501 : status.failureCategory === 'not_configured' ? 403 : 200).json({
     ...status,
-    warning: 'This may consume provider credits when a supported Kling route is implemented.',
+    warning: 'This may consume provider credits.',
   });
 });
 

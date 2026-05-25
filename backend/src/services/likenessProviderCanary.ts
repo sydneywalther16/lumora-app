@@ -32,7 +32,7 @@ export function buildAlternateLikenessProviderCanaryStatus(): AlternateLikenessP
     {
       provider: 'kling-reference',
       configured: Boolean(env.KLING_ENABLED && env.KLING_API_KEY && env.KLING_REFERENCE_MODEL),
-      referenceCapable: false,
+      referenceCapable: Boolean(env.KLING_ENABLED && env.KLING_API_KEY && env.KLING_REFERENCE_MODEL),
       canaryTested: false,
       productionRouteEnabled: false,
       lastReferenceResult: null,
