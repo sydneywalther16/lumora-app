@@ -57,6 +57,8 @@ const canarySchema = z.object({
 });
 const videoReferenceCanarySchema = canarySchema.extend({
   variant: z.enum(['reference_videos_bracket', 'reference_videos_at', 'video_urls_at']).optional().default('reference_videos_bracket'),
+  forceNormalize: z.boolean().optional().default(false),
+  allowOriginalFallback: z.boolean().optional().default(false),
 });
 const referenceCanarySchema = canarySchema.extend({
   characterId: z.string().min(1),
@@ -554,6 +556,8 @@ healthRouter.post('/api/diagnostics/seedance-video-reference-canary/self', async
     userId,
     saveAsDraft: payload.saveAsDraft,
     variant: payload.variant,
+    forceNormalize: payload.forceNormalize,
+    allowOriginalFallback: payload.allowOriginalFallback,
   });
   res.status('ok' in status && status.ok === false ? 200 : 202).json({
     ...status,

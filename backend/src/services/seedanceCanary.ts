@@ -218,6 +218,8 @@ export type CanaryVerificationVideoDiagnostics = {
   promptTokenStyle?: 'bracket' | 'at' | null;
   normalizedAssetUsed?: boolean | null;
   normalizedStatus?: VerificationVideoNormalizationDiagnostics['normalizedStatus'] | null;
+  normalizationTriggered?: boolean | null;
+  normalizationReason?: VerificationVideoNormalizationDiagnostics['normalizationReason'] | null;
   preflight?: VerificationVideoPreflightMetadata | null;
   normalizedPreflight?: VerificationVideoPreflightMetadata | null;
   preflightOk?: boolean | null;
@@ -1020,6 +1022,8 @@ function verificationVideoDiagnostics(input: {
     promptTokenStyle: spec?.promptTokenStyle ?? null,
     normalizedAssetUsed: input.normalization?.normalizedAssetUsed ?? null,
     normalizedStatus: input.normalization?.normalizedStatus ?? null,
+    normalizationTriggered: input.normalization?.normalizationTriggered ?? null,
+    normalizationReason: input.normalization?.normalizationReason ?? null,
     preflight: input.normalization?.original ?? null,
     normalizedPreflight: input.normalization?.normalized ?? null,
     preflightOk: selectedPreflight?.preflightOk ?? null,
@@ -2361,6 +2365,8 @@ export async function startSeedanceVideoReferenceCanary(input: {
   userId?: string | null;
   saveAsDraft?: boolean;
   variant?: SeedanceVideoReferenceCanaryVariant;
+  forceNormalize?: boolean;
+  allowOriginalFallback?: boolean;
 }) {
   const variant = input.variant ?? 'reference_videos_bracket';
   const resolved = await resolveSelfVerificationVideoRuntime({
@@ -2407,6 +2413,9 @@ export async function startSeedanceVideoReferenceCanary(input: {
     bucket: resolved.runtime.bucket,
     objectPath: resolved.runtime.objectPath,
     userId: input.userId,
+    forceNormalize: input.forceNormalize,
+    requireNormalized: true,
+    allowOriginalFallback: input.allowOriginalFallback === true,
   });
   let selectedRuntime: CanaryVerificationVideoRuntime = prepared.ok
     ? {
@@ -2658,6 +2667,10 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
     selectedReferenceSource: metadata?.selectedReference?.source ?? null,
     selectedReference: metadata?.selectedReference ?? null,
     selectedVerificationVideo: metadata?.selectedVerificationVideo ?? null,
+    normalizedAssetUsed: metadata?.selectedVerificationVideo?.normalizedAssetUsed ?? null,
+    normalizationTriggered: metadata?.selectedVerificationVideo?.normalizationTriggered ?? null,
+    normalizationReason: metadata?.selectedVerificationVideo?.normalizationReason ?? null,
+    normalizedPreflightMetadata: metadata?.selectedVerificationVideo?.normalizedPreflight ?? null,
     message: status === 'completed' && outputParse.ok
       ? 'Seedance canary succeeded with a verified video URL.'
       : status === 'rate_limited'

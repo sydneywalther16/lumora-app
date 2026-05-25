@@ -16,6 +16,26 @@ export const VERIFICATION_VIDEO_MAX_SECONDS = 15;
 const FFMPEG_TIMEOUT_MS = 90_000;
 const FFPROBE_TIMEOUT_MS = 8_000;
 
+export const VERIFICATION_VIDEO_NORMALIZATION_TARGET = {
+  container: 'mp4',
+  videoCodec: 'h264',
+  audioCodec: 'aac',
+  pixelFormat: 'yuv420p',
+  videoProfile: 'high',
+  width: 720,
+  height: 1280,
+  durationSeconds: 12,
+  maxFileSizeBytes: VERIFICATION_VIDEO_PROVIDER_MAX_BYTES,
+  faststart: true,
+} as const;
+
+export type VerificationVideoNormalizationReason =
+  | 'missing_normalized_asset'
+  | 'stale_asset'
+  | 'force_refresh'
+  | 'skipped_existing_valid_asset'
+  | 'original_fallback_allowed';
+
 export type VerificationVideoPreflightMetadata = {
   durationSeconds: number | null;
   width: number | null;
@@ -35,9 +55,11 @@ export type VerificationVideoPreflightMetadata = {
 export type VerificationVideoNormalizationDiagnostics = {
   original: VerificationVideoPreflightMetadata | null;
   normalized: VerificationVideoPreflightMetadata | null;
+  normalizationTriggered: boolean;
+  normalizationReason: VerificationVideoNormalizationReason | null;
   normalizedAssetUsed: boolean;
   normalizedAssetPathPresent: boolean;
-  normalizedStatus: 'not_needed' | 'created' | 'unavailable' | 'failed';
+  normalizedStatus: 'not_needed' | 'ready' | 'created' | 'unavailable' | 'failed';
   failureReason: string | null;
 };
 
@@ -92,6 +114,11 @@ function numericValue(value: unknown) {
 
 function firstFormatName(value: string | null | undefined) {
   return value?.split(',')[0]?.trim().toLowerCase() || null;
+}
+
+function containerNameForPath(filePath: string, formatName: string | null | undefined) {
+  if (/\.mp4$/i.test(filePath)) return 'mp4';
+  return firstFormatName(formatName);
 }
 
 function isProviderSafeContainer(value: string | null) {
@@ -174,7 +201,7 @@ async function probeVideoFile(filePath: string, fallbackSizeBytes: number): Prom
       durationSeconds: numericValue(parsed.format?.duration),
       width: numericValue(video?.width),
       height: numericValue(video?.height),
-      container: firstFormatName(parsed.format?.format_name),
+      container: containerNameForPath(filePath, parsed.format?.format_name),
       videoCodec: video?.codec_name?.trim().toLowerCase() ?? null,
       audioCodec: audio?.codec_name?.trim().toLowerCase() ?? null,
       fileSizeBytes: size,
@@ -220,9 +247,13 @@ async function normalizeVideoBuffer(buffer: Buffer): Promise<{
       '-i',
       inputPath,
       '-t',
-      '12',
+      String(VERIFICATION_VIDEO_NORMALIZATION_TARGET.durationSeconds),
+      '-map',
+      '0:v:0',
+      '-map',
+      '0:a?',
       '-vf',
-      'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,setsar=1',
+      `scale=${VERIFICATION_VIDEO_NORMALIZATION_TARGET.width}:${VERIFICATION_VIDEO_NORMALIZATION_TARGET.height}:force_original_aspect_ratio=decrease,pad=${VERIFICATION_VIDEO_NORMALIZATION_TARGET.width}:${VERIFICATION_VIDEO_NORMALIZATION_TARGET.height}:(ow-iw)/2:(oh-ih)/2,setsar=1`,
       '-r',
       '24',
       '-c:v',
@@ -230,12 +261,16 @@ async function normalizeVideoBuffer(buffer: Buffer): Promise<{
       '-preset',
       'veryfast',
       '-pix_fmt',
-      'yuv420p',
+      VERIFICATION_VIDEO_NORMALIZATION_TARGET.pixelFormat,
       '-profile:v',
-      'main',
+      VERIFICATION_VIDEO_NORMALIZATION_TARGET.videoProfile,
       '-movflags',
       '+faststart',
-      '-an',
+      '-c:a',
+      'aac',
+      '-b:a',
+      '96k',
+      '-shortest',
       outputPath,
     ], {
       timeout: FFMPEG_TIMEOUT_MS,
@@ -317,11 +352,41 @@ async function storedNormalizedAsset(input: {
   return result.rows[0]?.normalizedAssetId ?? null;
 }
 
+export function chooseVerificationVideoNormalizationAction(input: {
+  forceNormalize?: boolean;
+  storedNormalizedAssetPresent?: boolean;
+  storedNormalizedAssetValid?: boolean;
+}) {
+  if (input.forceNormalize) {
+    return {
+      useStoredNormalizedAsset: false,
+      normalizationTriggered: true,
+      normalizationReason: 'force_refresh' as const,
+    };
+  }
+
+  if (input.storedNormalizedAssetPresent && input.storedNormalizedAssetValid) {
+    return {
+      useStoredNormalizedAsset: true,
+      normalizationTriggered: false,
+      normalizationReason: 'skipped_existing_valid_asset' as const,
+    };
+  }
+
+  return {
+    useStoredNormalizedAsset: false,
+    normalizationTriggered: true,
+    normalizationReason: input.storedNormalizedAssetPresent ? 'stale_asset' as const : 'missing_normalized_asset' as const,
+  };
+}
+
 export async function prepareVerificationVideoForProvider(input: {
   bucket: string;
   objectPath: string;
   userId?: string | null;
   forceNormalize?: boolean;
+  requireNormalized?: boolean;
+  allowOriginalFallback?: boolean;
 }): Promise<VerificationVideoPreparationResult> {
   if (!supabaseAdmin) {
     return {
@@ -333,6 +398,8 @@ export async function prepareVerificationVideoForProvider(input: {
       diagnostics: {
         original: null,
         normalized: null,
+        normalizationTriggered: false,
+        normalizationReason: null,
         normalizedAssetUsed: false,
         normalizedAssetPathPresent: false,
         normalizedStatus: 'unavailable',
@@ -345,9 +412,11 @@ export async function prepareVerificationVideoForProvider(input: {
   let objectToDownload = storedNormalized || input.objectPath;
   let usingStoredNormalized = Boolean(storedNormalized);
   let download = await supabaseAdmin.storage.from(input.bucket).download(objectToDownload);
+  let normalizedAssetStale = false;
   if (usingStoredNormalized && (download.error || !download.data)) {
     objectToDownload = input.objectPath;
     usingStoredNormalized = false;
+    normalizedAssetStale = true;
     download = await supabaseAdmin.storage.from(input.bucket).download(objectToDownload);
   }
   if (download.error || !download.data) {
@@ -362,6 +431,8 @@ export async function prepareVerificationVideoForProvider(input: {
       diagnostics: {
         original: null,
         normalized: null,
+        normalizationTriggered: false,
+        normalizationReason: null,
         normalizedAssetUsed: usingStoredNormalized,
         normalizedAssetPathPresent: Boolean(storedNormalized),
         normalizedStatus: usingStoredNormalized ? 'failed' : 'not_needed',
@@ -381,6 +452,8 @@ export async function prepareVerificationVideoForProvider(input: {
       diagnostics: {
         original: null,
         normalized: null,
+        normalizationTriggered: false,
+        normalizationReason: null,
         normalizedAssetUsed: false,
         normalizedAssetPathPresent: Boolean(storedNormalized),
         normalizedStatus: 'not_needed',
@@ -397,6 +470,11 @@ export async function prepareVerificationVideoForProvider(input: {
     await writeFile(probePath, buffer);
     const original = await probeVideoFile(probePath, buffer.length);
     if (usingStoredNormalized && original.preflightOk) {
+      const action = chooseVerificationVideoNormalizationAction({
+        storedNormalizedAssetPresent: true,
+        storedNormalizedAssetValid: true,
+        forceNormalize: false,
+      });
       return {
         ok: true,
         bucket: input.bucket,
@@ -404,15 +482,23 @@ export async function prepareVerificationVideoForProvider(input: {
         diagnostics: {
           original,
           normalized: original,
+          normalizationTriggered: action.normalizationTriggered,
+          normalizationReason: action.normalizationReason,
           normalizedAssetUsed: true,
           normalizedAssetPathPresent: true,
-          normalizedStatus: 'created',
+          normalizedStatus: 'ready',
           failureReason: null,
         },
       };
     }
 
-    if (original.preflightOk && !input.forceNormalize) {
+    const action = chooseVerificationVideoNormalizationAction({
+      storedNormalizedAssetPresent: Boolean(storedNormalized),
+      storedNormalizedAssetValid: false,
+      forceNormalize: input.forceNormalize,
+    });
+
+    if (!input.requireNormalized && original.preflightOk && !input.forceNormalize) {
       return {
         ok: true,
         bucket: input.bucket,
@@ -420,6 +506,8 @@ export async function prepareVerificationVideoForProvider(input: {
         diagnostics: {
           original,
           normalized: null,
+          normalizationTriggered: false,
+          normalizationReason: input.allowOriginalFallback ? 'original_fallback_allowed' : null,
           normalizedAssetUsed: false,
           normalizedAssetPathPresent: false,
           normalizedStatus: 'not_needed',
@@ -428,7 +516,7 @@ export async function prepareVerificationVideoForProvider(input: {
       };
     }
 
-    if (!original.needsNormalization && !input.forceNormalize) {
+    if (!input.requireNormalized && !original.needsNormalization && !input.forceNormalize) {
       return {
         ok: false,
         bucket: input.bucket,
@@ -438,6 +526,8 @@ export async function prepareVerificationVideoForProvider(input: {
         diagnostics: {
           original,
           normalized: null,
+          normalizationTriggered: action.normalizationTriggered,
+          normalizationReason: normalizedAssetStale ? 'stale_asset' : action.normalizationReason,
           normalizedAssetUsed: false,
           normalizedAssetPathPresent: false,
           normalizedStatus: 'unavailable',
@@ -448,6 +538,23 @@ export async function prepareVerificationVideoForProvider(input: {
 
     const normalized = await normalizeVideoBuffer(buffer);
     if (normalized.ok === false || !normalized.metadata.preflightOk) {
+      if (input.allowOriginalFallback && original.preflightOk) {
+        return {
+          ok: true,
+          bucket: input.bucket,
+          objectPath: input.objectPath,
+          diagnostics: {
+            original,
+            normalized: normalized.ok ? normalized.metadata : null,
+            normalizationTriggered: true,
+            normalizationReason: 'original_fallback_allowed',
+            normalizedAssetUsed: false,
+            normalizedAssetPathPresent: Boolean(storedNormalized),
+            normalizedStatus: 'failed',
+            failureReason: normalized.ok === true ? normalized.metadata.preflightFailureReason : normalized.reason,
+          },
+        };
+      }
       return {
         ok: false,
         bucket: input.bucket,
@@ -459,6 +566,8 @@ export async function prepareVerificationVideoForProvider(input: {
         diagnostics: {
           original,
           normalized: normalized.ok ? normalized.metadata : null,
+          normalizationTriggered: true,
+          normalizationReason: normalizedAssetStale ? 'stale_asset' : action.normalizationReason,
           normalizedAssetUsed: false,
           normalizedAssetPathPresent: false,
           normalizedStatus: 'failed',
@@ -482,6 +591,8 @@ export async function prepareVerificationVideoForProvider(input: {
         diagnostics: {
           original,
           normalized: normalized.metadata,
+          normalizationTriggered: true,
+          normalizationReason: normalizedAssetStale ? 'stale_asset' : action.normalizationReason,
           normalizedAssetUsed: false,
           normalizedAssetPathPresent: false,
           normalizedStatus: 'failed',
@@ -504,6 +615,8 @@ export async function prepareVerificationVideoForProvider(input: {
       diagnostics: {
         original,
         normalized: normalized.metadata,
+        normalizationTriggered: true,
+        normalizationReason: normalizedAssetStale ? 'stale_asset' : action.normalizationReason,
         normalizedAssetUsed: true,
         normalizedAssetPathPresent: true,
         normalizedStatus: 'created',

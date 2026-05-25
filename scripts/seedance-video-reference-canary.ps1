@@ -3,6 +3,7 @@ param(
   [string]$UserId = "",
   [ValidateSet("reference_videos_bracket", "reference_videos_at", "video_urls_at")]
   [string]$Variant = "reference_videos_bracket",
+  [switch]$ForceNormalize,
   [int]$TimeoutSeconds = 180
 )
 
@@ -25,6 +26,8 @@ function Print-CanaryStatus {
   if ($Result.promptTokenStyle) { Write-Host "prompt token style: $($Result.promptTokenStyle)" }
   if ($Result.selectedVerificationVideo) {
     Write-Host "normalized asset used: $($Result.selectedVerificationVideo.normalizedAssetUsed)"
+    Write-Host "normalization triggered: $($Result.selectedVerificationVideo.normalizationTriggered)"
+    Write-Host "normalization reason: $($Result.selectedVerificationVideo.normalizationReason)"
     if ($Result.selectedVerificationVideo.preflight) {
       $meta = $Result.selectedVerificationVideo.preflight
       Write-Host ("preflight: duration={0}s size={1} width={2} height={3} container={4} videoCodec={5} audioCodec={6} ok={7} reason={8}" -f $meta.durationSeconds, $meta.fileSizeBytes, $meta.width, $meta.height, $meta.container, $meta.videoCodec, $meta.audioCodec, $meta.preflightOk, $meta.preflightFailureReason)
@@ -98,11 +101,13 @@ $startUrl = Join-ApiUrl $ApiBaseUrl $startPath
 $body = @{}
 if (-not [string]::IsNullOrWhiteSpace($UserId)) { $body.userId = $UserId }
 $body.variant = $Variant
+if ($ForceNormalize.IsPresent) { $body.forceNormalize = $true }
 
 Write-Host "Starting Seedance video-reference canary..."
 Write-Host "API: $ApiBaseUrl"
 Write-Host "Route: $startPath"
 Write-Host "Variant: $Variant"
+Write-Host "Force normalize: $($ForceNormalize.IsPresent)"
 Write-Host "Warning: this may consume provider credits."
 
 try {

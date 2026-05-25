@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   buildSeedanceCanaryPayload,
   buildSeedanceInputSchemaDiagnostics,
@@ -28,7 +29,11 @@ import {
   SEEDANCE_VIDEO_REFERENCE_PROMPT,
   validateSelfVerificationVideoConsent,
 } from '../src/services/selfVerificationVideo';
-import { validateVerificationVideoMetadata } from '../src/services/verificationVideoNormalizer';
+import {
+  chooseVerificationVideoNormalizationAction,
+  validateVerificationVideoMetadata,
+  VERIFICATION_VIDEO_NORMALIZATION_TARGET,
+} from '../src/services/verificationVideoNormalizer';
 import { env } from '../src/lib/env';
 
 const textPayload = buildSeedanceCanaryPayload();
@@ -106,6 +111,59 @@ const webmMetadata = validateVerificationVideoMetadata({
 assert.equal(webmMetadata.preflightOk, false);
 assert.equal(webmMetadata.needsNormalization, true);
 assert.equal(webmMetadata.preflightFailureReason, 'provider_unsafe_container');
+assert.deepEqual(
+  chooseVerificationVideoNormalizationAction({
+    storedNormalizedAssetPresent: false,
+    storedNormalizedAssetValid: false,
+  }),
+  {
+    useStoredNormalizedAsset: false,
+    normalizationTriggered: true,
+    normalizationReason: 'missing_normalized_asset',
+  },
+);
+assert.deepEqual(
+  chooseVerificationVideoNormalizationAction({
+    storedNormalizedAssetPresent: true,
+    storedNormalizedAssetValid: false,
+  }),
+  {
+    useStoredNormalizedAsset: false,
+    normalizationTriggered: true,
+    normalizationReason: 'stale_asset',
+  },
+);
+assert.deepEqual(
+  chooseVerificationVideoNormalizationAction({
+    storedNormalizedAssetPresent: true,
+    storedNormalizedAssetValid: true,
+  }),
+  {
+    useStoredNormalizedAsset: true,
+    normalizationTriggered: false,
+    normalizationReason: 'skipped_existing_valid_asset',
+  },
+);
+assert.deepEqual(
+  chooseVerificationVideoNormalizationAction({
+    storedNormalizedAssetPresent: true,
+    storedNormalizedAssetValid: true,
+    forceNormalize: true,
+  }),
+  {
+    useStoredNormalizedAsset: false,
+    normalizationTriggered: true,
+    normalizationReason: 'force_refresh',
+  },
+);
+assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.container, 'mp4');
+assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.videoCodec, 'h264');
+assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.audioCodec, 'aac');
+assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.pixelFormat, 'yuv420p');
+assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.videoProfile, 'high');
+assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.width, 720);
+assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.height, 1280);
+assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.maxFileSizeBytes <= 50 * 1024 * 1024, true);
 
 assert.throws(
   () => validateSelfVerificationVideoConsent({ consentConfirmed: false }),
@@ -368,5 +426,10 @@ assert.equal(schemaDiagnostics.fields.video_urls, true);
 assert.equal(schemaDiagnostics.variants.some((variant) => variant.id === 'reference_videos_bracket'), true);
 assert.equal(schemaDiagnostics.variants.some((variant) => variant.id === 'reference_videos_at'), true);
 assert.equal(schemaDiagnostics.variants.some((variant) => variant.id === 'video_urls_at'), true);
+
+const videoCanaryScript = readFileSync(new URL('../../scripts/seedance-video-reference-canary.ps1', import.meta.url), 'utf8');
+assert.match(videoCanaryScript, /ForceNormalize/);
+assert.match(videoCanaryScript, /normalized asset used/);
+assert.match(videoCanaryScript, /normalization reason/);
 
 console.log('seedanceCanary unit tests passed');
