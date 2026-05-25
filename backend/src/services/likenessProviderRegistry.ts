@@ -72,8 +72,14 @@ function routeFailure(route: Record<string, unknown> | null | undefined) {
   return typeof route?.failureCategory === 'string' ? route.failureCategory : null;
 }
 
+function seedanceReferenceModerationBlocked(summary: ReferenceRouteSummaryLike) {
+  return summary.failureCategory === 'reference_moderation_block' ||
+    summary.knownBlockedReferenceRoutes.some((route) => routeFailure(route) === 'reference_moderation_block');
+}
+
 function seedanceReferenceCanaryStatus(summary: ReferenceRouteSummaryLike): LikenessCanaryStatus {
   if (summary.knownSuccessfulReferenceRoutes.length > 0) return 'succeeded';
+  if (seedanceReferenceModerationBlocked(summary)) return 'failed_blocked';
   if (summary.seedanceReferenceRoutesBlocked) return 'blocked';
   if (summary.knownBlockedReferenceRoutes.length > 0 || summary.state === 'failed') return 'failed';
   return 'not_tested';
@@ -99,6 +105,8 @@ export function buildLikenessProviderRegistry(input: {
   const successfulSeedanceRoute = summary.knownSuccessfulReferenceRoutes[0] ?? null;
   const blockedSeedanceRoute = summary.knownBlockedReferenceRoutes[0] ?? null;
   const seedanceReferenceSucceeded = summary.knownSuccessfulReferenceRoutes.length > 0;
+  const seedanceReferenceBlockedBySafety = seedanceReferenceModerationBlocked(summary);
+  const seedanceReferenceStatus = seedanceReferenceCanaryStatus(summary);
   const openAICharacterCanaryStatus = openAICanaryStatus(input.selfProviderCharacter);
   const openAIExactReady = Boolean(
     openAI.openaiCharacterConfigured &&
@@ -193,23 +201,23 @@ export function buildLikenessProviderRegistry(input: {
       supportsStoredCharacters: false,
       requiresConsent: false,
       requiresCanary: true,
-      canaryStatus: seedanceReferenceCanaryStatus(summary),
-      readinessStatus: seedanceReferenceCanaryStatus(summary),
+      canaryStatus: seedanceReferenceStatus,
+      readinessStatus: seedanceReferenceBlockedBySafety ? 'blocked' : seedanceReferenceStatus,
       lastSuccessAt: routeTimestamp(successfulSeedanceRoute),
       lastFailureCategory: routeFailure(blockedSeedanceRoute) ?? summary.failureCategory,
       deprecated: false,
       shutdownDate: null,
       implementationStatus: seedanceReferenceSucceeded
         ? 'ready'
-        : summary.seedanceReferenceRoutesBlocked
+        : seedanceReferenceBlockedBySafety || summary.seedanceReferenceRoutesBlocked
           ? 'blocked'
           : Boolean(env.REPLICATE_API_TOKEN)
             ? 'available'
             : 'not_configured',
       recommendedNextAction: seedanceReferenceSucceeded
         ? 'Use the successful Seedance reference route.'
-        : summary.seedanceReferenceRoutesBlocked
-          ? 'Do not auto-retry blocked Seedance self references.'
+        : seedanceReferenceBlockedBySafety || summary.seedanceReferenceRoutesBlocked
+          ? 'Configure Runway/Kling likeness canary or use soft self guidance.'
           : 'Run a reference matrix canary before automatic likeness routing.',
     },
     {

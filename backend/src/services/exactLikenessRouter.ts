@@ -180,15 +180,18 @@ export function chooseExactLikenessRoute(input: {
     identity: input.selfProviderCharacter,
   });
   const blocked = input.referenceRouteSummary.seedanceReferenceRoutesBlocked;
+  const seedancePhotoBlocked = seedanceReference?.implementationStatus === 'blocked' ||
+    seedanceReference?.canaryStatus === 'failed_blocked' ||
+    seedanceReference?.lastFailureCategory === 'reference_moderation_block';
   const seedanceVideoBlocked = seedanceVideoReference?.implementationStatus === 'blocked' ||
     seedanceVideoReference?.canaryStatus === 'failed_blocked' ||
     seedanceVideoReference?.lastFailureCategory === 'video_reference_moderation_block';
   const configuredButUnsupported = registry.filter((entry) => (
     entry.configured && entry.implementationStatus === 'configured_not_implemented'
   ));
-  const reason = blocked && seedanceVideoBlocked
+  const reason = (blocked || seedancePhotoBlocked) && seedanceVideoBlocked
     ? 'Seedance photo and video reference routes are blocked by provider safety; Lumora is using soft self guidance.'
-    : blocked || seedanceVideoBlocked
+    : blocked || seedancePhotoBlocked || seedanceVideoBlocked
     ? 'Seedance reference routes are blocked by provider safety; Lumora is using soft self guidance.'
     : configuredButUnsupported.length
       ? 'Configured exact likeness providers still need implementation or a successful canary, so Lumora uses soft text guidance.'
@@ -204,12 +207,12 @@ export function chooseExactLikenessRoute(input: {
     canaryStatus: seedanceVideoReference?.canaryStatus ?? openAI?.canaryStatus ?? null,
     fallbackRoute: 'seedance_text_guidance',
     providerRegistry: registry,
-    recommendedNextAction: seedanceVideoBlocked
-      ? 'Configure Runway/Kling likeness canary or use soft self guidance.'
-      : seedanceVideoReference?.canaryStatus === 'retry_later'
+    recommendedNextAction: seedanceVideoReference?.canaryStatus === 'retry_later'
       ? 'Retry Seedance video reference canary later.'
       : seedanceVideoReference?.canaryStatus === 'input_needs_repair'
         ? 'Normalize verification video or try a schema variant.'
+      : seedanceVideoBlocked || seedancePhotoBlocked
+        ? 'Configure Runway/Kling likeness canary or use soft self guidance.'
       : blocked
       ? 'Continue using Seedance text-first and configure an alternate likeness provider.'
       : seedanceVideoReference?.recommendedNextAction ?? setup[0] ?? 'Run a canary for a configured exact likeness provider.',

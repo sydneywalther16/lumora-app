@@ -83,6 +83,15 @@ const successfulReferenceSummary = {
   knownBlockedReferenceRoutes: [],
 };
 
+const moderationBlockedButIncompleteReferenceSummary = {
+  ...blockedReferenceSummary,
+  seedanceReferenceRoutesBlocked: false,
+  blockedReferenceRoles: ['front_angle'],
+  knownBlockedReferenceRoutes: [
+    { provider: 'seedance-fast', referenceRole: 'front_angle', failureCategory: 'reference_moderation_block' },
+  ],
+};
+
 try {
   env.OPENAI_VIDEO_ENABLED = true;
   env.OPENAI_VIDEO_CHARACTER_ENABLED = true;
@@ -164,6 +173,12 @@ try {
   assert.equal(registry.find((provider) => provider.id === 'openai_sora_character')?.deprecated, true);
   assert.equal(registry.find((provider) => provider.id === 'openai_sora_character')?.shutdownDate, '2026-09-24');
   assert.equal(registry.find((provider) => provider.id === 'seedance_video_reference')?.implementationStatus, 'not_configured');
+  const photoReferenceEntry = registry.find((provider) => provider.id === 'seedance_reference_images');
+  assert.equal(photoReferenceEntry?.canaryStatus, 'failed_blocked');
+  assert.equal(photoReferenceEntry?.readinessStatus, 'blocked');
+  assert.equal(photoReferenceEntry?.implementationStatus, 'blocked');
+  assert.equal(photoReferenceEntry?.lastFailureCategory, 'reference_moderation_block');
+  assert.equal(photoReferenceEntry?.recommendedNextAction, 'Configure Runway/Kling likeness canary or use soft self guidance.');
   assert.equal(registry.find((provider) => provider.id === 'kling_reference')?.implementationStatus, 'configured_ready_for_canary');
   assert.equal(registry.find((provider) => provider.id === 'runway_gen4_reference')?.implementationStatus, 'configured_ready_for_canary');
   assert.equal(registry.find((provider) => provider.id === 'lumora_identity_pack')?.implementationStatus, 'research_only');
@@ -180,6 +195,26 @@ try {
   });
   assert.equal(configuredButUntested.route, 'seedance_text_guidance');
   assert.equal(configuredButUntested.exactLikeness, false);
+
+  const incompletePhotoBlockedRegistry = buildLikenessProviderRegistry({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: moderationBlockedButIncompleteReferenceSummary,
+  });
+  const incompletePhotoBlockedEntry = incompletePhotoBlockedRegistry.find((provider) => provider.id === 'seedance_reference_images');
+  assert.equal(incompletePhotoBlockedEntry?.canaryStatus, 'failed_blocked');
+  assert.equal(incompletePhotoBlockedEntry?.readinessStatus, 'blocked');
+  assert.equal(incompletePhotoBlockedEntry?.implementationStatus, 'blocked');
+  assert.equal(incompletePhotoBlockedEntry?.recommendedNextAction, 'Configure Runway/Kling likeness canary or use soft self guidance.');
+  const incompletePhotoBlockedRoute = chooseExactLikenessRoute({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: moderationBlockedButIncompleteReferenceSummary,
+    providerRegistry: incompletePhotoBlockedRegistry,
+  });
+  assert.equal(incompletePhotoBlockedRoute.route, 'seedance_text_guidance');
+  assert.equal(incompletePhotoBlockedRoute.exactLikeness, false);
+  assert.notEqual(exactLikenessCanaryCandidate(incompletePhotoBlockedRoute)?.route, 'seedance_reference');
 
   const klingSucceededRegistry = buildLikenessProviderRegistry({
     openAISoraReadiness: readiness,
