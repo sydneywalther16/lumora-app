@@ -253,6 +253,10 @@ function selfVerificationVideoLabStatus(diagnostics: ApiHealthDiagnostics | null
     return 'Ready to test';
   }
 
+  if (entry.lastFailureCategory === 'video_reference_moderation_block' || canaryStatus === 'failed_blocked') {
+    return 'Saved';
+  }
+
   const status = providerLabStatus(diagnostics, 'seedance_video_reference');
   if (status === 'blocked' || status === 'failed blocked') return 'Blocked by provider safety';
   if (status === 'input needs repair') return 'Prepare verification video';

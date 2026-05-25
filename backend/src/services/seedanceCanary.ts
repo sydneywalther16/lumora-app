@@ -34,6 +34,7 @@ import {
   getSelfVerificationVideoDiagnostics,
   getSelfVerificationVideoReferenceAsset,
   markSeedanceVideoReferenceCanaryResult,
+  resolveSelfVerificationVideoOwner,
   SEEDANCE_VIDEO_REFERENCE_PROMPT,
 } from './selfVerificationVideo';
 import {
@@ -569,7 +570,7 @@ export function seedanceVideoReferenceBlockedRetestPayload(input: {
     failureCategory: input.failureCategory ?? 'video_reference_moderation_block',
     selectedVerificationVideo: input.selectedVerificationVideo ?? null,
     message: 'This Seedance video-reference route is already blocked. Use -ForceRetest if you intentionally want to spend another attempt.',
-    recommendedNextAction: 'Configure Runway/Kling likeness canary or continue soft guidance.',
+    recommendedNextAction: 'Configure Runway/Kling likeness canary or use soft self guidance.',
   };
 }
 
@@ -1431,12 +1432,19 @@ export async function persistReferenceRouteResult(input: {
   outputUrlPresent?: boolean | null;
   notes?: Record<string, unknown>;
 }) {
-  if (!isUuidLike(input.userId)) return;
+  let memoryUserId = input.userId ?? null;
+  let memoryCharacterId = input.characterId ?? null;
+  if (!isUuidLike(memoryUserId) && input.referenceRole === 'verification_video') {
+    const owner = await resolveSelfVerificationVideoOwner({ characterId: input.characterId }).catch(() => null);
+    memoryUserId = owner?.ownerUserId ?? memoryUserId;
+    memoryCharacterId = memoryCharacterId ?? owner?.characterId ?? null;
+  }
+  if (!isUuidLike(memoryUserId)) return;
   const provider = input.provider ?? 'seedance-fast';
   const variant = input.variant ?? 'reference_images';
   const referenceRole = input.referenceRole ?? 'unknown_reference';
-  const characterId = input.characterId ?? 'creator-self';
-  const memoryKey = `reference-route:${input.userId}:${characterId}:${provider}:${variant}:${referenceRole}`;
+  const characterId = memoryCharacterId ?? 'creator-self';
+  const memoryKey = `reference-route:${memoryUserId}:${characterId}:${provider}:${variant}:${referenceRole}`;
   const notes = {
     referenceRole,
     referenceLabel: input.referenceLabel ?? null,
@@ -1493,8 +1501,8 @@ export async function persistReferenceRouteResult(input: {
          updated_at = now()`,
       [
         memoryKey,
-        input.userId,
-        input.characterId ?? null,
+        memoryUserId,
+        characterId,
         provider,
         input.providerModel ?? SEEDANCE_FAST_MODEL,
         referenceRole,
@@ -2779,7 +2787,7 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
         ? 'input_needs_repair'
       : status;
   const recommendedNextAction = job.errorCategory === 'video_reference_moderation_block'
-    ? 'Configure Runway/Kling likeness canary or continue soft guidance.'
+    ? 'Configure Runway/Kling likeness canary or use soft self guidance.'
     : job.errorCategory === 'video_reference_provider_unavailable'
     ? 'Retry Seedance video reference canary later'
     : job.errorCategory === 'video_reference_input_invalid' || job.errorCategory === 'verification_video_preflight_failed'
@@ -3266,6 +3274,8 @@ export async function buildRenderPathCompareDiagnostics() {
       seedanceVideoReferenceCanaryStatus: selfVerificationVideo.seedanceVideoReferenceCanaryStatus,
       seedanceVideoReferenceLastFailureCategory: selfVerificationVideo.seedanceVideoReferenceLastFailureCategory,
       seedanceVideoReferenceProviderStatus: selfVerificationVideo.seedanceVideoReferenceProviderStatus,
+      seedanceVideoReferenceBlocked: selfVerificationVideo.seedanceVideoReferenceCanaryStatus === 'failed_blocked' ||
+        selfVerificationVideo.seedanceVideoReferenceLastFailureCategory === 'video_reference_moderation_block',
       seedanceVideoReferenceRetryAvailableAt: videoReferenceCanaryRow?.retryAvailableAt ?? null,
       seedanceImageReferenceBlocked: referenceRouteSummary.seedanceReferenceRoutesBlocked,
       selectedLikenessMode,

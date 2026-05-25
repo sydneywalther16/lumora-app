@@ -512,5 +512,9 @@ assert.match(normalizeScript, /No provider prediction will be created/);
 assert.match(normalizeScript, /Force/);
 assert.match(normalizeScript, /audio included/);
 assert.match(normalizeScript, /unknown input streams detected/);
+const repairVideoReferenceScript = readFileSync(new URL('../../scripts/repair-seedance-video-reference-status.ps1', import.meta.url), 'utf8');
+assert.match(repairVideoReferenceScript, /repair-seedance-video-reference-status/);
+assert.match(repairVideoReferenceScript, /Provider call: False/);
+assert.match(repairVideoReferenceScript, /failed_blocked|Canary status/);
 
 console.log('seedanceCanary unit tests passed');

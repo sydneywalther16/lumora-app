@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
   buildClearedSelfVerificationVideoPatch,
   buildSelfVerificationVideoPatch,
+  mergeSeedanceVideoReferenceCanarySnapshot,
   redactVerificationVideoUrl,
   validateSelfVerificationVideoUpload,
 } from '../src/services/selfVerificationVideo';
@@ -121,6 +122,36 @@ assert.equal(
   createSelfCharacterStatusCopy({ character: { verificationVideoPresent: true, videoReferenceRouteStatus: 'failed_blocked' }, exactRouteReady: false }),
   'Using soft self guidance. Exact likeness provider not ready.',
 );
+
+const mergedBlockedDiagnostics = mergeSeedanceVideoReferenceCanarySnapshot({
+  schemaReady: true,
+  oldSelfCapturePresent: false,
+  selfVerificationVideoPresent: true,
+  selfVerificationConsentPresent: true,
+  verificationAudioPresent: false,
+  verificationStatus: 'uploaded',
+  verificationPrompt: 'Look forward and turn.',
+  verificationLastTestedAt: null,
+  seedanceVideoReferenceCanaryStatus: 'not_tested',
+  seedanceVideoReferenceLastFailureCategory: null,
+  seedanceVideoReferenceProviderStatus: null,
+  videoReferenceProvider: 'seedance',
+  verificationVideoUrlRedacted: '[private-verification-video-present]',
+  migratedFromOldSelfCapture: false,
+  recommendedNextAction: 'Run Seedance video reference canary.',
+}, {
+  canaryJobId: 'job-1',
+  canaryStatus: 'failed_blocked',
+  failureCategory: 'video_reference_moderation_block',
+  providerStatus: 'failed',
+  updatedAt: '2026-05-25T12:00:00.000Z',
+  normalizedAssetUsed: true,
+});
+assert.equal(mergedBlockedDiagnostics.seedanceVideoReferenceCanaryStatus, 'failed_blocked');
+assert.equal(mergedBlockedDiagnostics.seedanceVideoReferenceLastFailureCategory, 'video_reference_moderation_block');
+assert.equal(mergedBlockedDiagnostics.seedanceVideoReferenceProviderStatus, 'failed_blocked');
+assert.equal(mergedBlockedDiagnostics.verificationLastTestedAt, '2026-05-25T12:00:00.000Z');
+assert.equal(mergedBlockedDiagnostics.recommendedNextAction, 'Configure Runway/Kling likeness canary or use soft self guidance.');
 assert.equal(
   createSelfCharacterStatusCopy({ character: { verificationVideoPresent: true }, exactRouteReady: true }),
   'Verified self character ready.',

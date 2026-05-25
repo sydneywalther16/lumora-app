@@ -44,6 +44,7 @@ import {
 } from '../services/seedanceCanary';
 import {
   getSelfVerificationVideoDiagnostics,
+  repairSeedanceVideoReferenceBlockedStatus,
 } from '../services/selfVerificationVideo';
 import { requireAuth, type AuthedRequest } from '../middleware/auth';
 import {
@@ -86,6 +87,7 @@ const canaryRouteInventory = {
   referenceCanaryRouteMounted: true,
   referenceMatrixRouteMounted: true,
   videoReferenceCanaryRouteMounted: true,
+  seedanceVideoReferenceRepairRouteMounted: true,
   normalizeVerificationVideoRouteMounted: true,
   seedanceInputSchemaRouteMounted: true,
   soraCharacterCanaryRouteMounted: true,
@@ -171,6 +173,8 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
       seedanceVideoReferenceCanaryStatus: selfVerificationVideo.seedanceVideoReferenceCanaryStatus,
       seedanceVideoReferenceLastFailureCategory: selfVerificationVideo.seedanceVideoReferenceLastFailureCategory,
       seedanceVideoReferenceProviderStatus: selfVerificationVideo.seedanceVideoReferenceProviderStatus,
+      seedanceVideoReferenceBlocked: selfVerificationVideo.seedanceVideoReferenceCanaryStatus === 'failed_blocked' ||
+        selfVerificationVideo.seedanceVideoReferenceLastFailureCategory === 'video_reference_moderation_block',
       seedanceVideoReferenceRetryAvailableAt: latestSeedanceVideoReferenceCanary?.retryAvailableAt ?? null,
       seedanceImageReferenceBlocked: referenceRouteStatus.seedanceReferenceRoutesBlocked,
       exactLikenessRouter: exactLikeness,
@@ -250,6 +254,7 @@ healthRouter.get('/api/diagnostics/canary-routes', (_req, res) => {
       referenceCanary: 'POST /api/diagnostics/seedance-reference-canary/self',
       referenceMatrix: 'POST /api/diagnostics/seedance-reference-matrix/self',
       videoReferenceCanary: 'POST /api/diagnostics/seedance-video-reference-canary/self',
+      repairSeedanceVideoReferenceStatus: 'POST /api/diagnostics/repair-seedance-video-reference-status',
       normalizeVerificationVideo: 'POST /api/diagnostics/normalize-verification-video/self',
       seedanceInputSchema: 'GET /api/diagnostics/seedance-input-schema',
       soraCharacterCanary: 'POST /api/diagnostics/sora-character-canary/self',
@@ -592,6 +597,20 @@ healthRouter.post('/api/diagnostics/seedance-video-reference-canary/self', async
     ...status,
     warning: 'This may consume provider credits.',
   });
+});
+
+healthRouter.post('/api/diagnostics/repair-seedance-video-reference-status', async (req, res) => {
+  if (!env.ENABLE_RENDER_PROBE) {
+    res.status(403).json({
+      error: 'Seedance video-reference status repair disabled. Set ENABLE_RENDER_PROBE=true to repair diagnostic canary memory.',
+    });
+    return;
+  }
+
+  const payload = canarySchema.parse(req.body ?? {});
+  const userId = payload.userId ?? req.header('x-lumora-user-id') ?? null;
+  const status = await repairSeedanceVideoReferenceBlockedStatus({ userId });
+  res.status(status.ok ? 200 : 404).json(status);
 });
 
 healthRouter.post('/api/diagnostics/sora-character-canary/self', async (req, res) => {

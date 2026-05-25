@@ -329,7 +329,7 @@ try {
       videoReferenceProvider: 'seedance',
       verificationVideoUrlRedacted: '[private-verification-video-present]',
       migratedFromOldSelfCapture: false,
-      recommendedNextAction: 'Configure Runway/Kling likeness canary or continue soft guidance.',
+      recommendedNextAction: 'Configure Runway/Kling likeness canary or use soft self guidance.',
     },
   });
   const blockedVideoEntry = videoReferenceBlockedRegistry.find((provider) => provider.id === 'seedance_video_reference');
@@ -345,8 +345,8 @@ try {
   });
   assert.equal(videoReferenceBlocked.route, 'seedance_text_guidance');
   assert.equal(videoReferenceBlocked.exactLikeness, false);
-  assert.equal(videoReferenceBlocked.reason, 'Seedance reference routes are blocked; no alternate exact-likeness provider has succeeded yet.');
-  assert.equal(videoReferenceBlocked.recommendedNextAction, 'Configure Runway/Kling likeness canary or continue soft guidance.');
+  assert.equal(videoReferenceBlocked.reason, 'Seedance photo and video reference routes are blocked by provider safety; Lumora is using soft self guidance.');
+  assert.equal(videoReferenceBlocked.recommendedNextAction, 'Configure Runway/Kling likeness canary or use soft self guidance.');
   assert.notEqual(exactLikenessCanaryCandidate(videoReferenceBlocked)?.route, 'seedance_video_reference');
 
   console.log('exactLikenessRouter unit tests passed');

@@ -36,6 +36,16 @@ export type SelfVerificationVideoDiagnostics = {
   recommendedNextAction: string;
 };
 
+export type SeedanceVideoReferenceCanarySnapshot = {
+  canaryJobId?: string | null;
+  canaryStatus?: string | null;
+  failureCategory?: string | null;
+  providerStatus?: string | null;
+  updatedAt?: string | null;
+  normalizedAssetUsed?: boolean | null;
+  verificationVideoPresent?: boolean | null;
+};
+
 export type SelfVerificationVideoReferenceAsset = {
   schemaReady: boolean;
   selfVerificationVideoPresent: boolean;
@@ -53,6 +63,8 @@ export const SELF_VERIFICATION_VIDEO_MAX_SIZE_BYTES = 100 * 1024 * 1024;
 const allowedVerificationVideoExtensions = ['.mp4', '.webm', '.mov'];
 
 type VerificationRow = {
+  ownerUserId?: string | null;
+  characterId?: string | null;
   verificationVideoUrl: string | null;
   verificationVideoAssetId: string | null;
   verificationAudioPresent: boolean | null;
@@ -67,6 +79,10 @@ type VerificationRow = {
   oldSelfCaptureCompleted?: boolean | null;
   oldSelfCaptureCapturedAt?: string | null;
 };
+
+function isUuidLike(value: string | null | undefined) {
+  return Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value));
+}
 
 function optionalVerificationSchemaError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
@@ -217,7 +233,7 @@ function diagnosticsFromRow(row: VerificationRow | null, schemaReady = true): Se
           : routeStatus === 'retry_later'
             ? 'Retry Seedance video reference canary later.'
           : routeStatus === 'failed_blocked'
-            ? 'Configure Runway/Kling likeness canary or continue soft guidance.'
+            ? 'Configure Runway/Kling likeness canary or use soft self guidance.'
             : routeStatus === 'input_needs_repair'
               ? 'Normalize verification video or try a schema variant.'
             : routeStatus === 'configured_not_implemented'
@@ -242,6 +258,36 @@ function diagnosticsFromRow(row: VerificationRow | null, schemaReady = true): Se
     verificationVideoUrlRedacted: redactVerificationVideoUrl(row?.verificationVideoUrl || row?.oldSelfCaptureVideoUrl),
     migratedFromOldSelfCapture,
     recommendedNextAction,
+  };
+}
+
+function isBlockedSeedanceVideoReferenceSnapshot(snapshot: SeedanceVideoReferenceCanarySnapshot | null | undefined) {
+  return Boolean(
+    snapshot &&
+    (
+      snapshot.canaryStatus === 'failed_blocked' ||
+      snapshot.canaryStatus === 'blocked' ||
+      snapshot.failureCategory === 'video_reference_moderation_block'
+    )
+  );
+}
+
+export function mergeSeedanceVideoReferenceCanarySnapshot(
+  diagnostics: SelfVerificationVideoDiagnostics,
+  snapshot: SeedanceVideoReferenceCanarySnapshot | null | undefined,
+): SelfVerificationVideoDiagnostics {
+  if (!diagnostics.selfVerificationVideoPresent || !isBlockedSeedanceVideoReferenceSnapshot(snapshot)) {
+    return diagnostics;
+  }
+
+  return {
+    ...diagnostics,
+    verificationLastTestedAt: diagnostics.verificationLastTestedAt ?? snapshot?.updatedAt ?? null,
+    seedanceVideoReferenceCanaryStatus: 'failed_blocked',
+    seedanceVideoReferenceLastFailureCategory: 'video_reference_moderation_block',
+    seedanceVideoReferenceProviderStatus: 'failed_blocked',
+    videoReferenceProvider: 'seedance',
+    recommendedNextAction: 'Configure Runway/Kling likeness canary or use soft self guidance.',
   };
 }
 
@@ -274,6 +320,8 @@ async function firstSelfVerificationRow(input: {
   const characterResult = await query<VerificationRow>(
     `select
        verification_video_url as "verificationVideoUrl",
+       owner_user_id as "ownerUserId",
+       character_id as "characterId",
        verification_video_asset_id as "verificationVideoAssetId",
        verification_audio_present as "verificationAudioPresent",
        verification_consent_at as "verificationConsentAt",
@@ -306,6 +354,8 @@ async function firstSelfVerificationRow(input: {
   const selfResult = await query<VerificationRow>(
     `select
        verification_video_url as "verificationVideoUrl",
+       user_id as "ownerUserId",
+       'creator-self' as "characterId",
        verification_video_asset_id as "verificationVideoAssetId",
        verification_audio_present as "verificationAudioPresent",
        verification_consent_at as "verificationConsentAt",
@@ -328,16 +378,93 @@ async function firstSelfVerificationRow(input: {
   return rowHasVerificationSignal(selfRow) ? selfRow : characterRow;
 }
 
+function canarySnapshotFromRow(row: Record<string, unknown> | null | undefined): SeedanceVideoReferenceCanarySnapshot | null {
+  if (!row) return null;
+  const sceneMetadata = row.sceneMetadata && typeof row.sceneMetadata === 'object'
+    ? row.sceneMetadata as Record<string, unknown>
+    : {};
+  const seedanceCanary = sceneMetadata.seedanceCanary && typeof sceneMetadata.seedanceCanary === 'object'
+    ? sceneMetadata.seedanceCanary as Record<string, unknown>
+    : {};
+  const selectedVerificationVideo = seedanceCanary.selectedVerificationVideo && typeof seedanceCanary.selectedVerificationVideo === 'object'
+    ? seedanceCanary.selectedVerificationVideo as Record<string, unknown>
+    : {};
+  const errorCategory = textValue(row.errorCategory);
+  return {
+    canaryJobId: textValue(row.id) || null,
+    canaryStatus: errorCategory === 'video_reference_moderation_block'
+      ? 'failed_blocked'
+      : textValue(row.status) || null,
+    failureCategory: errorCategory || null,
+    providerStatus: textValue(row.providerStatus) || null,
+    updatedAt: textValue(row.updatedAt) || null,
+    normalizedAssetUsed: typeof selectedVerificationVideo.normalizedAssetUsed === 'boolean'
+      ? selectedVerificationVideo.normalizedAssetUsed
+      : null,
+    verificationVideoPresent: seedanceCanary.kind === 'video_reference' ? true : null,
+  };
+}
+
+async function latestSeedanceVideoReferenceBlockedCanarySnapshot(input: {
+  userId?: string | null;
+}): Promise<SeedanceVideoReferenceCanarySnapshot | null> {
+  const params: unknown[] = [];
+  const filters = [
+    `render_mode = 'seedance_video_reference_canary'`,
+    `error_category = 'video_reference_moderation_block'`,
+  ];
+  if (isUuidLike(input.userId)) {
+    params.push(input.userId);
+    filters.push(`(user_id = $${params.length} or user_id = '00000000-0000-4000-8000-000000000000')`);
+  }
+  const result = await query<Record<string, unknown>>(
+    `select
+       id,
+       status,
+       provider_status as "providerStatus",
+       error_category as "errorCategory",
+       scene_metadata as "sceneMetadata",
+       updated_at as "updatedAt"
+     from generation_jobs
+     where ${filters.join(' and ')}
+     order by updated_at desc nulls last, created_at desc
+     limit 1`,
+    params,
+  );
+  return canarySnapshotFromRow(result.rows[0]);
+}
+
 export async function getSelfVerificationVideoDiagnostics(input: {
   userId?: string | null;
   characterId?: string | null;
 } = {}): Promise<SelfVerificationVideoDiagnostics> {
   try {
-    return diagnosticsFromRow(await firstSelfVerificationRow(input));
+    const row = await firstSelfVerificationRow(input);
+    const diagnostics = diagnosticsFromRow(row);
+    if (
+      diagnostics.selfVerificationVideoPresent &&
+      diagnostics.seedanceVideoReferenceCanaryStatus !== 'failed_blocked' &&
+      diagnostics.seedanceVideoReferenceLastFailureCategory !== 'video_reference_moderation_block'
+    ) {
+      const snapshot = await latestSeedanceVideoReferenceBlockedCanarySnapshot(input).catch(() => null);
+      return mergeSeedanceVideoReferenceCanarySnapshot(diagnostics, snapshot);
+    }
+    return diagnostics;
   } catch (error) {
     if (optionalVerificationSchemaError(error)) return diagnosticsFromRow(null, false);
     throw error;
   }
+}
+
+export async function resolveSelfVerificationVideoOwner(input: {
+  userId?: string | null;
+  characterId?: string | null;
+} = {}) {
+  const row = await firstSelfVerificationRow(input);
+  return {
+    ownerUserId: isUuidLike(input.userId) ? input.userId as string : textValue(row?.ownerUserId) || null,
+    characterId: textValue(row?.characterId) || input.characterId || 'creator-self',
+  };
 }
 
 export async function getSelfVerificationVideoReferenceAsset(input: {
@@ -559,11 +686,12 @@ export async function markSeedanceVideoReferenceCanaryResult(input: {
   provider?: string | null;
 }) {
   const now = new Date().toISOString();
-  if (input.userId) {
-    const existing = await firstSelfVerificationRow(input);
+  const existing = await firstSelfVerificationRow(input);
+  const ownerUserId = isUuidLike(input.userId) ? input.userId as string : textValue(existing?.ownerUserId) || null;
+  if (ownerUserId) {
     await updateSelfCharacterVerificationVideoForUser({
-      ownerUserId: input.userId,
-      characterId: input.characterId,
+      ownerUserId,
+      characterId: input.characterId ?? existing?.characterId ?? null,
       patch: {
         verificationVideoUrl: existing?.verificationVideoUrl ?? existing?.oldSelfCaptureVideoUrl ?? null,
         verificationVideoAssetId: existing?.verificationVideoAssetId ?? null,
@@ -578,4 +706,66 @@ export async function markSeedanceVideoReferenceCanaryResult(input: {
     });
   }
   return now;
+}
+
+export async function repairSeedanceVideoReferenceBlockedStatus(input: {
+  userId?: string | null;
+  characterId?: string | null;
+} = {}) {
+  const snapshot = await latestSeedanceVideoReferenceBlockedCanarySnapshot(input);
+  if (!isBlockedSeedanceVideoReferenceSnapshot(snapshot)) {
+    return {
+      ok: false,
+      repaired: false,
+      error: 'no_blocked_seedance_video_reference_canary',
+      message: 'No existing Seedance video-reference moderation block canary was found to repair from.',
+      providerCalled: false,
+      recommendedNextAction: 'Continue using soft self guidance or configure an alternate likeness provider.',
+    };
+  }
+
+  const owner = await resolveSelfVerificationVideoOwner(input);
+  if (!owner.ownerUserId) {
+    return {
+      ok: false,
+      repaired: false,
+      error: 'self_verification_owner_unresolved',
+      message: 'Lumora found the blocked canary but could not link it to a writable self character.',
+      providerCalled: false,
+      canaryJobId: snapshot?.canaryJobId ?? null,
+      canaryStatus: 'failed_blocked',
+      failureCategory: 'video_reference_moderation_block',
+      recommendedNextAction: 'Repair self character ownership, then rerun this local repair.',
+    };
+  }
+
+  const lastTestedAt = await markSeedanceVideoReferenceCanaryResult({
+    userId: owner.ownerUserId,
+    characterId: input.characterId ?? owner.characterId,
+    routeStatus: 'failed_blocked',
+    provider: 'seedance',
+  });
+  const diagnostics = await getSelfVerificationVideoDiagnostics({
+    userId: owner.ownerUserId,
+    characterId: input.characterId ?? owner.characterId,
+  });
+
+  return {
+    ok: true,
+    repaired: true,
+    providerCalled: false,
+    canaryJobId: snapshot?.canaryJobId ?? null,
+    canaryStatus: 'failed_blocked',
+    status: 'blocked',
+    route: 'seedance_video_reference',
+    provider: 'seedance-fast',
+    variant: 'reference_videos_bracket',
+    failureCategory: 'video_reference_moderation_block',
+    providerErrorCategory: 'video_reference_moderation_block',
+    outputUrlPresent: false,
+    lastTestedAt,
+    verificationVideoPresent: diagnostics.selfVerificationVideoPresent,
+    normalizedAssetUsed: snapshot?.normalizedAssetUsed ?? null,
+    recommendedNextAction: 'Configure Runway/Kling likeness canary or use soft self guidance.',
+  };
 }

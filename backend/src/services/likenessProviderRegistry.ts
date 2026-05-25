@@ -172,7 +172,7 @@ export function buildLikenessProviderRegistry(input: {
       recommendedNextAction: videoReferenceReady
         ? 'Use Seedance verification video reference route.'
         : videoReferenceBlocked
-          ? 'Seedance video reference is blocked by provider safety. Configure Runway/Kling likeness canary or continue soft guidance.'
+          ? 'Seedance video reference is blocked by provider safety. Configure Runway/Kling likeness canary or use soft self guidance.'
         : videoReferenceStatus === 'retry_later'
           ? 'Retry Seedance video reference canary later.'
         : videoReferenceStatus === 'input_needs_repair'

@@ -186,8 +186,10 @@ export function chooseExactLikenessRoute(input: {
   const configuredButUnsupported = registry.filter((entry) => (
     entry.configured && entry.implementationStatus === 'configured_not_implemented'
   ));
-  const reason = blocked || seedanceVideoBlocked
-    ? 'Seedance reference routes are blocked; no alternate exact-likeness provider has succeeded yet.'
+  const reason = blocked && seedanceVideoBlocked
+    ? 'Seedance photo and video reference routes are blocked by provider safety; Lumora is using soft self guidance.'
+    : blocked || seedanceVideoBlocked
+    ? 'Seedance reference routes are blocked by provider safety; Lumora is using soft self guidance.'
     : configuredButUnsupported.length
       ? 'Configured exact likeness providers still need implementation or a successful canary, so Lumora uses soft text guidance.'
       : 'No canary-proven exact likeness provider is available, so Lumora uses soft text guidance.';
@@ -203,7 +205,7 @@ export function chooseExactLikenessRoute(input: {
     fallbackRoute: 'seedance_text_guidance',
     providerRegistry: registry,
     recommendedNextAction: seedanceVideoBlocked
-      ? 'Configure Runway/Kling likeness canary or continue soft guidance.'
+      ? 'Configure Runway/Kling likeness canary or use soft self guidance.'
       : seedanceVideoReference?.canaryStatus === 'retry_later'
       ? 'Retry Seedance video reference canary later.'
       : seedanceVideoReference?.canaryStatus === 'input_needs_repair'
