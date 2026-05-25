@@ -4,6 +4,7 @@ param(
   [ValidateSet("reference_videos_bracket", "reference_videos_at", "video_urls_at")]
   [string]$Variant = "reference_videos_bracket",
   [switch]$ForceNormalize,
+  [switch]$ForceRetest,
   [int]$TimeoutSeconds = 180
 )
 
@@ -68,11 +69,15 @@ function Print-CanaryStatus {
     Write-Host "Provider reached Seedance, but the video-reference input was invalid."
     Write-Host "Do not retry the same payload blindly. Normalize the video or try one schema variant at a time."
   }
-  if ($failureCategory -eq "verification_video_preflight_failed") {
+if ($failureCategory -eq "verification_video_preflight_failed") {
     Write-Host "Verification video failed local preflight. Prepare a provider-safe MP4 before spending another attempt."
     if ($Result.normalizationErrorCategory) { Write-Host "normalization error category: $($Result.normalizationErrorCategory)" }
     if ($Result.normalizationStderrExcerpt) { Write-Host "normalization stderr: $($Result.normalizationStderrExcerpt)" }
     Write-Host "No provider prediction was created; no provider credits were consumed by this failed normalization."
+  }
+  if ($failureCategory -eq "video_reference_moderation_block" -or $Result.canaryStatus -eq "failed_blocked") {
+    Write-Host "Seedance video-reference route is blocked by provider safety."
+    Write-Host "Do not rerun automatically. Use -ForceRetest only if you intentionally want to spend another provider attempt."
   }
   if ($Result.retryAvailableAt) { Write-Host "retry available at: $($Result.retryAvailableAt)" }
   if ($Result.providerErrorSummary) { Write-Host "provider error summary: $($Result.providerErrorSummary)" }
@@ -114,12 +119,14 @@ $body = @{}
 if (-not [string]::IsNullOrWhiteSpace($UserId)) { $body.userId = $UserId }
 $body.variant = $Variant
 if ($ForceNormalize.IsPresent) { $body.forceNormalize = $true }
+if ($ForceRetest.IsPresent) { $body.forceRetest = $true }
 
 Write-Host "Starting Seedance video-reference canary..."
 Write-Host "API: $ApiBaseUrl"
 Write-Host "Route: $startPath"
 Write-Host "Variant: $Variant"
 Write-Host "Force normalize: $($ForceNormalize.IsPresent)"
+Write-Host "Force retest: $($ForceRetest.IsPresent)"
 Write-Host "Warning: this may consume provider credits."
 
 try {

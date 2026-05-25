@@ -114,6 +114,9 @@ export function buildLikenessProviderRegistry(input: {
   const runwayExactReady = runwayReadiness.status === 'canary_succeeded';
   const klingExactReady = klingReadiness.status === 'canary_succeeded';
   const videoReferenceStatus = input.selfVerificationVideo?.seedanceVideoReferenceCanaryStatus ?? 'not_tested';
+  const videoReferenceBlocked = videoReferenceStatus === 'failed_blocked' ||
+    videoReferenceStatus === 'blocked' ||
+    input.selfVerificationVideo?.seedanceVideoReferenceLastFailureCategory === 'video_reference_moderation_block';
   const videoReferenceReady = videoReferenceStatus === 'canary_succeeded' || videoReferenceStatus === 'succeeded';
   const videoReferenceConfigured = Boolean(env.REPLICATE_API_TOKEN && input.selfVerificationVideo?.selfVerificationVideoPresent);
 
@@ -146,17 +149,21 @@ export function buildLikenessProviderRegistry(input: {
       requiresConsent: true,
       requiresCanary: true,
       canaryStatus: input.selfVerificationVideo?.selfVerificationVideoPresent
-        ? videoReferenceStatus
+        ? videoReferenceBlocked ? 'failed_blocked' : videoReferenceStatus
         : 'not_configured',
       readinessStatus: input.selfVerificationVideo?.selfVerificationVideoPresent
-        ? videoReferenceStatus
+        ? videoReferenceBlocked ? 'blocked' : videoReferenceStatus
         : 'not_configured',
       lastSuccessAt: videoReferenceReady ? input.selfVerificationVideo?.verificationLastTestedAt ?? null : null,
-      lastFailureCategory: videoReferenceReady ? null : videoReferenceStatus,
+      lastFailureCategory: videoReferenceReady
+        ? null
+        : input.selfVerificationVideo?.seedanceVideoReferenceLastFailureCategory ?? videoReferenceStatus,
       deprecated: false,
       shutdownDate: null,
       implementationStatus: videoReferenceReady
         ? 'ready'
+        : videoReferenceBlocked
+          ? 'blocked'
         : videoReferenceConfigured
           ? videoReferenceStatus === 'configured_not_implemented'
             ? 'configured_not_implemented'
@@ -164,6 +171,8 @@ export function buildLikenessProviderRegistry(input: {
           : 'not_configured',
       recommendedNextAction: videoReferenceReady
         ? 'Use Seedance verification video reference route.'
+        : videoReferenceBlocked
+          ? 'Seedance video reference is blocked by provider safety. Configure Runway/Kling likeness canary or continue soft guidance.'
         : videoReferenceStatus === 'retry_later'
           ? 'Retry Seedance video reference canary later.'
         : videoReferenceStatus === 'input_needs_repair'

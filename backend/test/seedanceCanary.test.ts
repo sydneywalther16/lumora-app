@@ -16,10 +16,13 @@ import {
   providerFailureDiagnostics,
   redactRenderPathCompareValue,
   resolveSelfReferenceCanarySourceForTest,
+  isSeedanceVideoReferenceBlockedStatus,
+  seedanceVideoReferenceBlockedRetestPayload,
   selectStrongestCanaryReference,
   selectPrimaryCanaryReference,
   SEEDANCE_CANARY_PROMPT,
   SEEDANCE_REFERENCE_CANARY_PROMPT,
+  videoReferenceRouteStatusForFailure,
 } from '../src/services/seedanceCanary';
 import { parseProviderVideoOutput } from '../src/services/providerOutputParser';
 import { validateSeedanceProviderPayload } from '../src/services/providers/seedanceProvider';
@@ -359,6 +362,19 @@ assert.equal(classifyReferenceCanaryFailure('Prediction failed.', 'failed'), 're
 assert.equal(classifyReferenceCanaryFailure('seedance backend failed with no video', 'failed'), 'reference_provider_failed');
 assert.equal(classifyReferenceCanaryFailure('provider succeeded but output missing', 'succeeded'), 'reference_output_missing');
 assert.equal(classifyVideoReferenceCanaryFailure('E005: input or output was flagged as sensitive', 'failed'), 'video_reference_moderation_block');
+assert.equal(videoReferenceRouteStatusForFailure('video_reference_moderation_block'), 'failed_blocked');
+assert.equal(isSeedanceVideoReferenceBlockedStatus({ status: 'failed_blocked' }), true);
+assert.equal(isSeedanceVideoReferenceBlockedStatus({ failureCategory: 'video_reference_moderation_block' }), true);
+assert.equal(isSeedanceVideoReferenceBlockedStatus({ status: 'input_needs_repair' }), false);
+const blockedRetest = seedanceVideoReferenceBlockedRetestPayload({
+  status: 'failed_blocked',
+  failureCategory: 'video_reference_moderation_block',
+});
+assert.equal(blockedRetest.ok, false);
+assert.equal(blockedRetest.canaryStatus, 'failed_blocked');
+assert.equal(blockedRetest.providerPredictionCreated, false);
+assert.match(blockedRetest.message, /already blocked/i);
+assert.match(blockedRetest.message, /ForceRetest/i);
 assert.equal(classifyVideoReferenceCanaryFailure('ModelError: Service is temporarily unavailable. Please try again later. (E004)', 'failed'), 'video_reference_provider_unavailable');
 assert.equal(classifyVideoReferenceCanaryFailure('upstream unavailable, try again later', 'failed'), 'video_reference_provider_unavailable');
 assert.equal(classifyVideoReferenceCanaryFailure('unknown field reference_videos'), 'video_reference_input_schema');
@@ -484,6 +500,7 @@ assert.equal(schemaDiagnostics.variants.some((variant) => variant.id === 'video_
 
 const videoCanaryScript = readFileSync(new URL('../../scripts/seedance-video-reference-canary.ps1', import.meta.url), 'utf8');
 assert.match(videoCanaryScript, /ForceNormalize/);
+assert.match(videoCanaryScript, /ForceRetest/);
 assert.match(videoCanaryScript, /normalized asset used/);
 assert.match(videoCanaryScript, /normalization reason/);
 assert.match(videoCanaryScript, /normalization error category/);

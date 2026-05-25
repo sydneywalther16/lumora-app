@@ -180,11 +180,14 @@ export function chooseExactLikenessRoute(input: {
     identity: input.selfProviderCharacter,
   });
   const blocked = input.referenceRouteSummary.seedanceReferenceRoutesBlocked;
+  const seedanceVideoBlocked = seedanceVideoReference?.implementationStatus === 'blocked' ||
+    seedanceVideoReference?.canaryStatus === 'failed_blocked' ||
+    seedanceVideoReference?.lastFailureCategory === 'video_reference_moderation_block';
   const configuredButUnsupported = registry.filter((entry) => (
     entry.configured && entry.implementationStatus === 'configured_not_implemented'
   ));
-  const reason = blocked
-    ? 'No exact likeness route is ready; Seedance self reference routes are blocked, so Lumora uses soft text guidance.'
+  const reason = blocked || seedanceVideoBlocked
+    ? 'Seedance reference routes are blocked; no alternate exact-likeness provider has succeeded yet.'
     : configuredButUnsupported.length
       ? 'Configured exact likeness providers still need implementation or a successful canary, so Lumora uses soft text guidance.'
       : 'No canary-proven exact likeness provider is available, so Lumora uses soft text guidance.';
@@ -199,7 +202,9 @@ export function chooseExactLikenessRoute(input: {
     canaryStatus: seedanceVideoReference?.canaryStatus ?? openAI?.canaryStatus ?? null,
     fallbackRoute: 'seedance_text_guidance',
     providerRegistry: registry,
-    recommendedNextAction: seedanceVideoReference?.canaryStatus === 'retry_later'
+    recommendedNextAction: seedanceVideoBlocked
+      ? 'Configure Runway/Kling likeness canary or continue soft guidance.'
+      : seedanceVideoReference?.canaryStatus === 'retry_later'
       ? 'Retry Seedance video reference canary later.'
       : seedanceVideoReference?.canaryStatus === 'input_needs_repair'
         ? 'Normalize verification video or try a schema variant.'
@@ -239,6 +244,9 @@ export function exactLikenessCanaryCandidate(input: ExactLikenessRouterResult) {
   const seedanceVideoReference = registryEntry(input.providerRegistry, 'seedance_video_reference');
   if (
     seedanceVideoReference?.configured &&
+    seedanceVideoReference.implementationStatus !== 'blocked' &&
+    seedanceVideoReference.canaryStatus !== 'failed_blocked' &&
+    seedanceVideoReference.lastFailureCategory !== 'video_reference_moderation_block' &&
     seedanceVideoReference.canaryStatus !== 'succeeded' &&
     seedanceVideoReference.canaryStatus !== 'canary_succeeded'
   ) {

@@ -188,9 +188,15 @@ function diagnosticsFromRow(row: VerificationRow | null, schemaReady = true): Se
   const videoPresent = newVideoPresent || oldSelfCapturePresent;
   const consentPresent = Boolean(row?.verificationConsentAt || oldSelfCapturePresent);
   const rawRouteStatus = textValue(row?.videoReferenceRouteStatus) || (oldSelfCapturePresent ? 'not_tested' : null);
-  const routeStatus = rawRouteStatus === 'transient_unavailable' ? 'retry_later' : rawRouteStatus;
+  const routeStatus = rawRouteStatus === 'transient_unavailable'
+    ? 'retry_later'
+    : rawRouteStatus === 'video_reference_moderation_block' || rawRouteStatus === 'blocked'
+      ? 'failed_blocked'
+      : rawRouteStatus;
   const routeFailureCategory = rawRouteStatus === 'transient_unavailable'
     ? 'video_reference_provider_unavailable'
+    : routeStatus === 'failed_blocked'
+      ? 'video_reference_moderation_block'
     : rawRouteStatus === 'input_needs_repair'
       ? 'video_reference_input_invalid'
     : routeStatus &&
@@ -210,8 +216,8 @@ function diagnosticsFromRow(row: VerificationRow | null, schemaReady = true): Se
           ? 'Use Seedance video reference route for exact self character tests.'
           : routeStatus === 'retry_later'
             ? 'Retry Seedance video reference canary later.'
-          : routeStatus === 'blocked'
-            ? 'Continue using soft self guidance or test another exact likeness provider.'
+          : routeStatus === 'failed_blocked'
+            ? 'Configure Runway/Kling likeness canary or continue soft guidance.'
             : routeStatus === 'input_needs_repair'
               ? 'Normalize verification video or try a schema variant.'
             : routeStatus === 'configured_not_implemented'

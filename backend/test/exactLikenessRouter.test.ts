@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { env } from '../src/lib/env';
-import { chooseExactLikenessRoute } from '../src/services/exactLikenessRouter';
+import { chooseExactLikenessRoute, exactLikenessCanaryCandidate } from '../src/services/exactLikenessRouter';
 import { buildLikenessProviderRegistry } from '../src/services/likenessProviderRegistry';
 import { getOpenAISoraProviderReadiness, type SelfProviderCharacterDiagnostics } from '../src/services/providers/openaiSoraProvider';
 
@@ -105,7 +105,7 @@ try {
   });
   assert.equal(openAIFallback.route, 'seedance_text_guidance');
   assert.equal(openAIFallback.exactLikeness, false);
-  assert.match(openAIFallback.reason, /soft text guidance/i);
+  assert.match(openAIFallback.reason, /Seedance reference routes are blocked/i);
   assert.ok(openAIFallback.requiredSetup.includes('map documented character video usage field'));
 
   const mappedReadiness = {
@@ -309,6 +309,45 @@ try {
   assert.equal(videoReferenceInputNeedsRepair.route, 'seedance_text_guidance');
   assert.equal(videoReferenceInputNeedsRepair.exactLikeness, false);
   assert.equal(videoReferenceInputNeedsRepair.recommendedNextAction, 'Normalize verification video or try a schema variant.');
+
+  const videoReferenceBlockedRegistry = buildLikenessProviderRegistry({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: blockedReferenceSummary,
+    selfVerificationVideo: {
+      schemaReady: true,
+      oldSelfCapturePresent: false,
+      selfVerificationVideoPresent: true,
+      selfVerificationConsentPresent: true,
+      verificationAudioPresent: true,
+      verificationStatus: 'uploaded',
+      verificationPrompt: 'Look forward and turn.',
+      verificationLastTestedAt: '2026-05-24T00:00:00.000Z',
+      seedanceVideoReferenceCanaryStatus: 'failed_blocked',
+      seedanceVideoReferenceLastFailureCategory: 'video_reference_moderation_block',
+      seedanceVideoReferenceProviderStatus: 'failed_blocked',
+      videoReferenceProvider: 'seedance',
+      verificationVideoUrlRedacted: '[private-verification-video-present]',
+      migratedFromOldSelfCapture: false,
+      recommendedNextAction: 'Configure Runway/Kling likeness canary or continue soft guidance.',
+    },
+  });
+  const blockedVideoEntry = videoReferenceBlockedRegistry.find((provider) => provider.id === 'seedance_video_reference');
+  assert.equal(blockedVideoEntry?.implementationStatus, 'blocked');
+  assert.equal(blockedVideoEntry?.readinessStatus, 'blocked');
+  assert.equal(blockedVideoEntry?.canaryStatus, 'failed_blocked');
+  assert.equal(blockedVideoEntry?.lastFailureCategory, 'video_reference_moderation_block');
+  const videoReferenceBlocked = chooseExactLikenessRoute({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: blockedReferenceSummary,
+    providerRegistry: videoReferenceBlockedRegistry,
+  });
+  assert.equal(videoReferenceBlocked.route, 'seedance_text_guidance');
+  assert.equal(videoReferenceBlocked.exactLikeness, false);
+  assert.equal(videoReferenceBlocked.reason, 'Seedance reference routes are blocked; no alternate exact-likeness provider has succeeded yet.');
+  assert.equal(videoReferenceBlocked.recommendedNextAction, 'Configure Runway/Kling likeness canary or continue soft guidance.');
+  assert.notEqual(exactLikenessCanaryCandidate(videoReferenceBlocked)?.route, 'seedance_video_reference');
 
   console.log('exactLikenessRouter unit tests passed');
 } finally {

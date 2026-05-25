@@ -132,6 +132,11 @@ function latestContinuityConfidence(character: CharacterProfile) {
 
 function providerIdentityStatusLabel(character: CharacterProfile) {
   if (character.videoReferenceRouteStatus === 'canary_succeeded') return 'Video likeness ready';
+  if (hasEffectiveSelfVerificationVideo(character) && (
+    character.videoReferenceRouteStatus === 'failed_blocked' ||
+    character.videoReferenceRouteStatus === 'video_reference_moderation_block' ||
+    character.videoReferenceRouteStatus === 'blocked'
+  )) return 'Video likeness blocked';
   if (hasEffectiveSelfVerificationVideo(character) && character.videoReferenceRouteStatus === 'retry_later') return 'Provider temporarily unavailable';
   if (hasEffectiveSelfVerificationVideo(character) && character.videoReferenceRouteStatus === 'input_needs_repair') return 'Needs video prep';
   if (hasEffectiveSelfVerificationVideo(character) && character.videoReferenceRouteStatus === 'configured_not_implemented') return 'Video route needs canary';
@@ -149,6 +154,13 @@ function providerIdentityStatusLabel(character: CharacterProfile) {
 function providerIdentityStatusCopy(character: CharacterProfile) {
   if (character.videoReferenceRouteStatus === 'canary_succeeded') {
     return 'Seedance video-reference likeness route is canary-tested and ready.';
+  }
+  if (hasEffectiveSelfVerificationVideo(character) && (
+    character.videoReferenceRouteStatus === 'failed_blocked' ||
+    character.videoReferenceRouteStatus === 'video_reference_moderation_block' ||
+    character.videoReferenceRouteStatus === 'blocked'
+  )) {
+    return 'Seedance video reference is blocked by provider safety. Your self verification video is saved for alternate likeness providers.';
   }
   if (hasEffectiveSelfVerificationVideo(character) && character.videoReferenceRouteStatus === 'retry_later') {
     return 'Provider temporarily unavailable. Try this canary again later.';
@@ -215,6 +227,9 @@ function providerLabStatus(diagnostics: ApiHealthDiagnostics | null, id: string,
   if (entry.readinessStatus === 'canary_failed') return 'failed';
   if (entry.readinessStatus === 'configured_not_implemented') return 'configured, not implemented';
   if (entry.readinessStatus === 'research_only') return 'research only';
+  if (id === 'seedance_video_reference' && entry.lastFailureCategory === 'video_reference_moderation_block') {
+    return 'blocked by provider safety';
+  }
   if (entry.readinessStatus === 'blocked') return 'blocked';
   return entry.readinessStatus.replace(/_/g, ' ');
 }
@@ -239,6 +254,7 @@ function selfVerificationVideoLabStatus(diagnostics: ApiHealthDiagnostics | null
   }
 
   const status = providerLabStatus(diagnostics, 'seedance_video_reference');
+  if (status === 'blocked' || status === 'failed blocked') return 'Blocked by provider safety';
   if (status === 'input needs repair') return 'Prepare verification video';
   return status === 'not tested' ? 'Ready to test' : status;
 }
@@ -1213,6 +1229,9 @@ export default function CharacterHub({
       ? 'Enable diagnostic probe to run this paid canary.'
       : !effectiveVerificationVideoPresent
         ? 'Upload a self verification video before testing exact likeness routes.'
+        : seedanceVideoEntry?.implementationStatus === 'blocked' ||
+          seedanceVideoEntry?.canaryStatus === 'failed_blocked'
+          ? 'Your self verification video is saved. Lumora can test alternate likeness providers when configured.'
         : seedanceVideoCanaryRetryLater
           ? 'Provider temporarily unavailable. Try this canary again later.'
           : 'Video-reference canary is not available for this provider route yet.';
@@ -1537,6 +1556,7 @@ export default function CharacterHub({
                     'Self verification video',
                     selfVerificationVideoLabStatus(likenessDiagnostics, effectiveVerificationVideoPresent),
                   )}
+                  {metadataLine('Seedance video reference', providerLabStatus(likenessDiagnostics, 'seedance_video_reference'))}
                   {metadataLine(
                     'Seedance references',
                     likenessDiagnostics?.referenceRouteStatus?.seedanceReferenceRoutesBlocked ? 'Blocked' : 'Saved; needs route canary',

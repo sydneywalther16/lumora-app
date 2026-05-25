@@ -521,7 +521,10 @@ function videoReferenceRetryLaterInfo() {
   };
 }
 
-function videoReferenceRouteStatusForFailure(category: string) {
+export function videoReferenceRouteStatusForFailure(category: string) {
+  if (category === 'video_reference_moderation_block') {
+    return 'failed_blocked';
+  }
   if (
     category === 'video_reference_input_invalid' ||
     category === 'verification_video_preflight_failed' ||
@@ -530,6 +533,44 @@ function videoReferenceRouteStatusForFailure(category: string) {
     return 'input_needs_repair';
   }
   return isVideoReferenceTransientUnavailable(category) ? 'transient_unavailable' : category;
+}
+
+export function isSeedanceVideoReferenceBlockedStatus(input: {
+  status?: string | null;
+  failureCategory?: string | null;
+}) {
+  return [
+    input.status,
+    input.failureCategory,
+  ].some((value) => (
+    value === 'failed_blocked' ||
+    value === 'blocked' ||
+    value === 'video_reference_moderation_block' ||
+    value === 'reference_moderation_block'
+  ));
+}
+
+export function seedanceVideoReferenceBlockedRetestPayload(input: {
+  selectedVerificationVideo?: CanaryVerificationVideoDiagnostics | null;
+  status?: string | null;
+  failureCategory?: string | null;
+}) {
+  return {
+    ok: false,
+    provider: 'seedance-fast',
+    route: 'seedance_video_reference',
+    canaryStatus: 'failed_blocked',
+    verificationVideoPresent: true,
+    verificationConsentPresent: true,
+    providerPredictionCreated: false,
+    outputPresent: false,
+    outputUrlPresent: false,
+    parsedVideoUrlPresent: false,
+    failureCategory: input.failureCategory ?? 'video_reference_moderation_block',
+    selectedVerificationVideo: input.selectedVerificationVideo ?? null,
+    message: 'This Seedance video-reference route is already blocked. Use -ForceRetest if you intentionally want to spend another attempt.',
+    recommendedNextAction: 'Configure Runway/Kling likeness canary or continue soft guidance.',
+  };
 }
 
 function classifyCanaryFailure(kind: CanaryKind, value: unknown, providerStatus?: string | null) {
@@ -1404,6 +1445,12 @@ export async function persistReferenceRouteResult(input: {
     failureCategory: input.failureCategory ?? null,
     providerErrorCategory: input.providerErrorCategory ?? null,
     outputUrlPresent: Boolean(input.outputUrlPresent),
+    route: referenceRole === 'verification_video' ? 'seedance_video_reference' : 'seedance_reference',
+    routeStatus: input.succeeded
+      ? 'succeeded'
+      : input.failureCategory === 'video_reference_moderation_block' || input.failureCategory === 'reference_moderation_block'
+        ? 'blocked'
+        : 'failed',
     ...(input.notes ?? {}),
   };
 
@@ -2381,6 +2428,7 @@ export async function startSeedanceVideoReferenceCanary(input: {
   variant?: SeedanceVideoReferenceCanaryVariant;
   forceNormalize?: boolean;
   allowOriginalFallback?: boolean;
+  forceRetest?: boolean;
 }) {
   const variant = input.variant ?? 'reference_videos_bracket';
   const resolved = await resolveSelfVerificationVideoRuntime({
@@ -2421,6 +2469,21 @@ export async function startSeedanceVideoReferenceCanary(input: {
       recommendedNextAction: failure.recommendedNextAction,
       warning: 'This endpoint is gated because a mapped route may consume provider credits.',
     };
+  }
+
+  const existingDiagnostics = await getSelfVerificationVideoDiagnostics({
+    userId: input.userId,
+    characterId: null,
+  });
+  if (!input.forceRetest && isSeedanceVideoReferenceBlockedStatus({
+    status: existingDiagnostics.seedanceVideoReferenceCanaryStatus,
+    failureCategory: existingDiagnostics.seedanceVideoReferenceLastFailureCategory,
+  })) {
+    return seedanceVideoReferenceBlockedRetestPayload({
+      selectedVerificationVideo: resolved.runtime.diagnostics,
+      status: existingDiagnostics.seedanceVideoReferenceCanaryStatus,
+      failureCategory: existingDiagnostics.seedanceVideoReferenceLastFailureCategory ?? 'video_reference_moderation_block',
+    });
   }
 
   const prepared = await prepareVerificationVideoForProvider({
@@ -2684,6 +2747,7 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
     if (status === 'rendering') return job.providerPredictionId ? 'poll_provider_prediction' : 'create_provider_prediction';
     if (status === 'queued') return 'create_provider_prediction';
     if (status === 'failed') {
+      if (job.errorCategory === 'video_reference_moderation_block') return 'configure_alternate_likeness_provider';
       if (job.errorCategory === 'video_reference_provider_unavailable') return 'retry_later';
       if (job.errorCategory === 'video_reference_input_invalid' || job.errorCategory === 'verification_video_preflight_failed') return 'normalize_video_or_try_schema_variant';
       if (job.errorCategory === 'input_schema_invalid' || job.errorCategory === 'video_reference_input_schema') return 'fix_provider_payload_schema';
@@ -2707,12 +2771,16 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
   })();
   const canaryStatus = status === 'completed' && outputParse.ok
     ? 'canary_succeeded'
+    : job.errorCategory === 'video_reference_moderation_block'
+      ? 'failed_blocked'
     : job.errorCategory === 'video_reference_provider_unavailable'
       ? 'retry_later'
       : job.errorCategory === 'video_reference_input_invalid' || job.errorCategory === 'verification_video_preflight_failed'
         ? 'input_needs_repair'
       : status;
-  const recommendedNextAction = job.errorCategory === 'video_reference_provider_unavailable'
+  const recommendedNextAction = job.errorCategory === 'video_reference_moderation_block'
+    ? 'Configure Runway/Kling likeness canary or continue soft guidance.'
+    : job.errorCategory === 'video_reference_provider_unavailable'
     ? 'Retry Seedance video reference canary later'
     : job.errorCategory === 'video_reference_input_invalid' || job.errorCategory === 'verification_video_preflight_failed'
       ? 'Normalize verification video or try a schema variant'
@@ -2799,6 +2867,8 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
           ? 'Seedance video reference route reached the provider, but the provider was temporarily unavailable.'
         : job.errorCategory === 'video_reference_input_invalid'
           ? 'Seedance reached the provider, but the video-reference input needs repair or a schema variant.'
+        : job.errorCategory === 'video_reference_moderation_block'
+          ? 'Seedance video reference route is blocked by provider safety. Lumora will keep using soft self guidance until an alternate likeness provider succeeds.'
         : job.errorCategory === 'verification_video_preflight_failed'
           ? 'Verification video needs a provider-safe format before Seedance can test it.'
         : status === 'failed'

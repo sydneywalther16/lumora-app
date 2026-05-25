@@ -88,6 +88,7 @@ assert.equal(referencesAfterManualRemoval.rightAngleUrl, 'https://demo.supabase.
 assert.equal(selfVerificationVideoStatusLabel({ verificationVideoPresent: false }), 'Missing');
 assert.equal(selfVerificationVideoStatusLabel({ verificationVideoPresent: true }), 'Uploaded');
 assert.equal(selfVerificationVideoStatusLabel({ verificationVideoPresent: true, videoReferenceRouteStatus: 'canary_succeeded' }), 'Tested');
+assert.equal(selfVerificationVideoStatusLabel({ verificationVideoPresent: true, videoReferenceRouteStatus: 'failed_blocked' }), 'Blocked');
 const oldSelfCaptureCharacter = {
   verificationVideoPresent: false,
   sourceCaptureVideoUrl: 'https://demo.supabase.co/storage/v1/object/sign/self-capture-videos/private/self.mp4?token=secret',
@@ -115,6 +116,10 @@ assert.equal(
 assert.equal(
   createSelfCharacterStatusCopy({ character: { verificationVideoPresent: true, videoReferenceRouteStatus: 'input_needs_repair' }, exactRouteReady: false }),
   'Verification video needs a provider-safe format or schema variant.',
+);
+assert.equal(
+  createSelfCharacterStatusCopy({ character: { verificationVideoPresent: true, videoReferenceRouteStatus: 'failed_blocked' }, exactRouteReady: false }),
+  'Using soft self guidance. Exact likeness provider not ready.',
 );
 assert.equal(
   createSelfCharacterStatusCopy({ character: { verificationVideoPresent: true }, exactRouteReady: true }),

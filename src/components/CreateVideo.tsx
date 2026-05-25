@@ -1245,7 +1245,10 @@ export default function CreateVideo({
   const selfCharacterProviderStatusLabel = providerSelfCharacterReady
     ? 'Verified self character ready'
     : providerSelfCharacterSetupStarted
-      ? characterProfile?.videoReferenceRouteStatus === 'blocked' || characterProfile?.videoReferenceRouteStatus === 'reference_moderation_block'
+      ? characterProfile?.videoReferenceRouteStatus === 'blocked' ||
+        characterProfile?.videoReferenceRouteStatus === 'failed_blocked' ||
+        characterProfile?.videoReferenceRouteStatus === 'reference_moderation_block' ||
+        characterProfile?.videoReferenceRouteStatus === 'video_reference_moderation_block'
         ? 'Video likeness route blocked'
         : !effectiveVerificationVideoPresent
           ? 'Record self verification video'

@@ -79,7 +79,12 @@ export function selfVerificationVideoStatusLabel(character: SelfCharacterSetupSt
   if (!hasEffectiveSelfVerificationVideo(character)) return 'Missing';
   const routeStatus = character?.videoReferenceRouteStatus;
   if (routeStatus === 'canary_succeeded') return 'Tested';
-  if (routeStatus === 'blocked' || routeStatus === 'reference_moderation_block') {
+  if (
+    routeStatus === 'blocked' ||
+    routeStatus === 'failed_blocked' ||
+    routeStatus === 'reference_moderation_block' ||
+    routeStatus === 'video_reference_moderation_block'
+  ) {
     return 'Blocked';
   }
   if (routeStatus === 'configured_not_implemented') return 'Ready for canary';
@@ -105,8 +110,13 @@ export function createSelfCharacterStatusCopy(input: {
   if (input.exactRouteReady) return 'Verified self character ready.';
 
   const character = input.character;
-  if (character?.videoReferenceRouteStatus === 'blocked' || character?.videoReferenceRouteStatus === 'reference_moderation_block') {
-    return 'Video likeness route blocked. Using soft self guidance.';
+  if (
+    character?.videoReferenceRouteStatus === 'blocked' ||
+    character?.videoReferenceRouteStatus === 'failed_blocked' ||
+    character?.videoReferenceRouteStatus === 'reference_moderation_block' ||
+    character?.videoReferenceRouteStatus === 'video_reference_moderation_block'
+  ) {
+    return 'Using soft self guidance. Exact likeness provider not ready.';
   }
 
   if (character?.videoReferenceRouteStatus === 'input_needs_repair') {

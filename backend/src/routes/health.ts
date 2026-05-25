@@ -60,6 +60,7 @@ const videoReferenceCanarySchema = canarySchema.extend({
   variant: z.enum(['reference_videos_bracket', 'reference_videos_at', 'video_urls_at']).optional().default('reference_videos_bracket'),
   forceNormalize: z.boolean().optional().default(false),
   allowOriginalFallback: z.boolean().optional().default(false),
+  forceRetest: z.boolean().optional().default(false),
 });
 const normalizeVerificationVideoSchema = canarySchema.extend({
   force: z.boolean().optional().default(false),
@@ -140,6 +141,9 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
       ? 'Upload self verification video'
       : obsoleteManualReferenceCount > 0
         ? 'Remove old manual reference override'
+        : selfVerificationVideo.seedanceVideoReferenceCanaryStatus === 'failed_blocked' ||
+          selfVerificationVideo.seedanceVideoReferenceLastFailureCategory === 'video_reference_moderation_block'
+          ? exactLikeness.recommendedNextAction
         : exactLikenessCanaryStatus && exactLikenessCanaryStatus !== 'canary_succeeded'
           ? 'Run exact likeness canary'
           : 'Continue using soft self guidance';
@@ -582,6 +586,7 @@ healthRouter.post('/api/diagnostics/seedance-video-reference-canary/self', async
     variant: payload.variant,
     forceNormalize: payload.forceNormalize,
     allowOriginalFallback: payload.allowOriginalFallback,
+    forceRetest: payload.forceRetest,
   });
   res.status('ok' in status && status.ok === false ? 200 : 202).json({
     ...status,
