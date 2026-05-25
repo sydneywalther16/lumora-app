@@ -28,6 +28,10 @@ function Print-CanaryStatus {
     Write-Host "normalized asset used: $($Result.selectedVerificationVideo.normalizedAssetUsed)"
     Write-Host "normalization triggered: $($Result.selectedVerificationVideo.normalizationTriggered)"
     Write-Host "normalization reason: $($Result.selectedVerificationVideo.normalizationReason)"
+    if ($Result.selectedVerificationVideo.normalizationErrorCategory) { Write-Host "normalization error category: $($Result.selectedVerificationVideo.normalizationErrorCategory)" }
+    if ($null -ne $Result.selectedVerificationVideo.normalizationExitCode) { Write-Host "normalization exit code: $($Result.selectedVerificationVideo.normalizationExitCode)" }
+    if ($Result.selectedVerificationVideo.normalizationEncoderFallbackUsed) { Write-Host "normalization encoder fallback used: $($Result.selectedVerificationVideo.normalizationEncoderFallbackUsed)" }
+    if ($Result.selectedVerificationVideo.normalizationStderrExcerpt) { Write-Host "normalization stderr: $($Result.selectedVerificationVideo.normalizationStderrExcerpt)" }
     if ($Result.selectedVerificationVideo.preflight) {
       $meta = $Result.selectedVerificationVideo.preflight
       Write-Host ("preflight: duration={0}s size={1} width={2} height={3} container={4} videoCodec={5} audioCodec={6} ok={7} reason={8}" -f $meta.durationSeconds, $meta.fileSizeBytes, $meta.width, $meta.height, $meta.container, $meta.videoCodec, $meta.audioCodec, $meta.preflightOk, $meta.preflightFailureReason)
@@ -61,6 +65,9 @@ function Print-CanaryStatus {
   }
   if ($failureCategory -eq "verification_video_preflight_failed") {
     Write-Host "Verification video failed local preflight. Prepare a provider-safe MP4 before spending another attempt."
+    if ($Result.normalizationErrorCategory) { Write-Host "normalization error category: $($Result.normalizationErrorCategory)" }
+    if ($Result.normalizationStderrExcerpt) { Write-Host "normalization stderr: $($Result.normalizationStderrExcerpt)" }
+    Write-Host "No provider prediction was created; no provider credits were consumed by this failed normalization."
   }
   if ($Result.retryAvailableAt) { Write-Host "retry available at: $($Result.retryAvailableAt)" }
   if ($Result.providerErrorSummary) { Write-Host "provider error summary: $($Result.providerErrorSummary)" }

@@ -30,8 +30,11 @@ import {
   validateSelfVerificationVideoConsent,
 } from '../src/services/selfVerificationVideo';
 import {
+  buildVerificationVideoFfmpegArgs,
+  classifyFfmpegNormalizationFailure,
   chooseVerificationVideoNormalizationAction,
   validateVerificationVideoMetadata,
+  verificationVideoInputExtension,
   VERIFICATION_VIDEO_NORMALIZATION_TARGET,
 } from '../src/services/verificationVideoNormalizer';
 import { env } from '../src/lib/env';
@@ -164,6 +167,20 @@ assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.videoProfile, 'high');
 assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.width, 720);
 assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.height, 1280);
 assert.equal(VERIFICATION_VIDEO_NORMALIZATION_TARGET.maxFileSizeBytes <= 50 * 1024 * 1024, true);
+assert.equal(verificationVideoInputExtension({ contentType: 'video/quicktime', objectPath: 'self.mov' }), 'mov');
+assert.equal(verificationVideoInputExtension({ contentType: 'video/mp4', objectPath: 'self.mov' }), 'mp4');
+assert.equal(verificationVideoInputExtension({ contentType: '', objectPath: 'private/self.webm' }), 'webm');
+const ffmpegArgs = buildVerificationVideoFfmpegArgs('/tmp/private/input.mov', '/tmp/private/output.mp4');
+assert.equal(Array.isArray(ffmpegArgs), true);
+assert.equal(ffmpegArgs.includes('/tmp/private/input.mov'), true);
+assert.equal(ffmpegArgs[ffmpegArgs.length - 1], '/tmp/private/output.mp4');
+assert.equal(ffmpegArgs[ffmpegArgs.indexOf('-vf') + 1], 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2,setsar=1');
+assert.equal(ffmpegArgs[ffmpegArgs.indexOf('-c:v') + 1], 'libx264');
+assert.equal(ffmpegArgs[ffmpegArgs.indexOf('-pix_fmt') + 1], 'yuv420p');
+assert.equal(ffmpegArgs[ffmpegArgs.indexOf('-movflags') + 1], '+faststart');
+assert.equal(classifyFfmpegNormalizationFailure({ stderr: 'Unknown encoder libx264' }), 'ffmpeg_encoder_unavailable');
+assert.equal(classifyFfmpegNormalizationFailure({ stderr: 'Syntax error: unexpected token (' }), 'ffmpeg_shell_parse');
+assert.equal(classifyFfmpegNormalizationFailure({ stderr: 'moov atom not found' }), 'ffmpeg_input_decode_failed');
 
 assert.throws(
   () => validateSelfVerificationVideoConsent({ consentConfirmed: false }),
@@ -431,5 +448,10 @@ const videoCanaryScript = readFileSync(new URL('../../scripts/seedance-video-ref
 assert.match(videoCanaryScript, /ForceNormalize/);
 assert.match(videoCanaryScript, /normalized asset used/);
 assert.match(videoCanaryScript, /normalization reason/);
+assert.match(videoCanaryScript, /normalization error category/);
+const normalizeScript = readFileSync(new URL('../../scripts/normalize-verification-video.ps1', import.meta.url), 'utf8');
+assert.match(normalizeScript, /normalize-verification-video\/self/);
+assert.match(normalizeScript, /No provider prediction will be created/);
+assert.match(normalizeScript, /Force/);
 
 console.log('seedanceCanary unit tests passed');

@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -36,6 +36,13 @@ export type VerificationVideoNormalizationReason =
   | 'skipped_existing_valid_asset'
   | 'original_fallback_allowed';
 
+export type VerificationVideoNormalizationErrorCategory =
+  | 'ffmpeg_shell_parse'
+  | 'ffmpeg_encoder_unavailable'
+  | 'ffmpeg_input_decode_failed'
+  | 'ffmpeg_output_missing'
+  | 'ffmpeg_unknown';
+
 export type VerificationVideoPreflightMetadata = {
   durationSeconds: number | null;
   width: number | null;
@@ -61,6 +68,12 @@ export type VerificationVideoNormalizationDiagnostics = {
   normalizedAssetPathPresent: boolean;
   normalizedStatus: 'not_needed' | 'ready' | 'created' | 'unavailable' | 'failed';
   failureReason: string | null;
+  normalizationErrorCategory?: VerificationVideoNormalizationErrorCategory | null;
+  normalizationExitCode?: number | null;
+  normalizationStderrExcerpt?: string | null;
+  normalizationStdoutExcerpt?: string | null;
+  normalizationFfmpegArgs?: string[] | null;
+  normalizationEncoderFallbackUsed?: boolean | null;
 };
 
 export type VerificationVideoPreparationResult =
@@ -103,6 +116,29 @@ function ffprobeBinary() {
   return process.env.FFPROBE_PATH?.trim() || 'ffprobe';
 }
 
+function excerpt(value: string, maxLength: number) {
+  const text = value.replace(/\s+/g, ' ').trim();
+  return text ? text.slice(0, maxLength) : null;
+}
+
+function safeExtension(value: string | null | undefined) {
+  const text = value?.trim().toLowerCase().replace(/^\./, '') ?? '';
+  return /^[a-z0-9]{2,8}$/.test(text) ? text : 'mov';
+}
+
+export function verificationVideoInputExtension(input: {
+  contentType?: string | null;
+  objectPath?: string | null;
+}) {
+  const contentType = input.contentType?.toLowerCase() ?? '';
+  if (contentType.includes('mp4')) return 'mp4';
+  if (contentType.includes('quicktime') || contentType.includes('mov')) return 'mov';
+  if (contentType.includes('webm')) return 'webm';
+  const pathExtension = input.objectPath?.match(/\.([a-zA-Z0-9]{2,8})(?:$|\?)/)?.[1] ?? null;
+  if (pathExtension) return safeExtension(pathExtension);
+  return 'mov';
+}
+
 function numericValue(value: unknown) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim()) {
@@ -138,6 +174,55 @@ function hasProviderSafeResolution(width: number | null, height: number | null) 
   const longSide = Math.max(width, height);
   const shortSide = Math.min(width, height);
   return longSide >= 480 && longSide <= 1280 && shortSide >= 270 && shortSide <= 720;
+}
+
+function hasNormalizedTargetResolution(width: number | null, height: number | null) {
+  return (width === 720 && height === 1280) || (width === 480 && height === 854);
+}
+
+function validateNormalizedOutputMetadata(metadata: VerificationVideoPreflightMetadata): VerificationVideoPreflightMetadata {
+  if (!metadata.preflightOk) return metadata;
+  if (metadata.container !== VERIFICATION_VIDEO_NORMALIZATION_TARGET.container) {
+    return {
+      ...metadata,
+      preflightOk: false,
+      needsNormalization: true,
+      preflightFailureReason: 'normalized_container_mismatch',
+    };
+  }
+  if (!isProviderSafeVideoCodec(metadata.videoCodec)) {
+    return {
+      ...metadata,
+      preflightOk: false,
+      needsNormalization: true,
+      preflightFailureReason: 'normalized_video_codec_mismatch',
+    };
+  }
+  if (metadata.hasAudioStream && !isProviderSafeAudioCodec(metadata.audioCodec)) {
+    return {
+      ...metadata,
+      preflightOk: false,
+      needsNormalization: true,
+      preflightFailureReason: 'normalized_audio_codec_mismatch',
+    };
+  }
+  if (!hasNormalizedTargetResolution(metadata.width, metadata.height)) {
+    return {
+      ...metadata,
+      preflightOk: false,
+      needsNormalization: true,
+      preflightFailureReason: 'normalized_resolution_mismatch',
+    };
+  }
+  if (metadata.fileSizeBytes > VERIFICATION_VIDEO_PROVIDER_MAX_BYTES) {
+    return {
+      ...metadata,
+      preflightOk: false,
+      needsNormalization: true,
+      preflightFailureReason: 'normalized_file_too_large',
+    };
+  }
+  return metadata;
 }
 
 export function validateVerificationVideoMetadata(input: Omit<VerificationVideoPreflightMetadata, 'preflightOk' | 'needsNormalization' | 'preflightFailureReason'>): VerificationVideoPreflightMetadata {
@@ -228,62 +313,253 @@ async function probeVideoFile(filePath: string, fallbackSizeBytes: number): Prom
   }
 }
 
-async function normalizeVideoBuffer(buffer: Buffer): Promise<{
-  ok: true;
-  buffer: Buffer;
-  metadata: VerificationVideoPreflightMetadata;
-} | {
-  ok: false;
-  reason: string;
-}> {
-  const tmpRoot = join(tmpdir(), `lumora-verification-${randomUUID()}`);
-  const inputPath = join(tmpRoot, 'input-video');
-  const outputPath = join(tmpRoot, 'normalized.mp4');
+export function buildVerificationVideoFfmpegArgs(inputPath: string, outputPath: string, encoder = 'libx264') {
+  return [
+    '-y',
+    '-i',
+    inputPath,
+    '-t',
+    String(VERIFICATION_VIDEO_NORMALIZATION_TARGET.durationSeconds),
+    '-map',
+    '0:v:0',
+    '-map',
+    '0:a?',
+    '-vf',
+    `scale=${VERIFICATION_VIDEO_NORMALIZATION_TARGET.width}:${VERIFICATION_VIDEO_NORMALIZATION_TARGET.height}:force_original_aspect_ratio=decrease,pad=${VERIFICATION_VIDEO_NORMALIZATION_TARGET.width}:${VERIFICATION_VIDEO_NORMALIZATION_TARGET.height}:(ow-iw)/2:(oh-ih)/2,setsar=1`,
+    '-r',
+    '24',
+    '-c:v',
+    encoder,
+    '-pix_fmt',
+    VERIFICATION_VIDEO_NORMALIZATION_TARGET.pixelFormat,
+    '-profile:v',
+    VERIFICATION_VIDEO_NORMALIZATION_TARGET.videoProfile,
+    '-preset',
+    'veryfast',
+    '-crf',
+    '23',
+    '-movflags',
+    '+faststart',
+    '-c:a',
+    'aac',
+    '-b:a',
+    '128k',
+    outputPath,
+  ];
+}
+
+function redactedFfmpegArgs(args: string[]) {
+  return args.map((arg, index) => {
+    const previous = args[index - 1];
+    if (previous === '-i') return '[input-video]';
+    if (index === args.length - 1) return '[output-video]';
+    return arg;
+  });
+}
+
+export function classifyFfmpegNormalizationFailure(input: {
+  stderr?: string | null;
+  stdout?: string | null;
+  message?: string | null;
+}): VerificationVideoNormalizationErrorCategory {
+  const combined = `${input.message ?? ''}\n${input.stderr ?? ''}\n${input.stdout ?? ''}`;
+  if (/Invalid data found|moov atom not found|could not find codec parameters|Error while decoding|Invalid input/i.test(combined)) {
+    return 'ffmpeg_input_decode_failed';
+  }
+  if (/Syntax error|unexpected token|command not found|spawn .*ENOENT/i.test(combined)) return 'ffmpeg_shell_parse';
+  if (/Unknown encoder ['"]?libx264|Encoder .*libx264.*not found|codec.*libx264.*not found/i.test(combined)) {
+    return 'ffmpeg_encoder_unavailable';
+  }
+  return 'ffmpeg_unknown';
+}
+
+type FfmpegRunResult =
+  | {
+      ok: true;
+      stdout: string;
+      stderr: string;
+      exitCode: number;
+      args: string[];
+    }
+  | {
+      ok: false;
+      stdout: string;
+      stderr: string;
+      exitCode: number | null;
+      args: string[];
+      errorCategory: VerificationVideoNormalizationErrorCategory;
+      message: string;
+    };
+
+function isFfmpegRunFailure(result: FfmpegRunResult): result is Extract<FfmpegRunResult, { ok: false }> {
+  return result.ok === false;
+}
+
+function runFfmpegArgs(args: string[]): Promise<FfmpegRunResult> {
+  return new Promise((resolve) => {
+    const child = spawn(ffmpegBinary(), args, {
+      windowsHide: true,
+      shell: false,
+    });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      child.kill('SIGKILL');
+    }, FFMPEG_TIMEOUT_MS);
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf8');
+      if (stdout.length > 20_000) stdout = stdout.slice(-20_000);
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+      if (stderr.length > 40_000) stderr = stderr.slice(-40_000);
+    });
+    child.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve({
+        ok: false,
+        stdout,
+        stderr,
+        exitCode: null,
+        args,
+        errorCategory: classifyFfmpegNormalizationFailure({ stdout, stderr, message: error.message }),
+        message: error.message,
+      });
+    });
+    child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (code === 0) {
+        resolve({
+          ok: true,
+          stdout,
+          stderr,
+          exitCode: 0,
+          args,
+        });
+        return;
+      }
+      resolve({
+        ok: false,
+        stdout,
+        stderr,
+        exitCode: code,
+        args,
+        errorCategory: classifyFfmpegNormalizationFailure({ stdout, stderr }),
+        message: `ffmpeg exited with code ${code ?? 'unknown'}`,
+      });
+    });
+  });
+}
+
+async function availableH264EncoderFallback() {
   try {
-    await mkdir(tmpRoot, { recursive: true });
-    await writeFile(inputPath, buffer);
-    await execFileAsync(ffmpegBinary(), [
-      '-y',
-      '-i',
-      inputPath,
-      '-t',
-      String(VERIFICATION_VIDEO_NORMALIZATION_TARGET.durationSeconds),
-      '-map',
-      '0:v:0',
-      '-map',
-      '0:a?',
-      '-vf',
-      `scale=${VERIFICATION_VIDEO_NORMALIZATION_TARGET.width}:${VERIFICATION_VIDEO_NORMALIZATION_TARGET.height}:force_original_aspect_ratio=decrease,pad=${VERIFICATION_VIDEO_NORMALIZATION_TARGET.width}:${VERIFICATION_VIDEO_NORMALIZATION_TARGET.height}:(ow-iw)/2:(oh-ih)/2,setsar=1`,
-      '-r',
-      '24',
-      '-c:v',
-      'libx264',
-      '-preset',
-      'veryfast',
-      '-pix_fmt',
-      VERIFICATION_VIDEO_NORMALIZATION_TARGET.pixelFormat,
-      '-profile:v',
-      VERIFICATION_VIDEO_NORMALIZATION_TARGET.videoProfile,
-      '-movflags',
-      '+faststart',
-      '-c:a',
-      'aac',
-      '-b:a',
-      '96k',
-      '-shortest',
-      outputPath,
-    ], {
-      timeout: FFMPEG_TIMEOUT_MS,
+    const { stdout } = await execFileAsync(ffmpegBinary(), ['-hide_banner', '-encoders'], {
+      timeout: FFPROBE_TIMEOUT_MS,
       windowsHide: true,
       maxBuffer: 1024 * 1024,
     });
+    const candidates = ['h264', 'libx264', 'h264_nvenc', 'h264_qsv', 'h264_videotoolbox', 'h264_amf'];
+    return candidates.find((candidate) => new RegExp(`\\b${candidate}\\b`).test(stdout)) ?? null;
+  } catch {
+    return 'h264';
+  }
+}
+
+async function normalizeVideoBuffer(buffer: Buffer, inputExtension = 'mov'): Promise<{
+  ok: true;
+  buffer: Buffer;
+  metadata: VerificationVideoPreflightMetadata;
+  ffmpegDiagnostics: {
+    exitCode: number | null;
+    stderrExcerpt: string | null;
+    stdoutExcerpt: string | null;
+    args: string[];
+    encoderFallbackUsed: boolean;
+  };
+} | {
+  ok: false;
+  reason: string;
+  errorCategory: VerificationVideoNormalizationErrorCategory;
+  exitCode: number | null;
+  stderrExcerpt: string | null;
+  stdoutExcerpt: string | null;
+  args: string[];
+  encoderFallbackUsed: boolean;
+}> {
+  const tmpRoot = join(tmpdir(), `lumora-verification-${randomUUID()}`);
+  const inputPath = join(tmpRoot, `input.${safeExtension(inputExtension)}`);
+  const outputPath = join(tmpRoot, 'output.mp4');
+  try {
+    await mkdir(tmpRoot, { recursive: true });
+    await writeFile(inputPath, buffer);
+    let encoderFallbackUsed = false;
+    let args = buildVerificationVideoFfmpegArgs(inputPath, outputPath, 'libx264');
+    let ffmpegResult = await runFfmpegArgs(args);
+    if (isFfmpegRunFailure(ffmpegResult) && ffmpegResult.errorCategory === 'ffmpeg_encoder_unavailable') {
+      const fallbackEncoder = await availableH264EncoderFallback();
+      if (fallbackEncoder && fallbackEncoder !== 'libx264') {
+        encoderFallbackUsed = true;
+        args = buildVerificationVideoFfmpegArgs(inputPath, outputPath, fallbackEncoder);
+        ffmpegResult = await runFfmpegArgs(args);
+      }
+    }
+    if (isFfmpegRunFailure(ffmpegResult)) {
+      const failed = ffmpegResult;
+      return {
+        ok: false,
+        reason: `${failed.errorCategory}: ${failed.message}`,
+        errorCategory: failed.errorCategory,
+        exitCode: failed.exitCode,
+        stderrExcerpt: excerpt(failed.stderr, 2000),
+        stdoutExcerpt: excerpt(failed.stdout, 1000),
+        args: redactedFfmpegArgs(failed.args),
+        encoderFallbackUsed,
+      };
+    }
     const normalizedBuffer = await readFile(outputPath);
-    const metadata = await probeVideoFile(outputPath, normalizedBuffer.length);
-    return { ok: true, buffer: normalizedBuffer, metadata };
+    if (normalizedBuffer.length <= 0) {
+      return {
+        ok: false,
+        reason: 'ffmpeg_output_missing: normalized output file was empty',
+        errorCategory: 'ffmpeg_output_missing',
+        exitCode: ffmpegResult.exitCode,
+        stderrExcerpt: excerpt(ffmpegResult.stderr, 2000),
+        stdoutExcerpt: excerpt(ffmpegResult.stdout, 1000),
+        args: redactedFfmpegArgs(ffmpegResult.args),
+        encoderFallbackUsed,
+      };
+    }
+    const metadata = validateNormalizedOutputMetadata(await probeVideoFile(outputPath, normalizedBuffer.length));
+    return {
+      ok: true,
+      buffer: normalizedBuffer,
+      metadata,
+      ffmpegDiagnostics: {
+        exitCode: ffmpegResult.exitCode,
+        stderrExcerpt: excerpt(ffmpegResult.stderr, 2000),
+        stdoutExcerpt: excerpt(ffmpegResult.stdout, 1000),
+        args: redactedFfmpegArgs(ffmpegResult.args),
+        encoderFallbackUsed,
+      },
+    };
   } catch (error) {
+    const reason = error instanceof Error ? error.message : 'normalization_failed';
     return {
       ok: false,
-      reason: error instanceof Error ? error.message.slice(0, 240) : 'normalization_failed',
+      reason,
+      errorCategory: /ENOENT|no such file/i.test(reason) ? 'ffmpeg_output_missing' : 'ffmpeg_unknown',
+      exitCode: null,
+      stderrExcerpt: null,
+      stdoutExcerpt: null,
+      args: [],
+      encoderFallbackUsed: false,
     };
   } finally {
     await rm(tmpRoot, { recursive: true, force: true }).catch(() => null);
@@ -441,7 +717,7 @@ export async function prepareVerificationVideoForProvider(input: {
     };
   }
 
-  const contentType = download.data.type || 'application/octet-stream';
+  let contentType = download.data.type || 'application/octet-stream';
   if (!contentType.toLowerCase().startsWith('video/') && contentType !== 'application/octet-stream') {
     return {
       ok: false,
@@ -462,14 +738,18 @@ export async function prepareVerificationVideoForProvider(input: {
     };
   }
 
-  const buffer = Buffer.from(await download.data.arrayBuffer());
+  let buffer = Buffer.from(await download.data.arrayBuffer());
+  let inputExtension = verificationVideoInputExtension({
+    contentType,
+    objectPath: objectToDownload,
+  });
   const tmpRoot = join(tmpdir(), `lumora-verification-probe-${randomUUID()}`);
-  const probePath = join(tmpRoot, 'probe-video');
+  const probePath = join(tmpRoot, `probe-video.${inputExtension}`);
   try {
     await mkdir(tmpRoot, { recursive: true });
     await writeFile(probePath, buffer);
-    const original = await probeVideoFile(probePath, buffer.length);
-    if (usingStoredNormalized && original.preflightOk) {
+    let original = await probeVideoFile(probePath, buffer.length);
+    if (usingStoredNormalized && validateNormalizedOutputMetadata(original).preflightOk) {
       const action = chooseVerificationVideoNormalizationAction({
         storedNormalizedAssetPresent: true,
         storedNormalizedAssetValid: true,
@@ -490,6 +770,40 @@ export async function prepareVerificationVideoForProvider(input: {
           failureReason: null,
         },
       };
+    }
+
+    if (usingStoredNormalized) {
+      normalizedAssetStale = true;
+      const originalDownload = await supabaseAdmin.storage.from(input.bucket).download(input.objectPath);
+      if (originalDownload.error || !originalDownload.data) {
+        return {
+          ok: false,
+          bucket: input.bucket,
+          objectPath: input.objectPath,
+          errorCategory: 'verification_video_asset_access',
+          message: 'Stored normalized verification video is stale and the original self verification video is missing or unreadable.',
+          diagnostics: {
+            original,
+            normalized: validateNormalizedOutputMetadata(original),
+            normalizationTriggered: true,
+            normalizationReason: 'stale_asset',
+            normalizedAssetUsed: false,
+            normalizedAssetPathPresent: true,
+            normalizedStatus: 'failed',
+            failureReason: originalDownload.error?.message ?? 'verification_video_object_missing',
+          },
+        };
+      }
+      contentType = originalDownload.data.type || 'application/octet-stream';
+      buffer = Buffer.from(await originalDownload.data.arrayBuffer());
+      inputExtension = verificationVideoInputExtension({
+        contentType,
+        objectPath: input.objectPath,
+      });
+      const originalProbePath = join(tmpRoot, `probe-original.${inputExtension}`);
+      await writeFile(originalProbePath, buffer);
+      original = await probeVideoFile(originalProbePath, buffer.length);
+      usingStoredNormalized = false;
     }
 
     const action = chooseVerificationVideoNormalizationAction({
@@ -536,7 +850,7 @@ export async function prepareVerificationVideoForProvider(input: {
       };
     }
 
-    const normalized = await normalizeVideoBuffer(buffer);
+    const normalized = await normalizeVideoBuffer(buffer, inputExtension);
     if (normalized.ok === false || !normalized.metadata.preflightOk) {
       if (input.allowOriginalFallback && original.preflightOk) {
         return {
@@ -552,6 +866,12 @@ export async function prepareVerificationVideoForProvider(input: {
             normalizedAssetPathPresent: Boolean(storedNormalized),
             normalizedStatus: 'failed',
             failureReason: normalized.ok === true ? normalized.metadata.preflightFailureReason : normalized.reason,
+            normalizationErrorCategory: normalized.ok === true ? null : normalized.errorCategory,
+            normalizationExitCode: normalized.ok === true ? null : normalized.exitCode,
+            normalizationStderrExcerpt: normalized.ok === true ? null : normalized.stderrExcerpt,
+            normalizationStdoutExcerpt: normalized.ok === true ? null : normalized.stdoutExcerpt,
+            normalizationFfmpegArgs: normalized.ok === true ? null : normalized.args,
+            normalizationEncoderFallbackUsed: normalized.ok === true ? null : normalized.encoderFallbackUsed,
           },
         };
       }
@@ -572,6 +892,12 @@ export async function prepareVerificationVideoForProvider(input: {
           normalizedAssetPathPresent: false,
           normalizedStatus: 'failed',
           failureReason: normalized.ok === true ? normalized.metadata.preflightFailureReason : normalized.reason,
+          normalizationErrorCategory: normalized.ok === true ? null : normalized.errorCategory,
+          normalizationExitCode: normalized.ok === true ? null : normalized.exitCode,
+          normalizationStderrExcerpt: normalized.ok === true ? null : normalized.stderrExcerpt,
+          normalizationStdoutExcerpt: normalized.ok === true ? null : normalized.stdoutExcerpt,
+          normalizationFfmpegArgs: normalized.ok === true ? null : normalized.args,
+          normalizationEncoderFallbackUsed: normalized.ok === true ? null : normalized.encoderFallbackUsed,
         },
       };
     }
@@ -597,6 +923,12 @@ export async function prepareVerificationVideoForProvider(input: {
           normalizedAssetPathPresent: false,
           normalizedStatus: 'failed',
           failureReason: upload.error.message,
+          normalizationErrorCategory: null,
+          normalizationExitCode: normalized.ffmpegDiagnostics.exitCode,
+          normalizationStderrExcerpt: normalized.ffmpegDiagnostics.stderrExcerpt,
+          normalizationStdoutExcerpt: normalized.ffmpegDiagnostics.stdoutExcerpt,
+          normalizationFfmpegArgs: normalized.ffmpegDiagnostics.args,
+          normalizationEncoderFallbackUsed: normalized.ffmpegDiagnostics.encoderFallbackUsed,
         },
       };
     }
@@ -621,6 +953,12 @@ export async function prepareVerificationVideoForProvider(input: {
         normalizedAssetPathPresent: true,
         normalizedStatus: 'created',
         failureReason: null,
+        normalizationErrorCategory: null,
+        normalizationExitCode: normalized.ffmpegDiagnostics.exitCode,
+        normalizationStderrExcerpt: normalized.ffmpegDiagnostics.stderrExcerpt,
+        normalizationStdoutExcerpt: normalized.ffmpegDiagnostics.stdoutExcerpt,
+        normalizationFfmpegArgs: normalized.ffmpegDiagnostics.args,
+        normalizationEncoderFallbackUsed: normalized.ffmpegDiagnostics.encoderFallbackUsed,
       },
     };
   } finally {

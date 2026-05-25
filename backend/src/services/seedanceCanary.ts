@@ -220,6 +220,12 @@ export type CanaryVerificationVideoDiagnostics = {
   normalizedStatus?: VerificationVideoNormalizationDiagnostics['normalizedStatus'] | null;
   normalizationTriggered?: boolean | null;
   normalizationReason?: VerificationVideoNormalizationDiagnostics['normalizationReason'] | null;
+  normalizationErrorCategory?: VerificationVideoNormalizationDiagnostics['normalizationErrorCategory'] | null;
+  normalizationExitCode?: number | null;
+  normalizationStderrExcerpt?: string | null;
+  normalizationStdoutExcerpt?: string | null;
+  normalizationFfmpegArgs?: string[] | null;
+  normalizationEncoderFallbackUsed?: boolean | null;
   preflight?: VerificationVideoPreflightMetadata | null;
   normalizedPreflight?: VerificationVideoPreflightMetadata | null;
   preflightOk?: boolean | null;
@@ -1024,6 +1030,12 @@ function verificationVideoDiagnostics(input: {
     normalizedStatus: input.normalization?.normalizedStatus ?? null,
     normalizationTriggered: input.normalization?.normalizationTriggered ?? null,
     normalizationReason: input.normalization?.normalizationReason ?? null,
+    normalizationErrorCategory: input.normalization?.normalizationErrorCategory ?? null,
+    normalizationExitCode: input.normalization?.normalizationExitCode ?? null,
+    normalizationStderrExcerpt: input.normalization?.normalizationStderrExcerpt ?? null,
+    normalizationStdoutExcerpt: input.normalization?.normalizationStdoutExcerpt ?? null,
+    normalizationFfmpegArgs: input.normalization?.normalizationFfmpegArgs ?? null,
+    normalizationEncoderFallbackUsed: input.normalization?.normalizationEncoderFallbackUsed ?? null,
     preflight: input.normalization?.original ?? null,
     normalizedPreflight: input.normalization?.normalized ?? null,
     preflightOk: selectedPreflight?.preflightOk ?? null,
@@ -2527,6 +2539,103 @@ export async function startSeedanceVideoReferenceCanary(input: {
   return formatSeedanceCanaryStatus(processed ?? job);
 }
 
+export async function normalizeSeedanceVerificationVideoForDiagnostics(input: {
+  userId?: string | null;
+  forceNormalize?: boolean;
+}) {
+  const resolved = await resolveSelfVerificationVideoRuntime({
+    userId: input.userId,
+    characterId: null,
+  });
+  if (!resolved.ok) {
+    const failure = resolved as {
+      error: string;
+      message: string;
+      verificationVideoPresent: boolean;
+      verificationConsentPresent: boolean;
+      diagnostics: CanaryVerificationVideoDiagnostics;
+      recommendedNextAction: string;
+    };
+    return {
+      ok: false,
+      route: 'normalize_verification_video',
+      verificationVideoPresent: failure.verificationVideoPresent,
+      verificationConsentPresent: failure.verificationConsentPresent,
+      providerPredictionCreated: false,
+      normalizedAssetUsed: false,
+      normalizationTriggered: false,
+      normalizationReason: null,
+      selectedVerificationVideo: failure.diagnostics,
+      failureCategory: failure.error,
+      message: failure.message,
+      recommendedNextAction: failure.recommendedNextAction,
+    };
+  }
+
+  const prepared = await prepareVerificationVideoForProvider({
+    bucket: resolved.runtime.bucket,
+    objectPath: resolved.runtime.objectPath,
+    userId: input.userId,
+    forceNormalize: input.forceNormalize,
+    requireNormalized: true,
+    allowOriginalFallback: false,
+  });
+  const selectedVerificationVideo = verificationVideoDiagnostics({
+    bucket: prepared.ok ? prepared.bucket : resolved.runtime.bucket,
+    objectPath: prepared.ok ? prepared.objectPath : resolved.runtime.objectPath,
+    source: prepared.ok ? 'verification_video_asset_id' : resolved.runtime.diagnostics.source,
+    variant: 'reference_videos_bracket',
+    normalization: prepared.diagnostics,
+  });
+
+  if (prepared.ok === true) {
+    return {
+      ok: true,
+      route: 'normalize_verification_video',
+      verificationVideoPresent: true,
+      verificationConsentPresent: true,
+      providerPredictionCreated: false,
+      normalizedAssetUsed: selectedVerificationVideo.normalizedAssetUsed,
+      normalizationTriggered: selectedVerificationVideo.normalizationTriggered,
+      normalizationReason: selectedVerificationVideo.normalizationReason,
+      normalizationErrorCategory: selectedVerificationVideo.normalizationErrorCategory,
+      normalizationExitCode: selectedVerificationVideo.normalizationExitCode,
+      normalizationStderrExcerpt: selectedVerificationVideo.normalizationStderrExcerpt,
+      normalizationStdoutExcerpt: selectedVerificationVideo.normalizationStdoutExcerpt,
+      normalizationFfmpegArgs: selectedVerificationVideo.normalizationFfmpegArgs,
+      normalizationEncoderFallbackUsed: selectedVerificationVideo.normalizationEncoderFallbackUsed,
+      normalizedPreflightMetadata: selectedVerificationVideo.normalizedPreflight,
+      selectedVerificationVideo,
+      failureCategory: null,
+      message: 'Verification video normalized and persisted for provider-safe canary use.',
+      recommendedNextAction: 'Run Seedance video-reference canary with the normalized asset.',
+    };
+  }
+
+  const failedPreparation = prepared as Extract<typeof prepared, { ok: false }>;
+  return {
+    ok: false,
+    route: 'normalize_verification_video',
+    verificationVideoPresent: true,
+    verificationConsentPresent: true,
+    providerPredictionCreated: false,
+    normalizedAssetUsed: selectedVerificationVideo.normalizedAssetUsed,
+    normalizationTriggered: selectedVerificationVideo.normalizationTriggered,
+    normalizationReason: selectedVerificationVideo.normalizationReason,
+    normalizationErrorCategory: selectedVerificationVideo.normalizationErrorCategory,
+    normalizationExitCode: selectedVerificationVideo.normalizationExitCode,
+    normalizationStderrExcerpt: selectedVerificationVideo.normalizationStderrExcerpt,
+    normalizationStdoutExcerpt: selectedVerificationVideo.normalizationStdoutExcerpt,
+    normalizationFfmpegArgs: selectedVerificationVideo.normalizationFfmpegArgs,
+    normalizationEncoderFallbackUsed: selectedVerificationVideo.normalizationEncoderFallbackUsed,
+    normalizedPreflightMetadata: selectedVerificationVideo.normalizedPreflight,
+    selectedVerificationVideo,
+    failureCategory: failedPreparation.errorCategory,
+    message: failedPreparation.message,
+    recommendedNextAction: 'Fix verification video normalization before running provider canaries.',
+  };
+}
+
 export async function getSeedanceCanaryStatus(jobId: string) {
   const job = await getCanaryJob(jobId);
   if (!job) return null;
@@ -2670,6 +2779,12 @@ export function formatSeedanceCanaryStatus(job: CanaryJobRow) {
     normalizedAssetUsed: metadata?.selectedVerificationVideo?.normalizedAssetUsed ?? null,
     normalizationTriggered: metadata?.selectedVerificationVideo?.normalizationTriggered ?? null,
     normalizationReason: metadata?.selectedVerificationVideo?.normalizationReason ?? null,
+    normalizationErrorCategory: metadata?.selectedVerificationVideo?.normalizationErrorCategory ?? null,
+    normalizationExitCode: metadata?.selectedVerificationVideo?.normalizationExitCode ?? null,
+    normalizationStderrExcerpt: metadata?.selectedVerificationVideo?.normalizationStderrExcerpt ?? null,
+    normalizationStdoutExcerpt: metadata?.selectedVerificationVideo?.normalizationStdoutExcerpt ?? null,
+    normalizationFfmpegArgs: metadata?.selectedVerificationVideo?.normalizationFfmpegArgs ?? null,
+    normalizationEncoderFallbackUsed: metadata?.selectedVerificationVideo?.normalizationEncoderFallbackUsed ?? null,
     normalizedPreflightMetadata: metadata?.selectedVerificationVideo?.normalizedPreflight ?? null,
     message: status === 'completed' && outputParse.ok
       ? 'Seedance canary succeeded with a verified video URL.'

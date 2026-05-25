@@ -40,6 +40,7 @@ import {
   startSeedanceSelfReferenceCanary,
   startSeedanceVideoReferenceCanary,
   buildSeedanceInputSchemaDiagnostics,
+  normalizeSeedanceVerificationVideoForDiagnostics,
 } from '../services/seedanceCanary';
 import {
   getSelfVerificationVideoDiagnostics,
@@ -59,6 +60,10 @@ const videoReferenceCanarySchema = canarySchema.extend({
   variant: z.enum(['reference_videos_bracket', 'reference_videos_at', 'video_urls_at']).optional().default('reference_videos_bracket'),
   forceNormalize: z.boolean().optional().default(false),
   allowOriginalFallback: z.boolean().optional().default(false),
+});
+const normalizeVerificationVideoSchema = canarySchema.extend({
+  force: z.boolean().optional().default(false),
+  forceNormalize: z.boolean().optional().default(false),
 });
 const referenceCanarySchema = canarySchema.extend({
   characterId: z.string().min(1),
@@ -80,6 +85,7 @@ const canaryRouteInventory = {
   referenceCanaryRouteMounted: true,
   referenceMatrixRouteMounted: true,
   videoReferenceCanaryRouteMounted: true,
+  normalizeVerificationVideoRouteMounted: true,
   seedanceInputSchemaRouteMounted: true,
   soraCharacterCanaryRouteMounted: true,
   exactLikenessCanaryRouteMounted: true,
@@ -240,6 +246,7 @@ healthRouter.get('/api/diagnostics/canary-routes', (_req, res) => {
       referenceCanary: 'POST /api/diagnostics/seedance-reference-canary/self',
       referenceMatrix: 'POST /api/diagnostics/seedance-reference-matrix/self',
       videoReferenceCanary: 'POST /api/diagnostics/seedance-video-reference-canary/self',
+      normalizeVerificationVideo: 'POST /api/diagnostics/normalize-verification-video/self',
       seedanceInputSchema: 'GET /api/diagnostics/seedance-input-schema',
       soraCharacterCanary: 'POST /api/diagnostics/sora-character-canary/self',
       exactLikenessCanary: 'POST /api/diagnostics/exact-likeness-canary/self',
@@ -540,6 +547,23 @@ healthRouter.post('/api/diagnostics/seedance-reference-canary/self', async (req,
     }
     throw error;
   }
+});
+
+healthRouter.post('/api/diagnostics/normalize-verification-video/self', async (req, res) => {
+  if (!env.ENABLE_RENDER_PROBE) {
+    res.status(403).json({
+      error: 'Verification video normalization diagnostics disabled. Set ENABLE_RENDER_PROBE=true to normalize private verification media.',
+    });
+    return;
+  }
+
+  const payload = normalizeVerificationVideoSchema.parse(req.body ?? {});
+  const userId = payload.userId ?? req.header('x-lumora-user-id') ?? null;
+  const status = await normalizeSeedanceVerificationVideoForDiagnostics({
+    userId,
+    forceNormalize: payload.forceNormalize || payload.force,
+  });
+  res.json(status);
 });
 
 healthRouter.post('/api/diagnostics/seedance-video-reference-canary/self', async (req, res) => {
