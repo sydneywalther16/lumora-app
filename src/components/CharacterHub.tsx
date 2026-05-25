@@ -222,12 +222,18 @@ function likenessRegistryEntry(diagnostics: ApiHealthDiagnostics | null, id: str
 function providerLabStatus(diagnostics: ApiHealthDiagnostics | null, id: string, fallback = 'not configured') {
   const entry = likenessRegistryEntry(diagnostics, id);
   if (!entry) return fallback;
+  if (
+    (id === 'seedance_video_reference' && entry.lastFailureCategory === 'video_reference_moderation_block') ||
+    (id === 'seedance_reference_images' && entry.lastFailureCategory === 'reference_moderation_block')
+  ) {
+    return 'blocked by provider safety';
+  }
   if (entry.readinessStatus === 'configured_ready_for_canary') return 'ready to test';
   if (entry.readinessStatus === 'canary_succeeded') return 'succeeded';
   if (entry.readinessStatus === 'canary_failed') return 'failed';
   if (entry.readinessStatus === 'configured_not_implemented') return 'configured, not implemented';
   if (entry.readinessStatus === 'research_only') return 'research only';
-  if (id === 'seedance_video_reference' && entry.lastFailureCategory === 'video_reference_moderation_block') {
+  if ((id === 'seedance_video_reference' || id === 'seedance_reference_images') && entry.readinessStatus === 'blocked') {
     return 'blocked by provider safety';
   }
   if (entry.readinessStatus === 'blocked') return 'blocked';
@@ -1229,12 +1235,23 @@ export default function CharacterHub({
       probeEnabled &&
       seedanceVideoCanaryReadyToTest,
     );
-    const exactCanaryUnavailableCopy = !probeEnabled
-      ? 'Enable diagnostic probe to run this paid canary.'
-      : !effectiveVerificationVideoPresent
+    const seedancePhotoReferencesBlocked = Boolean(
+      likenessDiagnostics?.referenceRouteStatus?.seedanceReferenceRoutesBlocked ||
+      likenessRegistryEntry(likenessDiagnostics, 'seedance_reference_images')?.implementationStatus === 'blocked',
+    );
+    const seedanceVideoReferenceBlocked = Boolean(
+      seedanceVideoEntry?.implementationStatus === 'blocked' ||
+      seedanceVideoEntry?.canaryStatus === 'failed_blocked' ||
+      seedanceVideoEntry?.lastFailureCategory === 'video_reference_moderation_block',
+    );
+    const seedanceExactRoutesBlocked = seedancePhotoReferencesBlocked && seedanceVideoReferenceBlocked;
+    const exactCanaryUnavailableCopy = seedanceExactRoutesBlocked
+      ? 'Configure Runway or Kling to test exact likeness, or keep using soft self guidance.'
+      : !probeEnabled
+        ? 'Enable diagnostic probe to run this paid canary.'
+        : !effectiveVerificationVideoPresent
         ? 'Upload a self verification video before testing exact likeness routes.'
-        : seedanceVideoEntry?.implementationStatus === 'blocked' ||
-          seedanceVideoEntry?.canaryStatus === 'failed_blocked'
+        : seedanceVideoReferenceBlocked
           ? 'Your self verification video is saved. Lumora can test alternate likeness providers when configured.'
         : seedanceVideoCanaryRetryLater
           ? 'Provider temporarily unavailable. Try this canary again later.'
@@ -1562,8 +1579,8 @@ export default function CharacterHub({
                   )}
                   {metadataLine('Seedance video reference', providerLabStatus(likenessDiagnostics, 'seedance_video_reference'))}
                   {metadataLine(
-                    'Seedance references',
-                    likenessDiagnostics?.referenceRouteStatus?.seedanceReferenceRoutesBlocked ? 'Blocked' : 'Saved; needs route canary',
+                    'Seedance photo references',
+                    providerLabStatus(likenessDiagnostics, 'seedance_reference_images', seedancePhotoReferencesBlocked ? 'blocked by provider safety' : 'Saved; needs route canary'),
                   )}
                   {metadataLine('Runway', providerLabStatus(likenessDiagnostics, 'runway_gen4_reference'))}
                   {metadataLine('Kling', providerLabStatus(likenessDiagnostics, 'kling_reference'))}
