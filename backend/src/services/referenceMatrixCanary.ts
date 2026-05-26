@@ -175,7 +175,7 @@ export async function buildReferenceProviderReadinessDiagnostics(input: {
       lastReferenceResult: null,
     },
     klingReference: {
-      configured: Boolean(env.KLING_ENABLED && env.KLING_API_KEY && env.KLING_REFERENCE_MODEL),
+          configured: Boolean(env.KLING_ENABLED && (env.FAL_KEY || env.KLING_API_KEY) && env.KLING_REFERENCE_MODEL),
       referenceCapable: false,
       canaryTested: false,
       lastReferenceResult: null,

@@ -10,6 +10,7 @@ const originalEnv = {
   OPENAI_API_KEY: env.OPENAI_API_KEY,
   REPLICATE_API_TOKEN: env.REPLICATE_API_TOKEN,
   KLING_ENABLED: env.KLING_ENABLED,
+  FAL_KEY: env.FAL_KEY,
   KLING_API_KEY: env.KLING_API_KEY,
   KLING_MODEL: env.KLING_MODEL,
   KLING_REFERENCE_MODEL: env.KLING_REFERENCE_MODEL,
@@ -25,6 +26,7 @@ function restoreEnv() {
   env.OPENAI_API_KEY = originalEnv.OPENAI_API_KEY;
   env.REPLICATE_API_TOKEN = originalEnv.REPLICATE_API_TOKEN;
   env.KLING_ENABLED = originalEnv.KLING_ENABLED;
+  env.FAL_KEY = originalEnv.FAL_KEY;
   env.KLING_API_KEY = originalEnv.KLING_API_KEY;
   env.KLING_MODEL = originalEnv.KLING_MODEL;
   env.KLING_REFERENCE_MODEL = originalEnv.KLING_REFERENCE_MODEL;
@@ -98,6 +100,7 @@ try {
   env.OPENAI_API_KEY = 'sk-test-secret';
   env.REPLICATE_API_TOKEN = 'replicate-secret';
   env.KLING_ENABLED = false;
+  env.FAL_KEY = undefined;
   env.KLING_API_KEY = undefined;
   env.KLING_MODEL = undefined;
   env.KLING_REFERENCE_MODEL = undefined;
@@ -158,6 +161,7 @@ try {
   assert.notEqual(blockedSeedance.route, 'seedance_reference');
 
   env.KLING_ENABLED = true;
+  env.FAL_KEY = undefined;
   env.KLING_API_KEY = 'kling-secret';
   env.KLING_MODEL = 'kling-video';
   env.KLING_REFERENCE_MODEL = 'kling-reference-model';
@@ -186,6 +190,33 @@ try {
   assert.equal(registryText.includes('sk-test-secret'), false);
   assert.equal(registryText.includes('kling-secret'), false);
   assert.equal(registryText.includes('runway-secret'), false);
+
+  const billingRequiredRegistry = buildLikenessProviderRegistry({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: blockedReferenceSummary,
+    falAccountStatus: {
+      ok: false,
+      falKeyPresent: true,
+      falKeySource: 'KLING_API_KEY',
+      authOk: true,
+      workspaceRedacted: 'wor...ce',
+      userRedacted: null,
+      balancePresent: true,
+      balanceAmount: 0,
+      balanceCurrency: 'USD',
+      locked: true,
+      billingRequired: true,
+      errorCategory: 'fal_account_locked',
+      errorSummary: 'locked',
+      recommendedNextAction: 'Add fal credits.',
+    },
+  });
+  const billingRequiredKling = billingRequiredRegistry.find((provider) => provider.id === 'kling_reference');
+  assert.equal(billingRequiredKling?.configured, true);
+  assert.equal(billingRequiredKling?.canaryStatus, 'billing_required');
+  assert.equal(billingRequiredKling?.readinessStatus, 'billing_required');
+  assert.equal(billingRequiredKling?.implementationStatus, 'billing_required');
 
   const configuredButUntested = chooseExactLikenessRoute({
     openAISoraReadiness: readiness,

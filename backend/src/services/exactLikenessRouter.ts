@@ -11,6 +11,7 @@ import {
   type OpenAISoraProviderReadiness,
   type SelfProviderCharacterDiagnostics,
 } from './providers/openaiSoraProvider';
+import { type FalAccountStatus } from './providers/falAccountDiagnostics';
 
 export type ExactLikenessRoute =
   | 'openai_sora_character'
@@ -76,11 +77,13 @@ export function chooseExactLikenessRoute(input: {
   selfProviderCharacter: SelfProviderCharacterDiagnostics;
   referenceRouteSummary: ReferenceRouteSummaryLike;
   providerRegistry?: LikenessProviderRegistryEntry[];
+  falAccountStatus?: FalAccountStatus | null;
 }): ExactLikenessRouterResult {
   const registry = input.providerRegistry ?? buildLikenessProviderRegistry({
     openAISoraReadiness: input.openAISoraReadiness,
     selfProviderCharacter: input.selfProviderCharacter,
     referenceRouteSummary: input.referenceRouteSummary,
+    falAccountStatus: input.falAccountStatus,
   });
   const openAI = registryEntry(registry, 'openai_sora_character');
 
@@ -222,6 +225,7 @@ export function chooseExactLikenessRoute(input: {
 export async function resolveExactLikenessRoute(input: {
   userId?: string | null;
   characterId?: string | null;
+  falAccountStatus?: FalAccountStatus | null;
 } = {}) {
   const openAISoraReadiness = getOpenAISoraProviderReadiness();
   const [selfProviderCharacter, referenceRouteSummary, selfVerificationVideo] = await Promise.all([
@@ -235,6 +239,7 @@ export async function resolveExactLikenessRoute(input: {
     selfVerificationVideo,
     referenceRouteSummary,
     alternateProviderStatuses: await getAlternateExactLikenessProviderStatuses(input),
+    falAccountStatus: input.falAccountStatus,
   });
 
   return chooseExactLikenessRoute({
@@ -242,6 +247,7 @@ export async function resolveExactLikenessRoute(input: {
     selfProviderCharacter,
     referenceRouteSummary,
     providerRegistry,
+    falAccountStatus: input.falAccountStatus,
   });
 }
 

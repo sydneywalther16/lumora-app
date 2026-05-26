@@ -21,6 +21,7 @@ import {
   getOpenAISoraProviderReadiness,
   getSelfProviderCharacterDiagnostics,
 } from './providers/openaiSoraProvider';
+import { getFalAccountStatus } from './providers/falAccountDiagnostics';
 import {
   SEEDANCE_FAST_MODEL,
   SEEDANCE_QUALITY_MODEL,
@@ -3113,12 +3114,14 @@ export async function buildRenderPathCompareDiagnostics() {
       userId: real?.userId ?? null,
       characterId: real?.characterId ?? null,
     });
+    const falAccountStatus = env.ENABLE_RENDER_PROBE ? await getFalAccountStatus() : null;
     const likenessProviderRegistry = buildLikenessProviderRegistry({
       openAISoraReadiness: openaiSoraReadiness,
       selfProviderCharacter: openaiSoraIdentity,
       selfVerificationVideo,
       referenceRouteSummary,
       alternateProviderStatuses,
+      falAccountStatus,
     });
     const runwayProvider = likenessProviderRegistry.find((provider) => provider.id === 'runway_gen4_reference') ?? null;
     const klingProvider = likenessProviderRegistry.find((provider) => provider.id === 'kling_reference') ?? null;
@@ -3320,6 +3323,7 @@ export async function buildRenderPathCompareDiagnostics() {
       exactLikenessProvider: exactLikenessRouterChoice.exactLikeness ? exactLikenessRouterChoice.provider : null,
       exactLikenessReason: exactLikenessRouterChoice.reason,
       softGuidanceAvailable: true,
+      falAccountStatus,
       likenessProviderRegistry,
       alternateProvidersConfigured: likenessProviderRegistry.filter((provider) => provider.configured).map((provider) => provider.id),
       runwayConfigured: Boolean(runwayProvider?.configured),

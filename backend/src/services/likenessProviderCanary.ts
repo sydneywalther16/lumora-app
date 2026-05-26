@@ -31,12 +31,12 @@ export function buildAlternateLikenessProviderCanaryStatus(): AlternateLikenessP
     },
     {
       provider: 'kling-reference',
-      configured: Boolean(env.KLING_ENABLED && env.KLING_API_KEY && env.KLING_REFERENCE_MODEL),
-      referenceCapable: Boolean(env.KLING_ENABLED && env.KLING_API_KEY && env.KLING_REFERENCE_MODEL),
+      configured: Boolean(env.KLING_ENABLED && (env.FAL_KEY || env.KLING_API_KEY) && env.KLING_REFERENCE_MODEL),
+      referenceCapable: Boolean(env.KLING_ENABLED && (env.FAL_KEY || env.KLING_API_KEY) && env.KLING_REFERENCE_MODEL),
       canaryTested: false,
       productionRouteEnabled: false,
       lastReferenceResult: null,
-      status: env.KLING_ENABLED && env.KLING_API_KEY && env.KLING_REFERENCE_MODEL ? 'configured_needs_test' : 'not_configured',
+      status: env.KLING_ENABLED && (env.FAL_KEY || env.KLING_API_KEY) && env.KLING_REFERENCE_MODEL ? 'configured_needs_test' : 'not_configured',
     },
     {
       provider: 'runway',

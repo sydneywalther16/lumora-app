@@ -8,6 +8,7 @@ import {
   type OpenAISoraProviderReadiness,
   type SelfProviderCharacterDiagnostics,
 } from './providers/openaiSoraProvider';
+import { type FalAccountStatus } from './providers/falAccountDiagnostics';
 import { getKlingProviderReadiness } from './providers/klingProvider';
 import { getRunwayProviderReadiness } from './providers/runwayProvider';
 import { type SelfVerificationVideoDiagnostics } from './selfVerificationVideo';
@@ -60,7 +61,7 @@ export type LikenessProviderRegistryEntry = {
   lastFailureCategory: string | null;
   deprecated: boolean;
   shutdownDate: string | null;
-  implementationStatus: 'ready' | 'available' | 'configured_not_implemented' | 'configured_ready_for_canary' | 'not_configured' | 'blocked' | 'fallback' | 'research_only';
+  implementationStatus: 'ready' | 'available' | 'configured_not_implemented' | 'configured_ready_for_canary' | 'not_configured' | 'blocked' | 'billing_required' | 'fallback' | 'research_only';
   recommendedNextAction: string;
 };
 
@@ -99,6 +100,7 @@ export function buildLikenessProviderRegistry(input: {
   selfVerificationVideo?: SelfVerificationVideoDiagnostics | null;
   referenceRouteSummary: ReferenceRouteSummaryLike;
   alternateProviderStatuses?: AlternateExactLikenessProviderStatus[];
+  falAccountStatus?: FalAccountStatus | null;
 }): LikenessProviderRegistryEntry[] {
   const openAI = input.openAISoraReadiness ?? getOpenAISoraProviderReadiness();
   const summary = input.referenceRouteSummary;
@@ -121,7 +123,10 @@ export function buildLikenessProviderRegistry(input: {
     canaryStatus: runwayStatus?.status ?? null,
     lastFailureCategory: runwayStatus?.lastFailureCategory ?? null,
   });
-  const klingReadiness = getKlingProviderReadiness({ statuses: input.alternateProviderStatuses });
+  const klingReadiness = getKlingProviderReadiness({
+    statuses: input.alternateProviderStatuses,
+    falAccountStatus: input.falAccountStatus,
+  });
   const runwayExactReady = runwayReadiness.status === 'canary_succeeded';
   const klingExactReady = klingReadiness.status === 'canary_succeeded';
   const videoReferenceStatus = input.selfVerificationVideo?.seedanceVideoReferenceCanaryStatus ?? 'not_tested';
@@ -268,7 +273,9 @@ export function buildLikenessProviderRegistry(input: {
             ? 'configured_not_implemented'
             : klingReadiness.status === 'blocked'
               ? 'blocked'
-              : 'configured_ready_for_canary'
+              : klingReadiness.status === 'billing_required'
+                ? 'billing_required'
+                : 'configured_ready_for_canary'
           : 'not_configured',
       recommendedNextAction: klingReadiness.recommendedNextAction,
     },

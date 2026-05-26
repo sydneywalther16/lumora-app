@@ -50,7 +50,7 @@ export function getEnvironmentDiagnostics(): EnvironmentDiagnostics {
     googleVeo: Boolean(env.GOOGLE_API_KEY),
     openai: Boolean(env.OPENAI_API_KEY),
     openaiVideo: openAISora.routeReady,
-    klingReference: Boolean(env.KLING_ENABLED && env.KLING_API_KEY && env.KLING_REFERENCE_MODEL),
+    klingReference: Boolean(env.KLING_ENABLED && (env.FAL_KEY || env.KLING_API_KEY) && env.KLING_REFERENCE_MODEL),
     runwayReference: Boolean(env.RUNWAY_ENABLED && env.RUNWAY_API_KEY && (env.RUNWAY_REFERENCE_MODEL ?? env.RUNWAY_MODEL)),
     stripe: stripeReady,
     billing: billing.enabled,

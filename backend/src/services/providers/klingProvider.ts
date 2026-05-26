@@ -5,6 +5,13 @@ import { persistCompletedGeneration } from '../generationPersistence';
 import { parseProviderVideoOutput } from '../providerOutputParser';
 import { serializeDiagnosticError } from '../schemaDiagnostics';
 import {
+  falAuthorizationHeader,
+  getConfiguredFalKey,
+  getFalAccountStatus,
+  isFalBillingRequired,
+  type FalAccountStatus,
+} from './falAccountDiagnostics';
+import {
   listSelfReferenceMatrixCandidates,
   verifyReferenceAssetAccess,
   type SelfReferenceMatrixCandidate,
@@ -21,7 +28,8 @@ export type KlingReadinessStatus =
   | 'canary_succeeded'
   | 'canary_failed'
   | 'blocked'
-  | 'provider_unavailable';
+  | 'provider_unavailable'
+  | 'billing_required';
 
 type KlingQueueSubmitResponse = {
   request_id?: string;
@@ -67,6 +75,17 @@ export function classifyKlingFailure(input: {
 }) {
   const detail = redactKlingError(input.detail);
   const lower = detail.toLowerCase();
+  if (
+    lower.includes('exhausted balance') ||
+    lower.includes('user is locked') ||
+    lower.includes('account locked') ||
+    lower.includes('top up') ||
+    lower.includes('billing required') ||
+    lower.includes('insufficient credit') ||
+    lower.includes('insufficient balance')
+  ) {
+    return { category: 'kling_billing_required', detail };
+  }
   if (
     input.statusCode === 429 ||
     input.statusCode === 502 ||
@@ -153,9 +172,11 @@ export function getKlingProviderReadiness(input: {
     lastFailureCategory?: string | null;
     providerModel?: string | null;
   }> | null;
+  falAccountStatus?: FalAccountStatus | null;
 } = {}) {
   const model = configuredModel();
-  const configured = Boolean(env.KLING_ENABLED && env.KLING_API_KEY && model);
+  const falKey = getConfiguredFalKey();
+  const configured = Boolean(env.KLING_ENABLED && falKey.key && model);
   const provider = (env.KLING_PROVIDER ?? 'fal').toLowerCase();
   const implemented = provider === 'fal';
   const stored = input.statuses?.find((status) => status.provider === 'kling_reference') ?? null;
@@ -166,8 +187,14 @@ export function getKlingProviderReadiness(input: {
       ? 'configured_not_implemented'
     : stored?.status === 'canary_succeeded'
       ? 'canary_succeeded'
+    : lastFailureCategory === 'kling_billing_required' && input.falAccountStatus?.errorCategory === 'fal_ok'
+      ? 'configured_ready_for_canary'
+    : input.falAccountStatus && isFalBillingRequired(input.falAccountStatus)
+      ? 'billing_required'
     : lastFailureCategory === 'kling_moderation_block'
       ? 'blocked'
+    : lastFailureCategory === 'kling_billing_required'
+      ? 'billing_required'
     : lastFailureCategory === 'kling_provider_unavailable'
       ? 'provider_unavailable'
     : stored?.status === 'canary_failed'
@@ -179,7 +206,8 @@ export function getKlingProviderReadiness(input: {
     displayName: 'Kling reference route',
     configured,
     enabled: env.KLING_ENABLED,
-    apiKeyConfigured: Boolean(env.KLING_API_KEY),
+    apiKeyConfigured: Boolean(falKey.key),
+    falKeySource: falKey.source,
     providerTransport: provider,
     model: env.KLING_MODEL ?? null,
     referenceModel: env.KLING_REFERENCE_MODEL ?? null,
@@ -190,13 +218,15 @@ export function getKlingProviderReadiness(input: {
     canarySucceeded: status === 'canary_succeeded',
     canaryFailed: status === 'canary_failed' || status === 'blocked' || status === 'provider_unavailable',
     recommendedNextAction: !configured
-      ? 'Set KLING_ENABLED=true, KLING_API_KEY, and KLING_REFERENCE_MODEL to test Kling likeness.'
+      ? 'Set KLING_ENABLED=true, FAL_KEY or KLING_API_KEY, and KLING_REFERENCE_MODEL to test Kling likeness.'
       : !implemented
         ? 'Kling provider is configured, but only KLING_PROVIDER=fal is implemented.'
       : status === 'canary_succeeded'
         ? 'Kling canary succeeded; router may use it for exact likeness.'
       : status === 'blocked'
         ? 'Kling route was blocked by provider safety. Keep soft self guidance or test another provider.'
+      : status === 'billing_required'
+        ? 'Fal billing requires attention. Run fal account diagnostics, add credits if needed, then retry Kling.'
       : status === 'provider_unavailable'
         ? 'Kling provider was temporarily unavailable. Retry later if you want to spend another canary attempt.'
       : status === 'canary_failed'
@@ -218,10 +248,17 @@ async function falJson<T>(input: {
   method: string;
   body?: unknown;
 }) {
+  const falKey = getConfiguredFalKey();
+  if (!falKey.key) {
+    throw Object.assign(new Error('fal key missing'), {
+      failureCategory: 'not_configured',
+      failureDetail: 'fal key missing',
+    });
+  }
   const response = await fetch(input.path, {
     method: input.method,
     headers: {
-      Authorization: `Key ${env.KLING_API_KEY}`,
+      Authorization: falAuthorizationHeader(falKey.key),
       'Content-Type': 'application/json',
     },
     body: input.body === undefined ? undefined : JSON.stringify(input.body),
@@ -397,6 +434,41 @@ export async function startKlingSelfLikenessCanary(input: {
     };
   }
 
+  const falAccount = await getFalAccountStatus();
+  if (!falAccount.ok) {
+    const failureCategory = isFalBillingRequired(falAccount)
+      ? 'kling_billing_required'
+      : falAccount.errorCategory;
+    return {
+      ok: false,
+      provider: 'kling',
+      route: 'kling_reference',
+      configured: readiness.configured,
+      readinessStatus: failureCategory === 'kling_billing_required' ? 'billing_required' : readiness.status,
+      canaryStatus: failureCategory === 'kling_billing_required' ? 'billing_required' : readiness.status,
+      selectedModel: readiness.selectedModel,
+      falAccountStatus: {
+        falKeyPresent: falAccount.falKeyPresent,
+        falKeySource: falAccount.falKeySource,
+        authOk: falAccount.authOk,
+        balancePresent: falAccount.balancePresent,
+        balanceAmount: falAccount.balanceAmount,
+        balanceCurrency: falAccount.balanceCurrency,
+        locked: falAccount.locked,
+        billingRequired: falAccount.billingRequired,
+        errorCategory: falAccount.errorCategory,
+      },
+      outputUrlPresent: false,
+      parsedVideoUrlPresent: false,
+      verifiedVideoPresent: false,
+      verifiedPersistedVideo: false,
+      providerJobCreated: false,
+      failureCategory,
+      providerErrorSummary: falAccount.errorSummary,
+      recommendedNextAction: falAccount.recommendedNextAction,
+    };
+  }
+
   const matrix = await listSelfReferenceMatrixCandidates({
     userId: input.userId ?? null,
     referenceRole: 'all',
@@ -482,6 +554,32 @@ export async function startKlingSelfLikenessCanary(input: {
       const failure = failed
         ? classifyKlingFailure({ detail: finalJob.error ?? finalJob })
         : { category: 'kling_output_missing', detail: `output shape ${outputShapeSummary(output)}` };
+      if (failure.category === 'kling_billing_required') {
+        return {
+          ok: false,
+          provider: 'kling',
+          route: 'kling_reference',
+          configured: true,
+          readinessStatus: 'billing_required',
+          canaryStatus: 'billing_required',
+          selectedModel: readiness.selectedModel,
+          providerJobCreated: false,
+          providerJobIdPresent: Boolean(jobId),
+          providerStatus: finalJob.status ?? submitted.status ?? null,
+          referenceCount: referenceSet.candidates.length,
+          selectedReferenceRole: referenceSet.selected.referenceRole,
+          selectedReferenceLabel: referenceSet.selected.referenceLabel,
+          verificationVideoUsed: false,
+          outputUrlPresent: false,
+          parsedVideoUrlPresent: false,
+          verifiedVideoPresent: false,
+          verifiedPersistedVideo: false,
+          outputShapeSummary: outputShapeSummary(output),
+          failureCategory: failure.category,
+          providerErrorSummary: failure.detail,
+          recommendedNextAction: 'Fal billing requires attention. Run fal account diagnostics, add credits if needed, then retry Kling.',
+        };
+      }
       await persistAlternateExactLikenessCanaryResult({
         userId: referenceSet.selected.userId,
         characterId: referenceSet.selected.characterId,
@@ -599,6 +697,32 @@ export async function startKlingSelfLikenessCanary(input: {
     const failureCategory = typeof (error as { failureCategory?: unknown }).failureCategory === 'string'
       ? String((error as { failureCategory: string }).failureCategory)
       : 'kling_provider_failed';
+    if (failureCategory === 'kling_billing_required') {
+      return {
+        ok: false,
+        provider: 'kling',
+        route: 'kling_reference',
+        configured: true,
+        readinessStatus: 'billing_required',
+        canaryStatus: 'billing_required',
+        selectedModel: readiness.selectedModel,
+        providerJobCreated: false,
+        referenceCount: referenceSet.candidates.length,
+        selectedReferenceRole: referenceSet.selected.referenceRole,
+        selectedReferenceLabel: referenceSet.selected.referenceLabel,
+        verificationVideoUsed: false,
+        outputUrlPresent: false,
+        parsedVideoUrlPresent: false,
+        verifiedVideoPresent: false,
+        verifiedPersistedVideo: false,
+        failureCategory,
+        providerErrorSummary: typeof (error as { failureDetail?: unknown }).failureDetail === 'string'
+          ? (error as { failureDetail: string }).failureDetail
+          : serializeDiagnosticError(error),
+        recommendedNextAction: 'Fal billing requires attention. Run fal account diagnostics, add credits if needed, then retry Kling.',
+      };
+    }
+
     await persistAlternateExactLikenessCanaryResult({
       userId: referenceSet.selected.userId,
       characterId: referenceSet.selected.characterId,

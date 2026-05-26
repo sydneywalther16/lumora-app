@@ -21,6 +21,7 @@ import {
   getOpenAISoraProviderReadiness,
   startOpenAISoraSelfCharacterCanary,
 } from '../services/providers/openaiSoraProvider';
+import { getFalAccountStatus } from '../services/providers/falAccountDiagnostics';
 import { getKlingProviderReadiness, startKlingSelfLikenessCanary } from '../services/providers/klingProvider';
 import { getRunwayProviderReadiness, startRunwaySelfLikenessCanary } from '../services/providers/runwayProvider';
 import { buildVideoThumbnailDiagnostics, repairVideoThumbnails } from '../services/videoThumbnailRepair';
@@ -92,6 +93,7 @@ const canaryRouteInventory = {
   seedanceInputSchemaRouteMounted: true,
   soraCharacterCanaryRouteMounted: true,
   exactLikenessCanaryRouteMounted: true,
+  falAccountStatusRouteMounted: true,
   runwayLikenessCanaryRouteMounted: true,
   klingLikenessCanaryRouteMounted: true,
   renderLastRouteMounted: true,
@@ -120,7 +122,8 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
   try {
     const posterGenerationAvailability = await getPosterGenerationAvailability();
     const posterBackfillRuntime = getPosterBackfillRuntimeDiagnostics();
-    const exactLikeness = await resolveExactLikenessRoute();
+    const falAccountStatus = env.ENABLE_RENDER_PROBE ? await getFalAccountStatus() : null;
+    const exactLikeness = await resolveExactLikenessRoute({ falAccountStatus });
     const selfVerificationVideo = await getSelfVerificationVideoDiagnostics();
     const latestSeedanceVideoReferenceCanary = await getLatestSeedanceVideoReferenceCanaryStatus();
     const referenceRouteStatus = await getReferenceRouteSummary({});
@@ -162,6 +165,7 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
       providerFallback: await safeHealthDiagnostic('providerFallback', buildProviderFallbackDiagnostics),
       renderSuccessEngine: await safeHealthDiagnostic('renderSuccessEngine', buildRenderSuccessDiagnostics),
       referenceRouteStatus,
+      falAccountStatus,
       selfVerificationVideo,
       selfVerificationVideoPresent: selfVerificationVideo.selfVerificationVideoPresent,
       selfVerificationConsentPresent: selfVerificationVideo.selfVerificationConsentPresent,
@@ -269,6 +273,7 @@ healthRouter.get('/api/diagnostics/canary-routes', (_req, res) => {
       seedanceInputSchema: 'GET /api/diagnostics/seedance-input-schema',
       soraCharacterCanary: 'POST /api/diagnostics/sora-character-canary/self',
       exactLikenessCanary: 'POST /api/diagnostics/exact-likeness-canary/self',
+      falAccountStatus: 'GET /api/diagnostics/fal-account-status',
       runwayLikenessCanary: 'POST /api/diagnostics/runway-likeness-canary/self',
       klingLikenessCanary: 'POST /api/diagnostics/kling-likeness-canary/self',
       renderLast: 'GET /api/diagnostics/render-last',
@@ -276,6 +281,17 @@ healthRouter.get('/api/diagnostics/canary-routes', (_req, res) => {
     },
     ...canaryRouteInventory,
   });
+});
+
+healthRouter.get('/api/diagnostics/fal-account-status', async (_req, res) => {
+  if (!env.ENABLE_RENDER_PROBE) {
+    res.status(403).json({
+      error: 'Fal account diagnostics disabled. Set ENABLE_RENDER_PROBE=true to check the configured fal key safely.',
+    });
+    return;
+  }
+
+  res.json(await getFalAccountStatus());
 });
 
 healthRouter.get('/api/diagnostics/seedance-input-schema', async (_req, res) => {
@@ -477,9 +493,9 @@ healthRouter.post('/api/diagnostics/kling-likeness-canary/self', async (req, res
     });
     return;
   }
-  if (!env.KLING_API_KEY) {
+  if (!env.FAL_KEY && !env.KLING_API_KEY) {
     res.status(403).json({
-      error: 'Kling API key missing. Set KLING_API_KEY to run a paid canary.',
+      error: 'Fal API key missing. Set FAL_KEY or KLING_API_KEY to run a paid canary.',
     });
     return;
   }
