@@ -176,6 +176,7 @@ export function getKlingProviderReadiness(input: {
     status: string;
     lastFailureCategory?: string | null;
     providerModel?: string | null;
+    providerJobCreated?: boolean | null;
   }> | null;
   falAccountStatus?: FalAccountStatus | null;
 } = {}) {
@@ -187,6 +188,7 @@ export function getKlingProviderReadiness(input: {
   const stored = input.statuses?.find((status) => status.provider === 'kling_reference') ?? null;
   const lastFailureCategory = stored?.lastFailureCategory ?? null;
   const falAccountAllowsCanary = input.falAccountStatus && !isFalAccountBlockingKling(input.falAccountStatus);
+  const storedFailureCreatedProviderJob = stored?.providerJobCreated === true;
   const status: KlingReadinessStatus = !configured
     ? 'not_configured'
     : !implemented
@@ -194,6 +196,8 @@ export function getKlingProviderReadiness(input: {
     : stored?.status === 'canary_succeeded'
       ? 'canary_succeeded'
     : lastFailureCategory === 'kling_billing_required' && falAccountAllowsCanary
+      ? 'configured_ready_for_canary'
+    : stored?.status === 'canary_failed' && !storedFailureCreatedProviderJob && falAccountAllowsCanary
       ? 'configured_ready_for_canary'
     : input.falAccountStatus && isFalBillingRequired(input.falAccountStatus)
       ? 'billing_required'
@@ -203,7 +207,7 @@ export function getKlingProviderReadiness(input: {
       ? 'billing_required'
     : lastFailureCategory === 'kling_provider_unavailable'
       ? 'provider_unavailable'
-    : stored?.status === 'canary_failed'
+    : stored?.status === 'canary_failed' && storedFailureCreatedProviderJob
       ? 'canary_failed'
       : 'configured_ready_for_canary';
 
@@ -253,7 +257,7 @@ export function shouldReturnStoredKlingCanaryStatus(input: {
   if (!stored || input.forceRetest) return false;
   if (stored.lastFailureCategory === 'kling_billing_required') return false;
   if (stored.lastFailureCategory === 'kling_moderation_block') return true;
-  return stored.status === 'canary_failed' && Boolean(stored.lastFailureCategory);
+  return stored.status === 'canary_failed' && Boolean(stored.lastFailureCategory) && stored.providerJobCreated === true;
 }
 
 function storedKlingStatusReason(stored: AlternateExactLikenessProviderStatus) {

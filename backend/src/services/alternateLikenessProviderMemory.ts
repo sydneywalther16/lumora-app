@@ -62,21 +62,23 @@ function recordValue(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function providerJobCreatedFromNotes(value: unknown) {
-  const record = recordValue(value);
-  const candidates = [
-    record.providerJobCreated,
-    record.providerJobCreatedPresent,
-    record.providerPredictionCreated,
-    record.providerPredictionCreatedPresent,
-    record.providerJobIdPresent,
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate === 'boolean') return candidate;
-    if (typeof candidate === 'string') {
-      const normalized = candidate.trim().toLowerCase();
-      if (normalized === 'true') return true;
-      if (normalized === 'false') return false;
+function providerJobCreatedFromNotes(...values: unknown[]) {
+  for (const value of values) {
+    const record = recordValue(value);
+    const candidates = [
+      record.providerJobCreated,
+      record.providerJobCreatedPresent,
+      record.providerPredictionCreated,
+      record.providerPredictionCreatedPresent,
+      record.providerJobIdPresent,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'boolean') return candidate;
+      if (typeof candidate === 'string') {
+        const normalized = candidate.trim().toLowerCase();
+        if (normalized === 'true') return true;
+        if (normalized === 'false') return false;
+      }
     }
   }
   return null;
@@ -100,8 +102,11 @@ export function normalizeAlternateProviderFailureCategory(input: {
     text.includes('billing required') ||
     text.includes('insufficient credit') ||
     text.includes('insufficient balance');
+  const providerJobCreated = providerJobCreatedFromNotes(input.notes, input.metadata);
+  const preProviderKlingFailure = failureCategory === 'kling_provider_failed' &&
+    (providerJobCreated !== true || !text.includes('providerstatus'));
+  if (preProviderKlingFailure) return 'kling_billing_required';
   if (!billingText) return failureCategory;
-  const providerJobCreated = providerJobCreatedFromNotes(input.notes ?? input.metadata);
   return providerJobCreated === false || !text.includes('providerstatus')
     ? 'kling_billing_required'
     : failureCategory;
@@ -126,7 +131,7 @@ function mapRow(row: AlternateProviderMemoryRow): AlternateExactLikenessProvider
     lastSuccessAt: row.lastSuccessAt,
     lastFailureAt: row.lastFailureAt,
     lastFailureCategory,
-    providerJobCreated: providerJobCreatedFromNotes(row.notes ?? row.metadata),
+    providerJobCreated: providerJobCreatedFromNotes(row.notes, row.metadata),
     outputUrlPresent: Boolean(row.outputUrlPresent),
   };
 }

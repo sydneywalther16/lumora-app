@@ -104,6 +104,15 @@ try {
       providerErrorSummary: 'User is locked. Reason: Exhausted balance. Top up your balance.',
     },
   }), 'kling_billing_required');
+  assert.equal(normalizeAlternateProviderFailureCategory({
+    provider: 'kling_reference',
+    failureCategory: 'kling_provider_failed',
+    notes: {
+      outputUrlPresent: false,
+      referenceCount: 2,
+      verificationVideoUsed: false,
+    },
+  }), 'kling_billing_required');
 
   const lockedAccount = {
     ok: false,
@@ -233,6 +242,21 @@ try {
       providerJobCreated: false,
     }],
   }).status, 'configured_ready_for_canary');
+  assert.equal(getKlingProviderReadiness({
+    falAccountStatus: accountScopeLimited,
+    statuses: [{
+      provider: 'kling_reference',
+      status: 'canary_failed',
+      lastFailureCategory: 'kling_provider_failed',
+      providerModel: 'fal-ai/kling-video/o1/standard/reference-to-video',
+      referenceRole: 'front_angle',
+      referenceLabel: 'Primary front face',
+      lastSuccessAt: null,
+      lastFailureAt: '2026-05-25T00:00:00.000Z',
+      outputUrlPresent: false,
+      providerJobCreated: false,
+    }],
+  }).status, 'configured_ready_for_canary');
   assert.equal(JSON.stringify(accountScopeLimited).includes('kling-secret'), false);
 
   const storedRealFailure: AlternateExactLikenessProviderStatus = {
@@ -249,6 +273,12 @@ try {
   };
   assert.equal(shouldReturnStoredKlingCanaryStatus({ stored: storedRealFailure }), true);
   assert.equal(shouldReturnStoredKlingCanaryStatus({ stored: storedRealFailure, forceRetest: true }), false);
+  assert.equal(shouldReturnStoredKlingCanaryStatus({
+    stored: { ...storedRealFailure, providerJobCreated: null },
+  }), false);
+  assert.equal(shouldReturnStoredKlingCanaryStatus({
+    stored: { ...storedRealFailure, providerJobCreated: false },
+  }), false);
   assert.equal(shouldReturnStoredKlingCanaryStatus({
     stored: { ...storedRealFailure, lastFailureCategory: 'kling_billing_required', providerJobCreated: false },
   }), false);
