@@ -16,6 +16,7 @@ import {
   alternateLikenessProvidersConfigured,
   buildAlternateLikenessProviderCanaryStatus,
 } from '../services/likenessProviderCanary';
+import { repairKlingBillingCanaryMemory } from '../services/alternateLikenessProviderMemory';
 import { exactLikenessCanaryCandidate, resolveExactLikenessRoute } from '../services/exactLikenessRouter';
 import {
   getOpenAISoraProviderReadiness,
@@ -58,6 +59,9 @@ const canarySchema = z.object({
   userId: z.string().optional().nullable(),
   saveAsDraft: z.boolean().optional().default(false),
 });
+const klingCanarySchema = canarySchema.extend({
+  forceRetest: z.boolean().optional().default(false),
+});
 const videoReferenceCanarySchema = canarySchema.extend({
   variant: z.enum(['reference_videos_bracket', 'reference_videos_at', 'video_urls_at']).optional().default('reference_videos_bracket'),
   forceNormalize: z.boolean().optional().default(false),
@@ -94,6 +98,7 @@ const canaryRouteInventory = {
   soraCharacterCanaryRouteMounted: true,
   exactLikenessCanaryRouteMounted: true,
   falAccountStatusRouteMounted: true,
+  klingCanaryRepairRouteMounted: true,
   runwayLikenessCanaryRouteMounted: true,
   klingLikenessCanaryRouteMounted: true,
   renderLastRouteMounted: true,
@@ -274,6 +279,7 @@ healthRouter.get('/api/diagnostics/canary-routes', (_req, res) => {
       soraCharacterCanary: 'POST /api/diagnostics/sora-character-canary/self',
       exactLikenessCanary: 'POST /api/diagnostics/exact-likeness-canary/self',
       falAccountStatus: 'GET /api/diagnostics/fal-account-status',
+      repairKlingCanaryStatus: 'POST /api/diagnostics/repair-kling-canary-status',
       runwayLikenessCanary: 'POST /api/diagnostics/runway-likeness-canary/self',
       klingLikenessCanary: 'POST /api/diagnostics/kling-likeness-canary/self',
       renderLast: 'GET /api/diagnostics/render-last',
@@ -281,6 +287,21 @@ healthRouter.get('/api/diagnostics/canary-routes', (_req, res) => {
     },
     ...canaryRouteInventory,
   });
+});
+
+healthRouter.post('/api/diagnostics/repair-kling-canary-status', async (req, res) => {
+  if (!env.ENABLE_RENDER_PROBE) {
+    res.status(403).json({
+      error: 'Kling canary repair disabled. Set ENABLE_RENDER_PROBE=true to repair local canary memory.',
+    });
+    return;
+  }
+
+  const payload = canarySchema.parse(req.body ?? {});
+  res.json(await repairKlingBillingCanaryMemory({
+    userId: payload.userId ?? req.header('x-lumora-user-id') ?? null,
+    characterId: null,
+  }));
 });
 
 healthRouter.get('/api/diagnostics/fal-account-status', async (_req, res) => {
@@ -500,10 +521,11 @@ healthRouter.post('/api/diagnostics/kling-likeness-canary/self', async (req, res
     return;
   }
 
-  const payload = canarySchema.parse(req.body ?? {});
+  const payload = klingCanarySchema.parse(req.body ?? {});
   const status = await startKlingSelfLikenessCanary({
     userId: payload.userId ?? req.header('x-lumora-user-id') ?? null,
     saveAsDraft: payload.saveAsDraft,
+    forceRetest: payload.forceRetest,
   });
   res.status(status.ok ? 202 : status.failureCategory === 'configured_not_implemented' ? 501 : status.failureCategory === 'not_configured' ? 403 : 200).json({
     ...status,

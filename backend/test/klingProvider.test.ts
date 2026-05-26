@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { env } from '../src/lib/env';
+import { normalizeAlternateProviderFailureCategory, type AlternateExactLikenessProviderStatus } from '../src/services/alternateLikenessProviderMemory';
 import {
   classifyFalAccountStatus,
   getFalAccountStatus,
@@ -8,6 +9,7 @@ import {
   buildKlingReferenceToVideoPayload,
   classifyKlingFailure,
   getKlingProviderReadiness,
+  shouldReturnStoredKlingCanaryStatus,
   startKlingSelfLikenessCanary,
 } from '../src/services/providers/klingProvider';
 
@@ -94,6 +96,14 @@ try {
   assert.equal(classifyFalAccountStatus({ statusCode: 403, payload: { detail: 'This API key not permitted to perform this action.' } }).errorCategory, 'fal_key_scope_not_permitted');
   assert.equal(classifyFalAccountStatus({ statusCode: 403, payload: { detail: 'User is locked. Reason: Exhausted balance.' } }).errorCategory, 'fal_account_locked');
   assert.equal(classifyFalAccountStatus({ statusCode: 200, payload: { username: 'workspace', credits: { current_balance: 0, currency: 'USD' } }, balanceAmount: 0 }).errorCategory, 'fal_billing_required');
+  assert.equal(normalizeAlternateProviderFailureCategory({
+    provider: 'kling_reference',
+    failureCategory: 'kling_provider_failed',
+    notes: {
+      providerJobCreated: false,
+      providerErrorSummary: 'User is locked. Reason: Exhausted balance. Top up your balance.',
+    },
+  }), 'kling_billing_required');
 
   const lockedAccount = {
     ok: false,
@@ -208,7 +218,40 @@ try {
   assert.equal(accountScopeLimited.billingCheckStatus, 'scope_not_permitted');
   assert.match(accountScopeLimited.recommendedNextAction, /FAL_ADMIN_KEY|dashboard/i);
   assert.equal(getKlingProviderReadiness({ falAccountStatus: accountScopeLimited }).status, 'configured_ready_for_canary');
+  assert.equal(getKlingProviderReadiness({
+    falAccountStatus: accountScopeLimited,
+    statuses: [{
+      provider: 'kling_reference',
+      status: 'canary_failed',
+      lastFailureCategory: 'kling_billing_required',
+      providerModel: 'fal-ai/kling-video/o1/standard/reference-to-video',
+      referenceRole: 'front_angle',
+      referenceLabel: 'Primary front face',
+      lastSuccessAt: null,
+      lastFailureAt: '2026-05-25T00:00:00.000Z',
+      outputUrlPresent: false,
+      providerJobCreated: false,
+    }],
+  }).status, 'configured_ready_for_canary');
   assert.equal(JSON.stringify(accountScopeLimited).includes('kling-secret'), false);
+
+  const storedRealFailure: AlternateExactLikenessProviderStatus = {
+    provider: 'kling_reference',
+    providerModel: 'fal-ai/kling-video/o1/standard/reference-to-video',
+    status: 'canary_failed',
+    referenceRole: 'front_angle',
+    referenceLabel: 'Primary front face',
+    lastSuccessAt: null,
+    lastFailureAt: '2026-05-25T00:00:00.000Z',
+    lastFailureCategory: 'kling_provider_failed',
+    outputUrlPresent: false,
+    providerJobCreated: true,
+  };
+  assert.equal(shouldReturnStoredKlingCanaryStatus({ stored: storedRealFailure }), true);
+  assert.equal(shouldReturnStoredKlingCanaryStatus({ stored: storedRealFailure, forceRetest: true }), false);
+  assert.equal(shouldReturnStoredKlingCanaryStatus({
+    stored: { ...storedRealFailure, lastFailureCategory: 'kling_billing_required', providerJobCreated: false },
+  }), false);
 
   globalThis.fetch = (async () => new Response(JSON.stringify({
     detail: 'User is locked. Reason: Exhausted balance. Top up your balance.',

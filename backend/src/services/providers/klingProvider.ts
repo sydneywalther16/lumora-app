@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { env } from '../../lib/env';
-import { persistAlternateExactLikenessCanaryResult } from '../alternateLikenessProviderMemory';
+import {
+  getAlternateExactLikenessProviderStatuses,
+  persistAlternateExactLikenessCanaryResult,
+  type AlternateExactLikenessProviderStatus,
+} from '../alternateLikenessProviderMemory';
 import { persistCompletedGeneration } from '../generationPersistence';
 import { parseProviderVideoOutput } from '../providerOutputParser';
 import { serializeDiagnosticError } from '../schemaDiagnostics';
@@ -182,13 +186,14 @@ export function getKlingProviderReadiness(input: {
   const implemented = provider === 'fal';
   const stored = input.statuses?.find((status) => status.provider === 'kling_reference') ?? null;
   const lastFailureCategory = stored?.lastFailureCategory ?? null;
+  const falAccountAllowsCanary = input.falAccountStatus && !isFalAccountBlockingKling(input.falAccountStatus);
   const status: KlingReadinessStatus = !configured
     ? 'not_configured'
     : !implemented
       ? 'configured_not_implemented'
     : stored?.status === 'canary_succeeded'
       ? 'canary_succeeded'
-    : lastFailureCategory === 'kling_billing_required' && input.falAccountStatus?.errorCategory === 'fal_ok'
+    : lastFailureCategory === 'kling_billing_required' && falAccountAllowsCanary
       ? 'configured_ready_for_canary'
     : input.falAccountStatus && isFalBillingRequired(input.falAccountStatus)
       ? 'billing_required'
@@ -233,6 +238,56 @@ export function getKlingProviderReadiness(input: {
       : status === 'canary_failed'
         ? 'Inspect the last Kling canary failure before production routing.'
         : 'Run the Kling likeness canary before production routing.',
+  };
+}
+
+function storedKlingStatus(statuses: AlternateExactLikenessProviderStatus[] | null | undefined) {
+  return statuses?.find((status) => status.provider === 'kling_reference') ?? null;
+}
+
+export function shouldReturnStoredKlingCanaryStatus(input: {
+  stored?: AlternateExactLikenessProviderStatus | null;
+  forceRetest?: boolean;
+}) {
+  const stored = input.stored ?? null;
+  if (!stored || input.forceRetest) return false;
+  if (stored.lastFailureCategory === 'kling_billing_required') return false;
+  if (stored.lastFailureCategory === 'kling_moderation_block') return true;
+  return stored.status === 'canary_failed' && Boolean(stored.lastFailureCategory);
+}
+
+function storedKlingStatusReason(stored: AlternateExactLikenessProviderStatus) {
+  if (stored.lastFailureCategory === 'kling_moderation_block') {
+    return 'Kling route was previously blocked by provider safety. Use ForceRetest only if you intentionally want another paid attempt.';
+  }
+  return 'Kling has a stored canary failure. Use ForceRetest if you intentionally want a fresh paid canary attempt.';
+}
+
+function storedKlingStatusPayload(input: {
+  readiness: ReturnType<typeof getKlingProviderReadiness>;
+  stored: AlternateExactLikenessProviderStatus;
+  reason: string;
+}) {
+  return {
+    ok: false,
+    provider: 'kling',
+    route: 'kling_reference',
+    configured: input.readiness.configured,
+    readinessStatus: input.readiness.status,
+    canaryStatus: input.readiness.status,
+    selectedModel: input.readiness.selectedModel,
+    outputUrlPresent: input.stored.outputUrlPresent,
+    parsedVideoUrlPresent: false,
+    verifiedVideoPresent: false,
+    verifiedPersistedVideo: false,
+    providerJobCreated: false,
+    providerJobCreatedStored: input.stored.providerJobCreated ?? null,
+    storedStatusReturned: true,
+    freshCanaryAttemptCreated: false,
+    attemptMode: 'returning_stored_status',
+    lastFailureCategory: input.stored.lastFailureCategory,
+    failureCategory: input.stored.lastFailureCategory ?? 'kling_canary_stored_status',
+    recommendedNextAction: input.reason,
   };
 }
 
@@ -397,8 +452,18 @@ function providerOutputFromKlingResult(result: KlingQueueStatusResponse) {
 export async function startKlingSelfLikenessCanary(input: {
   userId?: string | null;
   saveAsDraft?: boolean;
+  forceRetest?: boolean;
 } = {}) {
-  const readiness = getKlingProviderReadiness();
+  const [statuses, falAccount] = await Promise.all([
+    getAlternateExactLikenessProviderStatuses({
+      userId: input.userId ?? null,
+      characterId: null,
+    }),
+    getFalAccountStatus(),
+  ]);
+  const readiness = getKlingProviderReadiness({ statuses, falAccountStatus: falAccount });
+  const stored = storedKlingStatus(statuses);
+
   if (!readiness.configured || !readiness.selectedModel) {
     return {
       ok: false,
@@ -412,6 +477,9 @@ export async function startKlingSelfLikenessCanary(input: {
       verifiedVideoPresent: false,
       verifiedPersistedVideo: false,
       providerJobCreated: false,
+      storedStatusReturned: false,
+      freshCanaryAttemptCreated: false,
+      attemptMode: 'blocked_by_configuration',
       failureCategory: 'not_configured',
       recommendedNextAction: readiness.recommendedNextAction,
     };
@@ -430,12 +498,14 @@ export async function startKlingSelfLikenessCanary(input: {
       verifiedVideoPresent: false,
       verifiedPersistedVideo: false,
       providerJobCreated: false,
+      storedStatusReturned: false,
+      freshCanaryAttemptCreated: false,
+      attemptMode: 'blocked_by_configuration',
       failureCategory: 'configured_not_implemented',
       recommendedNextAction: readiness.recommendedNextAction,
     };
   }
 
-  const falAccount = await getFalAccountStatus();
   if (isFalAccountBlockingKling(falAccount)) {
     const failureCategory = isFalBillingRequired(falAccount)
       ? 'kling_billing_required'
@@ -464,10 +534,23 @@ export async function startKlingSelfLikenessCanary(input: {
       verifiedVideoPresent: false,
       verifiedPersistedVideo: false,
       providerJobCreated: false,
+      storedStatusReturned: false,
+      freshCanaryAttemptCreated: false,
+      attemptMode: 'blocked_by_billing',
       failureCategory,
       providerErrorSummary: falAccount.errorSummary,
       recommendedNextAction: falAccount.recommendedNextAction,
     };
+  }
+
+  if (shouldReturnStoredKlingCanaryStatus({ stored, forceRetest: input.forceRetest })) {
+    return storedKlingStatusPayload({
+      readiness: stored?.lastFailureCategory === 'kling_moderation_block'
+        ? { ...readiness, status: 'blocked' }
+        : readiness,
+      stored: stored!,
+      reason: storedKlingStatusReason(stored!),
+    });
   }
 
   const matrix = await listSelfReferenceMatrixCandidates({
@@ -488,6 +571,9 @@ export async function startKlingSelfLikenessCanary(input: {
       verifiedVideoPresent: false,
       verifiedPersistedVideo: false,
       providerJobCreated: false,
+      storedStatusReturned: false,
+      freshCanaryAttemptCreated: false,
+      attemptMode: 'preflight_failed',
       failureCategory: 'no_saved_self_reference',
       sourcesChecked: matrix.sourcesChecked,
       sourceErrors: matrix.sourceErrors,
@@ -522,6 +608,9 @@ export async function startKlingSelfLikenessCanary(input: {
       referencesChecked: access.checked,
       verificationVideoUsed: false,
       providerJobCreated: false,
+      storedStatusReturned: false,
+      freshCanaryAttemptCreated: false,
+      attemptMode: 'preflight_failed',
       outputUrlPresent: false,
       parsedVideoUrlPresent: false,
       verifiedVideoPresent: false,
@@ -565,6 +654,9 @@ export async function startKlingSelfLikenessCanary(input: {
           canaryStatus: 'billing_required',
           selectedModel: readiness.selectedModel,
           providerJobCreated: false,
+          storedStatusReturned: false,
+          freshCanaryAttemptCreated: false,
+          attemptMode: 'blocked_by_billing',
           providerJobIdPresent: Boolean(jobId),
           providerStatus: finalJob.status ?? submitted.status ?? null,
           referenceCount: referenceSet.candidates.length,
@@ -611,6 +703,9 @@ export async function startKlingSelfLikenessCanary(input: {
         canaryStatus: 'canary_failed',
         selectedModel: readiness.selectedModel,
         providerJobCreated: true,
+        storedStatusReturned: false,
+        freshCanaryAttemptCreated: true,
+        attemptMode: input.forceRetest ? 'force_retest_fresh_canary_attempt' : 'creating_fresh_canary_attempt',
         providerJobIdPresent: Boolean(jobId),
         providerStatus: finalJob.status ?? submitted.status ?? null,
         referenceCount: referenceSet.candidates.length,
@@ -679,6 +774,9 @@ export async function startKlingSelfLikenessCanary(input: {
       canaryStatus: 'canary_succeeded',
       selectedModel: readiness.selectedModel,
       providerJobCreated: true,
+      storedStatusReturned: false,
+      freshCanaryAttemptCreated: true,
+      attemptMode: input.forceRetest ? 'force_retest_fresh_canary_attempt' : 'creating_fresh_canary_attempt',
       providerJobIdPresent: Boolean(jobId),
       providerStatus: finalJob.status ?? submitted.status ?? null,
       referenceCount: referenceSet.candidates.length,
@@ -708,6 +806,9 @@ export async function startKlingSelfLikenessCanary(input: {
         canaryStatus: 'billing_required',
         selectedModel: readiness.selectedModel,
         providerJobCreated: false,
+        storedStatusReturned: false,
+        freshCanaryAttemptCreated: false,
+        attemptMode: 'blocked_by_billing',
         referenceCount: referenceSet.candidates.length,
         selectedReferenceRole: referenceSet.selected.referenceRole,
         selectedReferenceLabel: referenceSet.selected.referenceLabel,
@@ -753,6 +854,9 @@ export async function startKlingSelfLikenessCanary(input: {
       canaryStatus: 'canary_failed',
       selectedModel: readiness.selectedModel,
       providerJobCreated: false,
+      storedStatusReturned: false,
+      freshCanaryAttemptCreated: false,
+      attemptMode: 'provider_call_failed_before_job',
       referenceCount: referenceSet.candidates.length,
       selectedReferenceRole: referenceSet.selected.referenceRole,
       selectedReferenceLabel: referenceSet.selected.referenceLabel,

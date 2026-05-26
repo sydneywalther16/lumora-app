@@ -13,6 +13,7 @@ export type AlternateExactLikenessProviderStatus = {
   lastSuccessAt: string | null;
   lastFailureAt: string | null;
   lastFailureCategory: string | null;
+  providerJobCreated?: boolean | null;
   outputUrlPresent: boolean;
 };
 
@@ -26,6 +27,8 @@ type AlternateProviderMemoryRow = {
   lastSuccessAt: string | null;
   lastFailureAt: string | null;
   lastFailureCategory: string | null;
+  notes: unknown;
+  metadata: unknown;
   outputUrlPresent: boolean | null;
 };
 
@@ -43,10 +46,77 @@ function memoryProviderId(value: string | null): AlternateExactLikenessProviderI
   return null;
 }
 
+function safeText(value: unknown) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function providerJobCreatedFromNotes(value: unknown) {
+  const record = recordValue(value);
+  const candidates = [
+    record.providerJobCreated,
+    record.providerJobCreatedPresent,
+    record.providerPredictionCreated,
+    record.providerPredictionCreatedPresent,
+    record.providerJobIdPresent,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'boolean') return candidate;
+    if (typeof candidate === 'string') {
+      const normalized = candidate.trim().toLowerCase();
+      if (normalized === 'true') return true;
+      if (normalized === 'false') return false;
+    }
+  }
+  return null;
+}
+
+export function normalizeAlternateProviderFailureCategory(input: {
+  provider?: string | null;
+  failureCategory?: string | null;
+  notes?: unknown;
+  metadata?: unknown;
+}) {
+  const provider = memoryProviderId(input.provider ?? null);
+  const failureCategory = input.failureCategory ?? null;
+  if (provider !== 'kling_reference') return failureCategory;
+  if (failureCategory === 'kling_billing_required') return failureCategory;
+  const text = `${safeText(input.failureCategory)} ${safeText(input.notes)} ${safeText(input.metadata)}`.toLowerCase();
+  const billingText = text.includes('exhausted balance') ||
+    text.includes('user is locked') ||
+    text.includes('account locked') ||
+    text.includes('top up') ||
+    text.includes('billing required') ||
+    text.includes('insufficient credit') ||
+    text.includes('insufficient balance');
+  if (!billingText) return failureCategory;
+  const providerJobCreated = providerJobCreatedFromNotes(input.notes ?? input.metadata);
+  return providerJobCreated === false || !text.includes('providerstatus')
+    ? 'kling_billing_required'
+    : failureCategory;
+}
+
 function mapRow(row: AlternateProviderMemoryRow): AlternateExactLikenessProviderStatus | null {
   const provider = memoryProviderId(row.provider);
   if (!provider) return null;
   const succeeded = (row.successCount ?? 0) > 0 && (row.successCount ?? 0) >= (row.failureCount ?? 0);
+  const lastFailureCategory = normalizeAlternateProviderFailureCategory({
+    provider: row.provider,
+    failureCategory: row.lastFailureCategory,
+    notes: row.notes,
+    metadata: row.metadata,
+  });
   return {
     provider,
     providerModel: row.providerModel,
@@ -55,7 +125,8 @@ function mapRow(row: AlternateProviderMemoryRow): AlternateExactLikenessProvider
     referenceLabel: row.referenceLabel,
     lastSuccessAt: row.lastSuccessAt,
     lastFailureAt: row.lastFailureAt,
-    lastFailureCategory: row.lastFailureCategory,
+    lastFailureCategory,
+    providerJobCreated: providerJobCreatedFromNotes(row.notes ?? row.metadata),
     outputUrlPresent: Boolean(row.outputUrlPresent),
   };
 }
@@ -83,6 +154,8 @@ export async function getAlternateExactLikenessProviderStatuses(input: {
          last_success_at as "lastSuccessAt",
          last_failure_at as "lastFailureAt",
          last_failure_category as "lastFailureCategory",
+         notes,
+         metadata,
          coalesce((notes->>'outputUrlPresent')::boolean, false) as "outputUrlPresent"
        from render_success_memory
        where render_mode = 'exact_likeness_provider_canary'
@@ -100,6 +173,91 @@ export async function getAlternateExactLikenessProviderStatuses(input: {
       .filter((row): row is AlternateExactLikenessProviderStatus => Boolean(row));
   } catch {
     return [];
+  }
+}
+
+export async function repairKlingBillingCanaryMemory(input: {
+  userId?: string | null;
+  characterId?: string | null;
+} = {}) {
+  const scanned = await getAlternateExactLikenessProviderStatuses(input);
+  try {
+    const result = await query<{ memoryKey: string; lastFailureCategory: string | null; notes: unknown; metadata: unknown }>(
+      `select
+         memory_key as "memoryKey",
+         last_failure_category as "lastFailureCategory",
+         notes,
+         metadata
+       from render_success_memory
+       where render_mode = 'exact_likeness_provider_canary'
+         and provider in ('kling_reference', 'kling')
+         and ($1::uuid is null or user_id = $1)
+         and ($2::text is null or character_id = $2)`,
+      [
+        isUuidLike(input.userId) ? input.userId : null,
+        input.characterId ?? null,
+      ],
+    );
+    const repairable = result.rows.filter((row) => (
+      normalizeAlternateProviderFailureCategory({
+        provider: 'kling_reference',
+        failureCategory: row.lastFailureCategory,
+        notes: row.notes,
+        metadata: row.metadata,
+      }) === 'kling_billing_required' && row.lastFailureCategory !== 'kling_billing_required'
+    ));
+    for (const row of repairable) {
+      await query(
+        `update render_success_memory
+         set
+           last_failure_category = 'kling_billing_required',
+           notes = jsonb_set(
+             coalesce(notes, '{}'::jsonb),
+             '{repair}',
+             jsonb_build_object(
+               'repairedAt', now(),
+               'fromFailureCategory', $2::text,
+               'toFailureCategory', 'kling_billing_required',
+               'reason', 'billing_or_locked_error_without_provider_job'
+             ),
+             true
+           ),
+           metadata = jsonb_set(
+             coalesce(metadata, '{}'::jsonb),
+             '{repair}',
+             jsonb_build_object(
+               'repairedAt', now(),
+               'fromFailureCategory', $2::text,
+               'toFailureCategory', 'kling_billing_required',
+               'reason', 'billing_or_locked_error_without_provider_job'
+             ),
+             true
+           ),
+           updated_at = now()
+         where memory_key = $1`,
+        [row.memoryKey, row.lastFailureCategory],
+      );
+    }
+    return {
+      ok: true,
+      scannedCount: result.rows.length,
+      repairedCount: repairable.length,
+      inferredBillingFailuresBeforeRepair: scanned.filter((status) => status.lastFailureCategory === 'kling_billing_required').length,
+      failureCategory: repairable.length ? 'kling_billing_required' : null,
+      providerCallsMade: false,
+      recommendedNextAction: repairable.length
+        ? 'Kling billing failures were repaired. Rerun fal account diagnostics, then rerun Kling canary when ready.'
+        : 'No stale Kling billing failures needed repair.',
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      scannedCount: 0,
+      repairedCount: 0,
+      providerCallsMade: false,
+      error: error instanceof Error ? error.message : String(error),
+      recommendedNextAction: 'Apply render_success_memory migrations, then retry the repair diagnostic.',
+    };
   }
 }
 

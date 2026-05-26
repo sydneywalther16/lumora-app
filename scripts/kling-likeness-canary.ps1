@@ -2,6 +2,7 @@ param(
   [string]$ApiBaseUrl = "http://localhost:8787",
   [string]$UserId = "",
   [switch]$SaveAsDraft,
+  [switch]$ForceRetest,
   [int]$TimeoutSeconds = 180
 )
 
@@ -19,6 +20,9 @@ function Print-CanaryResult {
   Write-Host "selected model: $($Result.selectedModel)"
   Write-Host "readiness status: $($Result.readinessStatus)"
   Write-Host "canary status: $($Result.canaryStatus)"
+  if ($Result.attemptMode) { Write-Host "attempt mode: $($Result.attemptMode)" }
+  if ($null -ne $Result.storedStatusReturned) { Write-Host "stored status returned: $($Result.storedStatusReturned)" }
+  if ($null -ne $Result.freshCanaryAttemptCreated) { Write-Host "fresh canary attempt created: $($Result.freshCanaryAttemptCreated)" }
   Write-Host "reference count: $($Result.referenceCount)"
   Write-Host "verification video used: $($Result.verificationVideoUsed)"
   Write-Host "provider prediction/job created: $($Result.providerJobCreated)"
@@ -66,11 +70,15 @@ $url = Join-ApiUrl $ApiBaseUrl $path
 $body = @{}
 if (-not [string]::IsNullOrWhiteSpace($UserId)) { $body.userId = $UserId }
 if ($SaveAsDraft.IsPresent) { $body.saveAsDraft = $true }
+if ($ForceRetest.IsPresent) { $body.forceRetest = $true }
 
 Write-Host "Starting Kling likeness canary..."
 Write-Host "API: $ApiBaseUrl"
 Write-Host "Route: $path"
 Write-Host "Warning: this may consume provider credits."
+if ($ForceRetest.IsPresent) {
+  Write-Host "ForceRetest: enabled. Stored non-blocking failures will be ignored for this paid attempt."
+}
 
 try {
   $result = Invoke-RestMethod -Method Post -Uri $url -ContentType "application/json" -Body ($body | ConvertTo-Json -Depth 6) -TimeoutSec $TimeoutSeconds
