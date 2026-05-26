@@ -23,7 +23,11 @@ import {
   startOpenAISoraSelfCharacterCanary,
 } from '../services/providers/openaiSoraProvider';
 import { getFalAccountStatus } from '../services/providers/falAccountDiagnostics';
-import { getKlingProviderReadiness, startKlingSelfLikenessCanary } from '../services/providers/klingProvider';
+import {
+  buildKlingProviderShapeDiagnostics,
+  getKlingProviderReadiness,
+  startKlingSelfLikenessCanary,
+} from '../services/providers/klingProvider';
 import { getRunwayProviderReadiness, startRunwaySelfLikenessCanary } from '../services/providers/runwayProvider';
 import { buildVideoThumbnailDiagnostics, repairVideoThumbnails } from '../services/videoThumbnailRepair';
 import {
@@ -61,6 +65,11 @@ const canarySchema = z.object({
 });
 const klingCanarySchema = canarySchema.extend({
   forceRetest: z.boolean().optional().default(false),
+  variant: z.enum(['configured', 'o1_reference_to_video', 'o1_standard_reference_to_video', 'elements_standard']).optional().default('configured'),
+});
+const klingProviderShapeSchema = z.object({
+  userId: z.string().optional().nullable(),
+  variant: z.enum(['configured', 'o1_reference_to_video', 'o1_standard_reference_to_video', 'elements_standard']).optional().default('configured'),
 });
 const videoReferenceCanarySchema = canarySchema.extend({
   variant: z.enum(['reference_videos_bracket', 'reference_videos_at', 'video_urls_at']).optional().default('reference_videos_bracket'),
@@ -98,6 +107,7 @@ const canaryRouteInventory = {
   soraCharacterCanaryRouteMounted: true,
   exactLikenessCanaryRouteMounted: true,
   falAccountStatusRouteMounted: true,
+  klingProviderShapeRouteMounted: true,
   klingCanaryRepairRouteMounted: true,
   runwayLikenessCanaryRouteMounted: true,
   klingLikenessCanaryRouteMounted: true,
@@ -279,6 +289,7 @@ healthRouter.get('/api/diagnostics/canary-routes', (_req, res) => {
       soraCharacterCanary: 'POST /api/diagnostics/sora-character-canary/self',
       exactLikenessCanary: 'POST /api/diagnostics/exact-likeness-canary/self',
       falAccountStatus: 'GET /api/diagnostics/fal-account-status',
+      klingProviderShape: 'GET /api/diagnostics/kling-provider-shape',
       repairKlingCanaryStatus: 'POST /api/diagnostics/repair-kling-canary-status',
       runwayLikenessCanary: 'POST /api/diagnostics/runway-likeness-canary/self',
       klingLikenessCanary: 'POST /api/diagnostics/kling-likeness-canary/self',
@@ -313,6 +324,21 @@ healthRouter.get('/api/diagnostics/fal-account-status', async (_req, res) => {
   }
 
   res.json(await getFalAccountStatus());
+});
+
+healthRouter.get('/api/diagnostics/kling-provider-shape', async (req, res) => {
+  if (!env.ENABLE_RENDER_PROBE) {
+    res.status(403).json({
+      error: 'Kling provider shape diagnostics disabled. Set ENABLE_RENDER_PROBE=true to inspect the configured Kling/fal payload shape.',
+    });
+    return;
+  }
+
+  const payload = klingProviderShapeSchema.parse(req.query ?? {});
+  res.json(await buildKlingProviderShapeDiagnostics({
+    userId: payload.userId ?? req.header('x-lumora-user-id') ?? null,
+    variant: payload.variant,
+  }));
 });
 
 healthRouter.get('/api/diagnostics/seedance-input-schema', async (_req, res) => {
@@ -526,6 +552,7 @@ healthRouter.post('/api/diagnostics/kling-likeness-canary/self', async (req, res
     userId: payload.userId ?? req.header('x-lumora-user-id') ?? null,
     saveAsDraft: payload.saveAsDraft,
     forceRetest: payload.forceRetest,
+    variant: payload.variant,
   });
   res.status(status.ok ? 202 : status.failureCategory === 'configured_not_implemented' ? 501 : status.failureCategory === 'not_configured' ? 403 : 200).json({
     ...status,

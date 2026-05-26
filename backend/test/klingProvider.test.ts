@@ -6,9 +6,12 @@ import {
   getFalAccountStatus,
 } from '../src/services/providers/falAccountDiagnostics';
 import {
+  buildKlingPreJobFailureDiagnostics,
   buildKlingReferenceToVideoPayload,
   classifyKlingFailure,
   getKlingProviderReadiness,
+  klingPayloadShapeSummary,
+  modelForVariant,
   shouldReturnStoredKlingCanaryStatus,
   startKlingSelfLikenessCanary,
 } from '../src/services/providers/klingProvider';
@@ -87,10 +90,47 @@ try {
   assert.equal(payload.aspect_ratio, '9:16');
 
   assert.equal(classifyKlingFailure({ statusCode: 400, detail: 'unknown field image_urls' }).category, 'kling_input_schema');
+  assert.equal(classifyKlingFailure({ statusCode: 422, detail: 'validation failed' }).category, 'kling_input_schema');
+  assert.equal(classifyKlingFailure({ statusCode: 404, detail: 'model not found' }).category, 'kling_model_not_found');
+  assert.equal(classifyKlingFailure({ statusCode: 401, detail: 'invalid key' }).category, 'kling_auth_failed');
+  assert.equal(classifyKlingFailure({ statusCode: 403, detail: 'This API key not permitted to perform this action.' }).category, 'kling_key_scope_failed');
+  assert.equal(classifyKlingFailure({ statusCode: 429, detail: 'too many requests' }).category, 'kling_rate_limited');
   assert.equal(classifyKlingFailure({ statusCode: 503, detail: 'temporarily unavailable' }).category, 'kling_provider_unavailable');
   assert.equal(classifyKlingFailure({ detail: 'content flagged by safety policy' }).category, 'kling_moderation_block');
   assert.equal(classifyKlingFailure({ detail: 'could not download image url' }).category, 'kling_asset_access');
   assert.equal(classifyKlingFailure({ statusCode: 403, detail: 'User is locked. Reason: Exhausted balance. Top up your balance.' }).category, 'kling_billing_required');
+  assert.equal(modelForVariant('o1_reference_to_video', 'configured-model'), 'fal-ai/kling-video/o1/reference-to-video');
+  assert.equal(modelForVariant('o1_standard_reference_to_video', 'configured-model'), 'fal-ai/kling-video/o1/standard/reference-to-video');
+  assert.equal(modelForVariant('configured', 'configured-model'), 'configured-model');
+
+  const shape = klingPayloadShapeSummary(payload);
+  assert.equal(shape.imageUrlsCount, 1);
+  assert.equal(shape.elementsCount, 1);
+  assert.equal(shape.hasPrompt, true);
+  assert.equal(shape.promptTokenStyle, '@Element1');
+  assert.equal(shape.privateUrlsRedacted, true);
+  assert.equal(JSON.stringify(shape).includes('assets.example'), false);
+
+  const preJobDiagnostics = buildKlingPreJobFailureDiagnostics({
+    selectedModel: 'fal-ai/kling-video/o1/reference-to-video',
+    payload,
+    error: Object.assign(new Error('fal failed'), {
+      failureCategory: 'kling_input_schema',
+      falHttpStatus: 400,
+      falErrorType: 'validation_error',
+      falErrorMessage: 'invalid image url [redacted-url]',
+      falErrorBodyRedacted: '{"detail":"invalid [redacted-url]"}',
+      endpointUsed: 'https://queue.fal.run/fal-ai/kling-video/o1/reference-to-video',
+      modelSlug: 'fal-ai/kling-video/o1/reference-to-video',
+    }),
+  });
+  assert.equal(preJobDiagnostics.failureCategory, 'kling_input_schema');
+  assert.equal(preJobDiagnostics.falHttpStatus, 400);
+  assert.equal(preJobDiagnostics.falErrorType, 'validation_error');
+  assert.equal(preJobDiagnostics.modelSlug, 'fal-ai/kling-video/o1/reference-to-video');
+  assert.equal(preJobDiagnostics.payloadShapeSummary.privateUrlsRedacted, true);
+  assert.equal(JSON.stringify(preJobDiagnostics).includes('kling-secret'), false);
+  assert.equal(JSON.stringify(preJobDiagnostics).includes('assets.example'), false);
 
   assert.equal(classifyFalAccountStatus({ statusCode: 401, payload: { detail: 'invalid key' } }).errorCategory, 'fal_auth_failed');
   assert.equal(classifyFalAccountStatus({ statusCode: 403, payload: { detail: 'This API key not permitted to perform this action.' } }).errorCategory, 'fal_key_scope_not_permitted');

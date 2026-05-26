@@ -83,6 +83,10 @@ try {
   assert.equal(klingCanary.status, 403);
   assert.match((await klingCanary.json()).error, /Render probe disabled/);
 
+  const klingShape = await request('/api/diagnostics/kling-provider-shape');
+  assert.equal(klingShape.status, 403);
+  assert.match((await klingShape.json()).error, /Kling provider shape diagnostics disabled/);
+
   const renderLast = await request('/api/diagnostics/render-last');
   assert.equal(renderLast.status, 200);
 
@@ -96,6 +100,7 @@ try {
   assert.equal(inventoryBody.videoReferenceCanaryRouteMounted, true);
   assert.equal(inventoryBody.soraCharacterCanaryRouteMounted, true);
   assert.equal(inventoryBody.exactLikenessCanaryRouteMounted, true);
+  assert.equal(inventoryBody.klingProviderShapeRouteMounted, true);
   assert.equal(inventoryBody.runwayLikenessCanaryRouteMounted, true);
   assert.equal(inventoryBody.klingLikenessCanaryRouteMounted, true);
   assert.equal(inventoryBody.renderLastRouteMounted, true);
@@ -105,6 +110,7 @@ try {
   assert.equal(inventoryBody.routes.videoReferenceCanary, 'POST /api/diagnostics/seedance-video-reference-canary/self');
   assert.equal(inventoryBody.routes.soraCharacterCanary, 'POST /api/diagnostics/sora-character-canary/self');
   assert.equal(inventoryBody.routes.exactLikenessCanary, 'POST /api/diagnostics/exact-likeness-canary/self');
+  assert.equal(inventoryBody.routes.klingProviderShape, 'GET /api/diagnostics/kling-provider-shape');
   assert.equal(inventoryBody.routes.runwayLikenessCanary, 'POST /api/diagnostics/runway-likeness-canary/self');
   assert.equal(inventoryBody.routes.klingLikenessCanary, 'POST /api/diagnostics/kling-likeness-canary/self');
 

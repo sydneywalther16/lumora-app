@@ -3,6 +3,8 @@ param(
   [string]$UserId = "",
   [switch]$SaveAsDraft,
   [switch]$ForceRetest,
+  [ValidateSet("", "configured", "o1_reference_to_video", "o1_standard_reference_to_video", "elements_standard")]
+  [string]$Variant = "",
   [int]$TimeoutSeconds = 180
 )
 
@@ -18,11 +20,32 @@ function Print-CanaryResult {
 
   Write-Host "provider configured: $($Result.configured)"
   Write-Host "selected model: $($Result.selectedModel)"
+  if ($Result.modelSlug) { Write-Host "model slug: $($Result.modelSlug)" }
   Write-Host "readiness status: $($Result.readinessStatus)"
   Write-Host "canary status: $($Result.canaryStatus)"
   if ($Result.attemptMode) { Write-Host "attempt mode: $($Result.attemptMode)" }
+  if ($null -ne $Result.forceRetestRequested) { Write-Host "force retest requested: $($Result.forceRetestRequested)" }
+  if ($null -ne $Result.forceRetestHonored) { Write-Host "force retest honored: $($Result.forceRetestHonored)" }
+  if ($null -ne $Result.storedStatusIgnored) { Write-Host "stored status ignored: $($Result.storedStatusIgnored)" }
+  if ($Result.reasonIfNotHonored) { Write-Host "reason if not honored: $($Result.reasonIfNotHonored)" }
   if ($null -ne $Result.storedStatusReturned) { Write-Host "stored status returned: $($Result.storedStatusReturned)" }
   if ($null -ne $Result.freshCanaryAttemptCreated) { Write-Host "fresh canary attempt created: $($Result.freshCanaryAttemptCreated)" }
+  if ($Result.endpointUsed) { Write-Host "endpoint used: $($Result.endpointUsed)" }
+  if ($null -ne $Result.falHttpStatus) { Write-Host "fal HTTP status: $($Result.falHttpStatus)" }
+  if ($Result.falErrorType) { Write-Host "fal error type: $($Result.falErrorType)" }
+  if ($Result.falErrorMessage) { Write-Host "fal error message: $($Result.falErrorMessage)" }
+  if ($Result.falErrorBodyRedacted) { Write-Host "fal error body redacted: $($Result.falErrorBodyRedacted)" }
+  if ($Result.payloadShapeSummary) {
+    $shape = $Result.payloadShapeSummary
+    Write-Host "payload imageUrlsCount: $($shape.imageUrlsCount)"
+    Write-Host "payload elementsCount: $($shape.elementsCount)"
+    Write-Host "payload hasPrompt: $($shape.hasPrompt)"
+    Write-Host "payload promptTokenStyle: $($shape.promptTokenStyle)"
+    Write-Host "payload privateUrlsRedacted: $($shape.privateUrlsRedacted)"
+    if ($shape.fieldNames) {
+      Write-Host "payload fields: $($shape.fieldNames -join ', ')"
+    }
+  }
   Write-Host "reference count: $($Result.referenceCount)"
   Write-Host "verification video used: $($Result.verificationVideoUsed)"
   Write-Host "provider prediction/job created: $($Result.providerJobCreated)"
@@ -71,6 +94,7 @@ $body = @{}
 if (-not [string]::IsNullOrWhiteSpace($UserId)) { $body.userId = $UserId }
 if ($SaveAsDraft.IsPresent) { $body.saveAsDraft = $true }
 if ($ForceRetest.IsPresent) { $body.forceRetest = $true }
+if (-not [string]::IsNullOrWhiteSpace($Variant)) { $body.variant = $Variant }
 
 Write-Host "Starting Kling likeness canary..."
 Write-Host "API: $ApiBaseUrl"
@@ -78,6 +102,9 @@ Write-Host "Route: $path"
 Write-Host "Warning: this may consume provider credits."
 if ($ForceRetest.IsPresent) {
   Write-Host "ForceRetest: enabled. Stored non-blocking failures will be ignored for this paid attempt."
+}
+if (-not [string]::IsNullOrWhiteSpace($Variant)) {
+  Write-Host "Variant: $Variant"
 }
 
 try {
