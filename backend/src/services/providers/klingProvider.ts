@@ -8,6 +8,7 @@ import {
   falAuthorizationHeader,
   getConfiguredFalKey,
   getFalAccountStatus,
+  isFalAccountBlockingKling,
   isFalBillingRequired,
   type FalAccountStatus,
 } from './falAccountDiagnostics';
@@ -435,7 +436,7 @@ export async function startKlingSelfLikenessCanary(input: {
   }
 
   const falAccount = await getFalAccountStatus();
-  if (!falAccount.ok) {
+  if (isFalAccountBlockingKling(falAccount)) {
     const failureCategory = isFalBillingRequired(falAccount)
       ? 'kling_billing_required'
       : falAccount.errorCategory;

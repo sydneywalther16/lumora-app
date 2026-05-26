@@ -15,7 +15,15 @@ function Print-FalStatus {
 
   Write-Host "fal key present: $($Status.falKeyPresent)"
   Write-Host "fal key source: $($Status.falKeySource)"
+  Write-Host "fal admin key present: $($Status.falAdminKeyPresent)"
+  Write-Host "billing key source: $($Status.billingKeySource)"
   Write-Host "auth ok: $($Status.authOk)"
+  Write-Host "inference key validation: $($Status.inferenceKeyValidationStatus)"
+  Write-Host "inference key scope ok: $($Status.inferenceKeyScopeOk)"
+  if ($Status.inferenceKeyValidationModel) { Write-Host "inference validation model: $($Status.inferenceKeyValidationModel)" }
+  if ($Status.inferenceKeyValidationErrorSummary) { Write-Host "inference validation summary: $($Status.inferenceKeyValidationErrorSummary)" }
+  Write-Host "billing check available: $($Status.billingCheckAvailable)"
+  Write-Host "billing check status: $($Status.billingCheckStatus)"
   if ($Status.workspaceRedacted) { Write-Host "workspace/account: $($Status.workspaceRedacted)" }
   if ($Status.userRedacted) { Write-Host "user: $($Status.userRedacted)" }
   Write-Host "balance present: $($Status.balancePresent)"

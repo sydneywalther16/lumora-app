@@ -39,6 +39,7 @@ const envSchema = z.object({
   }).default(4),
   DEBUG_PROVIDER_PROMPTS: booleanEnv.default(false),
   GOOGLE_API_KEY: z.string().min(1).optional(),
+  FAL_ADMIN_KEY: z.string().min(1).optional(),
   FAL_KEY: z.string().min(1).optional(),
   KLING_ENABLED: booleanEnv.default(false),
   KLING_PROVIDER: z.string().default('fal'),

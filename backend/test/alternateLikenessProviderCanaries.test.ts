@@ -6,6 +6,7 @@ import { getRunwayProviderReadiness, startRunwaySelfLikenessCanary } from '../sr
 const originalEnv = {
   KLING_ENABLED: env.KLING_ENABLED,
   KLING_PROVIDER: env.KLING_PROVIDER,
+  FAL_ADMIN_KEY: env.FAL_ADMIN_KEY,
   FAL_KEY: env.FAL_KEY,
   KLING_API_KEY: env.KLING_API_KEY,
   KLING_MODEL: env.KLING_MODEL,
@@ -22,6 +23,7 @@ let fetchCalls = 0;
 function restore() {
   env.KLING_ENABLED = originalEnv.KLING_ENABLED;
   env.KLING_PROVIDER = originalEnv.KLING_PROVIDER;
+  env.FAL_ADMIN_KEY = originalEnv.FAL_ADMIN_KEY;
   env.FAL_KEY = originalEnv.FAL_KEY;
   env.KLING_API_KEY = originalEnv.KLING_API_KEY;
   env.KLING_MODEL = originalEnv.KLING_MODEL;
@@ -59,6 +61,7 @@ try {
 
   env.KLING_ENABLED = false;
   env.KLING_PROVIDER = 'fal';
+  env.FAL_ADMIN_KEY = undefined;
   env.FAL_KEY = undefined;
   env.KLING_API_KEY = undefined;
   env.KLING_REFERENCE_MODEL = undefined;
@@ -70,6 +73,7 @@ try {
 
   env.KLING_ENABLED = true;
   env.KLING_PROVIDER = 'fal';
+  env.FAL_ADMIN_KEY = undefined;
   env.FAL_KEY = undefined;
   env.KLING_API_KEY = 'kling-secret';
   env.KLING_REFERENCE_MODEL = 'kling-reference';

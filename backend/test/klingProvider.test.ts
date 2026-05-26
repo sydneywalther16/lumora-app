@@ -13,6 +13,7 @@ import {
 
 const originalEnv = {
   KLING_ENABLED: env.KLING_ENABLED,
+  FAL_ADMIN_KEY: env.FAL_ADMIN_KEY,
   FAL_KEY: env.FAL_KEY,
   KLING_PROVIDER: env.KLING_PROVIDER,
   KLING_API_KEY: env.KLING_API_KEY,
@@ -25,6 +26,7 @@ let fetchCalls = 0;
 
 function restore() {
   env.KLING_ENABLED = originalEnv.KLING_ENABLED;
+  env.FAL_ADMIN_KEY = originalEnv.FAL_ADMIN_KEY;
   env.FAL_KEY = originalEnv.FAL_KEY;
   env.KLING_PROVIDER = originalEnv.KLING_PROVIDER;
   env.KLING_API_KEY = originalEnv.KLING_API_KEY;
@@ -41,6 +43,7 @@ try {
   }) as typeof fetch;
 
   env.KLING_ENABLED = false;
+  env.FAL_ADMIN_KEY = undefined;
   env.FAL_KEY = undefined;
   env.KLING_PROVIDER = 'fal';
   env.KLING_API_KEY = undefined;
@@ -88,6 +91,7 @@ try {
   assert.equal(classifyKlingFailure({ statusCode: 403, detail: 'User is locked. Reason: Exhausted balance. Top up your balance.' }).category, 'kling_billing_required');
 
   assert.equal(classifyFalAccountStatus({ statusCode: 401, payload: { detail: 'invalid key' } }).errorCategory, 'fal_auth_failed');
+  assert.equal(classifyFalAccountStatus({ statusCode: 403, payload: { detail: 'This API key not permitted to perform this action.' } }).errorCategory, 'fal_key_scope_not_permitted');
   assert.equal(classifyFalAccountStatus({ statusCode: 403, payload: { detail: 'User is locked. Reason: Exhausted balance.' } }).errorCategory, 'fal_account_locked');
   assert.equal(classifyFalAccountStatus({ statusCode: 200, payload: { username: 'workspace', credits: { current_balance: 0, currency: 'USD' } }, balanceAmount: 0 }).errorCategory, 'fal_billing_required');
 
@@ -95,7 +99,15 @@ try {
     ok: false,
     falKeyPresent: true,
     falKeySource: 'KLING_API_KEY' as const,
+    falAdminKeyPresent: false,
+    billingKeySource: 'KLING_API_KEY' as const,
     authOk: true,
+    inferenceKeyScopeOk: true,
+    inferenceKeyValidationStatus: 'ok' as const,
+    inferenceKeyValidationModel: 'fal-ai/kling-video/o1/standard/reference-to-video',
+    inferenceKeyValidationErrorSummary: null,
+    billingCheckAvailable: true,
+    billingCheckStatus: 'account_locked' as const,
     workspaceRedacted: 'wor...ce',
     userRedacted: null,
     balancePresent: true,
@@ -118,6 +130,7 @@ try {
     billingRequired: false,
     errorCategory: 'fal_ok' as const,
     errorSummary: null,
+    billingCheckStatus: 'ok' as const,
   };
   assert.equal(getKlingProviderReadiness({
     falAccountStatus: okAccount,
@@ -164,6 +177,38 @@ try {
   const accountExhausted = await getFalAccountStatus();
   assert.equal(accountExhausted.errorCategory, 'fal_billing_required');
   assert.equal(accountExhausted.billingRequired, true);
+
+  let scopedFetchCalls = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    scopedFetchCalls += 1;
+    const url = String(input);
+    if (url.includes('/models/pricing')) {
+      return new Response(JSON.stringify({
+        prices: [{ endpoint_id: 'fal-ai/kling-video/o1/standard/reference-to-video', unit_price: 0.05, unit: 'video', currency: 'USD' }],
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return new Response(JSON.stringify({
+      detail: 'This API key not permitted to perform this action.',
+    }), {
+      status: 403,
+      headers: { 'content-type': 'application/json' },
+    });
+  }) as typeof fetch;
+  const accountScopeLimited = await getFalAccountStatus();
+  assert.equal(scopedFetchCalls, 2);
+  assert.equal(accountScopeLimited.ok, true);
+  assert.equal(accountScopeLimited.errorCategory, 'fal_key_scope_not_permitted');
+  assert.equal(accountScopeLimited.authOk, true);
+  assert.equal(accountScopeLimited.inferenceKeyScopeOk, true);
+  assert.equal(accountScopeLimited.inferenceKeyValidationStatus, 'ok');
+  assert.equal(accountScopeLimited.billingCheckAvailable, false);
+  assert.equal(accountScopeLimited.billingCheckStatus, 'scope_not_permitted');
+  assert.match(accountScopeLimited.recommendedNextAction, /FAL_ADMIN_KEY|dashboard/i);
+  assert.equal(getKlingProviderReadiness({ falAccountStatus: accountScopeLimited }).status, 'configured_ready_for_canary');
+  assert.equal(JSON.stringify(accountScopeLimited).includes('kling-secret'), false);
 
   globalThis.fetch = (async () => new Response(JSON.stringify({
     detail: 'User is locked. Reason: Exhausted balance. Top up your balance.',

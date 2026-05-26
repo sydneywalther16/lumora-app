@@ -10,6 +10,7 @@ const originalEnv = {
   OPENAI_API_KEY: env.OPENAI_API_KEY,
   REPLICATE_API_TOKEN: env.REPLICATE_API_TOKEN,
   KLING_ENABLED: env.KLING_ENABLED,
+  FAL_ADMIN_KEY: env.FAL_ADMIN_KEY,
   FAL_KEY: env.FAL_KEY,
   KLING_API_KEY: env.KLING_API_KEY,
   KLING_MODEL: env.KLING_MODEL,
@@ -26,6 +27,7 @@ function restoreEnv() {
   env.OPENAI_API_KEY = originalEnv.OPENAI_API_KEY;
   env.REPLICATE_API_TOKEN = originalEnv.REPLICATE_API_TOKEN;
   env.KLING_ENABLED = originalEnv.KLING_ENABLED;
+  env.FAL_ADMIN_KEY = originalEnv.FAL_ADMIN_KEY;
   env.FAL_KEY = originalEnv.FAL_KEY;
   env.KLING_API_KEY = originalEnv.KLING_API_KEY;
   env.KLING_MODEL = originalEnv.KLING_MODEL;
@@ -100,6 +102,7 @@ try {
   env.OPENAI_API_KEY = 'sk-test-secret';
   env.REPLICATE_API_TOKEN = 'replicate-secret';
   env.KLING_ENABLED = false;
+  env.FAL_ADMIN_KEY = undefined;
   env.FAL_KEY = undefined;
   env.KLING_API_KEY = undefined;
   env.KLING_MODEL = undefined;
@@ -161,6 +164,7 @@ try {
   assert.notEqual(blockedSeedance.route, 'seedance_reference');
 
   env.KLING_ENABLED = true;
+  env.FAL_ADMIN_KEY = undefined;
   env.FAL_KEY = undefined;
   env.KLING_API_KEY = 'kling-secret';
   env.KLING_MODEL = 'kling-video';
@@ -199,7 +203,15 @@ try {
       ok: false,
       falKeyPresent: true,
       falKeySource: 'KLING_API_KEY',
+      falAdminKeyPresent: false,
+      billingKeySource: 'KLING_API_KEY',
       authOk: true,
+      inferenceKeyScopeOk: true,
+      inferenceKeyValidationStatus: 'ok',
+      inferenceKeyValidationModel: 'kling-reference-model',
+      inferenceKeyValidationErrorSummary: null,
+      billingCheckAvailable: true,
+      billingCheckStatus: 'account_locked',
       workspaceRedacted: 'wor...ce',
       userRedacted: null,
       balancePresent: true,
