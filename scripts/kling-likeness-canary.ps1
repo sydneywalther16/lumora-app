@@ -30,6 +30,10 @@ function Print-CanaryResult {
   if ($Result.reasonIfNotHonored) { Write-Host "reason if not honored: $($Result.reasonIfNotHonored)" }
   if ($null -ne $Result.storedStatusReturned) { Write-Host "stored status returned: $($Result.storedStatusReturned)" }
   if ($null -ne $Result.freshCanaryAttemptCreated) { Write-Host "fresh canary attempt created: $($Result.freshCanaryAttemptCreated)" }
+  if ($null -ne $Result.attemptCreated) { Write-Host "attempt created: $($Result.attemptCreated)" }
+  if ($Result.attemptId) { Write-Host "attempt id: $($Result.attemptId)" }
+  if ($Result.skipStage) { Write-Host "skip stage: $($Result.skipStage)" }
+  if ($Result.skipReason) { Write-Host "skip reason: $($Result.skipReason)" }
   if ($Result.endpointUsed) { Write-Host "endpoint used: $($Result.endpointUsed)" }
   if ($null -ne $Result.falHttpStatus) { Write-Host "fal HTTP status: $($Result.falHttpStatus)" }
   if ($Result.falErrorType) { Write-Host "fal error type: $($Result.falErrorType)" }

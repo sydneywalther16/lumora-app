@@ -25,6 +25,19 @@ import {
 const FAL_QUEUE_BASE_URL = 'https://queue.fal.run';
 const KLING_REFERENCE_PROMPT =
   'Keep the referenced self character from @Element1 consistent while the character walks slowly through a peaceful sunlit garden, natural movement, fully clothed, soft cinematic storybook style, gentle camera motion.';
+const KLING_CANARY_STAGES = [
+  'auth_probe_gate',
+  'resolve_self_character',
+  'load_references',
+  'select_references',
+  'sign_reference_urls',
+  'build_payload',
+  'create_attempt_record',
+  'submit_fal_job',
+  'poll_fal_job',
+  'parse_output',
+  'persist_verified_video',
+] as const;
 
 export type KlingCanaryVariant =
   | 'configured'
@@ -41,6 +54,8 @@ export type KlingReadinessStatus =
   | 'blocked'
   | 'provider_unavailable'
   | 'billing_required';
+
+export type KlingCanaryStage = typeof KLING_CANARY_STAGES[number];
 
 type KlingQueueSubmitResponse = {
   request_id?: string;
@@ -87,9 +102,6 @@ export function classifyKlingFailure(input: {
 }) {
   const detail = redactKlingError(input.detail);
   const lower = detail.toLowerCase();
-  if (input.statusCode === 401) {
-    return { category: 'kling_auth_failed', detail };
-  }
   if (
     lower.includes('exhausted balance') ||
     lower.includes('user is locked') ||
@@ -102,13 +114,14 @@ export function classifyKlingFailure(input: {
     return { category: 'kling_billing_required', detail };
   }
   if (
+    input.statusCode === 401 ||
     input.statusCode === 403 ||
     lower.includes('not permitted to perform this action') ||
     lower.includes('insufficient permissions') ||
     lower.includes('missing required scope') ||
     lower.includes('does not have permission')
   ) {
-    return { category: 'kling_key_scope_failed', detail };
+    return { category: 'kling_auth_or_scope_failed', detail };
   }
   if (
     input.statusCode === 404 ||
@@ -375,6 +388,99 @@ function storedKlingStatusPayload(input: {
   };
 }
 
+function stageStatus(input: {
+  completed?: KlingCanaryStage[];
+  active?: KlingCanaryStage | null;
+  failed?: KlingCanaryStage | null;
+}) {
+  const completed = new Set(input.completed ?? []);
+  return Object.fromEntries(KLING_CANARY_STAGES.map((stage) => {
+    if (input.failed === stage) return [stage, 'failed'];
+    if (input.active === stage) return [stage, 'in_progress'];
+    if (completed.has(stage)) return [stage, 'completed'];
+    return [stage, 'pending'];
+  }));
+}
+
+function safeProviderSummary(value: unknown, fallback: string) {
+  const redacted = redactKlingError(value);
+  return redacted.trim() ? redacted : fallback;
+}
+
+function stoppedBeforeFalSummary(stage: KlingCanaryStage, reason: string) {
+  return `Kling canary stopped before fal submission at ${stage}: ${reason}.`;
+}
+
+function readinessStatusForFailure(failureCategory: string, fallback: KlingReadinessStatus) {
+  if (failureCategory === 'kling_billing_required') return 'billing_required';
+  if (failureCategory === 'kling_provider_unavailable') return 'provider_unavailable';
+  if (failureCategory === 'kling_moderation_block') return 'blocked';
+  return fallback;
+}
+
+function canaryStatusForFailure(failureCategory: string) {
+  if (failureCategory === 'kling_billing_required') return 'billing_required';
+  return 'canary_failed';
+}
+
+export function buildKlingStageFailurePayload(input: {
+  readiness?: ReturnType<typeof getKlingProviderReadiness> | null;
+  selectedModel?: string | null;
+  failureCategory: string;
+  skipStage: KlingCanaryStage;
+  skipReason: string;
+  completedStages?: KlingCanaryStage[];
+  attemptId?: string | null;
+  attemptCreated?: boolean;
+  forceRetest?: boolean;
+  storedIgnored?: boolean;
+  forceRetestHonored?: boolean;
+  configured?: boolean;
+  providerErrorSummary?: unknown;
+  recommendedNextAction: string;
+  extras?: Record<string, unknown>;
+}) {
+  const summary = safeProviderSummary(
+    input.providerErrorSummary,
+    stoppedBeforeFalSummary(input.skipStage, input.skipReason),
+  );
+  return {
+    ok: false,
+    provider: 'kling',
+    route: 'kling_reference',
+    configured: input.configured ?? input.readiness?.configured ?? true,
+    readinessStatus: readinessStatusForFailure(input.failureCategory, input.readiness?.status ?? 'canary_failed'),
+    canaryStatus: canaryStatusForFailure(input.failureCategory),
+    selectedModel: input.selectedModel ?? input.readiness?.selectedModel ?? null,
+    attemptId: input.attemptId ?? null,
+    attemptCreated: Boolean(input.attemptCreated),
+    providerJobCreated: false,
+    providerJobIdPresent: false,
+    providerStatus: null,
+    storedStatusReturned: false,
+    freshCanaryAttemptCreated: Boolean(input.attemptCreated),
+    attemptMode: 'provider_call_failed_before_job',
+    forceRetestRequested: Boolean(input.forceRetest),
+    forceRetestHonored: Boolean(input.forceRetestHonored ?? input.forceRetest),
+    storedStatusIgnored: Boolean(input.storedIgnored),
+    reasonIfNotHonored: input.forceRetest && input.forceRetestHonored === false ? input.skipReason : null,
+    skipStage: input.skipStage,
+    skipReason: input.skipReason,
+    stageStatus: stageStatus({
+      completed: input.completedStages,
+      failed: input.skipStage,
+    }),
+    outputUrlPresent: false,
+    parsedVideoUrlPresent: false,
+    verifiedVideoPresent: false,
+    verifiedPersistedVideo: false,
+    failureCategory: input.failureCategory,
+    providerErrorSummary: summary,
+    recommendedNextAction: input.recommendedNextAction,
+    ...(input.extras ?? {}),
+  };
+}
+
 function valueFromError(error: unknown, key: string) {
   const record = recordValue(error);
   const value = record[key];
@@ -390,15 +496,18 @@ export function buildKlingPreJobFailureDiagnostics(input: {
 }) {
   const failureCategory = typeof valueFromError(input.error, 'failureCategory') === 'string'
     ? String(valueFromError(input.error, 'failureCategory'))
-    : 'kling_provider_failed';
+    : 'kling_client_exception';
   const falHttpStatus = typeof valueFromError(input.error, 'falHttpStatus') === 'number'
     ? Number(valueFromError(input.error, 'falHttpStatus'))
     : typeof valueFromError(input.error, 'statusCode') === 'number'
       ? Number(valueFromError(input.error, 'statusCode'))
       : null;
-  const providerErrorSummary = typeof valueFromError(input.error, 'failureDetail') === 'string'
-    ? String(valueFromError(input.error, 'failureDetail'))
-    : serializeDiagnosticError(input.error);
+  const providerErrorSummary = safeProviderSummary(
+    typeof valueFromError(input.error, 'failureDetail') === 'string'
+      ? valueFromError(input.error, 'failureDetail')
+      : serializeDiagnosticError(input.error),
+    'Kling canary failed during fal job submission before a provider job id was returned.',
+  );
   const endpointUsed = typeof valueFromError(input.error, 'endpointUsed') === 'string'
     ? String(valueFromError(input.error, 'endpointUsed'))
     : queueUrl(input.selectedModel);
@@ -432,8 +541,10 @@ function preJobErrorPayload(input: {
   selectedModel: string;
   payload: unknown;
   referenceSet: KlingReferenceSet;
+  attemptId: string;
   forceRetest?: boolean;
   storedIgnored: boolean;
+  completedStages: KlingCanaryStage[];
 }) {
   const diagnostics = buildKlingPreJobFailureDiagnostics({
     error: input.error,
@@ -441,30 +552,34 @@ function preJobErrorPayload(input: {
     payload: input.payload,
   });
   const failureCategory = diagnostics.failureCategory;
-  return {
-    ok: false,
-    provider: 'kling',
-    route: 'kling_reference',
-    configured: true,
-    readinessStatus: failureCategory === 'kling_billing_required'
-      ? 'billing_required'
-      : failureCategory === 'kling_provider_unavailable'
-        ? 'provider_unavailable'
-        : input.readiness.status,
-    canaryStatus: failureCategory === 'kling_billing_required'
-      ? 'billing_required'
-      : 'canary_failed',
+  return buildKlingStageFailurePayload({
+    readiness: input.readiness,
     selectedModel: input.selectedModel,
-    providerJobCreated: false,
-    providerJobIdPresent: false,
-    providerStatus: null,
-    storedStatusReturned: false,
-    freshCanaryAttemptCreated: true,
-    attemptMode: 'provider_call_failed_before_job',
-    forceRetestRequested: Boolean(input.forceRetest),
-    forceRetestHonored: Boolean(input.forceRetest),
-    storedStatusIgnored: input.storedIgnored,
-    reasonIfNotHonored: null,
+    failureCategory,
+    skipStage: 'submit_fal_job',
+    skipReason: diagnostics.falErrorMessage || diagnostics.providerErrorSummary || failureCategory,
+    completedStages: input.completedStages,
+    attemptId: input.attemptId,
+    attemptCreated: true,
+    forceRetest: input.forceRetest,
+    storedIgnored: input.storedIgnored,
+    providerErrorSummary: diagnostics.providerErrorSummary,
+    recommendedNextAction: failureCategory === 'kling_model_not_found'
+      ? 'The configured Kling/fal model slug was not found. Try a supported variant such as o1_standard_reference_to_video.'
+      : failureCategory === 'kling_input_schema'
+        ? 'Fal rejected the Kling payload before job creation. Inspect payload shape and try another Kling variant.'
+      : failureCategory === 'kling_auth_or_scope_failed'
+        ? 'Check the fal inference key permissions in Render. Do not paste the key into scripts or chat.'
+      : failureCategory === 'kling_rate_limited'
+        ? 'Fal rate-limited this request. Wait before retrying the Kling canary.'
+      : failureCategory === 'kling_billing_required'
+        ? 'Fal billing requires attention. Run fal account diagnostics, add credits if needed, then retry Kling.'
+      : failureCategory === 'kling_provider_unavailable'
+        ? 'Fal or Kling was unavailable before job creation. Retry later.'
+      : failureCategory === 'kling_client_exception'
+        ? 'The backend could not reach fal or submit the request. Check network/provider availability and retry later.'
+        : 'Kling job creation failed before fal returned a job id. Inspect the redacted fal error and model slug.',
+    extras: {
     falHttpStatus: diagnostics.falHttpStatus,
     falErrorType: diagnostics.falErrorType,
     falErrorMessage: diagnostics.falErrorMessage,
@@ -476,26 +591,8 @@ function preJobErrorPayload(input: {
     selectedReferenceRole: input.referenceSet.selected.referenceRole,
     selectedReferenceLabel: input.referenceSet.selected.referenceLabel,
     verificationVideoUsed: false,
-    outputUrlPresent: false,
-    parsedVideoUrlPresent: false,
-    verifiedVideoPresent: false,
-    verifiedPersistedVideo: false,
-    failureCategory,
-    providerErrorSummary: diagnostics.providerErrorSummary,
-    recommendedNextAction: failureCategory === 'kling_model_not_found'
-      ? 'The configured Kling/fal model slug was not found. Try a supported variant such as o1_standard_reference_to_video.'
-      : failureCategory === 'kling_input_schema'
-        ? 'Fal rejected the Kling payload before job creation. Inspect payload shape and try another Kling variant.'
-      : failureCategory === 'kling_auth_failed' || failureCategory === 'kling_key_scope_failed'
-        ? 'Check the fal inference key permissions in Render. Do not paste the key into scripts or chat.'
-      : failureCategory === 'kling_rate_limited'
-        ? 'Fal rate-limited this request. Wait before retrying the Kling canary.'
-      : failureCategory === 'kling_billing_required'
-        ? 'Fal billing requires attention. Run fal account diagnostics, add credits if needed, then retry Kling.'
-      : failureCategory === 'kling_provider_unavailable'
-        ? 'Fal or Kling was unavailable before job creation. Retry later.'
-      : 'Kling job creation failed before fal returned a job id. Inspect the redacted fal error and model slug.',
-  };
+    },
+  });
 }
 
 function requestId(response: KlingQueueSubmitResponse) {
@@ -667,6 +764,18 @@ function providerOutputFromKlingResult(result: KlingQueueStatusResponse) {
   return result.output ?? result.result ?? result.data ?? result;
 }
 
+export function createKlingCanaryAttemptMarker(input: {
+  selectedModel: string;
+  variant?: KlingCanaryVariant | null;
+}) {
+  return {
+    attemptId: `kling-canary-${randomUUID()}`,
+    selectedModel: input.selectedModel,
+    variant: input.variant ?? 'configured',
+    createdAt: new Date().toISOString(),
+  };
+}
+
 export async function buildKlingProviderShapeDiagnostics(input: {
   userId?: string | null;
   variant?: KlingCanaryVariant;
@@ -729,108 +838,95 @@ export async function startKlingSelfLikenessCanary(input: {
   forceRetest?: boolean;
   variant?: KlingCanaryVariant;
 } = {}) {
-  const [statuses, falAccount] = await Promise.all([
-    getAlternateExactLikenessProviderStatuses({
-      userId: input.userId ?? null,
-      characterId: null,
-    }),
-    getFalAccountStatus(),
-  ]);
+  const completedStages: KlingCanaryStage[] = [];
+  let statuses: AlternateExactLikenessProviderStatus[] = [];
+  let falAccount: FalAccountStatus;
+  try {
+    [statuses, falAccount] = await Promise.all([
+      getAlternateExactLikenessProviderStatuses({
+        userId: input.userId ?? null,
+        characterId: null,
+      }),
+      getFalAccountStatus(),
+    ]);
+    completedStages.push('auth_probe_gate');
+  } catch (error) {
+    return buildKlingStageFailurePayload({
+      selectedModel: null,
+      configured: false,
+      failureCategory: 'kling_internal_preflight_failed',
+      skipStage: 'auth_probe_gate',
+      skipReason: 'auth_or_memory_probe_failed',
+      completedStages,
+      forceRetest: input.forceRetest,
+      forceRetestHonored: false,
+      providerErrorSummary: serializeDiagnosticError(error),
+      recommendedNextAction: 'Kling could not complete its local auth/memory probe. Check backend diagnostics before retrying.',
+    });
+  }
   const readiness = getKlingProviderReadiness({ statuses, falAccountStatus: falAccount });
   const selectedModel = modelForVariant(input.variant, readiness.selectedModel);
   const stored = storedKlingStatus(statuses);
 
   if (!readiness.configured || !selectedModel) {
-    return {
-      ok: false,
-      provider: 'kling',
-      route: 'kling_reference',
-      configured: readiness.configured,
-      readinessStatus: readiness.status,
-      canaryStatus: readiness.status,
+    return buildKlingStageFailurePayload({
+      readiness,
       selectedModel,
-      outputUrlPresent: false,
-      parsedVideoUrlPresent: false,
-      verifiedVideoPresent: false,
-      verifiedPersistedVideo: false,
-      providerJobCreated: false,
-      storedStatusReturned: false,
-      freshCanaryAttemptCreated: false,
-      attemptMode: 'blocked_by_configuration',
-      forceRetestRequested: Boolean(input.forceRetest),
-      forceRetestHonored: false,
-      storedStatusIgnored: false,
-      reasonIfNotHonored: 'provider_not_configured',
       failureCategory: 'not_configured',
+      skipStage: 'auth_probe_gate',
+      skipReason: 'provider_not_configured',
+      completedStages,
+      forceRetest: input.forceRetest,
+      forceRetestHonored: false,
+      providerErrorSummary: 'Kling provider is not configured with an enabled fal key and model.',
       recommendedNextAction: readiness.recommendedNextAction,
-    };
+    });
   }
 
   if (!readiness.implemented) {
-    return {
-      ok: false,
-      provider: 'kling',
-      route: 'kling_reference',
-      configured: true,
-      readinessStatus: readiness.status,
-      canaryStatus: readiness.status,
+    return buildKlingStageFailurePayload({
+      readiness,
       selectedModel,
-      outputUrlPresent: false,
-      parsedVideoUrlPresent: false,
-      verifiedVideoPresent: false,
-      verifiedPersistedVideo: false,
-      providerJobCreated: false,
-      storedStatusReturned: false,
-      freshCanaryAttemptCreated: false,
-      attemptMode: 'blocked_by_configuration',
-      forceRetestRequested: Boolean(input.forceRetest),
-      forceRetestHonored: false,
-      storedStatusIgnored: false,
-      reasonIfNotHonored: 'provider_transport_not_implemented',
       failureCategory: 'configured_not_implemented',
+      skipStage: 'auth_probe_gate',
+      skipReason: 'provider_transport_not_implemented',
+      completedStages,
+      forceRetest: input.forceRetest,
+      forceRetestHonored: false,
+      providerErrorSummary: 'Kling provider is configured, but the selected transport is not implemented.',
       recommendedNextAction: readiness.recommendedNextAction,
-    };
+    });
   }
 
   if (isFalAccountBlockingKling(falAccount)) {
     const failureCategory = isFalBillingRequired(falAccount)
       ? 'kling_billing_required'
       : falAccount.errorCategory;
-    return {
-      ok: false,
-      provider: 'kling',
-      route: 'kling_reference',
-      configured: readiness.configured,
-      readinessStatus: failureCategory === 'kling_billing_required' ? 'billing_required' : readiness.status,
-      canaryStatus: failureCategory === 'kling_billing_required' ? 'billing_required' : readiness.status,
+    return buildKlingStageFailurePayload({
+      readiness,
       selectedModel,
-      falAccountStatus: {
-        falKeyPresent: falAccount.falKeyPresent,
-        falKeySource: falAccount.falKeySource,
-        authOk: falAccount.authOk,
-        balancePresent: falAccount.balancePresent,
-        balanceAmount: falAccount.balanceAmount,
-        balanceCurrency: falAccount.balanceCurrency,
-        locked: falAccount.locked,
-        billingRequired: falAccount.billingRequired,
-        errorCategory: falAccount.errorCategory,
-      },
-      outputUrlPresent: false,
-      parsedVideoUrlPresent: false,
-      verifiedVideoPresent: false,
-      verifiedPersistedVideo: false,
-      providerJobCreated: false,
-      storedStatusReturned: false,
-      freshCanaryAttemptCreated: false,
-      attemptMode: 'blocked_by_billing',
-      forceRetestRequested: Boolean(input.forceRetest),
-      forceRetestHonored: false,
-      storedStatusIgnored: false,
-      reasonIfNotHonored: 'blocked_by_fal_account_status',
       failureCategory,
+      skipStage: 'auth_probe_gate',
+      skipReason: 'blocked_by_fal_account_status',
+      completedStages,
+      forceRetest: input.forceRetest,
+      forceRetestHonored: false,
       providerErrorSummary: falAccount.errorSummary,
       recommendedNextAction: falAccount.recommendedNextAction,
-    };
+      extras: {
+        falAccountStatus: {
+          falKeyPresent: falAccount.falKeyPresent,
+          falKeySource: falAccount.falKeySource,
+          authOk: falAccount.authOk,
+          balancePresent: falAccount.balancePresent,
+          balanceAmount: falAccount.balanceAmount,
+          balanceCurrency: falAccount.balanceCurrency,
+          locked: falAccount.locked,
+          billingRequired: falAccount.billingRequired,
+          errorCategory: falAccount.errorCategory,
+        },
+      },
+    });
   }
 
   if (shouldReturnStoredKlingCanaryStatus({ stored, forceRetest: input.forceRetest })) {
@@ -843,40 +939,71 @@ export async function startKlingSelfLikenessCanary(input: {
     });
   }
 
-  const matrix = await listSelfReferenceMatrixCandidates({
-    userId: input.userId ?? null,
-    referenceRole: 'all',
-  });
+  completedStages.push('resolve_self_character');
+
+  let matrix: Awaited<ReturnType<typeof listSelfReferenceMatrixCandidates>>;
+  try {
+    matrix = await listSelfReferenceMatrixCandidates({
+      userId: input.userId ?? null,
+      referenceRole: 'all',
+    });
+    completedStages.push('load_references');
+  } catch (error) {
+    return buildKlingStageFailurePayload({
+      readiness,
+      selectedModel,
+      failureCategory: 'kling_internal_preflight_failed',
+      skipStage: 'load_references',
+      skipReason: 'reference_matrix_load_failed',
+      completedStages,
+      forceRetest: input.forceRetest,
+      storedIgnored: Boolean(input.forceRetest && stored),
+      providerErrorSummary: serializeDiagnosticError(error),
+      recommendedNextAction: 'Lumora could not load saved self references. Check reference storage diagnostics before retrying Kling.',
+    });
+  }
   const referenceSet = selectReferenceSet(matrix.candidates);
   if (!referenceSet) {
-    return {
-      ok: false,
-      provider: 'kling',
-      route: 'kling_reference',
-      configured: true,
-      readinessStatus: readiness.status,
-      canaryStatus: 'canary_failed',
+    return buildKlingStageFailurePayload({
+      readiness,
       selectedModel,
-      outputUrlPresent: false,
-      parsedVideoUrlPresent: false,
-      verifiedVideoPresent: false,
-      verifiedPersistedVideo: false,
-      providerJobCreated: false,
-      storedStatusReturned: false,
-      freshCanaryAttemptCreated: false,
-      attemptMode: 'preflight_failed',
-      forceRetestRequested: Boolean(input.forceRetest),
-      forceRetestHonored: false,
-      storedStatusIgnored: Boolean(input.forceRetest && stored),
-      reasonIfNotHonored: 'no_saved_self_reference',
-      failureCategory: 'no_saved_self_reference',
-      sourcesChecked: matrix.sourcesChecked,
-      sourceErrors: matrix.sourceErrors,
+      failureCategory: 'kling_no_references',
+      skipStage: 'select_references',
+      skipReason: 'no_saved_self_reference',
+      completedStages,
+      forceRetest: input.forceRetest,
+      storedIgnored: Boolean(input.forceRetest && stored),
       recommendedNextAction: 'Open Create or Characters and re-save the self reference photos to Lumora storage, then rerun the Kling canary.',
-    };
+      extras: {
+        sourcesChecked: matrix.sourcesChecked,
+        sourceErrors: matrix.sourceErrors,
+      },
+    });
   }
+  completedStages.push('select_references');
 
-  const access = await verifyReferenceSet(referenceSet);
+  let access: Awaited<ReturnType<typeof verifyReferenceSet>>;
+  try {
+    access = await verifyReferenceSet(referenceSet);
+  } catch (error) {
+    return buildKlingStageFailurePayload({
+      readiness,
+      selectedModel,
+      failureCategory: 'kling_asset_access',
+      skipStage: 'sign_reference_urls',
+      skipReason: 'reference_asset_signing_or_access_failed',
+      completedStages,
+      forceRetest: input.forceRetest,
+      storedIgnored: Boolean(input.forceRetest && stored),
+      providerErrorSummary: serializeDiagnosticError(error),
+      recommendedNextAction: 'A saved Lumora reference could not be signed or checked. Repair references before testing Kling again.',
+      extras: {
+        referenceCount: referenceSet.candidates.length,
+        selectedReferenceRole: referenceSet.selected.referenceRole,
+        selectedReferenceLabel: referenceSet.selected.referenceLabel,
+      },
+    });
+  }
   if (!access.ok) {
     await persistAlternateExactLikenessCanaryResult({
       userId: referenceSet.selected.userId,
@@ -891,63 +1018,139 @@ export async function startKlingSelfLikenessCanary(input: {
       outputUrlPresent: false,
       notes: { referencesChecked: access.checked },
     });
-    return {
-      ok: false,
-      provider: 'kling',
-      route: 'kling_reference',
-      configured: true,
-      readinessStatus: 'canary_failed',
-      canaryStatus: 'canary_failed',
+    return buildKlingStageFailurePayload({
+      readiness,
       selectedModel,
-      referenceCount: referenceSet.candidates.length,
-      referencesChecked: access.checked,
-      verificationVideoUsed: false,
-      providerJobCreated: false,
-      storedStatusReturned: false,
-      freshCanaryAttemptCreated: false,
-      attemptMode: 'preflight_failed',
-      forceRetestRequested: Boolean(input.forceRetest),
-      forceRetestHonored: false,
-      storedStatusIgnored: Boolean(input.forceRetest && stored),
-      reasonIfNotHonored: 'reference_asset_access_failed',
-      outputUrlPresent: false,
-      parsedVideoUrlPresent: false,
-      verifiedVideoPresent: false,
-      verifiedPersistedVideo: false,
       failureCategory: 'kling_asset_access',
+      skipStage: 'sign_reference_urls',
+      skipReason: 'reference_asset_access_failed',
+      completedStages,
+      forceRetest: input.forceRetest,
+      storedIgnored: Boolean(input.forceRetest && stored),
+      providerErrorSummary: 'One or more saved Lumora references were not provider-reachable.',
       recommendedNextAction: 'A saved Lumora reference was not provider-reachable. Repair references before testing Kling again.',
-    };
+      extras: {
+        referenceCount: referenceSet.candidates.length,
+        referencesChecked: access.checked,
+        selectedReferenceRole: referenceSet.selected.referenceRole,
+        selectedReferenceLabel: referenceSet.selected.referenceLabel,
+        verificationVideoUsed: false,
+      },
+    });
+  }
+  completedStages.push('sign_reference_urls');
+
+  let payload: ReturnType<typeof buildKlingReferenceToVideoPayload>;
+  try {
+    payload = buildKlingReferenceToVideoPayload({
+      frontalImageUrl: referenceSet.frontalImageUrl,
+      referenceImageUrls: referenceSet.referenceImageUrls,
+    });
+    completedStages.push('build_payload');
+  } catch (error) {
+    return buildKlingStageFailurePayload({
+      readiness,
+      selectedModel,
+      failureCategory: 'kling_payload_build_failed',
+      skipStage: 'build_payload',
+      skipReason: 'payload_construction_failed',
+      completedStages,
+      forceRetest: input.forceRetest,
+      storedIgnored: Boolean(input.forceRetest && stored),
+      providerErrorSummary: serializeDiagnosticError(error),
+      recommendedNextAction: 'Kling payload construction failed. Inspect provider shape diagnostics before retrying.',
+      extras: {
+        referenceCount: referenceSet.candidates.length,
+        selectedReferenceRole: referenceSet.selected.referenceRole,
+        selectedReferenceLabel: referenceSet.selected.referenceLabel,
+      },
+    });
   }
 
-  const payload = buildKlingReferenceToVideoPayload({
-    frontalImageUrl: referenceSet.frontalImageUrl,
-    referenceImageUrls: referenceSet.referenceImageUrls,
-  });
+  let attempt: ReturnType<typeof createKlingCanaryAttemptMarker>;
+  try {
+    attempt = createKlingCanaryAttemptMarker({
+      selectedModel,
+      variant: input.variant,
+    });
+    completedStages.push('create_attempt_record');
+  } catch (error) {
+    return buildKlingStageFailurePayload({
+      readiness,
+      selectedModel,
+      failureCategory: 'kling_attempt_record_failed',
+      skipStage: 'create_attempt_record',
+      skipReason: 'local_attempt_record_failed',
+      completedStages,
+      forceRetest: input.forceRetest,
+      storedIgnored: Boolean(input.forceRetest && stored),
+      providerErrorSummary: serializeDiagnosticError(error),
+      recommendedNextAction: 'Lumora could not create a local Kling canary attempt record. Check backend diagnostics before retrying.',
+      extras: {
+        referenceCount: referenceSet.candidates.length,
+        selectedReferenceRole: referenceSet.selected.referenceRole,
+        selectedReferenceLabel: referenceSet.selected.referenceLabel,
+      },
+    });
+  }
+
   const fallbackRequestId = randomUUID();
+  let activeStage: KlingCanaryStage = 'submit_fal_job';
+  let submitted: KlingQueueSubmitResponse | null = null;
+  let jobId: string | null = null;
 
   try {
-    let submitted: KlingQueueSubmitResponse;
     try {
       submitted = await submitKlingQueueRequest({
         model: selectedModel,
         payload,
       });
+      completedStages.push('submit_fal_job');
     } catch (error) {
-      return preJobErrorPayload({
+      const response = preJobErrorPayload({
         error,
         readiness,
         selectedModel,
         payload,
         referenceSet,
+        attemptId: attempt.attemptId,
         forceRetest: input.forceRetest,
         storedIgnored: Boolean(input.forceRetest && stored),
+        completedStages,
+      }) as ReturnType<typeof preJobErrorPayload> & Record<string, unknown>;
+      await persistAlternateExactLikenessCanaryResult({
+        userId: referenceSet.selected.userId,
+        characterId: referenceSet.selected.characterId,
+        provider: 'kling_reference',
+        providerModel: selectedModel,
+        referenceRole: referenceSet.selected.referenceRole,
+        referenceLabel: referenceSet.selected.referenceLabel,
+        succeeded: false,
+        failureCategory: String(response.failureCategory ?? 'kling_provider_failed'),
+        providerErrorCategory: String(response.failureCategory ?? 'kling_provider_failed'),
+        outputUrlPresent: false,
+        notes: {
+          attemptId: attempt.attemptId,
+          attemptCreated: true,
+          providerJobCreated: false,
+          skipStage: 'submit_fal_job',
+          skipReason: response.skipReason,
+          falHttpStatus: response.falHttpStatus ?? null,
+          modelSlug: response.modelSlug ?? selectedModel,
+          payloadShapeSummary: response.payloadShapeSummary ?? null,
+          providerErrorSummary: response.providerErrorSummary,
+        },
       });
+      return response;
     }
-    const jobId = requestId(submitted) ?? fallbackRequestId;
+    jobId = requestId(submitted) ?? fallbackRequestId;
+    activeStage = 'poll_fal_job';
     const finalJob = await pollKlingQueue({
       model: selectedModel,
       requestId: jobId,
     });
+    completedStages.push('poll_fal_job');
+    activeStage = 'parse_output';
     const output = providerOutputFromKlingResult(finalJob);
     const parsedOutput = parseProviderVideoOutput(output);
     const failed = !succeededKlingStatus(finalJob.status);
@@ -965,10 +1168,12 @@ export async function startKlingSelfLikenessCanary(input: {
           readinessStatus: 'billing_required',
           canaryStatus: 'billing_required',
           selectedModel,
-          providerJobCreated: false,
+          providerJobCreated: true,
           storedStatusReturned: false,
-          freshCanaryAttemptCreated: false,
+          freshCanaryAttemptCreated: true,
           attemptMode: 'blocked_by_billing',
+          attemptId: attempt.attemptId,
+          attemptCreated: true,
           forceRetestRequested: Boolean(input.forceRetest),
           forceRetestHonored: Boolean(input.forceRetest),
           storedStatusIgnored: Boolean(input.forceRetest && stored),
@@ -984,8 +1189,11 @@ export async function startKlingSelfLikenessCanary(input: {
           verifiedVideoPresent: false,
           verifiedPersistedVideo: false,
           outputShapeSummary: outputShapeSummary(output),
+          skipStage: 'poll_fal_job',
+          skipReason: failure.detail || 'billing_required_after_provider_job',
+          stageStatus: stageStatus({ completed: completedStages, failed: 'poll_fal_job' }),
           failureCategory: failure.category,
-          providerErrorSummary: failure.detail,
+          providerErrorSummary: safeProviderSummary(failure.detail, stoppedBeforeFalSummary('poll_fal_job', 'billing_required_after_provider_job')),
           recommendedNextAction: 'Fal billing requires attention. Run fal account diagnostics, add credits if needed, then retry Kling.',
         };
       }
@@ -1001,6 +1209,9 @@ export async function startKlingSelfLikenessCanary(input: {
         providerErrorCategory: failure.category,
         outputUrlPresent: false,
         notes: {
+          attemptId: attempt.attemptId,
+          attemptCreated: true,
+          providerJobCreated: true,
           providerStatus: finalJob.status ?? null,
           referenceCount: referenceSet.candidates.length,
           verificationVideoUsed: false,
@@ -1022,6 +1233,8 @@ export async function startKlingSelfLikenessCanary(input: {
         storedStatusReturned: false,
         freshCanaryAttemptCreated: true,
         attemptMode: input.forceRetest ? 'force_retest_fresh_canary_attempt' : 'creating_fresh_canary_attempt',
+        attemptId: attempt.attemptId,
+        attemptCreated: true,
         forceRetestRequested: Boolean(input.forceRetest),
         forceRetestHonored: Boolean(input.forceRetest),
         storedStatusIgnored: Boolean(input.forceRetest && stored),
@@ -1037,16 +1250,21 @@ export async function startKlingSelfLikenessCanary(input: {
         verifiedVideoPresent: false,
         verifiedPersistedVideo: false,
         outputShapeSummary: outputShapeSummary(output),
+        skipStage: failed ? 'poll_fal_job' : 'parse_output',
+        skipReason: failure.detail || (failed ? 'provider_job_failed' : 'provider_output_missing'),
+        stageStatus: stageStatus({ completed: completedStages, failed: failed ? 'poll_fal_job' : 'parse_output' }),
         failureCategory: failure.category,
-        providerErrorSummary: failure.detail,
+        providerErrorSummary: safeProviderSummary(failure.detail, `Kling canary failed after provider job creation: ${failure.category}.`),
         recommendedNextAction: failure.category === 'kling_provider_unavailable'
           ? 'Kling provider was unavailable. Retry later if you want to spend another canary attempt.'
           : 'Kling did not return a verified video. Keep using soft self guidance or test another exact provider.',
       };
     }
+    completedStages.push('parse_output');
 
     let persisted = null as Awaited<ReturnType<typeof persistCompletedGeneration>> | null;
     if (input.saveAsDraft) {
+      activeStage = 'persist_verified_video';
       persisted = await persistCompletedGeneration({
         userId: referenceSet.selected.userId ?? input.userId ?? null,
         id: `kling-canary-${jobId}`,
@@ -1067,6 +1285,7 @@ export async function startKlingSelfLikenessCanary(input: {
         privacy: 'private',
       });
     }
+    completedStages.push('persist_verified_video');
 
     await persistAlternateExactLikenessCanaryResult({
       userId: referenceSet.selected.userId,
@@ -1078,6 +1297,9 @@ export async function startKlingSelfLikenessCanary(input: {
       succeeded: true,
       outputUrlPresent: true,
       notes: {
+        attemptId: attempt.attemptId,
+        attemptCreated: true,
+        providerJobCreated: true,
         providerStatus: finalJob.status ?? null,
         persistedToDraft: Boolean(persisted),
         referenceCount: referenceSet.candidates.length,
@@ -1097,6 +1319,8 @@ export async function startKlingSelfLikenessCanary(input: {
       storedStatusReturned: false,
       freshCanaryAttemptCreated: true,
       attemptMode: input.forceRetest ? 'force_retest_fresh_canary_attempt' : 'creating_fresh_canary_attempt',
+      attemptId: attempt.attemptId,
+      attemptCreated: true,
       forceRetestRequested: Boolean(input.forceRetest),
       forceRetestHonored: Boolean(input.forceRetest),
       storedStatusIgnored: Boolean(input.forceRetest && stored),
@@ -1114,6 +1338,7 @@ export async function startKlingSelfLikenessCanary(input: {
       outputShapeSummary: outputShapeSummary(output),
       projectId: persisted?.projectId ?? null,
       storagePathPresent: Boolean(persisted?.storagePath),
+      stageStatus: stageStatus({ completed: completedStages }),
       recommendedNextAction: 'Kling canary succeeded. Lumora can route exact likeness through Kling after production enablement.',
     };
   } catch (error) {
@@ -1131,12 +1356,14 @@ export async function startKlingSelfLikenessCanary(input: {
         selectedModel,
         providerJobCreated: false,
         storedStatusReturned: false,
-        freshCanaryAttemptCreated: false,
+        freshCanaryAttemptCreated: true,
         attemptMode: 'blocked_by_billing',
+        attemptId: attempt.attemptId,
+        attemptCreated: true,
         forceRetestRequested: Boolean(input.forceRetest),
-        forceRetestHonored: false,
+        forceRetestHonored: Boolean(input.forceRetest),
         storedStatusIgnored: Boolean(input.forceRetest && stored),
-        reasonIfNotHonored: 'blocked_by_billing',
+        reasonIfNotHonored: null,
         referenceCount: referenceSet.candidates.length,
         selectedReferenceRole: referenceSet.selected.referenceRole,
         selectedReferenceLabel: referenceSet.selected.referenceLabel,
@@ -1145,10 +1372,16 @@ export async function startKlingSelfLikenessCanary(input: {
         parsedVideoUrlPresent: false,
         verifiedVideoPresent: false,
         verifiedPersistedVideo: false,
+        skipStage: activeStage,
+        skipReason: 'billing_required',
+        stageStatus: stageStatus({ completed: completedStages, failed: activeStage }),
         failureCategory,
-        providerErrorSummary: typeof (error as { failureDetail?: unknown }).failureDetail === 'string'
-          ? (error as { failureDetail: string }).failureDetail
-          : serializeDiagnosticError(error),
+        providerErrorSummary: safeProviderSummary(
+          typeof (error as { failureDetail?: unknown }).failureDetail === 'string'
+            ? (error as { failureDetail: string }).failureDetail
+            : serializeDiagnosticError(error),
+          stoppedBeforeFalSummary(activeStage, 'billing_required'),
+        ),
         recommendedNextAction: 'Fal billing requires attention. Run fal account diagnostics, add credits if needed, then retry Kling.',
       };
     }
@@ -1165,45 +1398,39 @@ export async function startKlingSelfLikenessCanary(input: {
       providerErrorCategory: failureCategory,
       outputUrlPresent: false,
       notes: {
+        attemptId: attempt.attemptId,
+        attemptCreated: true,
+        providerJobCreated: Boolean(jobId),
+        skipStage: activeStage,
         referenceCount: referenceSet.candidates.length,
         verificationVideoUsed: false,
       },
     });
-    return {
-      ok: false,
-      provider: 'kling',
-      route: 'kling_reference',
-      configured: true,
-      readinessStatus: failureCategory === 'kling_provider_unavailable'
-        ? 'provider_unavailable'
-        : failureCategory === 'kling_moderation_block'
-          ? 'blocked'
-          : 'canary_failed',
-      canaryStatus: 'canary_failed',
+    return buildKlingStageFailurePayload({
+      readiness,
       selectedModel,
-      providerJobCreated: false,
-      storedStatusReturned: false,
-      freshCanaryAttemptCreated: false,
-      attemptMode: 'provider_call_failed_before_job',
-      forceRetestRequested: Boolean(input.forceRetest),
-      forceRetestHonored: Boolean(input.forceRetest),
-      storedStatusIgnored: Boolean(input.forceRetest && stored),
-      reasonIfNotHonored: null,
-      referenceCount: referenceSet.candidates.length,
-      selectedReferenceRole: referenceSet.selected.referenceRole,
-      selectedReferenceLabel: referenceSet.selected.referenceLabel,
-      verificationVideoUsed: false,
-      outputUrlPresent: false,
-      parsedVideoUrlPresent: false,
-      verifiedVideoPresent: false,
-      verifiedPersistedVideo: false,
       failureCategory,
+      skipStage: activeStage,
+      skipReason: 'internal_exception',
+      completedStages,
+      attemptId: attempt.attemptId,
+      attemptCreated: true,
+      forceRetest: input.forceRetest,
+      storedIgnored: Boolean(input.forceRetest && stored),
       providerErrorSummary: typeof (error as { failureDetail?: unknown }).failureDetail === 'string'
         ? (error as { failureDetail: string }).failureDetail
         : serializeDiagnosticError(error),
       recommendedNextAction: failureCategory === 'kling_provider_unavailable'
         ? 'Kling provider was unavailable. Retry later if you want to spend another canary attempt.'
         : 'Kling canary failed. Keep using soft self guidance while reviewing provider diagnostics.',
-    };
+      extras: {
+        providerJobCreated: Boolean(jobId),
+        providerJobIdPresent: Boolean(jobId),
+        referenceCount: referenceSet.candidates.length,
+        selectedReferenceRole: referenceSet.selected.referenceRole,
+        selectedReferenceLabel: referenceSet.selected.referenceLabel,
+        verificationVideoUsed: false,
+      },
+    });
   }
 }

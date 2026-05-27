@@ -8,7 +8,9 @@ import {
 import {
   buildKlingPreJobFailureDiagnostics,
   buildKlingReferenceToVideoPayload,
+  buildKlingStageFailurePayload,
   classifyKlingFailure,
+  createKlingCanaryAttemptMarker,
   getKlingProviderReadiness,
   klingPayloadShapeSummary,
   modelForVariant,
@@ -92,8 +94,8 @@ try {
   assert.equal(classifyKlingFailure({ statusCode: 400, detail: 'unknown field image_urls' }).category, 'kling_input_schema');
   assert.equal(classifyKlingFailure({ statusCode: 422, detail: 'validation failed' }).category, 'kling_input_schema');
   assert.equal(classifyKlingFailure({ statusCode: 404, detail: 'model not found' }).category, 'kling_model_not_found');
-  assert.equal(classifyKlingFailure({ statusCode: 401, detail: 'invalid key' }).category, 'kling_auth_failed');
-  assert.equal(classifyKlingFailure({ statusCode: 403, detail: 'This API key not permitted to perform this action.' }).category, 'kling_key_scope_failed');
+  assert.equal(classifyKlingFailure({ statusCode: 401, detail: 'invalid key' }).category, 'kling_auth_or_scope_failed');
+  assert.equal(classifyKlingFailure({ statusCode: 403, detail: 'This API key not permitted to perform this action.' }).category, 'kling_auth_or_scope_failed');
   assert.equal(classifyKlingFailure({ statusCode: 429, detail: 'too many requests' }).category, 'kling_rate_limited');
   assert.equal(classifyKlingFailure({ statusCode: 503, detail: 'temporarily unavailable' }).category, 'kling_provider_unavailable');
   assert.equal(classifyKlingFailure({ detail: 'content flagged by safety policy' }).category, 'kling_moderation_block');
@@ -131,6 +133,57 @@ try {
   assert.equal(preJobDiagnostics.payloadShapeSummary.privateUrlsRedacted, true);
   assert.equal(JSON.stringify(preJobDiagnostics).includes('kling-secret'), false);
   assert.equal(JSON.stringify(preJobDiagnostics).includes('assets.example'), false);
+
+  const clientExceptionDiagnostics = buildKlingPreJobFailureDiagnostics({
+    selectedModel: 'fal-ai/kling-video/o1/reference-to-video',
+    payload,
+    error: new TypeError('fetch failed for https://private.example/signed?token=secret'),
+  });
+  assert.equal(clientExceptionDiagnostics.failureCategory, 'kling_client_exception');
+  assert.equal(clientExceptionDiagnostics.falHttpStatus, null);
+  assert.equal(clientExceptionDiagnostics.providerErrorSummary.includes('token=secret'), false);
+  assert.notEqual(clientExceptionDiagnostics.providerErrorSummary.trim(), '');
+
+  const attempt = createKlingCanaryAttemptMarker({
+    selectedModel: 'fal-ai/kling-video/o1/reference-to-video',
+    variant: 'o1_reference_to_video',
+  });
+  assert.match(attempt.attemptId, /^kling-canary-/);
+  assert.equal(attempt.variant, 'o1_reference_to_video');
+
+  const noReferencesPayload = buildKlingStageFailurePayload({
+    readiness: ready,
+    selectedModel: ready.selectedModel,
+    failureCategory: 'kling_no_references',
+    skipStage: 'load_references',
+    skipReason: 'no_saved_self_reference',
+    completedStages: ['auth_probe_gate', 'resolve_self_character'],
+    forceRetest: true,
+    storedIgnored: true,
+    providerErrorSummary: '',
+    recommendedNextAction: 'repair references',
+  });
+  assert.equal(noReferencesPayload.skipStage, 'load_references');
+  assert.equal(noReferencesPayload.failureCategory, 'kling_no_references');
+  assert.equal(noReferencesPayload.providerErrorSummary, 'Kling canary stopped before fal submission at load_references: no_saved_self_reference.');
+  assert.equal(noReferencesPayload.freshCanaryAttemptCreated, false);
+  assert.equal(noReferencesPayload.stageStatus.load_references, 'failed');
+
+  const attemptFailurePayload = buildKlingStageFailurePayload({
+    readiness: ready,
+    selectedModel: ready.selectedModel,
+    failureCategory: 'kling_attempt_record_failed',
+    skipStage: 'create_attempt_record',
+    skipReason: 'local_attempt_record_failed',
+    completedStages: ['auth_probe_gate', 'resolve_self_character', 'load_references', 'select_references', 'sign_reference_urls', 'build_payload'],
+    forceRetest: true,
+    storedIgnored: true,
+    providerErrorSummary: 'db insert failed',
+    recommendedNextAction: 'check backend diagnostics',
+  });
+  assert.equal(attemptFailurePayload.skipStage, 'create_attempt_record');
+  assert.equal(attemptFailurePayload.providerErrorSummary, 'db insert failed');
+  assert.equal(attemptFailurePayload.freshCanaryAttemptCreated, false);
 
   assert.equal(classifyFalAccountStatus({ statusCode: 401, payload: { detail: 'invalid key' } }).errorCategory, 'fal_auth_failed');
   assert.equal(classifyFalAccountStatus({ statusCode: 403, payload: { detail: 'This API key not permitted to perform this action.' } }).errorCategory, 'fal_key_scope_not_permitted');
