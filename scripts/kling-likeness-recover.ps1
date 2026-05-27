@@ -32,6 +32,7 @@ function Print-RecoveryResult {
   if ($Result.responseUrlSource) { Write-Host "response URL source: $($Result.responseUrlSource)" }
   if ($Result.pollErrorType) { Write-Host "poll error type: $($Result.pollErrorType)" }
   if ($Result.pollErrorMessage) { Write-Host "poll error message: $($Result.pollErrorMessage)" }
+  if ($Result.outputClassification) { Write-Host "output classification: $($Result.outputClassification)" }
   Write-Host "output present: $($Result.outputUrlPresent)"
   Write-Host "parsed video URL present: $($Result.parsedVideoUrlPresent)"
   Write-Host "verified video present: $($Result.verifiedVideoPresent)"

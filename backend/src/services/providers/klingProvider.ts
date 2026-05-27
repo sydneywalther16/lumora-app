@@ -345,6 +345,7 @@ export function getKlingProviderReadiness(input: {
     lastFailureCategory?: string | null;
     providerModel?: string | null;
     providerJobCreated?: boolean | null;
+    verifiedPersistedVideo?: boolean | null;
   }> | null;
   falAccountStatus?: FalAccountStatus | null;
 } = {}) {
@@ -361,7 +362,7 @@ export function getKlingProviderReadiness(input: {
     ? 'not_configured'
     : !implemented
       ? 'configured_not_implemented'
-    : stored?.status === 'canary_succeeded'
+    : stored?.status === 'canary_succeeded' && stored.verifiedPersistedVideo === true
       ? 'canary_succeeded'
     : lastFailureCategory === 'kling_billing_required' && falAccountAllowsCanary
       ? 'configured_ready_for_canary'
@@ -1261,10 +1262,13 @@ export async function recoverKlingSelfLikenessCanary(input: {
   const output = providerOutputFromKlingResult(finalJob);
   const parsedOutput = parseProviderVideoOutput(output);
   const recoveredOutputFailureReason = 'reason' in parsedOutput ? parsedOutput.reason : null;
-  if (!succeededKlingStatus(providerStatus) || !parsedOutput.ok) {
-    const failureCategory = succeededKlingStatus(providerStatus)
-      ? 'kling_recover_output_missing'
-      : classifyKlingFailure({ detail: finalJob.error ?? finalJob }).category;
+  const providerErrorFailure = finalJob.error ? classifyKlingFailure({ detail: finalJob.error }) : null;
+  if (!parsedOutput.ok || providerErrorFailure?.category === 'kling_moderation_block') {
+    const failureCategory = providerErrorFailure?.category ?? (
+      succeededKlingStatus(providerStatus)
+        ? 'kling_recover_output_missing'
+        : classifyKlingFailure({ detail: finalJob.error ?? finalJob }).category
+    );
     await persistAlternateExactLikenessCanaryResult({
       userId: row?.userId ?? input.userId ?? null,
       characterId: row?.characterId ?? null,
@@ -1314,10 +1318,13 @@ export async function recoverKlingSelfLikenessCanary(input: {
       parsedVideoUrlPresent: false,
       verifiedVideoPresent: false,
       verifiedPersistedVideo: false,
+      outputClassification: null,
       failureCategory,
       canaryStatus: 'canary_failed',
       skipStage: 'parse_output',
-      skipReason: recoveredOutputFailureReason ?? 'provider_job_not_completed',
+      skipReason: providerErrorFailure?.category === 'kling_moderation_block'
+        ? providerErrorFailure.detail
+        : recoveredOutputFailureReason ?? 'provider_job_not_completed',
       outputShapeSummary: outputShapeSummary(output),
       providerErrorSummary: failureCategory === 'kling_recover_output_missing'
         ? `Recovered Kling job did not contain a usable video output: ${recoveredOutputFailureReason ?? 'output missing'}`
@@ -1326,6 +1333,7 @@ export async function recoverKlingSelfLikenessCanary(input: {
     };
   }
 
+  const outputClassification = 'kling_output_found';
   const persisted = await persistCompletedGeneration({
     userId: row?.userId ?? input.userId ?? null,
     id: `kling-recover-${providerJobId}`,
@@ -1345,6 +1353,72 @@ export async function recoverKlingSelfLikenessCanary(input: {
     aspectRatio: '9:16',
     privacy: input.saveAsDraft ? 'private' : 'private',
   });
+  const verifiedPersistedVideo = Boolean(persisted.storagePath);
+
+  if (!verifiedPersistedVideo) {
+    await persistAlternateExactLikenessCanaryResult({
+      userId: row?.userId ?? input.userId ?? null,
+      characterId: row?.characterId ?? null,
+      provider: 'kling_reference',
+      providerModel: selectedModel,
+      referenceRole: row?.referenceRole ?? 'recovered_provider_job',
+      referenceLabel: row?.referenceLabel ?? 'Recovered Kling provider job',
+      succeeded: false,
+      failureCategory: 'kling_output_persist_failed',
+      providerErrorCategory: 'kling_output_persist_failed',
+      outputUrlPresent: true,
+      notes: {
+        ...notesRecord(notes),
+        attemptId,
+        providerJobCreated: true,
+        providerJobId,
+        requestId: providerJobId,
+        providerStatus,
+        providerStatusUrl: recoveryPollUrls.statusUrl,
+        providerResponseUrl: recoveryPollUrls.responseUrl,
+        pollEndpointUsed: redactFalUrl(recoveryPollUrls.statusUrl),
+        responseEndpointUsed: redactFalUrl(recoveryPollUrls.responseUrl),
+        statusUrlSource: recoveryPollUrls.statusUrlSource,
+        responseUrlSource: recoveryPollUrls.responseUrlSource,
+        recoveryAttempted: true,
+        outputClassification,
+        outputUrlPresent: true,
+        parsedVideoUrlPresent: true,
+        verifiedPersistedVideo: false,
+        persistenceWarnings: persisted.warnings,
+      },
+    });
+    return {
+      ok: false,
+      provider: 'kling',
+      route: 'kling_reference',
+      recovery: true,
+      selectedModel,
+      attemptId,
+      providerJobCreated: true,
+      providerJobId,
+      requestId: providerJobId,
+      providerJobIdPresent: true,
+      providerStatus,
+      providerStatusUrl: redactFalUrl(recoveryPollUrls.statusUrl),
+      pollEndpointUsed: redactFalUrl(recoveryPollUrls.statusUrl),
+      responseEndpointUsed: redactFalUrl(recoveryPollUrls.responseUrl),
+      statusUrlSource: recoveryPollUrls.statusUrlSource,
+      responseUrlSource: recoveryPollUrls.responseUrlSource,
+      outputClassification,
+      outputUrlPresent: true,
+      parsedVideoUrlPresent: true,
+      verifiedVideoPresent: false,
+      verifiedPersistedVideo: false,
+      failureCategory: 'kling_output_persist_failed',
+      canaryStatus: 'canary_failed',
+      skipStage: 'persist_verified_video',
+      skipReason: 'verified_video_not_persisted_to_lumora_storage',
+      persistenceWarnings: persisted.warnings,
+      providerErrorSummary: 'Kling returned a video URL, but Lumora did not persist it to controlled storage.',
+      recommendedNextAction: 'Fix Lumora video storage, then recover this existing Kling job again before starting another paid canary.',
+    };
+  }
 
   await persistAlternateExactLikenessCanaryResult({
     userId: row?.userId ?? input.userId ?? null,
@@ -1369,8 +1443,13 @@ export async function recoverKlingSelfLikenessCanary(input: {
       statusUrlSource: recoveryPollUrls.statusUrlSource,
       responseUrlSource: recoveryPollUrls.responseUrlSource,
       recoveryAttempted: true,
+      outputClassification,
       outputUrlPresent: true,
-      verifiedPersistedVideo: Boolean(persisted.storagePath || persisted.projectId || parsedOutput.videoUrl),
+      parsedVideoUrlPresent: true,
+      verifiedPersistedVideo: true,
+      thumbnailSource: persisted.thumbnailSource,
+      posterUrlPresent: Boolean(persisted.posterUrl),
+      persistenceWarnings: persisted.warnings,
     },
   });
 
@@ -1391,15 +1470,20 @@ export async function recoverKlingSelfLikenessCanary(input: {
     responseEndpointUsed: redactFalUrl(recoveryPollUrls.responseUrl),
     statusUrlSource: recoveryPollUrls.statusUrlSource,
     responseUrlSource: recoveryPollUrls.responseUrlSource,
+    outputClassification,
     outputUrlPresent: true,
     parsedVideoUrlPresent: true,
     verifiedVideoPresent: true,
-    verifiedPersistedVideo: Boolean(persisted.storagePath || persisted.projectId || parsedOutput.videoUrl),
+    verifiedPersistedVideo: true,
     failureCategory: null,
-    canaryStatus: 'kling_recover_succeeded',
+    canaryStatus: 'canary_succeeded',
+    readinessStatus: 'canary_succeeded',
     projectId: persisted.projectId,
     storagePathPresent: Boolean(persisted.storagePath),
-    recommendedNextAction: 'Kling recovery succeeded. Lumora can treat this provider route as canary-proven after production enablement.',
+    posterUrlPresent: Boolean(persisted.posterUrl),
+    thumbnailSource: persisted.thumbnailSource,
+    persistenceWarnings: persisted.warnings,
+    recommendedNextAction: 'Kling canary succeeded. Lumora can route exact likeness through Kling after production enablement.',
   };
 }
 
@@ -1796,10 +1880,13 @@ export async function startKlingSelfLikenessCanary(input: {
     const parsedOutput = parseProviderVideoOutput(output);
     const parsedFailureReason = 'reason' in parsedOutput ? parsedOutput.reason : null;
     const failed = !succeededKlingStatus(finalJob.status);
+    const providerErrorFailure = finalJob.error ? classifyKlingFailure({ detail: finalJob.error }) : null;
 
-    if (failed || !parsedOutput.ok) {
-      const failure = failed
-        ? classifyKlingFailure({ detail: finalJob.error ?? finalJob })
+    if (!parsedOutput.ok || providerErrorFailure?.category === 'kling_moderation_block') {
+      const failure = providerErrorFailure?.category === 'kling_moderation_block'
+        ? providerErrorFailure
+        : failed
+        ? providerErrorFailure ?? classifyKlingFailure({ detail: finalJob.error ?? finalJob })
         : { category: 'kling_output_parse_failed', detail: `output shape ${outputShapeSummary(output)}; ${parsedFailureReason ?? 'video output missing'}` };
       if (failure.category === 'kling_billing_required') {
         return {
@@ -1924,30 +2011,108 @@ export async function startKlingSelfLikenessCanary(input: {
     }
     completedStages.push('parse_output');
 
-    let persisted = null as Awaited<ReturnType<typeof persistCompletedGeneration>> | null;
-    if (input.saveAsDraft) {
-      activeStage = 'persist_verified_video';
-      persisted = await persistCompletedGeneration({
-        userId: referenceSet.selected.userId ?? input.userId ?? null,
-        id: `kling-canary-${jobId}`,
-        title: 'Kling likeness canary',
-        prompt: KLING_REFERENCE_PROMPT,
-        finalPrompt: KLING_REFERENCE_PROMPT,
-        provider: 'kling',
-        engine: 'kling',
-        model: selectedModel,
-        videoUrl: parsedOutput.videoUrl,
-        thumbnailUrl: null,
-        characterId: referenceSet.selected.characterId,
-        characterName: null,
-        characterAvatar: null,
-        isDefaultSelfCharacter: true,
-        durationSeconds: 5,
-        aspectRatio: '9:16',
-        privacy: 'private',
-      });
-    }
+    const outputClassification = 'kling_output_found';
+    activeStage = 'persist_verified_video';
+    const persisted = await persistCompletedGeneration({
+      userId: referenceSet.selected.userId ?? input.userId ?? null,
+      id: `kling-canary-${jobId}`,
+      title: 'Kling likeness canary',
+      prompt: KLING_REFERENCE_PROMPT,
+      finalPrompt: KLING_REFERENCE_PROMPT,
+      provider: 'kling',
+      engine: 'kling',
+      model: selectedModel,
+      videoUrl: parsedOutput.videoUrl,
+      thumbnailUrl: null,
+      characterId: referenceSet.selected.characterId,
+      characterName: null,
+      characterAvatar: null,
+      isDefaultSelfCharacter: true,
+      durationSeconds: 5,
+      aspectRatio: '9:16',
+      privacy: 'private',
+    });
     completedStages.push('persist_verified_video');
+    const verifiedPersistedVideo = Boolean(persisted.storagePath);
+
+    if (!verifiedPersistedVideo) {
+      await persistAlternateExactLikenessCanaryResult({
+        userId: referenceSet.selected.userId,
+        characterId: referenceSet.selected.characterId,
+        provider: 'kling_reference',
+        providerModel: selectedModel,
+        referenceRole: referenceSet.selected.referenceRole,
+        referenceLabel: referenceSet.selected.referenceLabel,
+        succeeded: false,
+        failureCategory: 'kling_output_persist_failed',
+        providerErrorCategory: 'kling_output_persist_failed',
+        outputUrlPresent: true,
+        notes: {
+          attemptId: attempt.attemptId,
+          attemptCreated: true,
+          providerJobCreated: true,
+          providerStatus: finalJob.status ?? null,
+          providerStatusUrl: pollUrls.statusUrl,
+          providerResponseUrl: pollUrls.responseUrl,
+          pollEndpointUsed: redactFalUrl(pollUrls.statusUrl),
+          responseEndpointUsed: redactFalUrl(pollUrls.responseUrl),
+          statusUrlSource: pollUrls.statusUrlSource,
+          responseUrlSource: pollUrls.responseUrlSource,
+          outputClassification,
+          outputUrlPresent: true,
+          parsedVideoUrlPresent: true,
+          verifiedPersistedVideo: false,
+          persistedToDraft: Boolean(persisted.projectId),
+          posterUrlPresent: Boolean(persisted.posterUrl),
+          persistenceWarnings: persisted.warnings,
+          referenceCount: referenceSet.candidates.length,
+          verificationVideoUsed: false,
+        },
+      });
+      return {
+        ok: false,
+        provider: 'kling',
+        route: 'kling_reference',
+        configured: true,
+        readinessStatus: 'canary_failed',
+        canaryStatus: 'canary_failed',
+        selectedModel,
+        providerJobCreated: true,
+        storedStatusReturned: false,
+        freshCanaryAttemptCreated: true,
+        attemptMode: input.forceRetest ? 'force_retest_fresh_canary_attempt' : 'creating_fresh_canary_attempt',
+        attemptId: attempt.attemptId,
+        attemptCreated: true,
+        forceRetestRequested: Boolean(input.forceRetest),
+        forceRetestHonored: Boolean(input.forceRetest),
+        storedStatusIgnored: Boolean(input.forceRetest && stored),
+        reasonIfNotHonored: null,
+        providerJobIdPresent: Boolean(jobId),
+        providerJobId: jobId,
+        requestId: jobId,
+        providerStatusUrl: redactFalUrl(pollUrls.statusUrl),
+        pollEndpointUsed: redactFalUrl(pollUrls.statusUrl),
+        responseEndpointUsed: redactFalUrl(pollUrls.responseUrl),
+        statusUrlSource: pollUrls.statusUrlSource,
+        responseUrlSource: pollUrls.responseUrlSource,
+        providerStatus: finalJob.status ?? submitted.status ?? null,
+        referenceCount: referenceSet.candidates.length,
+        selectedReferenceRole: referenceSet.selected.referenceRole,
+        selectedReferenceLabel: referenceSet.selected.referenceLabel,
+        verificationVideoUsed: false,
+        outputClassification,
+        outputUrlPresent: true,
+        parsedVideoUrlPresent: true,
+        verifiedVideoPresent: false,
+        verifiedPersistedVideo: false,
+        failureCategory: 'kling_output_persist_failed',
+        skipStage: 'persist_verified_video',
+        skipReason: 'verified_video_not_persisted_to_lumora_storage',
+        persistenceWarnings: persisted.warnings,
+        providerErrorSummary: 'Kling returned a video URL, but Lumora did not persist it to controlled storage.',
+        recommendedNextAction: 'Fix Lumora video storage, then recover this existing Kling job before starting another paid canary.',
+      };
+    }
 
     await persistAlternateExactLikenessCanaryResult({
       userId: referenceSet.selected.userId,
@@ -1969,7 +2134,14 @@ export async function startKlingSelfLikenessCanary(input: {
         responseEndpointUsed: redactFalUrl(pollUrls.responseUrl),
         statusUrlSource: pollUrls.statusUrlSource,
         responseUrlSource: pollUrls.responseUrlSource,
+        outputClassification,
+        outputUrlPresent: true,
+        parsedVideoUrlPresent: true,
+        verifiedPersistedVideo: true,
         persistedToDraft: Boolean(persisted),
+        posterUrlPresent: Boolean(persisted.posterUrl),
+        thumbnailSource: persisted.thumbnailSource,
+        persistenceWarnings: persisted.warnings,
         referenceCount: referenceSet.candidates.length,
         verificationVideoUsed: false,
       },
@@ -2006,13 +2178,17 @@ export async function startKlingSelfLikenessCanary(input: {
       selectedReferenceRole: referenceSet.selected.referenceRole,
       selectedReferenceLabel: referenceSet.selected.referenceLabel,
       verificationVideoUsed: false,
+      outputClassification,
       outputUrlPresent: true,
       parsedVideoUrlPresent: true,
       verifiedVideoPresent: true,
-      verifiedPersistedVideo: Boolean(persisted?.storagePath || persisted?.projectId),
+      verifiedPersistedVideo: true,
       outputShapeSummary: outputShapeSummary(output),
-      projectId: persisted?.projectId ?? null,
-      storagePathPresent: Boolean(persisted?.storagePath),
+      projectId: persisted.projectId,
+      storagePathPresent: Boolean(persisted.storagePath),
+      posterUrlPresent: Boolean(persisted.posterUrl),
+      thumbnailSource: persisted.thumbnailSource,
+      persistenceWarnings: persisted.warnings,
       stageStatus: stageStatus({ completed: completedStages }),
       recommendedNextAction: 'Kling canary succeeded. Lumora can route exact likeness through Kling after production enablement.',
     };

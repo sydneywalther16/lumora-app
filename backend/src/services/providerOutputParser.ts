@@ -26,6 +26,8 @@ export type ProviderOutputParseResult = ProviderOutputParseSuccess | ProviderOut
 const VIDEO_EXTENSION_PATTERN = /\.(mp4|webm|mov|m4v|avi|mpeg|mpg|m3u8)(?:[?#].*)?$/i;
 const IMAGE_EXTENSION_PATTERN = /\.(png|jpe?g|gif|webp|svg|avif|heic|heif)(?:[?#].*)?$/i;
 const TEXT_EXTENSION_PATTERN = /\.(txt|json|log|csv|html?)(?:[?#].*)?$/i;
+const VIDEO_CONTENT_TYPE_PATTERN = /^video\//i;
+const IMAGE_CONTENT_TYPE_PATTERN = /^image\//i;
 const DANGEROUS_KEYS = new Set([
   'error',
   'errors',
@@ -53,6 +55,8 @@ const PREFERRED_KEYS = [
   'result',
   'results',
 ];
+const CONTENT_TYPE_KEYS = ['content_type', 'contentType', 'mime_type', 'mimeType', 'type'];
+const CONTENT_TYPED_URL_KEYS = ['url', 'video_url', 'videoUrl', 'uri'];
 
 function stringifyUrlLike(value: unknown): string | null {
   if (Array.isArray(value)) return null;
@@ -83,7 +87,8 @@ function isErrorText(value: string) {
   return /\b(error|failed|exception|traceback|stack trace|moderation|policy violation)\b/i.test(value);
 }
 
-function classifyUrl(value: string): ProviderOutputParseResult {
+function classifyUrl(value: string, context?: { contentType?: string | null }): ProviderOutputParseResult {
+  const contentType = typeof context?.contentType === 'string' ? context.contentType.trim() : '';
   if (!value) {
     return {
       ok: false,
@@ -124,6 +129,25 @@ function classifyUrl(value: string): ProviderOutputParseResult {
     };
   }
 
+  if (VIDEO_CONTENT_TYPE_PATTERN.test(contentType)) {
+    return {
+      ok: true,
+      category: 'ok',
+      videoUrl: value,
+      sourcePath: '',
+    };
+  }
+
+  if (IMAGE_CONTENT_TYPE_PATTERN.test(contentType)) {
+    return {
+      ok: false,
+      category: 'image_output',
+      videoUrl: null,
+      sourcePath: null,
+      reason: 'Provider returned an image URL where video output was expected.',
+    };
+  }
+
   if (IMAGE_EXTENSION_PATTERN.test(value)) {
     return {
       ok: false,
@@ -150,6 +174,14 @@ function classifyUrl(value: string): ProviderOutputParseResult {
     videoUrl: value,
     sourcePath: '',
   };
+}
+
+function contentTypeFromRecord(record: Record<string, unknown>) {
+  for (const key of CONTENT_TYPE_KEYS) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
 }
 
 function betterFailure(
@@ -234,6 +266,19 @@ function parseAtPath(value: unknown, path: string, depth: number, seen: Set<unkn
 
   const record = value as Record<string, unknown>;
   let failure: ProviderOutputParseResult | null = null;
+  const contentType = contentTypeFromRecord(record);
+
+  if (contentType && (VIDEO_CONTENT_TYPE_PATTERN.test(contentType) || IMAGE_CONTENT_TYPE_PATTERN.test(contentType))) {
+    for (const key of CONTENT_TYPED_URL_KEYS) {
+      if (!(key in record)) continue;
+      const url = stringifyUrlLike(record[key]);
+      if (!url) continue;
+      const result = classifyUrl(url, { contentType });
+      const withPath = { ...result, sourcePath: `${path || '$'}.${key}` } as ProviderOutputParseResult;
+      if (withPath.ok) return withPath;
+      failure = betterFailure(failure, withPath);
+    }
+  }
 
   for (const key of PREFERRED_KEYS) {
     if (!(key in record)) continue;

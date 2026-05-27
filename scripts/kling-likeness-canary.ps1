@@ -63,6 +63,7 @@ function Print-CanaryResult {
   Write-Host "verification video used: $($Result.verificationVideoUsed)"
   Write-Host "provider prediction/job created: $($Result.providerJobCreated)"
   Write-Host "provider status: $($Result.providerStatus)"
+  if ($Result.outputClassification) { Write-Host "output classification: $($Result.outputClassification)" }
   Write-Host "output present: $($Result.outputUrlPresent)"
   Write-Host "parsed video URL present: $($Result.parsedVideoUrlPresent)"
   Write-Host "verified persisted video: $($Result.verifiedPersistedVideo)"

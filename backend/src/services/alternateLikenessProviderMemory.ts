@@ -16,6 +16,7 @@ export type AlternateExactLikenessProviderStatus = {
   providerJobCreated?: boolean | null;
   attemptId?: string | null;
   providerJobId?: string | null;
+  verifiedPersistedVideo?: boolean | null;
   outputUrlPresent: boolean;
 };
 
@@ -86,6 +87,17 @@ function providerJobCreatedFromNotes(...values: unknown[]) {
   return null;
 }
 
+function booleanFromRecord(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+  }
+  return null;
+}
+
 export function normalizeAlternateProviderFailureCategory(input: {
   provider?: string | null;
   failureCategory?: string | null;
@@ -117,7 +129,6 @@ export function normalizeAlternateProviderFailureCategory(input: {
 function mapRow(row: AlternateProviderMemoryRow): AlternateExactLikenessProviderStatus | null {
   const provider = memoryProviderId(row.provider);
   if (!provider) return null;
-  const succeeded = (row.successCount ?? 0) > 0 && (row.successCount ?? 0) >= (row.failureCount ?? 0);
   const lastFailureCategory = normalizeAlternateProviderFailureCategory({
     provider: row.provider,
     failureCategory: row.lastFailureCategory,
@@ -125,6 +136,10 @@ function mapRow(row: AlternateProviderMemoryRow): AlternateExactLikenessProvider
     metadata: row.metadata,
   });
   const notesRecord = recordValue(row.notes);
+  const verifiedPersistedVideo = booleanFromRecord(notesRecord, 'verifiedPersistedVideo');
+  const succeeded = (row.successCount ?? 0) > 0 &&
+    (row.successCount ?? 0) >= (row.failureCount ?? 0) &&
+    (provider !== 'kling_reference' || verifiedPersistedVideo === true);
   const attemptId = typeof notesRecord.attemptId === 'string' ? notesRecord.attemptId : null;
   const providerJobId = typeof notesRecord.providerJobId === 'string'
     ? notesRecord.providerJobId
@@ -143,6 +158,7 @@ function mapRow(row: AlternateProviderMemoryRow): AlternateExactLikenessProvider
     providerJobCreated: providerJobCreatedFromNotes(row.notes, row.metadata),
     attemptId,
     providerJobId,
+    verifiedPersistedVideo,
     outputUrlPresent: Boolean(row.outputUrlPresent),
   };
 }

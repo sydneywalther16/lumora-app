@@ -277,6 +277,16 @@ try {
     completed: true,
     data: { video: { url: 'https://cdn.example.com/final.mp4' } },
   }).ok, true);
+  const topLevelKlingVideo = parseKlingQueueVideoOutput({
+    video: {
+      content_type: 'video/mp4',
+      file_name: 'output.mp4',
+      file_size: 13048086,
+      url: 'https://fal.media/files/kling-output',
+    },
+  });
+  assert.equal(topLevelKlingVideo.ok, true);
+  assert.equal(topLevelKlingVideo.videoUrl, 'https://fal.media/files/kling-output');
   assert.equal(parseKlingQueueVideoOutput({
     status: 'COMPLETED',
     result: { video_url: 'https://cdn.example.com/final.webm' },

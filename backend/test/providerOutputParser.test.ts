@@ -39,6 +39,26 @@ assert.equal(
   'https://cdn.example.com/generated/final.mp4',
 );
 
+const falTopLevelVideo = parseProviderVideoOutput({
+  video: {
+    content_type: 'video/mp4',
+    file_name: 'output.mp4',
+    file_size: 13048086,
+    url: 'https://fal.media/files/generated-output',
+  },
+});
+assert.equal(falTopLevelVideo.ok, true);
+assert.equal(falTopLevelVideo.videoUrl, 'https://fal.media/files/generated-output');
+assert.equal(falTopLevelVideo.sourcePath, '$.video.url');
+
+const contentTypedTopLevelUrl = parseProviderVideoOutput({
+  content_type: 'video/mp4',
+  file_name: 'output.mp4',
+  url: 'https://fal.media/files/generated-output',
+});
+assert.equal(contentTypedTopLevelUrl.ok, true);
+assert.equal(contentTypedTopLevelUrl.videoUrl, 'https://fal.media/files/generated-output');
+
 assert.deepEqual(parseProviderVideoOutput(null), {
   ok: false,
   category: 'output_missing',

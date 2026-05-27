@@ -259,6 +259,45 @@ try {
   assert.equal(incompletePhotoBlockedRoute.exactLikeness, false);
   assert.notEqual(exactLikenessCanaryCandidate(incompletePhotoBlockedRoute)?.route, 'seedance_reference');
 
+  const klingUnverifiedRegistry = buildLikenessProviderRegistry({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: blockedReferenceSummary,
+    alternateProviderStatuses: [
+      {
+        provider: 'kling_reference',
+        providerModel: 'kling-reference-model',
+        status: 'canary_succeeded',
+        referenceRole: 'front_angle',
+        referenceLabel: 'Primary front face',
+        lastSuccessAt: '2026-05-23T00:00:00.000Z',
+        lastFailureAt: null,
+        lastFailureCategory: null,
+        outputUrlPresent: true,
+        verifiedPersistedVideo: false,
+      },
+      {
+        provider: 'runway_gen4_reference',
+        providerModel: 'gen4.5',
+        status: 'canary_succeeded',
+        referenceRole: 'front_angle',
+        referenceLabel: 'Primary front face',
+        lastSuccessAt: '2026-05-23T00:00:00.000Z',
+        lastFailureAt: null,
+        lastFailureCategory: null,
+        outputUrlPresent: true,
+      },
+    ],
+  });
+  const klingUnverified = chooseExactLikenessRoute({
+    openAISoraReadiness: readiness,
+    selfProviderCharacter: noIdentity,
+    referenceRouteSummary: blockedReferenceSummary,
+    providerRegistry: klingUnverifiedRegistry,
+  });
+  assert.equal(klingUnverified.route, 'runway_reference');
+  assert.equal(klingUnverified.provider, 'runway');
+
   const klingSucceededRegistry = buildLikenessProviderRegistry({
     openAISoraReadiness: readiness,
     selfProviderCharacter: noIdentity,
@@ -274,6 +313,7 @@ try {
         lastFailureAt: null,
         lastFailureCategory: null,
         outputUrlPresent: true,
+        verifiedPersistedVideo: true,
       },
       {
         provider: 'runway_gen4_reference',
