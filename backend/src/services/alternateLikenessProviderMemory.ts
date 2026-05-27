@@ -14,6 +14,8 @@ export type AlternateExactLikenessProviderStatus = {
   lastFailureAt: string | null;
   lastFailureCategory: string | null;
   providerJobCreated?: boolean | null;
+  attemptId?: string | null;
+  providerJobId?: string | null;
   outputUrlPresent: boolean;
 };
 
@@ -122,6 +124,13 @@ function mapRow(row: AlternateProviderMemoryRow): AlternateExactLikenessProvider
     notes: row.notes,
     metadata: row.metadata,
   });
+  const notesRecord = recordValue(row.notes);
+  const attemptId = typeof notesRecord.attemptId === 'string' ? notesRecord.attemptId : null;
+  const providerJobId = typeof notesRecord.providerJobId === 'string'
+    ? notesRecord.providerJobId
+    : typeof notesRecord.requestId === 'string'
+      ? notesRecord.requestId
+      : null;
   return {
     provider,
     providerModel: row.providerModel,
@@ -132,6 +141,8 @@ function mapRow(row: AlternateProviderMemoryRow): AlternateExactLikenessProvider
     lastFailureAt: row.lastFailureAt,
     lastFailureCategory,
     providerJobCreated: providerJobCreatedFromNotes(row.notes, row.metadata),
+    attemptId,
+    providerJobId,
     outputUrlPresent: Boolean(row.outputUrlPresent),
   };
 }

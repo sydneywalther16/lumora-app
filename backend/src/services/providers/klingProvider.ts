@@ -21,6 +21,7 @@ import {
   verifyReferenceAssetAccess,
   type SelfReferenceMatrixCandidate,
 } from '../seedanceCanary';
+import { query } from '../db';
 
 const FAL_QUEUE_BASE_URL = 'https://queue.fal.run';
 const KLING_REFERENCE_PROMPT =
@@ -81,6 +82,15 @@ type KlingReferenceSet = {
   frontalImageUrl: string;
   referenceImageUrls: string[];
   candidates: SelfReferenceMatrixCandidate[];
+};
+
+type KlingRecoveryRow = {
+  userId: string | null;
+  characterId: string | null;
+  providerModel: string | null;
+  referenceRole: string | null;
+  referenceLabel: string | null;
+  notes: unknown;
 };
 
 function redactKlingError(value: unknown) {
@@ -207,6 +217,25 @@ function outputShapeSummary(output: unknown) {
     return `object(${Object.keys(output as Record<string, unknown>).slice(0, 8).join(',')})`;
   }
   return typeof output;
+}
+
+function providerResponseShapeSummary(value: unknown) {
+  if (!value || typeof value !== 'object') return { type: typeof value, fieldNames: [] as string[] };
+  if (Array.isArray(value)) return { type: 'array', length: value.length, fieldNames: [] as string[] };
+  return {
+    type: 'object',
+    fieldNames: Object.keys(value as Record<string, unknown>).sort(),
+  };
+}
+
+function redactFalUrl(value: unknown) {
+  if (typeof value !== 'string' || !value) return null;
+  try {
+    const url = new URL(value);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return redactKlingError(value);
+  }
 }
 
 function configuredModel() {
@@ -347,13 +376,23 @@ export function shouldReturnStoredKlingCanaryStatus(input: {
   forceRetest?: boolean;
 }) {
   const stored = input.stored ?? null;
-  if (!stored || input.forceRetest) return false;
+  if (!stored) return false;
+  if (
+    stored.providerJobCreated === true &&
+    (stored.lastFailureCategory === 'kling_poll_pending' || stored.lastFailureCategory === 'kling_poll_failed')
+  ) {
+    return true;
+  }
+  if (input.forceRetest) return false;
   if (stored.lastFailureCategory === 'kling_billing_required') return false;
   if (stored.lastFailureCategory === 'kling_moderation_block') return true;
   return stored.status === 'canary_failed' && Boolean(stored.lastFailureCategory) && stored.providerJobCreated === true;
 }
 
 function storedKlingStatusReason(stored: AlternateExactLikenessProviderStatus) {
+  if (stored.lastFailureCategory === 'kling_poll_pending' || stored.lastFailureCategory === 'kling_poll_failed') {
+    return 'A Kling provider job already exists but was not recovered yet. Run the Kling recovery script before starting another paid canary.';
+  }
   if (stored.lastFailureCategory === 'kling_moderation_block') {
     return 'Kling route was previously blocked by provider safety. Use ForceRetest only if you intentionally want another paid attempt.';
   }
@@ -379,6 +418,18 @@ function storedKlingStatusPayload(input: {
     verifiedPersistedVideo: false,
     providerJobCreated: false,
     providerJobCreatedStored: input.stored.providerJobCreated ?? null,
+    attemptId: input.stored.attemptId ?? null,
+    providerJobId: input.stored.providerJobId ?? null,
+    requestId: input.stored.providerJobId ?? null,
+    providerJobIdPresent: Boolean(input.stored.providerJobId),
+    skipStage: input.stored.lastFailureCategory === 'kling_poll_pending' || input.stored.lastFailureCategory === 'kling_poll_failed'
+      ? 'poll_fal_job'
+      : null,
+    skipReason: input.stored.lastFailureCategory === 'kling_poll_pending'
+      ? 'existing_provider_job_pending_recovery'
+      : input.stored.lastFailureCategory === 'kling_poll_failed'
+        ? 'existing_provider_job_poll_failed'
+        : null,
     storedStatusReturned: true,
     freshCanaryAttemptCreated: false,
     attemptMode: 'returning_stored_status',
@@ -411,6 +462,22 @@ function stoppedBeforeFalSummary(stage: KlingCanaryStage, reason: string) {
   return `Kling canary stopped before fal submission at ${stage}: ${reason}.`;
 }
 
+function stageFailureSummary(stage: KlingCanaryStage, reason: string, providerJobCreated?: boolean) {
+  if (providerJobCreated || KLING_CANARY_STAGES.indexOf(stage) >= KLING_CANARY_STAGES.indexOf('poll_fal_job')) {
+    if (stage === 'poll_fal_job') {
+      return `Kling provider job was created, but Lumora failed while polling fal job status: ${reason}.`;
+    }
+    if (stage === 'parse_output') {
+      return `Kling provider job was created, but Lumora could not parse a verified video output: ${reason}.`;
+    }
+    if (stage === 'persist_verified_video') {
+      return `Kling provider job was created and returned output, but Lumora could not persist the verified video: ${reason}.`;
+    }
+    return `Kling provider job was created, but Lumora failed at ${stage}: ${reason}.`;
+  }
+  return stoppedBeforeFalSummary(stage, reason);
+}
+
 function readinessStatusForFailure(failureCategory: string, fallback: KlingReadinessStatus) {
   if (failureCategory === 'kling_billing_required') return 'billing_required';
   if (failureCategory === 'kling_provider_unavailable') return 'provider_unavailable';
@@ -432,6 +499,7 @@ export function buildKlingStageFailurePayload(input: {
   completedStages?: KlingCanaryStage[];
   attemptId?: string | null;
   attemptCreated?: boolean;
+  providerJobCreated?: boolean;
   forceRetest?: boolean;
   storedIgnored?: boolean;
   forceRetestHonored?: boolean;
@@ -442,7 +510,7 @@ export function buildKlingStageFailurePayload(input: {
 }) {
   const summary = safeProviderSummary(
     input.providerErrorSummary,
-    stoppedBeforeFalSummary(input.skipStage, input.skipReason),
+    stageFailureSummary(input.skipStage, input.skipReason, input.providerJobCreated),
   );
   return {
     ok: false,
@@ -454,8 +522,8 @@ export function buildKlingStageFailurePayload(input: {
     selectedModel: input.selectedModel ?? input.readiness?.selectedModel ?? null,
     attemptId: input.attemptId ?? null,
     attemptCreated: Boolean(input.attemptCreated),
-    providerJobCreated: false,
-    providerJobIdPresent: false,
+    providerJobCreated: Boolean(input.providerJobCreated),
+    providerJobIdPresent: Boolean(input.providerJobCreated),
     providerStatus: null,
     storedStatusReturned: false,
     freshCanaryAttemptCreated: Boolean(input.attemptCreated),
@@ -595,8 +663,63 @@ function preJobErrorPayload(input: {
   });
 }
 
+export function buildKlingPollFailurePayload(input: {
+  readiness?: ReturnType<typeof getKlingProviderReadiness> | null;
+  selectedModel: string;
+  attemptId?: string | null;
+  providerJobId?: string | null;
+  providerStatusUrl?: string | null;
+  pollEndpointUsed?: string | null;
+  error: unknown;
+  completedStages?: KlingCanaryStage[];
+  forceRetest?: boolean;
+  storedIgnored?: boolean;
+  referenceCount?: number | null;
+  selectedReferenceRole?: string | null;
+  selectedReferenceLabel?: string | null;
+}) {
+  const pollErrorMessage = safeProviderSummary(
+    typeof valueFromError(input.error, 'failureDetail') === 'string'
+      ? valueFromError(input.error, 'failureDetail')
+      : serializeDiagnosticError(input.error),
+    'Fal polling failed before Lumora could retrieve the Kling job status.',
+  );
+  return buildKlingStageFailurePayload({
+    readiness: input.readiness ?? null,
+    selectedModel: input.selectedModel,
+    failureCategory: 'kling_poll_failed',
+    skipStage: 'poll_fal_job',
+    skipReason: 'internal_exception',
+    completedStages: input.completedStages,
+    attemptId: input.attemptId ?? null,
+    attemptCreated: Boolean(input.attemptId),
+    providerJobCreated: true,
+    forceRetest: input.forceRetest,
+    storedIgnored: input.storedIgnored,
+    providerErrorSummary: pollErrorMessage,
+    recommendedNextAction: 'Recover or poll the existing Kling job before starting another canary.',
+    extras: {
+      pollErrorType: input.error instanceof Error ? input.error.name : typeof input.error,
+      pollErrorMessage,
+      providerJobId: input.providerJobId ?? null,
+      requestId: input.providerJobId ?? null,
+      providerJobIdPresent: Boolean(input.providerJobId),
+      providerStatusUrl: input.providerStatusUrl ?? null,
+      pollEndpointUsed: input.pollEndpointUsed ?? (
+        input.providerJobId ? queueUrl(input.selectedModel, `/requests/${encodeURIComponent(input.providerJobId)}/status`) : null
+      ),
+      referenceCount: input.referenceCount ?? null,
+      selectedReferenceRole: input.selectedReferenceRole ?? null,
+      selectedReferenceLabel: input.selectedReferenceLabel ?? null,
+      verificationVideoUsed: false,
+    },
+  });
+}
+
 function requestId(response: KlingQueueSubmitResponse) {
-  return response.request_id ?? response.requestId ?? null;
+  return response.request_id ?? response.requestId ?? (
+    typeof response.id === 'string' ? response.id : null
+  );
 }
 
 function queueUrl(model: string, suffix = '') {
@@ -699,6 +822,13 @@ function succeededKlingStatus(status: string | null | undefined) {
   return normalized === 'COMPLETED' || normalized === 'SUCCEEDED';
 }
 
+function klingStatusFromResponse(response: KlingQueueStatusResponse | null | undefined) {
+  if (!response) return null;
+  if (typeof response.status === 'string') return response.status;
+  if (response.completed === true) return 'COMPLETED';
+  return null;
+}
+
 async function pollKlingQueue(input: {
   model: string;
   requestId: string;
@@ -707,12 +837,12 @@ async function pollKlingQueue(input: {
   const deadline = Date.now() + (input.timeoutMs ?? 180_000);
   let latest = await retrieveKlingQueueStatus(input);
 
-  while (!terminalKlingStatus(latest.status) && Date.now() < deadline) {
+  while (!terminalKlingStatus(klingStatusFromResponse(latest)) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 5_000));
     latest = await retrieveKlingQueueStatus(input);
   }
 
-  if (succeededKlingStatus(latest.status)) {
+  if (succeededKlingStatus(klingStatusFromResponse(latest))) {
     return retrieveKlingQueueResult(input);
   }
   return latest;
@@ -760,8 +890,12 @@ async function verifyReferenceSet(referenceSet: KlingReferenceSet) {
   return { ok: true as const, checked };
 }
 
-function providerOutputFromKlingResult(result: KlingQueueStatusResponse) {
+export function providerOutputFromKlingResult(result: KlingQueueStatusResponse) {
   return result.output ?? result.result ?? result.data ?? result;
+}
+
+export function parseKlingQueueVideoOutput(result: KlingQueueStatusResponse) {
+  return parseProviderVideoOutput(providerOutputFromKlingResult(result));
 }
 
 export function createKlingCanaryAttemptMarker(input: {
@@ -774,6 +908,128 @@ export function createKlingCanaryAttemptMarker(input: {
     variant: input.variant ?? 'configured',
     createdAt: new Date().toISOString(),
   };
+}
+
+function submittedJobNotes(input: {
+  attempt: ReturnType<typeof createKlingCanaryAttemptMarker>;
+  jobId: string;
+  submitted: KlingQueueSubmitResponse;
+  payload: unknown;
+  referenceSet?: KlingReferenceSet | null;
+}) {
+  return {
+    attemptId: input.attempt.attemptId,
+    attemptCreated: true,
+    providerJobCreated: true,
+    providerJobId: input.jobId,
+    requestId: input.jobId,
+    providerStatus: input.submitted.status ?? null,
+    providerStatusUrl: redactFalUrl(input.submitted.status_url),
+    providerResponseUrl: redactFalUrl(input.submitted.response_url),
+    providerCancelUrlPresent: Boolean(input.submitted.cancel_url),
+    providerResponseShape: providerResponseShapeSummary(input.submitted),
+    payloadShapeSummary: klingPayloadShapeSummary(input.payload),
+    referenceCount: input.referenceSet?.candidates.length ?? null,
+    verificationVideoUsed: false,
+  };
+}
+
+export function buildKlingSubmittedJobNotesForTest(input: {
+  attemptId?: string;
+  jobId: string;
+  submitted: KlingQueueSubmitResponse;
+  payload: unknown;
+}) {
+  return submittedJobNotes({
+    attempt: {
+      attemptId: input.attemptId ?? 'kling-canary-test',
+      selectedModel: 'test-model',
+      variant: 'configured',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+    jobId: input.jobId,
+    submitted: input.submitted,
+    payload: input.payload,
+    referenceSet: null,
+  });
+}
+
+async function persistKlingSubmittedJob(input: {
+  userId?: string | null;
+  characterId?: string | null;
+  selectedModel: string;
+  referenceSet: KlingReferenceSet;
+  attempt: ReturnType<typeof createKlingCanaryAttemptMarker>;
+  jobId: string;
+  submitted: KlingQueueSubmitResponse;
+  payload: unknown;
+}) {
+  await persistAlternateExactLikenessCanaryResult({
+    userId: input.userId ?? input.referenceSet.selected.userId,
+    characterId: input.characterId ?? input.referenceSet.selected.characterId,
+    provider: 'kling_reference',
+    providerModel: input.selectedModel,
+    referenceRole: input.referenceSet.selected.referenceRole,
+    referenceLabel: input.referenceSet.selected.referenceLabel,
+    succeeded: false,
+    failureCategory: 'kling_poll_pending',
+    providerErrorCategory: 'kling_poll_pending',
+    outputUrlPresent: false,
+    notes: submittedJobNotes({
+      attempt: input.attempt,
+      jobId: input.jobId,
+      submitted: input.submitted,
+      payload: input.payload,
+      referenceSet: input.referenceSet,
+    }),
+  });
+}
+
+function notesRecord(value: unknown) {
+  return recordValue(value);
+}
+
+function noteString(notes: unknown, key: string) {
+  const value = notesRecord(notes)[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+async function findRecoverableKlingAttempt(input: {
+  userId?: string | null;
+  attemptId?: string | null;
+  providerJobId?: string | null;
+}) {
+  const result = await query<KlingRecoveryRow>(
+    `select
+       user_id as "userId",
+       character_id as "characterId",
+       provider_model as "providerModel",
+       reference_strategy as "referenceRole",
+       notes->>'referenceLabel' as "referenceLabel",
+       notes
+     from render_success_memory
+     where render_mode = 'exact_likeness_provider_canary'
+       and provider in ('kling_reference', 'kling')
+       and lower(coalesce(notes->>'providerJobCreated', 'false')) = 'true'
+       and lower(coalesce(notes->>'outputUrlPresent', 'false')) <> 'true'
+       and ($1::uuid is null or user_id = $1)
+       and ($2::text is null or notes->>'attemptId' = $2)
+       and (
+         $3::text is null
+         or notes->>'providerJobId' = $3
+         or notes->>'requestId' = $3
+       )
+     order by updated_at desc
+     limit 1`,
+    [
+      input.userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.userId)
+        ? input.userId
+        : null,
+      input.attemptId ?? null,
+      input.providerJobId ?? null,
+    ],
+  );
+  return result.rows[0] ?? null;
 }
 
 export async function buildKlingProviderShapeDiagnostics(input: {
@@ -829,6 +1085,205 @@ export async function buildKlingProviderShapeDiagnostics(input: {
     payloadShapeSummary: klingPayloadShapeSummary(payload),
     privateUrlsRedacted: true,
     readiness,
+  };
+}
+
+export async function recoverKlingSelfLikenessCanary(input: {
+  userId?: string | null;
+  attemptId?: string | null;
+  providerJobId?: string | null;
+  saveAsDraft?: boolean;
+} = {}) {
+  const [statuses, falAccount] = await Promise.all([
+    getAlternateExactLikenessProviderStatuses({
+      userId: input.userId ?? null,
+      characterId: null,
+    }),
+    getFalAccountStatus(),
+  ]);
+  const readiness = getKlingProviderReadiness({ statuses, falAccountStatus: falAccount });
+  let row: KlingRecoveryRow | null = null;
+  try {
+    row = await findRecoverableKlingAttempt({
+      userId: input.userId ?? null,
+      attemptId: input.attemptId ?? null,
+      providerJobId: input.providerJobId ?? null,
+    });
+  } catch (error) {
+    if (!input.providerJobId) {
+      return buildKlingStageFailurePayload({
+        readiness,
+        selectedModel: readiness.selectedModel,
+        failureCategory: 'kling_poll_failed',
+        skipStage: 'poll_fal_job',
+        skipReason: 'recoverable_attempt_lookup_failed',
+        completedStages: ['auth_probe_gate'],
+        providerErrorSummary: serializeDiagnosticError(error),
+        recommendedNextAction: 'Pass a providerJobId from the canary response, or fix render_success_memory diagnostics before recovery.',
+      });
+    }
+  }
+
+  const notes = row?.notes ?? {};
+  const selectedModel = row?.providerModel || readiness.selectedModel || configuredModel();
+  const providerJobId = input.providerJobId ?? noteString(notes, 'providerJobId') ?? noteString(notes, 'requestId');
+  const attemptId = input.attemptId ?? noteString(notes, 'attemptId') ?? null;
+  if (!selectedModel || !providerJobId) {
+    return buildKlingStageFailurePayload({
+      readiness,
+      selectedModel,
+      failureCategory: 'kling_poll_failed',
+      skipStage: 'poll_fal_job',
+      skipReason: 'recoverable_provider_job_not_found',
+      completedStages: ['auth_probe_gate'],
+      providerErrorSummary: 'No recoverable Kling provider job id was found.',
+      recommendedNextAction: 'Run a Kling canary only when you intend to spend a new attempt, or pass a providerJobId from the previous response.',
+    });
+  }
+
+  let finalJob: KlingQueueStatusResponse;
+  try {
+    finalJob = await pollKlingQueue({
+      model: selectedModel,
+      requestId: providerJobId,
+    });
+  } catch (error) {
+    return buildKlingPollFailurePayload({
+      readiness,
+      selectedModel,
+      attemptId,
+      providerJobId,
+      providerStatusUrl: noteString(notes, 'providerStatusUrl'),
+      pollEndpointUsed: queueUrl(selectedModel, `/requests/${encodeURIComponent(providerJobId)}/status`),
+      error,
+      completedStages: ['auth_probe_gate', 'submit_fal_job'],
+      referenceCount: null,
+      selectedReferenceRole: row?.referenceRole ?? null,
+      selectedReferenceLabel: row?.referenceLabel ?? null,
+    });
+  }
+
+  const providerStatus = klingStatusFromResponse(finalJob);
+  const output = providerOutputFromKlingResult(finalJob);
+  const parsedOutput = parseProviderVideoOutput(output);
+  const recoveredOutputFailureReason = 'reason' in parsedOutput ? parsedOutput.reason : null;
+  if (!succeededKlingStatus(providerStatus) || !parsedOutput.ok) {
+    const failureCategory = succeededKlingStatus(providerStatus)
+      ? 'kling_recover_output_missing'
+      : classifyKlingFailure({ detail: finalJob.error ?? finalJob }).category;
+    await persistAlternateExactLikenessCanaryResult({
+      userId: row?.userId ?? input.userId ?? null,
+      characterId: row?.characterId ?? null,
+      provider: 'kling_reference',
+      providerModel: selectedModel,
+      referenceRole: row?.referenceRole ?? 'recovered_provider_job',
+      referenceLabel: row?.referenceLabel ?? 'Recovered Kling provider job',
+      succeeded: false,
+      failureCategory,
+      providerErrorCategory: failureCategory,
+      outputUrlPresent: false,
+      notes: {
+        ...notesRecord(notes),
+        attemptId,
+        providerJobCreated: true,
+        providerJobId,
+        requestId: providerJobId,
+        providerStatus,
+        recoveryAttempted: true,
+        outputShapeSummary: outputShapeSummary(output),
+      },
+    });
+    return {
+      ok: false,
+      provider: 'kling',
+      route: 'kling_reference',
+      recovery: true,
+      selectedModel,
+      attemptId,
+      providerJobCreated: true,
+      providerJobId,
+      requestId: providerJobId,
+      providerJobIdPresent: true,
+      providerStatus,
+      outputUrlPresent: false,
+      parsedVideoUrlPresent: false,
+      verifiedVideoPresent: false,
+      verifiedPersistedVideo: false,
+      failureCategory,
+      canaryStatus: 'canary_failed',
+      skipStage: 'parse_output',
+      skipReason: recoveredOutputFailureReason ?? 'provider_job_not_completed',
+      outputShapeSummary: outputShapeSummary(output),
+      providerErrorSummary: failureCategory === 'kling_recover_output_missing'
+        ? `Recovered Kling job did not contain a usable video output: ${recoveredOutputFailureReason ?? 'output missing'}`
+        : safeProviderSummary(finalJob.error ?? finalJob, `Recovered Kling job status was ${providerStatus ?? 'unknown'}.`),
+      recommendedNextAction: 'Do not start another Kling canary yet unless you intend to spend a new provider attempt.',
+    };
+  }
+
+  const persisted = await persistCompletedGeneration({
+    userId: row?.userId ?? input.userId ?? null,
+    id: `kling-recover-${providerJobId}`,
+    title: 'Kling likeness recovery',
+    prompt: KLING_REFERENCE_PROMPT,
+    finalPrompt: KLING_REFERENCE_PROMPT,
+    provider: 'kling',
+    engine: 'kling',
+    model: selectedModel,
+    videoUrl: parsedOutput.videoUrl,
+    thumbnailUrl: null,
+    characterId: row?.characterId ?? null,
+    characterName: null,
+    characterAvatar: null,
+    isDefaultSelfCharacter: true,
+    durationSeconds: 5,
+    aspectRatio: '9:16',
+    privacy: input.saveAsDraft ? 'private' : 'private',
+  });
+
+  await persistAlternateExactLikenessCanaryResult({
+    userId: row?.userId ?? input.userId ?? null,
+    characterId: row?.characterId ?? null,
+    provider: 'kling_reference',
+    providerModel: selectedModel,
+    referenceRole: row?.referenceRole ?? 'recovered_provider_job',
+    referenceLabel: row?.referenceLabel ?? 'Recovered Kling provider job',
+    succeeded: true,
+    outputUrlPresent: true,
+    notes: {
+      ...notesRecord(notes),
+      attemptId,
+      providerJobCreated: true,
+      providerJobId,
+      requestId: providerJobId,
+      providerStatus,
+      recoveryAttempted: true,
+      outputUrlPresent: true,
+      verifiedPersistedVideo: Boolean(persisted.storagePath || persisted.projectId || parsedOutput.videoUrl),
+    },
+  });
+
+  return {
+    ok: true,
+    provider: 'kling',
+    route: 'kling_reference',
+    recovery: true,
+    selectedModel,
+    attemptId,
+    providerJobCreated: true,
+    providerJobId,
+    requestId: providerJobId,
+    providerJobIdPresent: true,
+    providerStatus,
+    outputUrlPresent: true,
+    parsedVideoUrlPresent: true,
+    verifiedVideoPresent: true,
+    verifiedPersistedVideo: Boolean(persisted.storagePath || persisted.projectId || parsedOutput.videoUrl),
+    failureCategory: null,
+    canaryStatus: 'kling_recover_succeeded',
+    projectId: persisted.projectId,
+    storagePathPresent: Boolean(persisted.storagePath),
+    recommendedNextAction: 'Kling recovery succeeded. Lumora can treat this provider route as canary-proven after production enablement.',
   };
 }
 
@@ -1144,21 +1599,72 @@ export async function startKlingSelfLikenessCanary(input: {
       return response;
     }
     jobId = requestId(submitted) ?? fallbackRequestId;
-    activeStage = 'poll_fal_job';
-    const finalJob = await pollKlingQueue({
-      model: selectedModel,
-      requestId: jobId,
+    await persistKlingSubmittedJob({
+      userId: referenceSet.selected.userId,
+      characterId: referenceSet.selected.characterId,
+      selectedModel,
+      referenceSet,
+      attempt,
+      jobId,
+      submitted,
+      payload,
     });
+    activeStage = 'poll_fal_job';
+    let finalJob: KlingQueueStatusResponse;
+    try {
+      finalJob = await pollKlingQueue({
+        model: selectedModel,
+        requestId: jobId,
+      });
+    } catch (error) {
+      const response = buildKlingPollFailurePayload({
+        readiness,
+        selectedModel,
+        attemptId: attempt.attemptId,
+        providerJobId: jobId,
+        providerStatusUrl: redactFalUrl(submitted.status_url),
+        pollEndpointUsed: queueUrl(selectedModel, `/requests/${encodeURIComponent(jobId)}/status`),
+        error,
+        completedStages,
+        forceRetest: input.forceRetest,
+        storedIgnored: Boolean(input.forceRetest && stored),
+        referenceCount: referenceSet.candidates.length,
+        selectedReferenceRole: referenceSet.selected.referenceRole,
+        selectedReferenceLabel: referenceSet.selected.referenceLabel,
+      });
+      const responseRecord = response as Record<string, unknown>;
+      await persistAlternateExactLikenessCanaryResult({
+        userId: referenceSet.selected.userId,
+        characterId: referenceSet.selected.characterId,
+        provider: 'kling_reference',
+        providerModel: selectedModel,
+        referenceRole: referenceSet.selected.referenceRole,
+        referenceLabel: referenceSet.selected.referenceLabel,
+        succeeded: false,
+        failureCategory: 'kling_poll_failed',
+        providerErrorCategory: 'kling_poll_failed',
+        outputUrlPresent: false,
+        notes: {
+          ...submittedJobNotes({ attempt, jobId, submitted, payload, referenceSet }),
+          skipStage: 'poll_fal_job',
+          skipReason: 'internal_exception',
+          pollErrorType: responseRecord.pollErrorType ?? null,
+          pollErrorMessage: responseRecord.pollErrorMessage ?? null,
+        },
+      });
+      return response;
+    }
     completedStages.push('poll_fal_job');
     activeStage = 'parse_output';
     const output = providerOutputFromKlingResult(finalJob);
     const parsedOutput = parseProviderVideoOutput(output);
+    const parsedFailureReason = 'reason' in parsedOutput ? parsedOutput.reason : null;
     const failed = !succeededKlingStatus(finalJob.status);
 
     if (failed || !parsedOutput.ok) {
       const failure = failed
         ? classifyKlingFailure({ detail: finalJob.error ?? finalJob })
-        : { category: 'kling_output_missing', detail: `output shape ${outputShapeSummary(output)}` };
+        : { category: 'kling_output_parse_failed', detail: `output shape ${outputShapeSummary(output)}; ${parsedFailureReason ?? 'video output missing'}` };
       if (failure.category === 'kling_billing_required') {
         return {
           ok: false,
@@ -1179,6 +1685,10 @@ export async function startKlingSelfLikenessCanary(input: {
           storedStatusIgnored: Boolean(input.forceRetest && stored),
           reasonIfNotHonored: null,
           providerJobIdPresent: Boolean(jobId),
+          providerJobId: jobId,
+          requestId: jobId,
+          providerStatusUrl: redactFalUrl(submitted.status_url),
+          pollEndpointUsed: queueUrl(selectedModel, `/requests/${encodeURIComponent(jobId)}/status`),
           providerStatus: finalJob.status ?? submitted.status ?? null,
           referenceCount: referenceSet.candidates.length,
           selectedReferenceRole: referenceSet.selected.referenceRole,
@@ -1193,7 +1703,7 @@ export async function startKlingSelfLikenessCanary(input: {
           skipReason: failure.detail || 'billing_required_after_provider_job',
           stageStatus: stageStatus({ completed: completedStages, failed: 'poll_fal_job' }),
           failureCategory: failure.category,
-          providerErrorSummary: safeProviderSummary(failure.detail, stoppedBeforeFalSummary('poll_fal_job', 'billing_required_after_provider_job')),
+          providerErrorSummary: safeProviderSummary(failure.detail, stageFailureSummary('poll_fal_job', 'billing_required_after_provider_job', true)),
           recommendedNextAction: 'Fal billing requires attention. Run fal account diagnostics, add credits if needed, then retry Kling.',
         };
       }
@@ -1240,6 +1750,10 @@ export async function startKlingSelfLikenessCanary(input: {
         storedStatusIgnored: Boolean(input.forceRetest && stored),
         reasonIfNotHonored: null,
         providerJobIdPresent: Boolean(jobId),
+        providerJobId: jobId,
+        requestId: jobId,
+        providerStatusUrl: redactFalUrl(submitted.status_url),
+        pollEndpointUsed: queueUrl(selectedModel, `/requests/${encodeURIComponent(jobId)}/status`),
         providerStatus: finalJob.status ?? submitted.status ?? null,
         referenceCount: referenceSet.candidates.length,
         selectedReferenceRole: referenceSet.selected.referenceRole,
@@ -1326,6 +1840,10 @@ export async function startKlingSelfLikenessCanary(input: {
       storedStatusIgnored: Boolean(input.forceRetest && stored),
       reasonIfNotHonored: null,
       providerJobIdPresent: Boolean(jobId),
+      providerJobId: jobId,
+      requestId: jobId,
+      providerStatusUrl: redactFalUrl(submitted.status_url),
+      pollEndpointUsed: queueUrl(selectedModel, `/requests/${encodeURIComponent(jobId)}/status`),
       providerStatus: finalJob.status ?? submitted.status ?? null,
       referenceCount: referenceSet.candidates.length,
       selectedReferenceRole: referenceSet.selected.referenceRole,
@@ -1354,7 +1872,10 @@ export async function startKlingSelfLikenessCanary(input: {
         readinessStatus: 'billing_required',
         canaryStatus: 'billing_required',
         selectedModel,
-        providerJobCreated: false,
+        providerJobCreated: Boolean(jobId),
+        providerJobIdPresent: Boolean(jobId),
+        providerJobId: jobId,
+        requestId: jobId,
         storedStatusReturned: false,
         freshCanaryAttemptCreated: true,
         attemptMode: 'blocked_by_billing',
@@ -1380,7 +1901,7 @@ export async function startKlingSelfLikenessCanary(input: {
           typeof (error as { failureDetail?: unknown }).failureDetail === 'string'
             ? (error as { failureDetail: string }).failureDetail
             : serializeDiagnosticError(error),
-          stoppedBeforeFalSummary(activeStage, 'billing_required'),
+          stageFailureSummary(activeStage, 'billing_required', Boolean(jobId)),
         ),
         recommendedNextAction: 'Fal billing requires attention. Run fal account diagnostics, add credits if needed, then retry Kling.',
       };
@@ -1426,6 +1947,8 @@ export async function startKlingSelfLikenessCanary(input: {
       extras: {
         providerJobCreated: Boolean(jobId),
         providerJobIdPresent: Boolean(jobId),
+        providerJobId: jobId,
+        requestId: jobId,
         referenceCount: referenceSet.candidates.length,
         selectedReferenceRole: referenceSet.selected.referenceRole,
         selectedReferenceLabel: referenceSet.selected.referenceLabel,

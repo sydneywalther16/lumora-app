@@ -34,6 +34,12 @@ function Print-CanaryResult {
   if ($Result.attemptId) { Write-Host "attempt id: $($Result.attemptId)" }
   if ($Result.skipStage) { Write-Host "skip stage: $($Result.skipStage)" }
   if ($Result.skipReason) { Write-Host "skip reason: $($Result.skipReason)" }
+  if ($Result.providerJobId) { Write-Host "provider job id: $($Result.providerJobId)" }
+  if ($Result.requestId) { Write-Host "request id: $($Result.requestId)" }
+  if ($Result.providerStatusUrl) { Write-Host "provider status url: $($Result.providerStatusUrl)" }
+  if ($Result.pollEndpointUsed) { Write-Host "poll endpoint used: $($Result.pollEndpointUsed)" }
+  if ($Result.pollErrorType) { Write-Host "poll error type: $($Result.pollErrorType)" }
+  if ($Result.pollErrorMessage) { Write-Host "poll error message: $($Result.pollErrorMessage)" }
   if ($Result.endpointUsed) { Write-Host "endpoint used: $($Result.endpointUsed)" }
   if ($null -ne $Result.falHttpStatus) { Write-Host "fal HTTP status: $($Result.falHttpStatus)" }
   if ($Result.falErrorType) { Write-Host "fal error type: $($Result.falErrorType)" }
@@ -62,6 +68,9 @@ function Print-CanaryResult {
   if ($Result.failureCategory) { Write-Host "failure category: $($Result.failureCategory)" }
   if ($Result.providerErrorSummary) { Write-Host "provider error summary: $($Result.providerErrorSummary)" }
   if ($Result.recommendedNextAction) { Write-Host "recommended next action: $($Result.recommendedNextAction)" }
+  if ($Result.failureCategory -eq "kling_poll_failed" -and $Result.attemptId) {
+    Write-Host "recovery suggestion: .\scripts\kling-likeness-recover.ps1 -ApiBaseUrl `"$ApiBaseUrl`" -AttemptId `"$($Result.attemptId)`""
+  }
   if ($Result.warning) { Write-Host "warning: $($Result.warning)" }
 }
 

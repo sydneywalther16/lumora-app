@@ -26,6 +26,7 @@ import { getFalAccountStatus } from '../services/providers/falAccountDiagnostics
 import {
   buildKlingProviderShapeDiagnostics,
   getKlingProviderReadiness,
+  recoverKlingSelfLikenessCanary,
   startKlingSelfLikenessCanary,
 } from '../services/providers/klingProvider';
 import { getRunwayProviderReadiness, startRunwaySelfLikenessCanary } from '../services/providers/runwayProvider';
@@ -71,6 +72,10 @@ const klingProviderShapeSchema = z.object({
   userId: z.string().optional().nullable(),
   variant: z.enum(['configured', 'o1_reference_to_video', 'o1_standard_reference_to_video', 'elements_standard']).optional().default('configured'),
 });
+const klingRecoverSchema = canarySchema.extend({
+  attemptId: z.string().optional().nullable(),
+  providerJobId: z.string().optional().nullable(),
+});
 const videoReferenceCanarySchema = canarySchema.extend({
   variant: z.enum(['reference_videos_bracket', 'reference_videos_at', 'video_urls_at']).optional().default('reference_videos_bracket'),
   forceNormalize: z.boolean().optional().default(false),
@@ -108,6 +113,7 @@ const canaryRouteInventory = {
   exactLikenessCanaryRouteMounted: true,
   falAccountStatusRouteMounted: true,
   klingProviderShapeRouteMounted: true,
+  klingCanaryRecoverRouteMounted: true,
   klingCanaryRepairRouteMounted: true,
   runwayLikenessCanaryRouteMounted: true,
   klingLikenessCanaryRouteMounted: true,
@@ -290,6 +296,7 @@ healthRouter.get('/api/diagnostics/canary-routes', (_req, res) => {
       exactLikenessCanary: 'POST /api/diagnostics/exact-likeness-canary/self',
       falAccountStatus: 'GET /api/diagnostics/fal-account-status',
       klingProviderShape: 'GET /api/diagnostics/kling-provider-shape',
+      klingLikenessCanaryRecover: 'POST /api/diagnostics/kling-likeness-canary/recover',
       repairKlingCanaryStatus: 'POST /api/diagnostics/repair-kling-canary-status',
       runwayLikenessCanary: 'POST /api/diagnostics/runway-likeness-canary/self',
       klingLikenessCanary: 'POST /api/diagnostics/kling-likeness-canary/self',
@@ -558,6 +565,36 @@ healthRouter.post('/api/diagnostics/kling-likeness-canary/self', async (req, res
     ...status,
     warning: 'This may consume provider credits.',
   });
+});
+
+healthRouter.post('/api/diagnostics/kling-likeness-canary/recover', async (req, res) => {
+  if (!env.ENABLE_RENDER_PROBE) {
+    res.status(403).json({
+      error: 'Kling recovery disabled. Set ENABLE_RENDER_PROBE=true to recover an existing Kling provider job.',
+    });
+    return;
+  }
+  if (!env.KLING_ENABLED) {
+    res.status(403).json({
+      error: 'Kling recovery disabled. Set KLING_ENABLED=true to recover a Kling job.',
+    });
+    return;
+  }
+  if (!env.FAL_KEY && !env.KLING_API_KEY) {
+    res.status(403).json({
+      error: 'Fal API key missing. Set FAL_KEY or KLING_API_KEY to recover a Kling job.',
+    });
+    return;
+  }
+
+  const payload = klingRecoverSchema.parse(req.body ?? {});
+  const status = await recoverKlingSelfLikenessCanary({
+    userId: payload.userId ?? req.header('x-lumora-user-id') ?? null,
+    attemptId: payload.attemptId ?? null,
+    providerJobId: payload.providerJobId ?? null,
+    saveAsDraft: payload.saveAsDraft,
+  });
+  res.status(status.ok ? 200 : 200).json(status);
 });
 
 healthRouter.post('/api/diagnostics/seedance-reference-matrix/self', async (req, res) => {

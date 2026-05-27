@@ -6,14 +6,17 @@ import {
   getFalAccountStatus,
 } from '../src/services/providers/falAccountDiagnostics';
 import {
+  buildKlingPollFailurePayload,
   buildKlingPreJobFailureDiagnostics,
   buildKlingReferenceToVideoPayload,
+  buildKlingSubmittedJobNotesForTest,
   buildKlingStageFailurePayload,
   classifyKlingFailure,
   createKlingCanaryAttemptMarker,
   getKlingProviderReadiness,
   klingPayloadShapeSummary,
   modelForVariant,
+  parseKlingQueueVideoOutput,
   shouldReturnStoredKlingCanaryStatus,
   startKlingSelfLikenessCanary,
 } from '../src/services/providers/klingProvider';
@@ -184,6 +187,46 @@ try {
   assert.equal(attemptFailurePayload.skipStage, 'create_attempt_record');
   assert.equal(attemptFailurePayload.providerErrorSummary, 'db insert failed');
   assert.equal(attemptFailurePayload.freshCanaryAttemptCreated, false);
+
+  const submittedNotes = buildKlingSubmittedJobNotesForTest({
+    attemptId: attempt.attemptId,
+    jobId: 'req_123',
+    submitted: {
+      request_id: 'req_123',
+      status_url: 'https://queue.fal.run/fal-ai/kling-video/o1/reference-to-video/requests/req_123/status?token=secret',
+      response_url: 'https://queue.fal.run/fal-ai/kling-video/o1/reference-to-video/requests/req_123?token=secret',
+      cancel_url: 'https://queue.fal.run/fal-ai/kling-video/o1/reference-to-video/requests/req_123/cancel?token=secret',
+      status: 'IN_QUEUE',
+    },
+    payload,
+  });
+  assert.equal(submittedNotes.providerJobCreated, true);
+  assert.equal(submittedNotes.providerJobId, 'req_123');
+  assert.equal(submittedNotes.providerStatusUrl, 'https://queue.fal.run/fal-ai/kling-video/o1/reference-to-video/requests/req_123/status');
+  assert.equal(JSON.stringify(submittedNotes).includes('token=secret'), false);
+
+  const pollFailure = buildKlingPollFailurePayload({
+    readiness: ready,
+    selectedModel: 'fal-ai/kling-video/o1/reference-to-video',
+    attemptId: attempt.attemptId,
+    providerJobId: 'req_123',
+    error: new Error('status fetch exploded'),
+    completedStages: ['auth_probe_gate', 'resolve_self_character', 'load_references', 'select_references', 'sign_reference_urls', 'build_payload', 'create_attempt_record', 'submit_fal_job'],
+  });
+  assert.equal(pollFailure.failureCategory, 'kling_poll_failed');
+  assert.equal(pollFailure.providerJobCreated, true);
+  assert.equal(pollFailure.skipStage, 'poll_fal_job');
+  assert.equal(pollFailure.providerErrorSummary.includes('stopped before fal submission'), false);
+  assert.match(pollFailure.providerErrorSummary, /polling fal job status|status fetch exploded/i);
+
+  assert.equal(parseKlingQueueVideoOutput({
+    completed: true,
+    data: { video: { url: 'https://cdn.example.com/final.mp4' } },
+  }).ok, true);
+  assert.equal(parseKlingQueueVideoOutput({
+    status: 'COMPLETED',
+    result: { video_url: 'https://cdn.example.com/final.webm' },
+  }).ok, true);
 
   assert.equal(classifyFalAccountStatus({ statusCode: 401, payload: { detail: 'invalid key' } }).errorCategory, 'fal_auth_failed');
   assert.equal(classifyFalAccountStatus({ statusCode: 403, payload: { detail: 'This API key not permitted to perform this action.' } }).errorCategory, 'fal_key_scope_not_permitted');
@@ -375,6 +418,16 @@ try {
   assert.equal(shouldReturnStoredKlingCanaryStatus({
     stored: { ...storedRealFailure, lastFailureCategory: 'kling_billing_required', providerJobCreated: false },
   }), false);
+  assert.equal(shouldReturnStoredKlingCanaryStatus({
+    stored: {
+      ...storedRealFailure,
+      lastFailureCategory: 'kling_poll_failed',
+      providerJobCreated: true,
+      attemptId: 'kling-canary-existing',
+      providerJobId: 'req_existing',
+    },
+    forceRetest: true,
+  }), true);
 
   globalThis.fetch = (async () => new Response(JSON.stringify({
     detail: 'User is locked. Reason: Exhausted balance. Top up your balance.',
