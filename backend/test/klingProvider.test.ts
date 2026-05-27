@@ -17,6 +17,7 @@ import {
   klingPayloadShapeSummary,
   modelForVariant,
   parseKlingQueueVideoOutput,
+  resolveKlingPollUrls,
   shouldReturnStoredKlingCanaryStatus,
   startKlingSelfLikenessCanary,
 } from '../src/services/providers/klingProvider';
@@ -193,31 +194,84 @@ try {
     jobId: 'req_123',
     submitted: {
       request_id: 'req_123',
-      status_url: 'https://queue.fal.run/fal-ai/kling-video/o1/reference-to-video/requests/req_123/status?token=secret',
-      response_url: 'https://queue.fal.run/fal-ai/kling-video/o1/reference-to-video/requests/req_123?token=secret',
-      cancel_url: 'https://queue.fal.run/fal-ai/kling-video/o1/reference-to-video/requests/req_123/cancel?token=secret',
+      status_url: 'https://queue.fal.run/fal-ai/kling-video/requests/req_123/status',
+      response_url: 'https://queue.fal.run/fal-ai/kling-video/requests/req_123',
+      cancel_url: 'https://queue.fal.run/fal-ai/kling-video/requests/req_123/cancel',
       status: 'IN_QUEUE',
     },
     payload,
   });
   assert.equal(submittedNotes.providerJobCreated, true);
   assert.equal(submittedNotes.providerJobId, 'req_123');
-  assert.equal(submittedNotes.providerStatusUrl, 'https://queue.fal.run/fal-ai/kling-video/o1/reference-to-video/requests/req_123/status');
-  assert.equal(JSON.stringify(submittedNotes).includes('token=secret'), false);
+  assert.equal(submittedNotes.providerStatusUrl, 'https://queue.fal.run/fal-ai/kling-video/requests/req_123/status');
+  assert.equal(submittedNotes.providerResponseUrl, 'https://queue.fal.run/fal-ai/kling-video/requests/req_123');
+
+  const providerReturnedUrls = resolveKlingPollUrls({
+    model: 'fal-ai/kling-video/o1/reference-to-video',
+    requestId: 'req_123',
+    statusUrl: 'https://queue.fal.run/fal-ai/kling-video/requests/req_123/status',
+    responseUrl: 'https://queue.fal.run/fal-ai/kling-video/requests/req_123',
+    preferGenericFallback: true,
+  });
+  assert.equal(providerReturnedUrls.statusUrlSource, 'provider_returned');
+  assert.equal(providerReturnedUrls.responseUrlSource, 'provider_returned');
+  assert.equal(providerReturnedUrls.statusUrl, 'https://queue.fal.run/fal-ai/kling-video/requests/req_123/status');
+
+  const oldAttemptUrls = resolveKlingPollUrls({
+    model: 'fal-ai/kling-video/o1/reference-to-video',
+    requestId: 'req_123',
+    preferGenericFallback: true,
+  });
+  assert.equal(oldAttemptUrls.statusUrlSource, 'generic_kling_fallback');
+  assert.equal(oldAttemptUrls.responseUrlSource, 'generic_kling_fallback');
+  assert.equal(oldAttemptUrls.statusUrl, 'https://queue.fal.run/fal-ai/kling-video/requests/req_123/status');
+  assert.equal(oldAttemptUrls.responseUrl, 'https://queue.fal.run/fal-ai/kling-video/requests/req_123');
+  assert.equal(oldAttemptUrls.statusUrl.includes('/o1/reference-to-video/'), false);
+
+  const modelSlugFallbackUrls = resolveKlingPollUrls({
+    model: 'fal-ai/kling-video/o1/reference-to-video',
+    requestId: 'req_123',
+  });
+  assert.equal(modelSlugFallbackUrls.statusUrlSource, 'model_slug_fallback');
 
   const pollFailure = buildKlingPollFailurePayload({
     readiness: ready,
     selectedModel: 'fal-ai/kling-video/o1/reference-to-video',
     attemptId: attempt.attemptId,
     providerJobId: 'req_123',
+    pollEndpointUsed: oldAttemptUrls.statusUrl,
+    responseEndpointUsed: oldAttemptUrls.responseUrl,
+    statusUrlSource: oldAttemptUrls.statusUrlSource,
+    responseUrlSource: oldAttemptUrls.responseUrlSource,
     error: new Error('status fetch exploded'),
     completedStages: ['auth_probe_gate', 'resolve_self_character', 'load_references', 'select_references', 'sign_reference_urls', 'build_payload', 'create_attempt_record', 'submit_fal_job'],
   });
   assert.equal(pollFailure.failureCategory, 'kling_poll_failed');
   assert.equal(pollFailure.providerJobCreated, true);
   assert.equal(pollFailure.skipStage, 'poll_fal_job');
+  assert.equal(pollFailure.pollEndpointUsed, 'https://queue.fal.run/fal-ai/kling-video/requests/req_123/status');
+  assert.equal(pollFailure.statusUrlSource, 'generic_kling_fallback');
   assert.equal(pollFailure.providerErrorSummary.includes('stopped before fal submission'), false);
   assert.match(pollFailure.providerErrorSummary, /polling fal job status|status fetch exploded/i);
+
+  const pollHttpFailure = buildKlingPollFailurePayload({
+    readiness: ready,
+    selectedModel: 'fal-ai/kling-video/o1/reference-to-video',
+    providerJobId: 'req_404',
+    error: Object.assign(new Error('fal poll returned 404'), {
+      falHttpStatus: 404,
+      falErrorType: 'not_found',
+      falErrorMessage: 'request not found',
+      falErrorBodyRedacted: { detail: 'request not found' },
+      endpointUsed: 'https://queue.fal.run/fal-ai/kling-video/o1/reference-to-video/requests/req_404/status?token=secret',
+      modelSlug: 'fal-ai/kling-video/o1/reference-to-video',
+    }),
+  });
+  assert.equal(pollHttpFailure.falHttpStatus, 404);
+  assert.equal(pollHttpFailure.falErrorType, 'not_found');
+  assert.equal(pollHttpFailure.falErrorMessage, 'request not found');
+  assert.equal(pollHttpFailure.endpointUsed, 'https://queue.fal.run/fal-ai/kling-video/o1/reference-to-video/requests/req_404/status');
+  assert.equal(JSON.stringify(pollHttpFailure).includes('token=secret'), false);
 
   assert.equal(parseKlingQueueVideoOutput({
     completed: true,

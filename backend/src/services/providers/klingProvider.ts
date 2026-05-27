@@ -24,6 +24,7 @@ import {
 import { query } from '../db';
 
 const FAL_QUEUE_BASE_URL = 'https://queue.fal.run';
+const KLING_GENERIC_QUEUE_MODEL = 'fal-ai/kling-video';
 const KLING_REFERENCE_PROMPT =
   'Keep the referenced self character from @Element1 consistent while the character walks slowly through a peaceful sunlit garden, natural movement, fully clothed, soft cinematic storybook style, gentle camera motion.';
 const KLING_CANARY_STAGES = [
@@ -82,6 +83,13 @@ type KlingReferenceSet = {
   frontalImageUrl: string;
   referenceImageUrls: string[];
   candidates: SelfReferenceMatrixCandidate[];
+};
+
+type KlingPollUrls = {
+  statusUrl: string;
+  responseUrl: string;
+  statusUrlSource: 'provider_returned' | 'generic_kling_fallback' | 'model_slug_fallback';
+  responseUrlSource: 'provider_returned' | 'generic_kling_fallback' | 'model_slug_fallback';
 };
 
 type KlingRecoveryRow = {
@@ -236,6 +244,44 @@ function redactFalUrl(value: unknown) {
   } catch {
     return redactKlingError(value);
   }
+}
+
+function rawFalUrl(value: unknown) {
+  return typeof value === 'string' && /^https:\/\/queue\.fal\.run\//i.test(value.trim())
+    ? value.trim()
+    : null;
+}
+
+function genericKlingQueueUrl(requestId: string, suffix = '') {
+  return queueUrl(KLING_GENERIC_QUEUE_MODEL, `/requests/${encodeURIComponent(requestId)}${suffix}`);
+}
+
+function modelQueueRequestUrl(model: string, requestId: string, suffix = '') {
+  return queueUrl(model, `/requests/${encodeURIComponent(requestId)}${suffix}`);
+}
+
+export function resolveKlingPollUrls(input: {
+  model: string;
+  requestId: string;
+  statusUrl?: string | null;
+  responseUrl?: string | null;
+  preferGenericFallback?: boolean;
+}): KlingPollUrls {
+  const statusUrl = rawFalUrl(input.statusUrl);
+  const responseUrl = rawFalUrl(input.responseUrl);
+  const fallbackStatusUrl = input.preferGenericFallback
+    ? genericKlingQueueUrl(input.requestId, '/status')
+    : modelQueueRequestUrl(input.model, input.requestId, '/status');
+  const fallbackResponseUrl = input.preferGenericFallback
+    ? genericKlingQueueUrl(input.requestId)
+    : modelQueueRequestUrl(input.model, input.requestId);
+  const fallbackSource = input.preferGenericFallback ? 'generic_kling_fallback' : 'model_slug_fallback';
+  return {
+    statusUrl: statusUrl ?? fallbackStatusUrl,
+    responseUrl: responseUrl ?? fallbackResponseUrl,
+    statusUrlSource: statusUrl ? 'provider_returned' : fallbackSource,
+    responseUrlSource: responseUrl ? 'provider_returned' : fallbackSource,
+  };
 }
 
 function configuredModel() {
@@ -670,6 +716,9 @@ export function buildKlingPollFailurePayload(input: {
   providerJobId?: string | null;
   providerStatusUrl?: string | null;
   pollEndpointUsed?: string | null;
+  responseEndpointUsed?: string | null;
+  statusUrlSource?: KlingPollUrls['statusUrlSource'] | null;
+  responseUrlSource?: KlingPollUrls['responseUrlSource'] | null;
   error: unknown;
   completedStages?: KlingCanaryStage[];
   forceRetest?: boolean;
@@ -701,13 +750,24 @@ export function buildKlingPollFailurePayload(input: {
     extras: {
       pollErrorType: input.error instanceof Error ? input.error.name : typeof input.error,
       pollErrorMessage,
+      falHttpStatus: valueFromError(input.error, 'falHttpStatus') ?? valueFromError(input.error, 'statusCode') ?? null,
+      falErrorType: valueFromError(input.error, 'falErrorType') ?? null,
+      falErrorMessage: valueFromError(input.error, 'falErrorMessage') ?? null,
+      falErrorBodyRedacted: valueFromError(input.error, 'falErrorBodyRedacted') ?? null,
+      endpointUsed: redactFalUrl(valueFromError(input.error, 'endpointUsed')),
+      modelSlug: valueFromError(input.error, 'modelSlug') ?? input.selectedModel,
       providerJobId: input.providerJobId ?? null,
       requestId: input.providerJobId ?? null,
       providerJobIdPresent: Boolean(input.providerJobId),
-      providerStatusUrl: input.providerStatusUrl ?? null,
-      pollEndpointUsed: input.pollEndpointUsed ?? (
+      providerStatusUrl: redactFalUrl(input.providerStatusUrl),
+      pollEndpointUsed: redactFalUrl(input.pollEndpointUsed ?? (
         input.providerJobId ? queueUrl(input.selectedModel, `/requests/${encodeURIComponent(input.providerJobId)}/status`) : null
-      ),
+      )),
+      responseEndpointUsed: redactFalUrl(input.responseEndpointUsed ?? (
+        input.providerJobId ? queueUrl(input.selectedModel, `/requests/${encodeURIComponent(input.providerJobId)}`) : null
+      )),
+      statusUrlSource: input.statusUrlSource ?? null,
+      responseUrlSource: input.responseUrlSource ?? null,
       referenceCount: input.referenceCount ?? null,
       selectedReferenceRole: input.selectedReferenceRole ?? null,
       selectedReferenceLabel: input.selectedReferenceLabel ?? null,
@@ -789,9 +849,17 @@ async function submitKlingQueueRequest(input: {
 async function retrieveKlingQueueStatus(input: {
   model: string;
   requestId: string;
+  statusUrl?: string | null;
+  preferGenericFallback?: boolean;
 }) {
+  const urls = resolveKlingPollUrls({
+    model: input.model,
+    requestId: input.requestId,
+    statusUrl: input.statusUrl,
+    preferGenericFallback: input.preferGenericFallback,
+  });
   return falJson<KlingQueueStatusResponse>({
-    path: queueUrl(input.model, `/requests/${encodeURIComponent(input.requestId)}/status`),
+    path: urls.statusUrl,
     method: 'GET',
     modelSlug: input.model,
   });
@@ -800,9 +868,17 @@ async function retrieveKlingQueueStatus(input: {
 async function retrieveKlingQueueResult(input: {
   model: string;
   requestId: string;
+  responseUrl?: string | null;
+  preferGenericFallback?: boolean;
 }) {
+  const urls = resolveKlingPollUrls({
+    model: input.model,
+    requestId: input.requestId,
+    responseUrl: input.responseUrl,
+    preferGenericFallback: input.preferGenericFallback,
+  });
   return falJson<KlingQueueStatusResponse>({
-    path: queueUrl(input.model, `/requests/${encodeURIComponent(input.requestId)}`),
+    path: urls.responseUrl,
     method: 'GET',
     modelSlug: input.model,
   });
@@ -832,6 +908,9 @@ function klingStatusFromResponse(response: KlingQueueStatusResponse | null | und
 async function pollKlingQueue(input: {
   model: string;
   requestId: string;
+  statusUrl?: string | null;
+  responseUrl?: string | null;
+  preferGenericFallback?: boolean;
   timeoutMs?: number;
 }) {
   const deadline = Date.now() + (input.timeoutMs ?? 180_000);
@@ -924,8 +1003,9 @@ function submittedJobNotes(input: {
     providerJobId: input.jobId,
     requestId: input.jobId,
     providerStatus: input.submitted.status ?? null,
-    providerStatusUrl: redactFalUrl(input.submitted.status_url),
-    providerResponseUrl: redactFalUrl(input.submitted.response_url),
+    providerStatusUrl: rawFalUrl(input.submitted.status_url),
+    providerResponseUrl: rawFalUrl(input.submitted.response_url),
+    providerCancelUrl: rawFalUrl(input.submitted.cancel_url),
     providerCancelUrlPresent: Boolean(input.submitted.cancel_url),
     providerResponseShape: providerResponseShapeSummary(input.submitted),
     payloadShapeSummary: klingPayloadShapeSummary(input.payload),
@@ -1141,11 +1221,22 @@ export async function recoverKlingSelfLikenessCanary(input: {
     });
   }
 
+  const recoveryPollUrls = resolveKlingPollUrls({
+    model: selectedModel,
+    requestId: providerJobId,
+    statusUrl: noteString(notes, 'providerStatusUrl'),
+    responseUrl: noteString(notes, 'providerResponseUrl'),
+    preferGenericFallback: true,
+  });
+
   let finalJob: KlingQueueStatusResponse;
   try {
     finalJob = await pollKlingQueue({
       model: selectedModel,
       requestId: providerJobId,
+      statusUrl: recoveryPollUrls.statusUrl,
+      responseUrl: recoveryPollUrls.responseUrl,
+      preferGenericFallback: true,
     });
   } catch (error) {
     return buildKlingPollFailurePayload({
@@ -1153,8 +1244,11 @@ export async function recoverKlingSelfLikenessCanary(input: {
       selectedModel,
       attemptId,
       providerJobId,
-      providerStatusUrl: noteString(notes, 'providerStatusUrl'),
-      pollEndpointUsed: queueUrl(selectedModel, `/requests/${encodeURIComponent(providerJobId)}/status`),
+      providerStatusUrl: recoveryPollUrls.statusUrl,
+      pollEndpointUsed: redactFalUrl(recoveryPollUrls.statusUrl),
+      responseEndpointUsed: redactFalUrl(recoveryPollUrls.responseUrl),
+      statusUrlSource: recoveryPollUrls.statusUrlSource,
+      responseUrlSource: recoveryPollUrls.responseUrlSource,
       error,
       completedStages: ['auth_probe_gate', 'submit_fal_job'],
       referenceCount: null,
@@ -1189,6 +1283,12 @@ export async function recoverKlingSelfLikenessCanary(input: {
         providerJobId,
         requestId: providerJobId,
         providerStatus,
+        providerStatusUrl: recoveryPollUrls.statusUrl,
+        providerResponseUrl: recoveryPollUrls.responseUrl,
+        pollEndpointUsed: redactFalUrl(recoveryPollUrls.statusUrl),
+        responseEndpointUsed: redactFalUrl(recoveryPollUrls.responseUrl),
+        statusUrlSource: recoveryPollUrls.statusUrlSource,
+        responseUrlSource: recoveryPollUrls.responseUrlSource,
         recoveryAttempted: true,
         outputShapeSummary: outputShapeSummary(output),
       },
@@ -1205,6 +1305,11 @@ export async function recoverKlingSelfLikenessCanary(input: {
       requestId: providerJobId,
       providerJobIdPresent: true,
       providerStatus,
+      providerStatusUrl: redactFalUrl(recoveryPollUrls.statusUrl),
+      pollEndpointUsed: redactFalUrl(recoveryPollUrls.statusUrl),
+      responseEndpointUsed: redactFalUrl(recoveryPollUrls.responseUrl),
+      statusUrlSource: recoveryPollUrls.statusUrlSource,
+      responseUrlSource: recoveryPollUrls.responseUrlSource,
       outputUrlPresent: false,
       parsedVideoUrlPresent: false,
       verifiedVideoPresent: false,
@@ -1257,6 +1362,12 @@ export async function recoverKlingSelfLikenessCanary(input: {
       providerJobId,
       requestId: providerJobId,
       providerStatus,
+      providerStatusUrl: recoveryPollUrls.statusUrl,
+      providerResponseUrl: recoveryPollUrls.responseUrl,
+      pollEndpointUsed: redactFalUrl(recoveryPollUrls.statusUrl),
+      responseEndpointUsed: redactFalUrl(recoveryPollUrls.responseUrl),
+      statusUrlSource: recoveryPollUrls.statusUrlSource,
+      responseUrlSource: recoveryPollUrls.responseUrlSource,
       recoveryAttempted: true,
       outputUrlPresent: true,
       verifiedPersistedVideo: Boolean(persisted.storagePath || persisted.projectId || parsedOutput.videoUrl),
@@ -1275,6 +1386,11 @@ export async function recoverKlingSelfLikenessCanary(input: {
     requestId: providerJobId,
     providerJobIdPresent: true,
     providerStatus,
+    providerStatusUrl: redactFalUrl(recoveryPollUrls.statusUrl),
+    pollEndpointUsed: redactFalUrl(recoveryPollUrls.statusUrl),
+    responseEndpointUsed: redactFalUrl(recoveryPollUrls.responseUrl),
+    statusUrlSource: recoveryPollUrls.statusUrlSource,
+    responseUrlSource: recoveryPollUrls.responseUrlSource,
     outputUrlPresent: true,
     parsedVideoUrlPresent: true,
     verifiedVideoPresent: true,
@@ -1553,6 +1669,7 @@ export async function startKlingSelfLikenessCanary(input: {
   let activeStage: KlingCanaryStage = 'submit_fal_job';
   let submitted: KlingQueueSubmitResponse | null = null;
   let jobId: string | null = null;
+  let pollUrls: KlingPollUrls | null = null;
 
   try {
     try {
@@ -1599,6 +1716,13 @@ export async function startKlingSelfLikenessCanary(input: {
       return response;
     }
     jobId = requestId(submitted) ?? fallbackRequestId;
+    pollUrls = resolveKlingPollUrls({
+      model: selectedModel,
+      requestId: jobId,
+      statusUrl: rawFalUrl(submitted.status_url),
+      responseUrl: rawFalUrl(submitted.response_url),
+      preferGenericFallback: true,
+    });
     await persistKlingSubmittedJob({
       userId: referenceSet.selected.userId,
       characterId: referenceSet.selected.characterId,
@@ -1615,6 +1739,9 @@ export async function startKlingSelfLikenessCanary(input: {
       finalJob = await pollKlingQueue({
         model: selectedModel,
         requestId: jobId,
+        statusUrl: pollUrls.statusUrl,
+        responseUrl: pollUrls.responseUrl,
+        preferGenericFallback: true,
       });
     } catch (error) {
       const response = buildKlingPollFailurePayload({
@@ -1622,8 +1749,11 @@ export async function startKlingSelfLikenessCanary(input: {
         selectedModel,
         attemptId: attempt.attemptId,
         providerJobId: jobId,
-        providerStatusUrl: redactFalUrl(submitted.status_url),
-        pollEndpointUsed: queueUrl(selectedModel, `/requests/${encodeURIComponent(jobId)}/status`),
+        providerStatusUrl: pollUrls.statusUrl,
+        pollEndpointUsed: pollUrls.statusUrl,
+        responseEndpointUsed: pollUrls.responseUrl,
+        statusUrlSource: pollUrls.statusUrlSource,
+        responseUrlSource: pollUrls.responseUrlSource,
         error,
         completedStages,
         forceRetest: input.forceRetest,
@@ -1650,6 +1780,12 @@ export async function startKlingSelfLikenessCanary(input: {
           skipReason: 'internal_exception',
           pollErrorType: responseRecord.pollErrorType ?? null,
           pollErrorMessage: responseRecord.pollErrorMessage ?? null,
+          providerStatusUrl: pollUrls.statusUrl,
+          providerResponseUrl: pollUrls.responseUrl,
+          pollEndpointUsed: redactFalUrl(pollUrls.statusUrl),
+          responseEndpointUsed: redactFalUrl(pollUrls.responseUrl),
+          statusUrlSource: pollUrls.statusUrlSource,
+          responseUrlSource: pollUrls.responseUrlSource,
         },
       });
       return response;
@@ -1687,8 +1823,11 @@ export async function startKlingSelfLikenessCanary(input: {
           providerJobIdPresent: Boolean(jobId),
           providerJobId: jobId,
           requestId: jobId,
-          providerStatusUrl: redactFalUrl(submitted.status_url),
-          pollEndpointUsed: queueUrl(selectedModel, `/requests/${encodeURIComponent(jobId)}/status`),
+          providerStatusUrl: redactFalUrl(pollUrls.statusUrl),
+          pollEndpointUsed: redactFalUrl(pollUrls.statusUrl),
+          responseEndpointUsed: redactFalUrl(pollUrls.responseUrl),
+          statusUrlSource: pollUrls.statusUrlSource,
+          responseUrlSource: pollUrls.responseUrlSource,
           providerStatus: finalJob.status ?? submitted.status ?? null,
           referenceCount: referenceSet.candidates.length,
           selectedReferenceRole: referenceSet.selected.referenceRole,
@@ -1723,6 +1862,12 @@ export async function startKlingSelfLikenessCanary(input: {
           attemptCreated: true,
           providerJobCreated: true,
           providerStatus: finalJob.status ?? null,
+          providerStatusUrl: pollUrls.statusUrl,
+          providerResponseUrl: pollUrls.responseUrl,
+          pollEndpointUsed: redactFalUrl(pollUrls.statusUrl),
+          responseEndpointUsed: redactFalUrl(pollUrls.responseUrl),
+          statusUrlSource: pollUrls.statusUrlSource,
+          responseUrlSource: pollUrls.responseUrlSource,
           referenceCount: referenceSet.candidates.length,
           verificationVideoUsed: false,
         },
@@ -1752,8 +1897,11 @@ export async function startKlingSelfLikenessCanary(input: {
         providerJobIdPresent: Boolean(jobId),
         providerJobId: jobId,
         requestId: jobId,
-        providerStatusUrl: redactFalUrl(submitted.status_url),
-        pollEndpointUsed: queueUrl(selectedModel, `/requests/${encodeURIComponent(jobId)}/status`),
+        providerStatusUrl: redactFalUrl(pollUrls.statusUrl),
+        pollEndpointUsed: redactFalUrl(pollUrls.statusUrl),
+        responseEndpointUsed: redactFalUrl(pollUrls.responseUrl),
+        statusUrlSource: pollUrls.statusUrlSource,
+        responseUrlSource: pollUrls.responseUrlSource,
         providerStatus: finalJob.status ?? submitted.status ?? null,
         referenceCount: referenceSet.candidates.length,
         selectedReferenceRole: referenceSet.selected.referenceRole,
@@ -1815,6 +1963,12 @@ export async function startKlingSelfLikenessCanary(input: {
         attemptCreated: true,
         providerJobCreated: true,
         providerStatus: finalJob.status ?? null,
+        providerStatusUrl: pollUrls.statusUrl,
+        providerResponseUrl: pollUrls.responseUrl,
+        pollEndpointUsed: redactFalUrl(pollUrls.statusUrl),
+        responseEndpointUsed: redactFalUrl(pollUrls.responseUrl),
+        statusUrlSource: pollUrls.statusUrlSource,
+        responseUrlSource: pollUrls.responseUrlSource,
         persistedToDraft: Boolean(persisted),
         referenceCount: referenceSet.candidates.length,
         verificationVideoUsed: false,
@@ -1842,8 +1996,11 @@ export async function startKlingSelfLikenessCanary(input: {
       providerJobIdPresent: Boolean(jobId),
       providerJobId: jobId,
       requestId: jobId,
-      providerStatusUrl: redactFalUrl(submitted.status_url),
-      pollEndpointUsed: queueUrl(selectedModel, `/requests/${encodeURIComponent(jobId)}/status`),
+      providerStatusUrl: redactFalUrl(pollUrls.statusUrl),
+      pollEndpointUsed: redactFalUrl(pollUrls.statusUrl),
+      responseEndpointUsed: redactFalUrl(pollUrls.responseUrl),
+      statusUrlSource: pollUrls.statusUrlSource,
+      responseUrlSource: pollUrls.responseUrlSource,
       providerStatus: finalJob.status ?? submitted.status ?? null,
       referenceCount: referenceSet.candidates.length,
       selectedReferenceRole: referenceSet.selected.referenceRole,
@@ -1876,6 +2033,11 @@ export async function startKlingSelfLikenessCanary(input: {
         providerJobIdPresent: Boolean(jobId),
         providerJobId: jobId,
         requestId: jobId,
+        providerStatusUrl: redactFalUrl(pollUrls?.statusUrl ?? null),
+        pollEndpointUsed: redactFalUrl(pollUrls?.statusUrl ?? null),
+        responseEndpointUsed: redactFalUrl(pollUrls?.responseUrl ?? null),
+        statusUrlSource: pollUrls?.statusUrlSource ?? null,
+        responseUrlSource: pollUrls?.responseUrlSource ?? null,
         storedStatusReturned: false,
         freshCanaryAttemptCreated: true,
         attemptMode: 'blocked_by_billing',
@@ -1949,6 +2111,11 @@ export async function startKlingSelfLikenessCanary(input: {
         providerJobIdPresent: Boolean(jobId),
         providerJobId: jobId,
         requestId: jobId,
+        providerStatusUrl: redactFalUrl(pollUrls?.statusUrl ?? null),
+        pollEndpointUsed: redactFalUrl(pollUrls?.statusUrl ?? null),
+        responseEndpointUsed: redactFalUrl(pollUrls?.responseUrl ?? null),
+        statusUrlSource: pollUrls?.statusUrlSource ?? null,
+        responseUrlSource: pollUrls?.responseUrlSource ?? null,
         referenceCount: referenceSet.candidates.length,
         selectedReferenceRole: referenceSet.selected.referenceRole,
         selectedReferenceLabel: referenceSet.selected.referenceLabel,

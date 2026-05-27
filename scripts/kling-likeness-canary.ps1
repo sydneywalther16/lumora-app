@@ -38,6 +38,9 @@ function Print-CanaryResult {
   if ($Result.requestId) { Write-Host "request id: $($Result.requestId)" }
   if ($Result.providerStatusUrl) { Write-Host "provider status url: $($Result.providerStatusUrl)" }
   if ($Result.pollEndpointUsed) { Write-Host "poll endpoint used: $($Result.pollEndpointUsed)" }
+  if ($Result.responseEndpointUsed) { Write-Host "response endpoint used: $($Result.responseEndpointUsed)" }
+  if ($Result.statusUrlSource) { Write-Host "status URL source: $($Result.statusUrlSource)" }
+  if ($Result.responseUrlSource) { Write-Host "response URL source: $($Result.responseUrlSource)" }
   if ($Result.pollErrorType) { Write-Host "poll error type: $($Result.pollErrorType)" }
   if ($Result.pollErrorMessage) { Write-Host "poll error message: $($Result.pollErrorMessage)" }
   if ($Result.endpointUsed) { Write-Host "endpoint used: $($Result.endpointUsed)" }

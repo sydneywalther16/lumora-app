@@ -27,6 +27,9 @@ function Print-RecoveryResult {
   if ($Result.skipStage) { Write-Host "skip stage: $($Result.skipStage)" }
   if ($Result.skipReason) { Write-Host "skip reason: $($Result.skipReason)" }
   if ($Result.pollEndpointUsed) { Write-Host "poll endpoint used: $($Result.pollEndpointUsed)" }
+  if ($Result.responseEndpointUsed) { Write-Host "response endpoint used: $($Result.responseEndpointUsed)" }
+  if ($Result.statusUrlSource) { Write-Host "status URL source: $($Result.statusUrlSource)" }
+  if ($Result.responseUrlSource) { Write-Host "response URL source: $($Result.responseUrlSource)" }
   if ($Result.pollErrorType) { Write-Host "poll error type: $($Result.pollErrorType)" }
   if ($Result.pollErrorMessage) { Write-Host "poll error message: $($Result.pollErrorMessage)" }
   Write-Host "output present: $($Result.outputUrlPresent)"
