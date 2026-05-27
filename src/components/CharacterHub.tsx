@@ -1223,6 +1223,12 @@ export default function CharacterHub({
     const seedancePhotoEntry = likenessRegistryEntry(likenessDiagnostics, 'seedance_reference_images');
     const runwayEntry = likenessRegistryEntry(likenessDiagnostics, 'runway_gen4_reference');
     const klingEntry = likenessRegistryEntry(likenessDiagnostics, 'kling_reference');
+    const exactRouter = likenessDiagnostics?.exactLikenessRouter;
+    const klingExactReady = Boolean(
+      exactRouter?.route === 'kling_reference' &&
+      exactRouter?.canaryStatus === 'canary_succeeded' &&
+      exactRouter?.exactLikeness,
+    );
     const seedanceVideoLabStatusText = providerLabStatus(likenessDiagnostics, 'seedance_video_reference');
     const seedancePhotoLabStatusText = providerLabStatus(
       likenessDiagnostics,
@@ -1248,6 +1254,7 @@ export default function CharacterHub({
     const seedanceExactRoutesBlocked = seedancePhotoReferencesBlocked && seedanceVideoReferenceBlocked;
     const seedanceVideoCanaryReadyToTest = Boolean(
       effectiveVerificationVideoPresent &&
+      !klingExactReady &&
       !seedanceExactRoutesBlocked &&
       !seedanceVideoCanaryRetryLater &&
       (
@@ -1257,15 +1264,18 @@ export default function CharacterHub({
       ),
     );
     const exactCanaryAvailable = Boolean(
+      !klingExactReady &&
       probeEnabled &&
       seedanceVideoCanaryReadyToTest,
     );
     const klingReadyToTest = Boolean(
+      !klingExactReady &&
       probeEnabled &&
       klingEntry?.configured &&
       klingEntry.readinessStatus === 'configured_ready_for_canary',
     );
     const runwayReadyToTest = Boolean(
+      !klingExactReady &&
       probeEnabled &&
       runwayEntry?.configured &&
       runwayEntry.readinessStatus === 'configured_ready_for_canary',
@@ -1287,6 +1297,12 @@ export default function CharacterHub({
         : seedanceVideoCanaryRetryLater
           ? 'Provider temporarily unavailable. Try this canary again later.'
           : 'Video-reference canary is not available for this provider route yet.';
+    const likenessLabPrimaryCopy = klingExactReady
+      ? 'Using Kling exact likeness.'
+      : likenessDiagnostics?.exactLikenessRouter?.reason || 'Lumora will use soft self guidance until an exact provider canary succeeds.';
+    const likenessLabStatusCopy = klingExactReady
+      ? 'Kling exact likeness is ready for generated scenes.'
+      : exactCanaryUnavailableCopy;
     const openAISoraProvider = likenessDiagnostics?.openaiSoraProvider;
     const openAIProviderConfigured = Boolean(
       openAISoraProvider?.openaiVideoEnabled &&
@@ -1618,7 +1634,8 @@ export default function CharacterHub({
                   {metadataLine('OpenAI/Sora', `${providerLabStatus(likenessDiagnostics, 'openai_sora_character')} / deprecated bridge`)}
                   {metadataLine('Lumora Identity Pack', 'Research only')}
                   <p className="muted">
-                    {likenessDiagnostics?.exactLikenessRouter?.reason || 'Lumora will use soft self guidance until an exact provider canary succeeds.'}
+                    <strong>{likenessLabPrimaryCopy}</strong>
+                    {klingExactReady ? ` ${likenessLabStatusCopy}` : null}
                   </p>
                 </div>
                 <div className="button-row">
@@ -1652,7 +1669,7 @@ export default function CharacterHub({
                       {likenessCanaryBusy === 'seedance-video' ? 'Checking route...' : 'Run video-reference canary from diagnostics'}
                     </button>
                   ) : !klingReadyToTest && !runwayReadyToTest ? (
-                    <span className="muted">{exactCanaryUnavailableCopy}</span>
+                    <span className="muted">{likenessLabStatusCopy}</span>
                   ) : null}
                   <button
                     type="button"
@@ -1663,7 +1680,9 @@ export default function CharacterHub({
                   </button>
                 </div>
                 {likenessLabStatus ? <p className="muted">{likenessLabStatus}</p> : null}
-                <p className="muted">Paid tests require confirmation and never enable production routing until the canary succeeds.</p>
+                {!klingExactReady ? (
+                  <p className="muted">Paid tests require confirmation and never enable production routing until the canary succeeds.</p>
+                ) : null}
               </div>
             </CharacterDetailSection>
           ) : null}
