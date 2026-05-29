@@ -36,6 +36,14 @@ export type StudioProject = {
   referenceImageUrls?: Partial<ReferenceImageUrls> | null;
   additionalReferenceImageUrls?: string[] | null;
   likenessFeedback?: LumoraIdentityFeedback | null;
+  exactLikenessRoute?: string | null;
+  exactLikenessProvider?: string | null;
+  exactLikenessCanaryStatus?: string | null;
+  referenceStrategy?: string | null;
+  referenceRolesUsed?: string[] | null;
+  referenceCount?: number | null;
+  renderProvider?: string | null;
+  klingReferenceDiagnostics?: Record<string, unknown> | null;
   characterId: string | null;
   characterName: string | null;
   characterAvatar?: string | null;
@@ -134,6 +142,19 @@ export function loadStudioProjects(): StudioProject[] {
           likenessFeedback:
             project.likenessFeedback && typeof project.likenessFeedback === 'object'
               ? project.likenessFeedback as LumoraIdentityFeedback
+              : null,
+          exactLikenessRoute: typeof project.exactLikenessRoute === 'string' ? project.exactLikenessRoute : null,
+          exactLikenessProvider: typeof project.exactLikenessProvider === 'string' ? project.exactLikenessProvider : null,
+          exactLikenessCanaryStatus: typeof project.exactLikenessCanaryStatus === 'string' ? project.exactLikenessCanaryStatus : null,
+          referenceStrategy: typeof project.referenceStrategy === 'string' ? project.referenceStrategy : null,
+          referenceRolesUsed: Array.isArray(project.referenceRolesUsed)
+            ? project.referenceRolesUsed.filter((item): item is string => typeof item === 'string')
+            : null,
+          referenceCount: numberValue(project.referenceCount),
+          renderProvider: typeof project.renderProvider === 'string' ? project.renderProvider : null,
+          klingReferenceDiagnostics:
+            project.klingReferenceDiagnostics && typeof project.klingReferenceDiagnostics === 'object'
+              ? project.klingReferenceDiagnostics as Record<string, unknown>
               : null,
           characterId: typeof project.characterId === 'string' ? project.characterId : null,
           characterAvatar: typeof project.characterAvatar === 'string' ? project.characterAvatar : null,

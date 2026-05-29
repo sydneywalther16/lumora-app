@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  buildKlingCreateReferencePlan,
   buildFinalPrompt,
   isKlingExactLikenessRequest,
   KLING_EXACT_LIKENESS_PROMPT_PREFIX,
@@ -56,6 +57,55 @@ assert.doesNotMatch(exactPromptWithLegacyConsistency, /\bsexual content\b/i);
 assert.doesNotMatch(exactPromptWithLegacyConsistency, /\bno minors\b/i);
 assert.doesNotMatch(exactPromptWithLegacyConsistency, /\bsuggestive posing\b/i);
 
+const multiReferencePlan = buildKlingCreateReferencePlan({
+  body: {
+    referenceImageUrls: {
+      frontFaceUrl: 'https://assets.example/front.jpg',
+      leftAngleUrl: 'https://assets.example/left.jpg',
+      rightAngleUrl: 'https://assets.example/right.jpg',
+      fullBodyUrl: 'https://assets.example/full.jpg',
+    },
+    additionalReferenceImageUrls: [
+      'https://assets.example/left.jpg',
+      'https://assets.example/right.jpg',
+      'https://assets.example/full.jpg',
+    ],
+  },
+  primaryReference: 'https://assets.example/front.jpg',
+  exactLikenessReady: true,
+});
+assert.equal(multiReferencePlan?.plannedStrategy, 'multi_reference');
+assert.equal(multiReferencePlan?.fallbackAllowed, false);
+assert.deepEqual(multiReferencePlan?.references.map((reference) => reference.role), [
+  'front_angle',
+  'side_angle_left',
+  'side_angle_right',
+  'full_body',
+]);
+assert.deepEqual(multiReferencePlan?.additionalReferences.map((reference) => reference.url), [
+  'https://assets.example/left.jpg',
+  'https://assets.example/right.jpg',
+  'https://assets.example/full.jpg',
+]);
+assert.match(multiReferencePlan?.promptGuidance ?? '', /Use @Element1 as the primary face identity/i);
+assert.match(multiReferencePlan?.promptGuidance ?? '', /@Element2 and @Element3 for side\/profile consistency/i);
+assert.match(multiReferencePlan?.promptGuidance ?? '', /@Element4 for body proportion/i);
+assert.match(multiReferencePlan?.promptGuidance ?? '', /Adapt clothing to the scene prompt/i);
+assert.doesNotMatch(multiReferencePlan?.promptGuidance ?? '', /\bno nudity\b/i);
+
+const frontOnlyPlan = buildKlingCreateReferencePlan({
+  body: {
+    referenceImageUrls: {
+      frontFaceUrl: 'https://assets.example/front.jpg',
+    },
+  },
+  primaryReference: 'https://assets.example/front.jpg',
+  exactLikenessReady: true,
+});
+assert.equal(frontOnlyPlan?.plannedStrategy, 'front_only_fallback');
+assert.equal(frontOnlyPlan?.fallbackAllowed, true);
+assert.deepEqual(frontOnlyPlan?.references.map((reference) => reference.role), ['front_angle']);
+
 const regularPrompt = buildFinalPrompt({
   prompt: safeGardenPrompt,
   characterDescription: '',
@@ -75,5 +125,14 @@ assert.match(createVideoSource, /Trying Kling exact likeness render\.\.\./);
 assert.match(createVideoSource, /Saving to Drafts/);
 assert.match(createVideoSource, /isClearlySafeKlingPrompt\(currentPrompt\)/);
 assert.match(createVideoSource, /isKlingComplexityError\(message\)/);
+assert.match(createVideoSource, /Kling exact-likeness render created\./);
+
+const studioListSource = readFileSync(join(process.cwd(), 'src/components/StudioList.tsx'), 'utf8');
+assert.match(studioListSource, /Kling exact likeness/);
+
+const continueStorySource = readFileSync(join(process.cwd(), 'src/lib/continueStory.ts'), 'utf8');
+assert.match(continueStorySource, /exactLikenessRoute/);
+assert.match(continueStorySource, /lumora_remix_render_engine/);
+assert.match(continueStorySource, /kling_reference/);
 
 console.log('createKlingRenderSafety unit tests passed');

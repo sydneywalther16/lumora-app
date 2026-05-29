@@ -88,6 +88,14 @@ function getPostedProjectIds(): string[] {
 }
 
 function getJobCharacterLabel(job: GenerationJob) {
+  if (job.exactLikenessRoute === 'kling_reference' || job.generationMode === 'kling-exact-likeness-reference') {
+    return 'Kling exact likeness';
+  }
+
+  if (job.displayEngine?.toLowerCase().includes('kling exact likeness')) {
+    return 'Kling exact likeness';
+  }
+
   // Always prioritize isDefaultSelfCharacter flag
   if (Boolean(job.isDefaultSelfCharacter)) {
     return 'Soft self guidance';
@@ -379,8 +387,20 @@ export default function StudioList({ jobs, onPublished }: Props) {
         referenceImageUrls: job.referenceImageUrls ?? null,
         additionalReferenceImageUrls: job.additionalReferenceImageUrls ?? [],
         generationMode: job.generationMode ?? null,
+        provider: job.provider ?? null,
+        displayEngine: job.displayEngine ?? null,
+        exactLikenessRoute: job.exactLikenessRoute ?? null,
+        exactLikenessProvider: job.exactLikenessProvider ?? null,
+        exactLikenessCanaryStatus: job.exactLikenessCanaryStatus ?? null,
+        referenceStrategy: job.referenceStrategy ?? null,
+        referenceRolesUsed: job.referenceRolesUsed ?? null,
+        referenceCount: job.referenceCount ?? null,
+        renderProvider: job.renderProvider ?? null,
       }),
     );
+    if (job.exactLikenessRoute === 'kling_reference' || job.generationMode === 'kling-exact-likeness-reference') {
+      localStorage.setItem('lumora_remix_render_engine', 'replicate');
+    }
     window.location.href = '/create';
   }
 

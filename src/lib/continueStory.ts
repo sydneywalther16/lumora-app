@@ -14,6 +14,15 @@ type ContinueStoryItem = {
   referenceImageUrls?: Partial<ReferenceImageUrls> | null;
   additionalReferenceImageUrls?: string[] | null;
   generationMode?: GenerationMode | null;
+  provider?: string | null;
+  displayEngine?: string | null;
+  exactLikenessRoute?: string | null;
+  exactLikenessProvider?: string | null;
+  exactLikenessCanaryStatus?: string | null;
+  referenceStrategy?: string | null;
+  referenceRolesUsed?: string[] | null;
+  referenceCount?: number | null;
+  renderProvider?: string | null;
 };
 
 function nextScenePrompt(item: ContinueStoryItem) {
@@ -39,6 +48,15 @@ export function prepareContinueStory(item: ContinueStoryItem, source: string) {
     referenceImageUrls: (item.referenceImageUrls ?? null) as Partial<ReferenceImageUrls> | null,
     additionalReferenceImageUrls: item.additionalReferenceImageUrls ?? [],
     generationMode: item.generationMode ?? null,
+    provider: item.provider ?? null,
+    displayEngine: item.displayEngine ?? null,
+    exactLikenessRoute: item.exactLikenessRoute ?? null,
+    exactLikenessProvider: item.exactLikenessProvider ?? null,
+    exactLikenessCanaryStatus: item.exactLikenessCanaryStatus ?? null,
+    referenceStrategy: item.referenceStrategy ?? null,
+    referenceRolesUsed: item.referenceRolesUsed ?? null,
+    referenceCount: item.referenceCount ?? null,
+    renderProvider: item.renderProvider ?? null,
     source,
   };
 
@@ -51,6 +69,9 @@ export function prepareContinueStory(item: ContinueStoryItem, source: string) {
     characterName: item.characterName ?? null,
     createdAt: new Date().toISOString(),
   }));
+  if (item.exactLikenessRoute === 'kling_reference' || item.generationMode === 'kling-exact-likeness-reference') {
+    localStorage.setItem('lumora_remix_render_engine', 'replicate');
+  }
 }
 
 export function openContinueStory(item: ContinueStoryItem, source: string) {

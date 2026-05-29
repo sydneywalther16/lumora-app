@@ -1670,6 +1670,14 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
       reference_image_urls: cleanJsonRecord(project.referenceImageUrls),
       additional_reference_image_urls: stripBase64Media(project.additionalReferenceImageUrls) ?? null,
       likeness_feedback: cleanJsonRecord(project.likenessFeedback),
+      exact_likeness_route: project.exactLikenessRoute ?? null,
+      exact_likeness_provider: project.exactLikenessProvider ?? null,
+      exact_likeness_canary_status: project.exactLikenessCanaryStatus ?? null,
+      reference_strategy: project.referenceStrategy ?? null,
+      reference_roles_used: project.referenceRolesUsed ?? null,
+      reference_count: project.referenceCount ?? null,
+      render_provider: project.renderProvider ?? null,
+      kling_reference_diagnostics: cleanJsonRecord(project.klingReferenceDiagnostics),
       character_id: project.characterId,
       character_name: project.characterName,
       character_avatar: storageUrl(project.characterAvatar, 'Project character avatar'),
@@ -1716,6 +1724,14 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
     'keyframe_url',
     'identity_id',
     'likeness_feedback',
+    'exact_likeness_route',
+    'exact_likeness_provider',
+    'exact_likeness_canary_status',
+    'reference_strategy',
+    'reference_roles_used',
+    'reference_count',
+    'render_provider',
+    'kling_reference_diagnostics',
     'generation_mode',
     'display_engine',
     'model',
@@ -1870,6 +1886,18 @@ function mapProjectRow(row: DbRow): StudioProject {
       : null,
     likenessFeedback: isObject(row.likeness_feedback)
       ? row.likeness_feedback as LumoraIdentityFeedback
+      : null,
+    exactLikenessRoute: nullableString(row.exact_likeness_route),
+    exactLikenessProvider: nullableString(row.exact_likeness_provider),
+    exactLikenessCanaryStatus: nullableString(row.exact_likeness_canary_status),
+    referenceStrategy: nullableString(row.reference_strategy),
+    referenceRolesUsed: Array.isArray(row.reference_roles_used)
+      ? row.reference_roles_used.filter((item): item is string => typeof item === 'string')
+      : null,
+    referenceCount: Number.isFinite(Number(row.reference_count)) ? Number(row.reference_count) : null,
+    renderProvider: nullableString(row.render_provider),
+    klingReferenceDiagnostics: isObject(row.kling_reference_diagnostics)
+      ? row.kling_reference_diagnostics as Record<string, unknown>
       : null,
     characterId: nullableString(row.character_id),
     characterName: nullableString(row.character_name),

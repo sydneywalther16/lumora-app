@@ -50,12 +50,42 @@ type ReplicateRunResult = {
   rawOutput: unknown;
   attempts: unknown[];
   durationSent: number | null;
+  finalInputKeys?: string[];
 };
 
 type GenerationModeUsed =
   | 'seedance-multimodal-reference'
   | 'identity-image-to-video'
-  | 'reference-image-to-video';
+  | 'reference-image-to-video'
+  | 'kling-exact-likeness-reference';
+
+type KlingCreateReferenceRole =
+  | 'front_angle'
+  | 'side_angle_left'
+  | 'side_angle_right'
+  | 'full_body'
+  | 'additional_reference';
+
+type KlingCreateReferenceEntry = {
+  role: KlingCreateReferenceRole;
+  label: string;
+  url: string;
+  token: string;
+};
+
+type KlingCreateReferenceStrategy =
+  | 'multi_reference'
+  | 'composite_identity_sheet'
+  | 'front_only_fallback';
+
+type KlingCreateReferencePlan = {
+  primaryReference: KlingCreateReferenceEntry;
+  references: KlingCreateReferenceEntry[];
+  additionalReferences: KlingCreateReferenceEntry[];
+  promptGuidance: string;
+  plannedStrategy: KlingCreateReferenceStrategy;
+  fallbackAllowed: boolean;
+};
 
 const SEEDANCE_MODEL = 'bytedance/seedance-2.0' as ReplicateModelIdentifier;
 const KLING_IMAGE_TO_VIDEO_MODEL = 'kwaivgi/kling-v2.1' as ReplicateModelIdentifier;
@@ -68,6 +98,8 @@ export const KLING_EXACT_LIKENESS_PROMPT_PREFIX =
   'Create a fully clothed cinematic video of the saved self-character reference person. Preserve likeness with calm everyday body language, natural movement, and gentle framing.';
 const KLING_EXACT_LIKENESS_CONSISTENCY_PROMPT =
   'Use the saved self-character references as the identity guide for face shape, hairstyle, hair color, skin tone, eye area, proportions, and overall likeness. Generate a new scene rather than copying the source image.';
+const KLING_EXACT_LIKENESS_IDENTITY_GUIDANCE =
+  'Use the referenced self character\'s facial identity, hair color, face shape, eye color, and body proportions. Preserve identity across motion. Adapt clothing to the scene prompt when the user specifies clothing.';
 const SAFE_PROMPT_REPLACEMENT = 'stylish, cinematic, confident, editorial, fashion-inspired';
 const SENSITIVE_FILTER_ERROR = 'Generation blocked by provider safety filter';
 const SENSITIVE_FILTER_SUGGESTION =
@@ -273,17 +305,21 @@ function publicImageUrl(value: unknown): string {
   return cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://') ? cleanUrl : '';
 }
 
+function safeUrlLabel(index: number) {
+  return `[reference-url-${index + 1}-redacted]`;
+}
+
 function referenceUrlMap(value: unknown): Record<string, string> {
   const record = objectRecord(value);
   const nested = objectRecord(record.referenceImageUrls);
   const source = Object.keys(nested).length > 0 ? nested : record;
   const aliases: Record<string, string[]> = {
-    manualReferenceImageUrl: ['manualReferenceImageUrl'],
-    frontFace: ['frontFaceUrl', 'frontFace', 'frontImageUrl', 'frontImage', 'front', 'face', 'primary'],
-    fullBody: ['fullBodyUrl', 'fullBody', 'body', 'full'],
-    leftAngle: ['leftAngleUrl', 'leftAngle', 'left'],
-    rightAngle: ['rightAngleUrl', 'rightAngle', 'right'],
-    expressive: ['expressiveUrl', 'expressive', 'expression'],
+    manualReferenceImageUrl: ['manualReferenceImageUrl', 'manualReferenceUrl', 'manual'],
+    frontFace: ['frontFaceUrl', 'frontFacePath', 'frontFace', 'frontImageUrl', 'frontImagePath', 'frontImage', 'front', 'face', 'primary'],
+    fullBody: ['fullBodyUrl', 'fullBodyPath', 'fullBody', 'body', 'full'],
+    leftAngle: ['leftAngleUrl', 'leftAnglePath', 'leftAngle', 'left'],
+    rightAngle: ['rightAngleUrl', 'rightAnglePath', 'rightAngle', 'right'],
+    expressive: ['expressiveUrl', 'expressivePath', 'expressive', 'expression'],
   };
 
   return Object.fromEntries(
@@ -292,6 +328,114 @@ function referenceUrlMap(value: unknown): Record<string, string> {
       return url ? [[slot, url]] : [];
     }),
   );
+}
+
+function uniqueReferenceEntries(entries: KlingCreateReferenceEntry[]): KlingCreateReferenceEntry[] {
+  const seen = new Set<string>();
+  return entries.flatMap((entry) => {
+    if (!entry.url || seen.has(entry.url)) return [];
+    seen.add(entry.url);
+    return [entry];
+  }).map((entry, index) => ({
+    ...entry,
+    token: `@Element${index + 1}`,
+  }));
+}
+
+export function buildKlingCreateReferencePlan(input: {
+  body: GenerateVideoBody;
+  primaryReference: string;
+  exactLikenessReady: boolean;
+}): KlingCreateReferencePlan | null {
+  const primary = publicImageUrl(input.primaryReference);
+  if (!primary) return null;
+
+  const urls = referenceUrlMap(input.body.referenceImageUrls);
+  const explicitAdditional = Array.isArray(input.body.additionalReferenceImageUrls)
+    ? input.body.additionalReferenceImageUrls.map(publicImageUrl)
+    : [];
+  const referenceImages = Array.isArray(input.body.referenceImages)
+    ? input.body.referenceImages.map(publicImageUrl)
+    : [];
+  const canonicalReferences = Array.isArray(input.body.canonicalReferenceSet)
+    ? input.body.canonicalReferenceSet.map(publicImageUrl)
+    : [];
+  const roleUrls = new Set([
+    urls.frontFace || primary,
+    urls.leftAngle,
+    urls.rightAngle,
+    urls.fullBody,
+  ].filter(Boolean));
+  const extraReferences = [
+    ...canonicalReferences,
+    ...explicitAdditional,
+    ...referenceImages,
+  ].filter((url) => url && !roleUrls.has(url));
+  const references = uniqueReferenceEntries([
+    {
+      role: 'front_angle',
+      label: 'front',
+      url: urls.frontFace || primary,
+      token: '@Element1',
+    },
+    {
+      role: 'side_angle_left',
+      label: 'left side',
+      url: urls.leftAngle,
+      token: '@Element2',
+    },
+    {
+      role: 'side_angle_right',
+      label: 'right side',
+      url: urls.rightAngle,
+      token: '@Element3',
+    },
+    {
+      role: 'full_body',
+      label: 'full body',
+      url: urls.fullBody,
+      token: '@Element4',
+    },
+    ...extraReferences.map((url) => ({
+      role: 'additional_reference' as const,
+      label: 'saved reference',
+      url,
+      token: '@Element',
+    })),
+  ]).slice(0, 4);
+
+  const [primaryReference] = references;
+  if (!primaryReference) return null;
+
+  const additionalReferences = references.slice(1);
+  const sideTokens = references
+    .filter((entry) => entry.role === 'side_angle_left' || entry.role === 'side_angle_right')
+    .map((entry) => entry.token);
+  const fullBodyToken = references.find((entry) => entry.role === 'full_body')?.token ?? null;
+  const promptGuidance = input.exactLikenessReady
+    ? [
+        `${KLING_EXACT_LIKENESS_IDENTITY_GUIDANCE}`,
+        `Use ${primaryReference.token} as the primary face identity.`,
+        sideTokens.length
+          ? `Use ${sideTokens.join(' and ')} for side/profile consistency.`
+          : '',
+        fullBodyToken
+          ? `Use ${fullBodyToken} for body proportion and outfit silhouette only.`
+          : '',
+      ].filter(Boolean).join(' ')
+    : '';
+  const plannedStrategy: KlingCreateReferenceStrategy = additionalReferences.length > 0
+    ? 'multi_reference'
+    : 'front_only_fallback';
+
+  return {
+    primaryReference,
+    references,
+    additionalReferences,
+    promptGuidance,
+    plannedStrategy,
+    fallbackAllowed: additionalReferences.length === 0,
+  };
 }
 
 function firstReferenceImageUrl(
@@ -350,6 +494,24 @@ function additionalReferenceImageUrls(body: GenerateVideoBody, primaryReference:
     seen.add(url);
     return [url];
   });
+}
+
+function klingReferenceDiagnostics(input: {
+  plan: KlingCreateReferencePlan | null;
+  referenceStrategy: KlingCreateReferenceStrategy;
+  exactLikenessRoute: string | null;
+  providerRoute: string;
+}) {
+  const references = input.plan?.references ?? [];
+  return {
+    referenceStrategy: input.referenceStrategy,
+    referenceRolesUsed: references.map((reference) => reference.role),
+    referenceCount: references.length,
+    exactLikenessRoute: input.exactLikenessRoute,
+    providerRoute: input.providerRoute,
+    privateUrlsRedacted: true,
+    referenceUrlLabels: references.map((_reference, index) => safeUrlLabel(index)),
+  };
 }
 
 function uniqueHttpUrls(values: string[]): string[] {
@@ -693,7 +855,7 @@ async function validateReferenceImageUrl(referenceImageUrl: string): Promise<{
   const timeout = setTimeout(() => controller.abort(), 10_000);
 
   try {
-    console.log('VALIDATING REFERENCE URL', { referenceImageUrl, method: 'HEAD' });
+    console.log('VALIDATING REFERENCE URL', { hasReferenceImage: Boolean(referenceImageUrl), method: 'HEAD', privateUrlsRedacted: true });
     const response = await fetch(referenceImageUrl, {
       method: 'HEAD',
       signal: controller.signal,
@@ -706,18 +868,18 @@ async function validateReferenceImageUrl(referenceImageUrl: string): Promise<{
     };
 
     console.log('VALIDATION RESULT', {
-      referenceImageUrl,
       status: validation.status,
       contentType: validation.contentType,
       ok: validation.ok,
+      privateUrlsRedacted: true,
     });
 
     return validation;
   } catch (error) {
     console.log('VALIDATION RESULT', {
-      referenceImageUrl,
       ok: false,
       error: errorMessage(error),
+      privateUrlsRedacted: true,
     });
 
     return {
@@ -757,9 +919,18 @@ async function runReplicate(input: {
   });
 
   if (input.generationModeUsed === 'seedance-multimodal-reference') {
-    console.log('SEEDANCE INPUT', input.requestInput);
+    console.log('SEEDANCE INPUT', {
+      inputKeys: Object.keys(input.requestInput),
+      referenceCount: Array.isArray(input.requestInput.reference_images)
+        ? input.requestInput.reference_images.length
+        : 0,
+      privateUrlsRedacted: true,
+    });
   } else if (input.generationModeUsed) {
-    console.log('SENDING IMAGE TO KLING:', input.referenceImageUrl);
+    console.log('SENDING IMAGE TO KLING:', {
+      hasReferenceImage: Boolean(input.referenceImageUrl),
+      privateUrlsRedacted: true,
+    });
   }
 
   const attempts: unknown[] = [];
@@ -801,6 +972,7 @@ async function runReplicate(input: {
         rawOutput: output,
         attempts,
         durationSent: input.durationSent,
+        finalInputKeys: Object.keys(requestInput),
       } satisfies ReplicateRunResult;
     } catch (error) {
       const rateLimited = isRateLimitError(error);
@@ -899,6 +1071,7 @@ async function runKlingImageToVideo(input: {
   fallbackFromModel?: ReplicateModelIdentifier;
   providerFallback?: boolean;
   safetyFallback?: boolean;
+  fallbackToStartImageOnly?: boolean;
 }) {
   const models = uniqueModels([
     input.primaryModel ?? KLING_IMAGE_TO_VIDEO_MODEL,
@@ -950,7 +1123,7 @@ async function runKlingImageToVideo(input: {
         durationSent: input.durationSent,
         generationModeUsed: input.generationModeUsed,
         referenceImageUrl: input.referenceImageUrl,
-        fallbackToStartImageOnly: true,
+        fallbackToStartImageOnly: input.fallbackToStartImageOnly ?? true,
       });
     } catch (error) {
       failures.push({
@@ -1030,16 +1203,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : useSeedance
         ? primaryReferenceImageUrl
         : firstReferenceImageUrl(body);
-    const additionalReferences = SINGLE_PROVIDER_MODE
-      ? []
-      : additionalReferenceImageUrls(body, referenceImageUrl);
-    const aspectRatio = normalizeAspectRatio(body.aspectRatio);
-    const durationSent = normalizeDuration(body.duration);
     const exactLikenessRoute = textValue(body.exactLikenessRoute);
     const exactLikenessCanaryStatus = textValue(body.exactLikenessCanaryStatus);
     const exactLikenessReady = booleanValue(body.exactLikenessReady) || exactLikenessCanaryStatus === 'canary_succeeded';
+    const klingExactLikenessRequest = isKlingExactLikenessRequest({
+      engine: 'replicate',
+      exactLikenessRoute,
+      exactLikenessReady,
+      exactLikenessCanaryStatus,
+    });
+    const klingReferencePlan = klingExactLikenessRequest
+      ? buildKlingCreateReferencePlan({
+          body,
+          primaryReference: primaryReferenceImageUrl || referenceImageUrl,
+          exactLikenessReady,
+        })
+      : null;
+    const providerReferenceImageUrl = klingReferencePlan?.primaryReference.url ?? referenceImageUrl;
+    const additionalReferences = SINGLE_PROVIDER_MODE
+      ? klingReferencePlan?.additionalReferences.map((reference) => reference.url) ?? []
+      : additionalReferenceImageUrls(body, referenceImageUrl);
+    const aspectRatio = normalizeAspectRatio(body.aspectRatio);
+    const durationSent = normalizeDuration(body.duration);
     const finalPrompt = buildFinalPrompt({
-      prompt,
+      prompt: klingReferencePlan?.promptGuidance
+        ? `${prompt}\n\nKling identity guidance: ${klingReferencePlan.promptGuidance}`
+        : prompt,
       characterDescription: textValue(body.characterDescription),
       identityPrompt: textValue(body.identityPrompt),
       consistencyPrompt: textValue(body.consistencyPrompt) || textValue(body.generationConsistencyPrompt),
@@ -1056,13 +1245,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     console.log('FINAL INPUT:', {
       prompt: promptForModel,
-      referenceImageUrl,
-      keyframeUrl,
-      additionalReferences,
-      seedanceReferences,
+      hasReferenceImage: Boolean(referenceImageUrl),
+      hasKeyframeUrl: Boolean(keyframeUrl),
+      additionalReferenceCount: additionalReferences.length,
+      seedanceReferenceCount: seedanceReferences.length,
       engine,
       exactLikenessRoute,
       exactLikenessReady,
+      referenceStrategy: klingReferencePlan?.plannedStrategy ?? null,
+      referenceRolesUsed: klingReferencePlan?.references.map((reference) => reference.role) ?? [],
+      privateUrlsRedacted: true,
     });
 
     if (SINGLE_PROVIDER_MODE) {
@@ -1072,29 +1264,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         skippedFallbackProviders: true,
       });
 
-      if (!isValidHttpUrl(referenceImageUrl)) {
+      if (!isValidHttpUrl(providerReferenceImageUrl)) {
         return sendJson(res, 400, {
           error: 'Invalid reference image URL',
-          received: referenceImageUrl,
+          received: '[redacted-reference-url]',
         });
       }
 
-      const referenceValidation = await validateReferenceImageUrl(referenceImageUrl);
+      const referenceValidation = await validateReferenceImageUrl(providerReferenceImageUrl);
       if (!referenceValidation.ok) {
         return sendJson(res, 400, {
           error: 'Reference image not accessible',
-          referenceImageUrl,
+          referenceImageUrl: '[redacted-reference-url]',
           status: referenceValidation.status,
           contentType: referenceValidation.contentType,
         });
       }
 
+      for (const [index, additionalReference] of additionalReferences.entries()) {
+        if (!isValidHttpUrl(additionalReference)) {
+          return sendJson(res, 400, {
+            error: 'Invalid additional reference image URL',
+            referenceImageUrl: safeUrlLabel(index + 1),
+          });
+        }
+
+        const additionalValidation = await validateReferenceImageUrl(additionalReference);
+        if (!additionalValidation.ok) {
+          return sendJson(res, 400, {
+            error: 'Additional reference image not accessible',
+            referenceImageUrl: safeUrlLabel(index + 1),
+            status: additionalValidation.status,
+            contentType: additionalValidation.contentType,
+          });
+        }
+      }
+
       const model = (process.env.REPLICATE_IMAGE_TO_VIDEO_MODEL || KLING_IMAGE_TO_VIDEO_MODEL) as ReplicateModelIdentifier;
       const requestInput = {
         prompt: promptForModel,
-        start_image: referenceImageUrl,
+        start_image: providerReferenceImageUrl,
+        ...(additionalReferences.length ? { reference_images: additionalReferences } : {}),
       };
-      const generationModeUsed: GenerationModeUsed = keyframeUrl
+      const generationModeUsed: GenerationModeUsed = klingExactLikenessRequest
+        ? 'kling-exact-likeness-reference'
+        : keyframeUrl
         ? 'identity-image-to-video'
         : 'reference-image-to-video';
 
@@ -1102,7 +1316,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         provider: 'replicate',
         model,
       });
-      console.log('FINAL INPUT SENT TO SINGLE PROVIDER', requestInput);
+      console.log('FINAL INPUT SENT TO SINGLE PROVIDER', {
+        prompt: requestInput.prompt,
+        inputKeys: Object.keys(requestInput),
+        referenceCount: 1 + additionalReferences.length,
+        privateUrlsRedacted: true,
+      });
 
       const { default: Replicate } = await import('replicate');
       const replicate = new Replicate({ auth: token }) as ReplicateClient;
@@ -1114,7 +1333,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           requestInput,
           durationSent: null,
           generationModeUsed,
-          referenceImageUrl,
+          referenceImageUrl: providerReferenceImageUrl,
           fallbackToStartImageOnly: false,
         });
 
@@ -1125,7 +1344,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           videoUrl: result.videoUrl,
           provider: 'replicate',
           model: result.model,
-          displayEngine: generationModeUsed === 'identity-image-to-video'
+          displayEngine: generationModeUsed === 'kling-exact-likeness-reference'
+            ? 'Kling exact likeness'
+            : generationModeUsed === 'identity-image-to-video'
             ? 'Lumora identity reference'
             : 'Reference image-to-video',
           generationMode: generationModeUsed,
@@ -1135,8 +1356,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           durationSent: result.durationSent,
           identityId: textValue(body.identityId) || null,
           keyframeUrl: keyframeUrl || null,
-          referenceImageUrl: primaryReferenceImageUrl || referenceImageUrl,
-          additionalReferenceImageUrls: [],
+          exactLikenessRoute: klingExactLikenessRequest ? 'kling_reference' : null,
+          exactLikenessAvailable: klingExactLikenessRequest,
+          exactLikenessReason: klingExactLikenessRequest ? 'Kling exact likeness route is canary-proven.' : null,
+          referenceImageUrl: providerReferenceImageUrl || primaryReferenceImageUrl || referenceImageUrl,
+          additionalReferenceImageUrls: additionalReferences,
+          referenceStrategy: klingReferencePlan?.plannedStrategy ?? (additionalReferences.length ? 'multi_reference' : 'front_only_fallback'),
+          referenceRolesUsed: klingReferencePlan?.references.map((reference) => reference.role) ?? ['front_angle'],
+          referenceCount: klingReferencePlan?.references.length ?? 1,
+          klingReferenceDiagnostics: klingReferenceDiagnostics({
+            plan: klingReferencePlan,
+            referenceStrategy: result.finalInputKeys?.includes('reference_images')
+              ? 'multi_reference'
+              : 'front_only_fallback',
+            exactLikenessRoute: klingExactLikenessRequest ? 'kling_reference' : null,
+            providerRoute: 'replicate_kling_image_to_video',
+          }),
           finalPrompt: promptForModel,
           warnings: [],
           rawOutput: {
@@ -1212,7 +1447,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         provider: 'replicate',
         model: SEEDANCE_MODEL,
       });
-      console.log('SEEDANCE INPUT', requestInput);
+      console.log('SEEDANCE INPUT', {
+        prompt: requestInput.prompt,
+        inputKeys: Object.keys(requestInput),
+        referenceCount: seedanceReferences.length,
+        duration: requestInput.duration,
+        aspectRatio: requestInput.aspect_ratio,
+        privateUrlsRedacted: true,
+      });
 
       const { default: Replicate } = await import('replicate');
       const replicate = new Replicate({ auth: token }) as ReplicateClient;
@@ -1262,7 +1504,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         console.warn('Seedance generation failed without image-to-video fallback.', {
           model: SEEDANCE_MODEL,
-          referenceImages: seedanceReferences,
+          referenceImageCount: seedanceReferences.length,
+          privateUrlsRedacted: true,
           safetyFiltered: seedanceSafetyFiltered,
           rateLimited: seedanceRateLimited,
         });
@@ -1301,15 +1544,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!isValidHttpUrl(referenceImageUrl)) {
       return sendJson(res, 400, {
         error: 'Invalid reference image URL',
-        received: referenceImageUrl,
+        received: '[redacted-reference-url]',
       });
     }
 
-    for (const additionalReference of additionalReferences) {
+    for (const [index, additionalReference] of additionalReferences.entries()) {
       if (!isValidHttpUrl(additionalReference)) {
         return sendJson(res, 400, {
           error: 'Invalid additional reference image URL',
-          received: additionalReference,
+          received: safeUrlLabel(index + 1),
         });
       }
     }
@@ -1318,18 +1561,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!referenceValidation.ok) {
       return sendJson(res, 400, {
         error: 'Reference image not accessible',
-        referenceImageUrl,
+        referenceImageUrl: '[redacted-reference-url]',
         status: referenceValidation.status,
         contentType: referenceValidation.contentType,
       });
     }
 
-    for (const additionalReference of additionalReferences) {
+    for (const [index, additionalReference] of additionalReferences.entries()) {
       const additionalValidation = await validateReferenceImageUrl(additionalReference);
       if (!additionalValidation.ok) {
         return sendJson(res, 400, {
           error: 'Additional reference image not accessible',
-          referenceImageUrl: additionalReference,
+          referenceImageUrl: safeUrlLabel(index + 1),
           status: additionalValidation.status,
           contentType: additionalValidation.contentType,
         });
@@ -1345,19 +1588,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const generationModeUsed = keyframeUrl ? 'identity-image-to-video' : 'reference-image-to-video';
 
     console.log('GENERATION DEBUG', {
-      referenceImageUrl,
-      additionalReferences,
+      hasReferenceImage: Boolean(referenceImageUrl),
+      additionalReferenceCount: additionalReferences.length,
       modelUsed: model,
       finalPrompt: promptForModel,
       generationModeUsed,
       identityId: textValue(body.identityId),
+      privateUrlsRedacted: true,
     });
     console.log('GENERATION ENGINE USED', {
       engine: 'kling',
       provider: 'replicate',
       model,
     });
-    console.log('FINAL INPUT SENT TO KLING', requestInput);
+    console.log('FINAL INPUT SENT TO KLING', {
+      prompt: requestInput.prompt,
+      inputKeys: Object.keys(requestInput),
+      referenceCount: 1 + additionalReferences.length,
+      privateUrlsRedacted: true,
+    });
 
     const { default: Replicate } = await import('replicate');
     const replicate = new Replicate({ auth: token }) as ReplicateClient;

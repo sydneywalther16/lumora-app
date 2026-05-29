@@ -93,6 +93,9 @@ try {
     'https://assets.example/right.jpg',
   ]);
   assert.match(payload.prompt, /@Element1/);
+  assert.match(payload.prompt, /@Element2 and @Element3/);
+  assert.match(payload.prompt, /Adapt clothing to the scene prompt/);
+  assert.doesNotMatch(payload.prompt, /\bno nudity\b/i);
   assert.equal(payload.aspect_ratio, '9:16');
 
   assert.equal(classifyKlingFailure({ statusCode: 400, detail: 'unknown field image_urls' }).category, 'kling_input_schema');

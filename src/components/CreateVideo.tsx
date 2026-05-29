@@ -274,6 +274,15 @@ type GenerateVideoApiResponse = {
   displayEngine?: string;
   referenceImages?: unknown;
   referenceImageCount?: unknown;
+  referenceStrategy?: string | null;
+  referenceRolesUsed?: unknown;
+  referenceCount?: number | null;
+  exactLikenessRoute?: string | null;
+  exactLikenessAvailable?: boolean | null;
+  exactLikenessReason?: string | null;
+  exactLikenessProvider?: string | null;
+  exactLikenessCanaryStatus?: string | null;
+  klingReferenceDiagnostics?: Record<string, unknown> | null;
   multimodalReferenceMode?: unknown;
   assetPersistence?: unknown;
   moderation?: unknown;
@@ -413,6 +422,8 @@ function creatorRenderModeLabel(mode: string) {
       return 'Reference-led scene';
     case 'text-to-video-fallback':
       return 'Cinematic text scene';
+    case 'kling-exact-likeness-reference':
+      return 'Kling exact likeness scene';
     default:
       return mode.replace(/-/g, ' ');
   }
@@ -591,6 +602,13 @@ function formatUrlList(value: unknown): string[] {
   return value
     .map((item) => (typeof item === 'string' ? cleanReferenceUrl(item) : null))
     .filter((item): item is string => Boolean(item));
+}
+
+function formatStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean);
 }
 
 function formatSeedanceReferenceUrls(value: unknown): string[] {
@@ -1537,6 +1555,7 @@ export default function CreateVideo({
     const savedPrompt = localStorage.getItem('remixPrompt');
     const savedTitle = localStorage.getItem('remixTitle');
     const savedRenderPreference = localStorage.getItem('lumora_remix_render_preference');
+    const savedRenderEngine = localStorage.getItem('lumora_remix_render_engine');
 
     if (savedPrompt) {
       setActivePrompt(savedPrompt);
@@ -1555,6 +1574,18 @@ export default function CreateVideo({
     ) {
       setRenderPreference(savedRenderPreference);
       localStorage.removeItem('lumora_remix_render_preference');
+    }
+
+    if (
+      savedRenderEngine === SEEDANCE_ENGINE_ID ||
+      savedRenderEngine === SEEDANCE_QUALITY_ENGINE_ID ||
+      savedRenderEngine === 'replicate' ||
+      savedRenderEngine === 'runway' ||
+      savedRenderEngine === 'openai' ||
+      savedRenderEngine === 'mock'
+    ) {
+      setEngine(savedRenderEngine as VideoEngine);
+      localStorage.removeItem('lumora_remix_render_engine');
     }
   }, [setActivePrompt, setDraftTitle]);
 
@@ -1648,7 +1679,16 @@ export default function CreateVideo({
             displayEngine,
             projectId: job.projectId ?? null,
             createdAt: job.createdAt ?? completedAt,
-            message: job.message ?? (job.textSelfGuidanceAvailable ? 'Rendered with soft self guidance.' : 'Your cinematic draft is saved.'),
+            exactLikenessRoute: job.exactLikenessRoute ?? null,
+            exactLikenessProvider: job.exactLikenessProvider ?? null,
+            exactLikenessCanaryStatus: job.exactLikenessCanaryStatus ?? null,
+            referenceStrategy: job.referenceStrategy ?? null,
+            referenceRolesUsed: job.referenceRolesUsed ?? null,
+            referenceCount: job.referenceCount ?? null,
+            klingReferenceDiagnostics: job.klingReferenceDiagnostics ?? null,
+            message: job.message ?? (job.exactLikenessRoute === 'kling_reference'
+              ? 'Kling exact-likeness render created.'
+              : job.textSelfGuidanceAvailable ? 'Rendered with soft self guidance.' : 'Your cinematic draft is saved.'),
             selfLikenessIntensity: job.selfLikenessIntensity ?? selfLikenessIntensity,
             textSelfGuidanceAvailable: job.textSelfGuidanceAvailable ?? null,
           });
@@ -2890,6 +2930,28 @@ export default function CreateVideo({
         : formatUrlList(data.additionalReferenceImageUrls).length
           ? formatUrlList(data.additionalReferenceImageUrls)
           : additionalReferenceImageUrls;
+      const nextExactLikenessRoute = typeof data.exactLikenessRoute === 'string'
+        ? data.exactLikenessRoute
+        : selectedKlingExactReadyForRequest
+          ? 'kling_reference'
+          : null;
+      const nextExactLikenessProvider = nextExactLikenessRoute === 'kling_reference' ? 'kling' : data.exactLikenessProvider ?? null;
+      const nextExactLikenessCanaryStatus = typeof data.exactLikenessCanaryStatus === 'string'
+        ? data.exactLikenessCanaryStatus
+        : nextExactLikenessRoute === 'kling_reference'
+          ? 'canary_succeeded'
+          : null;
+      const nextReferenceStrategy = typeof data.referenceStrategy === 'string'
+        ? data.referenceStrategy
+        : nextExactLikenessRoute === 'kling_reference'
+          ? (nextAdditionalReferenceImageUrls.length ? 'multi_reference' : 'front_only_fallback')
+          : null;
+      const nextReferenceRolesUsed = formatStringList(data.referenceRolesUsed);
+      const nextReferenceCount = typeof data.referenceCount === 'number'
+        ? data.referenceCount
+        : nextExactLikenessRoute === 'kling_reference'
+          ? 1 + nextAdditionalReferenceImageUrls.length
+          : null;
       const generatedMedia = resolveGeneratedVideoMedia({
         videoUrl: nextVideoUrl,
         outputUrl: nextVideoUrl,
@@ -2997,8 +3059,19 @@ export default function CreateVideo({
           : null,
         selfLikenessIntensity: data.selfLikenessIntensity ?? selectedSelfLikenessIntensity,
         textSelfGuidanceAvailable: data.textSelfGuidanceAvailable ?? null,
+        exactLikenessRoute: nextExactLikenessRoute,
+        exactLikenessAvailable: nextExactLikenessRoute === 'kling_reference',
+        exactLikenessReason: nextExactLikenessRoute === 'kling_reference' ? 'Kling exact likeness route is canary-proven.' : data.exactLikenessReason ?? null,
+        exactLikenessProvider: nextExactLikenessProvider,
+        exactLikenessCanaryStatus: nextExactLikenessCanaryStatus,
+        referenceStrategy: nextReferenceStrategy,
+        referenceRolesUsed: nextReferenceRolesUsed.length ? nextReferenceRolesUsed : null,
+        referenceCount: nextReferenceCount,
+        klingReferenceDiagnostics: data.klingReferenceDiagnostics ?? null,
         message: renderedWithLighterCastGuidance || renderedWithSoftSelfGuidance
           ? 'Rendered with soft self guidance.'
+          : nextExactLikenessRoute === 'kling_reference'
+          ? 'Kling exact-likeness render created.'
           : nextGenerationMode === 'seedance-multimodal-reference'
           ? 'Cast reference render created.'
           : nextGenerationMode === 'seedance-text-to-video'
@@ -3036,6 +3109,14 @@ export default function CreateVideo({
           referenceImageUrl: nextReferenceImageUrl,
           referenceImageUrls: referencePayload,
           additionalReferenceImageUrls: nextAdditionalReferenceImageUrls,
+          exactLikenessRoute: nextExactLikenessRoute,
+          exactLikenessProvider: nextExactLikenessProvider,
+          exactLikenessCanaryStatus: nextExactLikenessCanaryStatus,
+          referenceStrategy: nextReferenceStrategy,
+          referenceRolesUsed: nextReferenceRolesUsed.length ? nextReferenceRolesUsed : null,
+          referenceCount: nextReferenceCount,
+          renderProvider: nextExactLikenessRoute === 'kling_reference' ? 'kling' : generationProvider,
+          klingReferenceDiagnostics: data.klingReferenceDiagnostics ?? null,
           characterId,
           characterName,
           characterAvatar,
@@ -4284,7 +4365,9 @@ export default function CreateVideo({
             </div>
             <span className="tiny-pill">Draft saved</span>
           </div>
-          {isDefaultSelfCharacter ? (
+          {isDefaultSelfCharacter && generationResult.exactLikenessRoute === 'kling_reference' ? (
+            <p><strong>Kling exact likeness</strong></p>
+          ) : isDefaultSelfCharacter ? (
             <p><strong>Soft self guidance</strong></p>
           ) : generationResult.characterName ? (
             <p>Character: <strong>{generationResult.characterName}</strong></p>

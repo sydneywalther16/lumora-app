@@ -339,6 +339,11 @@ export type GenerationResponse = {
   exactLikenessRoute?: string | null;
   exactLikenessAvailable?: boolean | null;
   exactLikenessReason?: string | null;
+  exactLikenessProvider?: string | null;
+  exactLikenessCanaryStatus?: string | null;
+  referenceStrategy?: string | null;
+  referenceRolesUsed?: string[] | null;
+  klingReferenceDiagnostics?: Record<string, unknown> | null;
   selfLikenessIntensity?: SelfLikenessIntensity | null;
   textSelfGuidanceAvailable?: boolean | null;
   providerStatus?: string | null;
@@ -399,6 +404,14 @@ export type GenerationJob = {
   referenceImageUrls?: Partial<ReferenceImageUrls> | null;
   additionalReferenceImageUrls?: string[] | null;
   generationMode?: GenerationMode | null;
+  exactLikenessRoute?: string | null;
+  exactLikenessProvider?: string | null;
+  exactLikenessCanaryStatus?: string | null;
+  referenceStrategy?: string | null;
+  referenceRolesUsed?: string[] | null;
+  referenceCount?: number | null;
+  renderProvider?: string | null;
+  klingReferenceDiagnostics?: Record<string, unknown> | null;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
@@ -422,6 +435,7 @@ export type GenerationMode =
   | 'image-to-video'
   | 'reference-image-to-video'
   | 'text-to-video-fallback'
+  | 'kling-exact-likeness-reference'
   | 'seedance-text-to-video'
   | 'seedance-multimodal-reference';
 

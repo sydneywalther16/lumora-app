@@ -47,6 +47,15 @@ type RemixProjectPayload = {
   referenceImageUrls?: Partial<ReferenceImageUrls> | null;
   additionalReferenceImageUrls?: string[];
   generationMode?: GenerationMode | null;
+  provider?: string | null;
+  displayEngine?: string | null;
+  exactLikenessRoute?: string | null;
+  exactLikenessProvider?: string | null;
+  exactLikenessCanaryStatus?: string | null;
+  referenceStrategy?: string | null;
+  referenceRolesUsed?: string[] | null;
+  referenceCount?: number | null;
+  renderProvider?: string | null;
 };
 
 function readStoredRemixProject(): RemixProjectPayload | null {
