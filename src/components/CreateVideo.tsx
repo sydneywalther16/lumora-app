@@ -637,6 +637,42 @@ function isProviderSafetyFilterError(value: string): boolean {
   );
 }
 
+function klingProviderFailureMessage(category: string | null | undefined, fallback: string) {
+  if (category === 'kling_provider_safety_filter') {
+    return 'Kling provider safety filter paused this render. The provider returned a moderation failure for this exact-likeness attempt.';
+  }
+  if (category === 'kling_input_schema') {
+    return 'Kling rejected the render payload shape. Check provider diagnostics before retrying this exact-likeness route.';
+  }
+  if (category === 'kling_provider_unavailable') {
+    return 'Kling is temporarily unavailable. Your scene is safe to retry later.';
+  }
+  if (category === 'kling_billing_required') {
+    return 'Kling billing or account access needs attention before this exact-likeness route can render.';
+  }
+  if (category && category.startsWith('kling_')) {
+    return `Kling exact-likeness render paused: ${category.replace(/_/g, ' ')}.`;
+  }
+  return fallback;
+}
+
+function isClearlySafeKlingPrompt(value: string) {
+  return Boolean(value.trim()) && !/\b(nsfw|nude|nudity|erotic|sexual|onlyfans|fetish|lingerie|seductive|provocative|revealing|sheer|see[-\s]?through|cleavage|skimpy)\b/i.test(value);
+}
+
+function isKlingComplexityError(value: string) {
+  const lower = value.toLowerCase();
+  return (
+    lower.includes('too complex') ||
+    lower.includes('scene complexity') ||
+    lower.includes('prompt is too long') ||
+    lower.includes('prompt too long') ||
+    lower.includes('too many') ||
+    lower.includes('timed out before') ||
+    lower.includes('timeout before')
+  );
+}
+
 function isProviderModerationPayload(value: unknown): value is {
   moderation?: boolean;
   suggestedPrompt?: string;
@@ -1406,15 +1442,35 @@ export default function CreateVideo({
     generationStatusState === 'verifying_output' ||
     generationStatusState === 'rate_limited'
   );
+  const klingExactRenderStateActive = selectedKlingExactReady && (
+    generationStatusState === 'queued' ||
+    generationStatusState === 'processing' ||
+    generationStatusState === 'verifying_output'
+  );
   const visibleRenderState = generationStatusState === 'idle' || hasVerifiedGenerationOutput ? null : {
     label: generationStatusLabels[generationStatusState],
     tone: renderStateTone(generationStatusState),
-    headline: renderStateHeadline(generationStatusState),
-    body: status && !isProviderTechnicalText(status)
+    headline: klingExactRenderStateActive
+      ? generationStatusState === 'verifying_output'
+        ? 'Saving to Drafts'
+        : 'Trying Kling exact likeness render...'
+      : renderStateHeadline(generationStatusState),
+    body: klingExactRenderStateActive
+      ? generationStatusState === 'verifying_output'
+        ? 'Lumora is verifying the Kling video before marking the draft ready.'
+        : 'Using your saved self-character references for this scene.'
+      : status && !isProviderTechnicalText(status)
       ? status
       : renderStateBody(generationStatusState, renderCooldownSeconds),
   };
-  const pausedRenderCopy = creatorRenderStateCopy('paused');
+  const pausedRenderCopy = selectedKlingExactReady && generationError
+    ? {
+        ...creatorRenderStateCopy('paused'),
+        title: 'Kling exact likeness render paused.',
+        body: generationError,
+        suggestedNextStep: 'Suggested next step: retry Kling later, edit the scene, or switch to soft guidance.',
+      }
+    : creatorRenderStateCopy('paused');
   const suggestedTakePrompt = buildSafeTakePrompt(
     generationSafeRewrite || activePrompt,
     { displayName: characterName },
@@ -2478,6 +2534,7 @@ export default function CreateVideo({
     const selectedRenderPreference = options.renderPreferenceOverride ?? renderPreference;
     const selectedSelfLikenessIntensity = selfLikenessIntensity;
     const selectedReferenceImageUrl = resolveRenderableReferenceUrl(referenceImageUrl) || selectedSelfReferenceImageUrl;
+    const selectedKlingExactReadyForRequest = selectedEngine === 'replicate' && klingExactLikenessReady;
 
     if (!currentPrompt.trim()) {
       setGenerationError('Add a prompt before generating.');
@@ -2584,7 +2641,9 @@ export default function CreateVideo({
         setStatus('Shaping cinematic beats...');
         invisiblePlan = await buildCinematicStructureForPrompt({ source: 'generate', promptOverride: currentPrompt });
       }
-      if (invisiblePlan && selectedRenderPreference !== 'success_first') {
+      if (selectedKlingExactReadyForRequest) {
+        setStatus('Trying Kling exact likeness render...');
+      } else if (invisiblePlan && selectedRenderPreference !== 'success_first') {
         setStatus('Preparing your cast for the render...');
       } else {
         setStatus('Lumora is finding the cleanest render path...');
@@ -2719,6 +2778,9 @@ export default function CreateVideo({
             renderPreference: selectedRenderPreference,
             selfLikenessIntensity: selectedSelfLikenessIntensity,
             generationMode: videoGenerationMode,
+            exactLikenessRoute: selectedKlingExactReadyForRequest ? 'kling_reference' : null,
+            exactLikenessReady: selectedKlingExactReadyForRequest,
+            exactLikenessCanaryStatus: selectedKlingExactReadyForRequest ? 'canary_succeeded' : null,
           }),
         });
 
@@ -2727,15 +2789,22 @@ export default function CreateVideo({
 
         if (!res.ok) {
           const detail = formatUnknownDetail(parsedData.details);
+          const failureCategory = typeof parsedData.errorCategory === 'string' ? parsedData.errorCategory : null;
           const apiMessage = parsedData.error || parseError || 'Lumora paused this scene.';
-          const rawFailure = [apiMessage, parsedData.suggestion || '', detail].join(' ');
+          const rawFailure = [apiMessage, failureCategory || '', parsedData.suggestion || '', detail].join(' ');
           console.error('Video generation request paused', {
             status: res.status,
             error: apiMessage,
+            failureCategory,
             details: detail,
           });
+          if (selectedKlingExactReadyForRequest && failureCategory) {
+            throw new Error(klingProviderFailureMessage(failureCategory, apiMessage));
+          }
           if (isProviderSafetyFilterError(rawFailure)) {
-            throw new Error(creatorFacingErrorMessage(rawFailure, providerSafetyFilterMessage));
+            throw new Error(selectedKlingExactReadyForRequest
+              ? klingProviderFailureMessage('kling_provider_safety_filter', providerSafetyFilterMessage)
+              : creatorFacingErrorMessage(rawFailure, providerSafetyFilterMessage));
           }
           if (isReplicateThrottledError(rawFailure)) {
             throw new Error(creatorFacingErrorMessage(rawFailure, replicateThrottledMessage));
@@ -2881,6 +2950,9 @@ export default function CreateVideo({
       }
 
       const profile = authUser ? await loadSupabaseProfile(authUser.id) : loadLumoraProfile();
+      if (selectedKlingExactReadyForRequest) {
+        setStatus('Saving to Drafts');
+      }
       const now = new Date().toISOString();
       const generationId = createLocalGenerationId();
       const renderedWithSoftSelfGuidance = Boolean(
@@ -3055,6 +3127,30 @@ export default function CreateVideo({
         showToast({
           type: 'error',
           message: `Render queue is cooling down. Lumora will resume automatically in ${retryAfterSeconds} seconds.`,
+        });
+        return;
+      }
+      if (
+        selectedKlingExactReadyForRequest &&
+        !options.forceNewTake &&
+        isClearlySafeKlingPrompt(currentPrompt) &&
+        isKlingComplexityError(message)
+      ) {
+        const overrides = successFirstOverrides(selectedDuration);
+        setActivePrompt(ULTRA_SAFE_SCENE_PROMPT);
+        setRenderPreference(overrides.renderPreference);
+        setDuration(overrides.duration);
+        setGenerationSafeRewrite(ULTRA_SAFE_SCENE_PROMPT);
+        setGenerationModerationDetail('Lumora simplified the safe garden prompt and kept the Kling exact-likeness route selected.');
+        setGenerationModerationStages(['Trying Kling exact likeness render', 'Saving to Drafts']);
+        setGenerationError('');
+        setStatus('Trying Kling exact likeness render...');
+        releaseGenerateLock();
+        await handleGenerate({
+          promptOverride: ULTRA_SAFE_SCENE_PROMPT,
+          renderPreferenceOverride: overrides.renderPreference,
+          durationOverride: overrides.duration,
+          forceNewTake: true,
         });
         return;
       }
@@ -3925,8 +4021,10 @@ export default function CreateVideo({
             {(generationStatusState === 'queued' || generationStatusState === 'processing' || generationStatusState === 'rate_limited') ? (
               <ol className="success-ladder-progress" aria-label="Render progress">
                 {[
-                  'Preparing cast',
-                  successFirstLighterReferencePath ? 'Creating soft self-guided draft' : 'Trying storybook cinematic take',
+                  selectedKlingExactReady ? 'Preparing saved self references' : 'Preparing cast',
+                  selectedKlingExactReady
+                    ? 'Trying Kling exact likeness render'
+                    : successFirstLighterReferencePath ? 'Creating soft self-guided draft' : 'Trying storybook cinematic take',
                   'Saving to Drafts',
                 ].map((step, index) => (
                   <li key={step} className={index === 0 || generationStatusState === 'processing' ? 'active' : ''}>

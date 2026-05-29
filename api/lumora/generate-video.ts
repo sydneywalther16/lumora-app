@@ -35,6 +35,9 @@ type GenerateVideoBody = {
   provider?: unknown;
   engine?: unknown;
   generationMode?: unknown;
+  exactLikenessRoute?: unknown;
+  exactLikenessReady?: unknown;
+  exactLikenessCanaryStatus?: unknown;
 };
 
 type ReplicateClient = {
@@ -61,6 +64,10 @@ const SEEDANCE_IDENTITY_PROMPT =
   'Use the provided reference images only as identity references. Do not animate or copy any single source image. Generate a new photorealistic person matching the same identity in the requested scene.';
 const SAFE_IDENTITY_PROMPT_PREFIX =
   'Create a safe, fully clothed, photorealistic cinematic video of the identity reference person. Preserve likeness. No nudity, no sexual content, no minors, no suggestive posing.';
+export const KLING_EXACT_LIKENESS_PROMPT_PREFIX =
+  'Create a fully clothed cinematic video of the saved self-character reference person. Preserve likeness with calm everyday body language, natural movement, and gentle framing.';
+const KLING_EXACT_LIKENESS_CONSISTENCY_PROMPT =
+  'Use the saved self-character references as the identity guide for face shape, hairstyle, hair color, skin tone, eye area, proportions, and overall likeness. Generate a new scene rather than copying the source image.';
 const SAFE_PROMPT_REPLACEMENT = 'stylish, cinematic, confident, editorial, fashion-inspired';
 const SENSITIVE_FILTER_ERROR = 'Generation blocked by provider safety filter';
 const SENSITIVE_FILTER_SUGGESTION =
@@ -78,9 +85,15 @@ const sensitivePromptTerms = [
   'nude',
   'nudity',
   'lingerie',
+  'minors',
+  'minor',
+  'nsfw',
   'onlyfans',
+  'sex',
+  'sexual',
   'seducing',
   'seductive',
+  'suggestive',
   'provocative',
   'adult',
 ] as const;
@@ -194,6 +207,12 @@ function errorStack(error: unknown): string | null {
 
 function textValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function booleanValue(value: unknown): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') return ['true', '1', 'yes', 'ready'].includes(value.trim().toLowerCase());
+  return false;
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -380,7 +399,20 @@ function isSeedanceEngine(body: GenerateVideoBody): boolean {
   return engine === 'seedance-2.0' || engine === 'seedance';
 }
 
-function buildFinalPrompt(input: {
+export function isKlingExactLikenessRequest(input: {
+  engine: string;
+  exactLikenessRoute?: string;
+  exactLikenessReady?: boolean;
+  exactLikenessCanaryStatus?: string;
+}) {
+  return (
+    input.engine === 'replicate' &&
+    input.exactLikenessRoute === 'kling_reference' &&
+    (input.exactLikenessReady === true || input.exactLikenessCanaryStatus === 'canary_succeeded')
+  );
+}
+
+export function buildFinalPrompt(input: {
   prompt: string;
   characterDescription: string;
   identityPrompt: string;
@@ -390,13 +422,19 @@ function buildFinalPrompt(input: {
   camera: string;
   mood: string;
   aspectRatio: string;
+  exactLikenessRoute?: string;
+  exactLikenessReady?: boolean;
+  exactLikenessCanaryStatus?: string;
 }) {
-  const consistencyPrompt = input.consistencyPrompt || (input.engine === 'seedance-2.0'
+  const klingExactLikeness = isKlingExactLikenessRequest(input);
+  const consistencyPrompt = klingExactLikeness
+    ? KLING_EXACT_LIKENESS_CONSISTENCY_PROMPT
+    : input.consistencyPrompt || (input.engine === 'seedance-2.0'
       ? SEEDANCE_IDENTITY_PROMPT
       : 'Create a new photorealistic character render based on the provided identity references. Do not simply animate or copy the source photo. Use the references only to preserve identity: face shape, hair color, hairstyle, skin tone, eye area, proportions, makeup style, and overall likeness. Place this same person into the requested new scene.');
 
   return [
-    SAFE_IDENTITY_PROMPT_PREFIX,
+    klingExactLikeness ? KLING_EXACT_LIKENESS_PROMPT_PREFIX : SAFE_IDENTITY_PROMPT_PREFIX,
     sanitizePromptText(consistencyPrompt),
     input.identityPrompt ? `Identity prompt: ${sanitizePromptText(input.identityPrompt)}` : '',
     sanitizePromptText(`${input.characterDescription} ${input.prompt}`.trim()),
@@ -610,6 +648,31 @@ function isRateLimitError(error: unknown): boolean {
     lower.includes('rate_limit') ||
     lower.includes('throttl')
   );
+}
+
+function klingGenerationErrorCategory(error: unknown): string {
+  const lower = [
+    errorMessage(error),
+    JSON.stringify(safeJsonValue(error) ?? ''),
+  ].join(' ').toLowerCase();
+  const statusCode = errorStatusCode(error);
+
+  if (isBillingOrCreditError(error)) return 'kling_billing_required';
+  if (isSensitiveFilterError(error)) return 'kling_provider_safety_filter';
+  if (statusCode === 400 || statusCode === 422 || lower.includes('invalid input') || lower.includes('validation')) {
+    return 'kling_input_schema';
+  }
+  if (statusCode === 429 || isRateLimitError(error)) return 'kling_rate_limited';
+  if (
+    (statusCode !== null && statusCode >= 500) ||
+    lower.includes('temporarily unavailable') ||
+    lower.includes('provider unavailable') ||
+    lower.includes('upstream unavailable')
+  ) {
+    return 'kling_provider_unavailable';
+  }
+
+  return 'kling_provider_failed';
 }
 
 function uniqueModels(models: ReplicateModelIdentifier[]): ReplicateModelIdentifier[] {
@@ -972,6 +1035,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : additionalReferenceImageUrls(body, referenceImageUrl);
     const aspectRatio = normalizeAspectRatio(body.aspectRatio);
     const durationSent = normalizeDuration(body.duration);
+    const exactLikenessRoute = textValue(body.exactLikenessRoute);
+    const exactLikenessCanaryStatus = textValue(body.exactLikenessCanaryStatus);
+    const exactLikenessReady = booleanValue(body.exactLikenessReady) || exactLikenessCanaryStatus === 'canary_succeeded';
     const finalPrompt = buildFinalPrompt({
       prompt,
       characterDescription: textValue(body.characterDescription),
@@ -982,6 +1048,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       camera: textValue(body.camera),
       mood: textValue(body.mood),
       aspectRatio,
+      exactLikenessRoute,
+      exactLikenessReady,
+      exactLikenessCanaryStatus,
     });
     const promptForModel = finalPrompt;
 
@@ -992,6 +1061,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       additionalReferences,
       seedanceReferences,
       engine,
+      exactLikenessRoute,
+      exactLikenessReady,
     });
 
     if (SINGLE_PROVIDER_MODE) {
@@ -1335,6 +1406,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (errorRecord.safetyFiltered === true || isSensitiveFilterError(error)) {
       return sendJson(res, 422, {
         error: SENSITIVE_FILTER_ERROR,
+        errorCategory: 'kling_provider_safety_filter',
+        providerStatus: 'moderation_failed',
         suggestion: SENSITIVE_FILTER_SUGGESTION,
       });
     }
@@ -1350,6 +1423,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return sendJson(res, 500, {
       error: errorMessage(error),
+      errorCategory: klingGenerationErrorCategory(error),
       details: safeJsonValue(errorRecord.details ?? error),
       stack: errorStack(error),
       provider: textValue(errorRecord.provider) || 'replicate',
