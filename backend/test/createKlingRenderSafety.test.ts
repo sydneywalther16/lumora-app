@@ -2,11 +2,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  analyzeKlingSceneIntent,
   buildKlingCreateReferencePlan,
   buildFinalPrompt,
   isKlingExactLikenessRequest,
+  klingReferenceDiagnostics,
   KLING_EXACT_LIKENESS_PROMPT_PREFIX,
 } from '../../api/lumora/generate-video';
+import { prepareContinueStory } from '../../src/lib/continueStory';
 
 const safeGardenPrompt = 'Peaceful flower garden, golden hour, natural movement, fully clothed, gentle camera motion.';
 
@@ -57,8 +60,15 @@ assert.doesNotMatch(exactPromptWithLegacyConsistency, /\bsexual content\b/i);
 assert.doesNotMatch(exactPromptWithLegacyConsistency, /\bno minors\b/i);
 assert.doesNotMatch(exactPromptWithLegacyConsistency, /\bsuggestive posing\b/i);
 
-const multiReferencePlan = buildKlingCreateReferencePlan({
+const walkingIntent = analyzeKlingSceneIntent('The self character walks through a peaceful flower garden at golden hour.');
+assert.ok(walkingIntent.sceneIntent.includes('walking'));
+assert.ok(walkingIntent.sceneIntent.includes('open_space_environment'));
+assert.equal(walkingIntent.framingIntent, 'walking_full_body');
+assert.equal(walkingIntent.prefersFullBodyPrimary, true);
+
+const walkingReferencePlan = buildKlingCreateReferencePlan({
   body: {
+    prompt: 'The self character walks through a peaceful flower garden at golden hour.',
     referenceImageUrls: {
       frontFaceUrl: 'https://assets.example/front.jpg',
       leftAngleUrl: 'https://assets.example/left.jpg',
@@ -74,24 +84,61 @@ const multiReferencePlan = buildKlingCreateReferencePlan({
   primaryReference: 'https://assets.example/front.jpg',
   exactLikenessReady: true,
 });
-assert.equal(multiReferencePlan?.plannedStrategy, 'multi_reference');
-assert.equal(multiReferencePlan?.fallbackAllowed, false);
-assert.deepEqual(multiReferencePlan?.references.map((reference) => reference.role), [
+assert.equal(walkingReferencePlan?.plannedStrategy, 'multi_reference');
+assert.equal(walkingReferencePlan?.fallbackAllowed, false);
+assert.equal(walkingReferencePlan?.primaryReferenceRole, 'full_body');
+assert.equal(walkingReferencePlan?.framingIntent, 'walking_full_body');
+assert.equal(walkingReferencePlan?.compositionNeutralized, true);
+assert.deepEqual(walkingReferencePlan?.references.map((reference) => reference.role), [
+  'full_body',
   'front_angle',
   'side_angle_left',
   'side_angle_right',
-  'full_body',
 ]);
-assert.deepEqual(multiReferencePlan?.additionalReferences.map((reference) => reference.url), [
+assert.deepEqual(walkingReferencePlan?.additionalReferences.map((reference) => reference.url), [
+  'https://assets.example/front.jpg',
   'https://assets.example/left.jpg',
   'https://assets.example/right.jpg',
-  'https://assets.example/full.jpg',
 ]);
-assert.match(multiReferencePlan?.promptGuidance ?? '', /Use @Element1 as the primary face identity/i);
-assert.match(multiReferencePlan?.promptGuidance ?? '', /@Element2 and @Element3 for side\/profile consistency/i);
-assert.match(multiReferencePlan?.promptGuidance ?? '', /@Element4 for body proportion/i);
-assert.match(multiReferencePlan?.promptGuidance ?? '', /Adapt clothing to the scene prompt/i);
-assert.doesNotMatch(multiReferencePlan?.promptGuidance ?? '', /\bno nudity\b/i);
+assert.match(walkingReferencePlan?.promptGuidance ?? '', /Use @Element1 as the full-figure identity/i);
+assert.match(walkingReferencePlan?.promptGuidance ?? '', /Use @Element2 as the primary face identity/i);
+assert.match(walkingReferencePlan?.promptGuidance ?? '', /@Element3 and @Element4 for side\/profile consistency/i);
+assert.match(walkingReferencePlan?.promptGuidance ?? '', /Adapt clothing to the scene prompt/i);
+assert.match(walkingReferencePlan?.promptGuidance ?? '', /standing and moving naturally through open space/i);
+assert.match(walkingReferencePlan?.promptGuidance ?? '', /clean unobstructed silhouette/i);
+assert.match(walkingReferencePlan?.promptGuidance ?? '', /source-photo furniture, seat-back shapes, studio framing, and seated posture/i);
+assert.doesNotMatch(walkingReferencePlan?.promptGuidance ?? '', /\bno nudity\b/i);
+
+const walkingDiagnostics = klingReferenceDiagnostics({
+  plan: walkingReferencePlan,
+  referenceStrategy: 'multi_reference',
+  exactLikenessRoute: 'kling_reference',
+  providerRoute: 'replicate_kling_image_to_video',
+});
+assert.equal(walkingDiagnostics.exactRouteActive, true);
+assert.equal(walkingDiagnostics.primaryReferenceRole, 'full_body');
+assert.deepEqual(walkingDiagnostics.supportingReferenceRoles, ['front_angle', 'side_angle_left', 'side_angle_right']);
+assert.equal(walkingDiagnostics.usedMultiReferencePlan, true);
+assert.equal(walkingDiagnostics.fellBackToFrontOnly, false);
+assert.equal(walkingDiagnostics.compositionNeutralized, true);
+assert.equal(walkingDiagnostics.privateUrlsRedacted, true);
+assert.equal(JSON.stringify(walkingDiagnostics).includes('assets.example'), false);
+
+const portraitReferencePlan = buildKlingCreateReferencePlan({
+  body: {
+    prompt: 'A close-up portrait in soft cinematic light.',
+    referenceImageUrls: {
+      frontFaceUrl: 'https://assets.example/front.jpg',
+      leftAngleUrl: 'https://assets.example/left.jpg',
+      rightAngleUrl: 'https://assets.example/right.jpg',
+      fullBodyUrl: 'https://assets.example/full.jpg',
+    },
+  },
+  primaryReference: 'https://assets.example/front.jpg',
+  exactLikenessReady: true,
+});
+assert.equal(portraitReferencePlan?.primaryReferenceRole, 'front_angle');
+assert.equal(portraitReferencePlan?.framingIntent, 'portrait_closeup');
 
 const frontOnlyPlan = buildKlingCreateReferencePlan({
   body: {
@@ -125,7 +172,7 @@ assert.match(createVideoSource, /Trying Kling exact likeness render\.\.\./);
 assert.match(createVideoSource, /Saving to Drafts/);
 assert.match(createVideoSource, /isClearlySafeKlingPrompt\(currentPrompt\)/);
 assert.match(createVideoSource, /isKlingComplexityError\(message\)/);
-assert.match(createVideoSource, /Kling exact-likeness render created\./);
+assert.match(createVideoSource, /Kling exact-likeness scene created with full self-character references\./);
 
 const studioListSource = readFileSync(join(process.cwd(), 'src/components/StudioList.tsx'), 'utf8');
 assert.match(studioListSource, /Kling exact likeness/);
@@ -134,5 +181,60 @@ const continueStorySource = readFileSync(join(process.cwd(), 'src/lib/continueSt
 assert.match(continueStorySource, /exactLikenessRoute/);
 assert.match(continueStorySource, /lumora_remix_render_engine/);
 assert.match(continueStorySource, /kling_reference/);
+assert.match(continueStorySource, /klingReferenceDiagnostics/);
+
+const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
+const originalLocalStorage = (globalThis as typeof globalThis & { localStorage?: unknown }).localStorage;
+const storage = new Map<string, string>();
+Object.defineProperty(globalThis, 'window', {
+  value: {},
+  configurable: true,
+});
+Object.defineProperty(globalThis, 'localStorage', {
+  value: {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+    removeItem: (key: string) => storage.delete(key),
+  },
+  configurable: true,
+});
+try {
+  prepareContinueStory({
+    id: 'draft-1',
+    title: 'Garden walk',
+    prompt: 'A peaceful garden walk.',
+    characterName: 'Self character',
+    isDefaultSelfCharacter: true,
+    generationMode: 'kling-exact-likeness-reference',
+    exactLikenessRoute: 'kling_reference',
+    referenceImageUrl: 'https://assets.example/full.jpg',
+    referenceImageUrls: {
+      frontFace: 'https://assets.example/front.jpg',
+      leftAngle: 'https://assets.example/left.jpg',
+      rightAngle: 'https://assets.example/right.jpg',
+      fullBody: 'https://assets.example/full.jpg',
+    },
+    additionalReferenceImageUrls: [
+      'https://assets.example/front.jpg',
+      'https://assets.example/left.jpg',
+      'https://assets.example/right.jpg',
+    ],
+    klingReferenceDiagnostics: walkingDiagnostics,
+  }, 'unit-test');
+  const payload = JSON.parse(storage.get('lumora_remix_project') ?? '{}') as Record<string, unknown>;
+  assert.equal(payload.exactLikenessRoute, 'kling_reference');
+  assert.equal((payload.klingReferenceDiagnostics as Record<string, unknown>).primaryReferenceRole, 'full_body');
+  assert.match(String(payload.prompt), /medium-full or full-body cinematic staging/i);
+  assert.equal(storage.get('lumora_remix_render_engine'), 'replicate');
+} finally {
+  Object.defineProperty(globalThis, 'window', {
+    value: originalWindow,
+    configurable: true,
+  });
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: originalLocalStorage,
+    configurable: true,
+  });
+}
 
 console.log('createKlingRenderSafety unit tests passed');

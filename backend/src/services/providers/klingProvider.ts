@@ -26,7 +26,7 @@ import { query } from '../db';
 const FAL_QUEUE_BASE_URL = 'https://queue.fal.run';
 const KLING_GENERIC_QUEUE_MODEL = 'fal-ai/kling-video';
 const KLING_REFERENCE_PROMPT =
-  'The referenced self character walks slowly through a peaceful sunlit garden, natural movement, fully clothed, soft cinematic storybook style, gentle camera motion. Use @Element1 as the primary face identity, @Element2 and @Element3 for side/profile consistency when present, and @Element4 for body proportion and outfit silhouette when present. Use the referenced self character\'s facial identity, hair color, face shape, eye color, and body proportions. Preserve identity across motion. Adapt clothing to the scene prompt when the user specifies clothing.';
+  'The referenced self character walks slowly through a peaceful sunlit garden, natural movement, fully clothed, soft cinematic storybook style, gentle camera motion. Use @Element1 as the primary face identity, @Element2 and @Element3 for side/profile consistency when present, and @Element4 for body proportion and outfit silhouette when present. Treat references as identity-only guidance while staging a fresh open-space scene with a clean unobstructed silhouette, natural arm swing, relaxed posture, visible environment around the subject, and clear separation from background. Use the referenced self character\'s facial identity, hair color, face shape, eye color, and body proportions. Preserve identity across motion. Adapt clothing to the scene prompt when the user specifies clothing.';
 const KLING_CANARY_STAGES = [
   'auth_probe_gate',
   'resolve_self_character',

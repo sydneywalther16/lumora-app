@@ -396,6 +396,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
         referenceRolesUsed: job.referenceRolesUsed ?? null,
         referenceCount: job.referenceCount ?? null,
         renderProvider: job.renderProvider ?? null,
+        klingReferenceDiagnostics: job.klingReferenceDiagnostics ?? null,
       }),
     );
     if (job.exactLikenessRoute === 'kling_reference' || job.generationMode === 'kling-exact-likeness-reference') {

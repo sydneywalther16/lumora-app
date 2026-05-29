@@ -1687,7 +1687,7 @@ export default function CreateVideo({
             referenceCount: job.referenceCount ?? null,
             klingReferenceDiagnostics: job.klingReferenceDiagnostics ?? null,
             message: job.message ?? (job.exactLikenessRoute === 'kling_reference'
-              ? 'Kling exact-likeness render created.'
+              ? 'Kling exact-likeness scene created with full self-character references.'
               : job.textSelfGuidanceAvailable ? 'Rendered with soft self guidance.' : 'Your cinematic draft is saved.'),
             selfLikenessIntensity: job.selfLikenessIntensity ?? selfLikenessIntensity,
             textSelfGuidanceAvailable: job.textSelfGuidanceAvailable ?? null,
@@ -3071,7 +3071,7 @@ export default function CreateVideo({
         message: renderedWithLighterCastGuidance || renderedWithSoftSelfGuidance
           ? 'Rendered with soft self guidance.'
           : nextExactLikenessRoute === 'kling_reference'
-          ? 'Kling exact-likeness render created.'
+          ? 'Kling exact-likeness scene created with full self-character references.'
           : nextGenerationMode === 'seedance-multimodal-reference'
           ? 'Cast reference render created.'
           : nextGenerationMode === 'seedance-text-to-video'

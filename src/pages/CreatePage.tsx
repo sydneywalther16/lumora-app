@@ -56,6 +56,7 @@ type RemixProjectPayload = {
   referenceRolesUsed?: string[] | null;
   referenceCount?: number | null;
   renderProvider?: string | null;
+  klingReferenceDiagnostics?: Record<string, unknown> | null;
 };
 
 function readStoredRemixProject(): RemixProjectPayload | null {

@@ -23,12 +23,35 @@ type ContinueStoryItem = {
   referenceRolesUsed?: string[] | null;
   referenceCount?: number | null;
   renderProvider?: string | null;
+  klingReferenceDiagnostics?: Record<string, unknown> | null;
 };
+
+function exactKlingStagingHint(item: ContinueStoryItem) {
+  if (item.exactLikenessRoute !== 'kling_reference' && item.generationMode !== 'kling-exact-likeness-reference') {
+    return '';
+  }
+
+  const diagnostics = item.klingReferenceDiagnostics ?? {};
+  const framingIntent = typeof diagnostics.framingIntent === 'string' ? diagnostics.framingIntent : item.referenceStrategy ?? '';
+  const primaryRole = typeof diagnostics.primaryReferenceRole === 'string' ? diagnostics.primaryReferenceRole : '';
+  const needsSceneStaging =
+    framingIntent.includes('walking') ||
+    framingIntent.includes('full_body') ||
+    framingIntent.includes('open_space') ||
+    primaryRole === 'full_body';
+
+  if (!needsSceneStaging) {
+    return ' Keep the Kling exact-likeness route and saved self-character references active for identity continuity.';
+  }
+
+  return ' Keep the Kling exact-likeness route active with medium-full or full-body cinematic staging, a clean unobstructed silhouette, and the saved self-character references used as identity guidance rather than portrait composition.';
+}
 
 function nextScenePrompt(item: ContinueStoryItem) {
   const storyText = item.caption || item.prompt || item.title || 'this cinematic moment';
   const characterText = item.characterName ? ` Keep ${item.characterName}'s emotional continuity alive.` : '';
-  return `Continue from this moment: ${storyText}. Create the next cinematic scene with a clear emotional turn, visual continuity, and one memorable detail.${characterText}`;
+  const exactKlingHint = exactKlingStagingHint(item);
+  return `Continue from this moment: ${storyText}. Create the next cinematic scene with a clear emotional turn, visual continuity, and one memorable detail.${characterText}${exactKlingHint}`;
 }
 
 export function prepareContinueStory(item: ContinueStoryItem, source: string) {
@@ -57,6 +80,7 @@ export function prepareContinueStory(item: ContinueStoryItem, source: string) {
     referenceRolesUsed: item.referenceRolesUsed ?? null,
     referenceCount: item.referenceCount ?? null,
     renderProvider: item.renderProvider ?? null,
+    klingReferenceDiagnostics: item.klingReferenceDiagnostics ?? null,
     source,
   };
 

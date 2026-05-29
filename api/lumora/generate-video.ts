@@ -78,6 +78,33 @@ type KlingCreateReferenceStrategy =
   | 'composite_identity_sheet'
   | 'front_only_fallback';
 
+type KlingSceneIntent =
+  | 'portrait_closeup'
+  | 'seated'
+  | 'standing'
+  | 'walking'
+  | 'full_body'
+  | 'medium_full'
+  | 'open_space_environment'
+  | 'motion_light'
+  | 'motion_medium';
+
+type KlingFramingIntent =
+  | 'portrait_closeup'
+  | 'seated_medium'
+  | 'standing_medium_full'
+  | 'walking_full_body'
+  | 'open_space_medium_full'
+  | 'full_body_scene'
+  | 'medium_full_scene';
+
+type KlingSceneIntentAnalysis = {
+  sceneIntent: KlingSceneIntent[];
+  framingIntent: KlingFramingIntent;
+  prefersFullBodyPrimary: boolean;
+  compositionNeutralized: boolean;
+};
+
 type KlingCreateReferencePlan = {
   primaryReference: KlingCreateReferenceEntry;
   references: KlingCreateReferenceEntry[];
@@ -85,6 +112,11 @@ type KlingCreateReferencePlan = {
   promptGuidance: string;
   plannedStrategy: KlingCreateReferenceStrategy;
   fallbackAllowed: boolean;
+  sceneIntent: KlingSceneIntent[];
+  framingIntent: KlingFramingIntent;
+  primaryReferenceRole: KlingCreateReferenceRole;
+  supportingReferenceRoles: KlingCreateReferenceRole[];
+  compositionNeutralized: boolean;
 };
 
 const SEEDANCE_MODEL = 'bytedance/seedance-2.0' as ReplicateModelIdentifier;
@@ -342,6 +374,185 @@ function uniqueReferenceEntries(entries: KlingCreateReferenceEntry[]): KlingCrea
   }));
 }
 
+function hasAnyPromptTerm(prompt: string, terms: string[]) {
+  return terms.some((term) => prompt.includes(term));
+}
+
+function hasPromptPattern(prompt: string, pattern: RegExp) {
+  return pattern.test(prompt);
+}
+
+export function analyzeKlingSceneIntent(prompt: string): KlingSceneIntentAnalysis {
+  const normalizedPrompt = ` ${prompt.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ')} `;
+  const intents = new Set<KlingSceneIntent>();
+
+  if (
+    hasAnyPromptTerm(normalizedPrompt, [
+      ' portrait ',
+      ' close up ',
+      ' closeup ',
+      ' headshot ',
+      ' selfie ',
+      ' talking head ',
+      ' face close ',
+      ' shoulders up ',
+      ' bust shot ',
+    ])
+  ) {
+    intents.add('portrait_closeup');
+  }
+
+  if (
+    hasAnyPromptTerm(normalizedPrompt, [
+      ' seated ',
+      ' sitting ',
+      ' sits ',
+      ' chair ',
+      ' sofa ',
+      ' couch ',
+      ' bench ',
+      ' at a table ',
+      ' dining table ',
+    ])
+  ) {
+    intents.add('seated');
+  }
+
+  if (
+    hasAnyPromptTerm(normalizedPrompt, [
+      ' walk ',
+      ' walks ',
+      ' walking ',
+      ' stroll ',
+      ' strolls ',
+      ' strolling ',
+      ' stride ',
+      ' striding ',
+      ' steps through ',
+      ' moving through ',
+      ' wanders ',
+      ' wandering ',
+    ]) ||
+    hasPromptPattern(normalizedPrompt, /\bwalk(?:s|ing)?\b/)
+  ) {
+    intents.add('walking');
+    intents.add('motion_light');
+  }
+
+  if (
+    hasAnyPromptTerm(normalizedPrompt, [
+      ' standing ',
+      ' stands ',
+      ' stand ',
+      ' upright ',
+      ' posing in ',
+      ' posed in ',
+    ])
+  ) {
+    intents.add('standing');
+  }
+
+  if (
+    hasAnyPromptTerm(normalizedPrompt, [
+      ' full body ',
+      ' full-body ',
+      ' full figure ',
+      ' whole body ',
+      ' head to toe ',
+      ' head-to-toe ',
+      ' wide shot ',
+    ])
+  ) {
+    intents.add('full_body');
+  }
+
+  if (
+    hasAnyPromptTerm(normalizedPrompt, [
+      ' medium full ',
+      ' medium-full ',
+      ' medium shot ',
+      ' three quarter ',
+      ' three-quarter ',
+      ' knees up ',
+      ' waist up ',
+    ])
+  ) {
+    intents.add('medium_full');
+  }
+
+  if (
+    hasAnyPromptTerm(normalizedPrompt, [
+      ' garden ',
+      ' meadow ',
+      ' field ',
+      ' forest ',
+      ' park ',
+      ' beach ',
+      ' street ',
+      ' plaza ',
+      ' courtyard ',
+      ' open space ',
+      ' outdoor ',
+      ' outside ',
+      ' through a ',
+      ' through the ',
+      ' around the ',
+    ])
+  ) {
+    intents.add('open_space_environment');
+  }
+
+  if (
+    hasAnyPromptTerm(normalizedPrompt, [
+      ' dance ',
+      ' dancing ',
+      ' running ',
+      ' run ',
+      ' twirl ',
+      ' twirling ',
+      ' spins ',
+      ' spinning ',
+    ])
+  ) {
+    intents.add('motion_medium');
+  }
+
+  const hasPortrait = intents.has('portrait_closeup');
+  const hasSeated = intents.has('seated');
+  const hasWalking = intents.has('walking');
+  const hasFullBody = intents.has('full_body');
+  const hasOpenSpace = intents.has('open_space_environment');
+  const hasStanding = intents.has('standing');
+
+  const framingIntent: KlingFramingIntent = hasPortrait && !hasWalking && !hasFullBody && !hasOpenSpace && !hasStanding
+    ? 'portrait_closeup'
+    : hasSeated && !hasWalking && !hasStanding && !hasFullBody
+      ? 'seated_medium'
+      : hasWalking
+        ? 'walking_full_body'
+        : hasFullBody
+          ? 'full_body_scene'
+          : hasOpenSpace
+            ? 'open_space_medium_full'
+            : hasStanding
+              ? 'standing_medium_full'
+              : 'medium_full_scene';
+
+  const prefersFullBodyPrimary = (
+    framingIntent === 'walking_full_body' ||
+    framingIntent === 'full_body_scene' ||
+    framingIntent === 'open_space_medium_full' ||
+    framingIntent === 'standing_medium_full'
+  );
+
+  return {
+    sceneIntent: Array.from(intents),
+    framingIntent,
+    prefersFullBodyPrimary,
+    compositionNeutralized: prefersFullBodyPrimary || hasOpenSpace || hasWalking,
+  };
+}
+
 export function buildKlingCreateReferencePlan(input: {
   body: GenerateVideoBody;
   primaryReference: string;
@@ -351,6 +562,7 @@ export function buildKlingCreateReferencePlan(input: {
   if (!primary) return null;
 
   const urls = referenceUrlMap(input.body.referenceImageUrls);
+  const sceneIntent = analyzeKlingSceneIntent(textValue(input.body.prompt));
   const explicitAdditional = Array.isArray(input.body.additionalReferenceImageUrls)
     ? input.body.additionalReferenceImageUrls.map(publicImageUrl)
     : [];
@@ -371,31 +583,51 @@ export function buildKlingCreateReferencePlan(input: {
     ...explicitAdditional,
     ...referenceImages,
   ].filter((url) => url && !roleUrls.has(url));
-  const references = uniqueReferenceEntries([
-    {
+  const roleEntries: Record<'front_angle' | 'side_angle_left' | 'side_angle_right' | 'full_body', KlingCreateReferenceEntry> = {
+    front_angle: {
       role: 'front_angle',
       label: 'front',
       url: urls.frontFace || primary,
       token: '@Element1',
     },
-    {
+    side_angle_left: {
       role: 'side_angle_left',
       label: 'left side',
       url: urls.leftAngle,
       token: '@Element2',
     },
-    {
+    side_angle_right: {
       role: 'side_angle_right',
       label: 'right side',
       url: urls.rightAngle,
       token: '@Element3',
     },
-    {
+    full_body: {
       role: 'full_body',
       label: 'full body',
       url: urls.fullBody,
       token: '@Element4',
     },
+  };
+  const primaryRole: KlingCreateReferenceRole =
+    sceneIntent.prefersFullBodyPrimary && roleEntries.full_body.url
+      ? 'full_body'
+      : 'front_angle';
+  const orderedRoleEntries = primaryRole === 'full_body'
+    ? [
+        roleEntries.full_body,
+        roleEntries.front_angle,
+        roleEntries.side_angle_left,
+        roleEntries.side_angle_right,
+      ]
+    : [
+        roleEntries.front_angle,
+        roleEntries.side_angle_left,
+        roleEntries.side_angle_right,
+        roleEntries.full_body,
+      ];
+  const references = uniqueReferenceEntries([
+    ...orderedRoleEntries,
     ...extraReferences.map((url) => ({
       role: 'additional_reference' as const,
       label: 'saved reference',
@@ -411,17 +643,43 @@ export function buildKlingCreateReferencePlan(input: {
   const sideTokens = references
     .filter((entry) => entry.role === 'side_angle_left' || entry.role === 'side_angle_right')
     .map((entry) => entry.token);
-  const fullBodyToken = references.find((entry) => entry.role === 'full_body')?.token ?? null;
+  const fullBodyReference = references.find((entry) => entry.role === 'full_body') ?? null;
+  const frontReference = references.find((entry) => entry.role === 'front_angle') ?? null;
+  const fullBodyToken = fullBodyReference?.token ?? null;
+  const frontToken = frontReference?.token ?? null;
+  const sceneStagingGuidance = sceneIntent.prefersFullBodyPrimary
+    ? [
+        'Stage the subject standing and moving naturally through open space in a fresh requested environment.',
+        'Use medium-full or full-body framing with visible environment around the subject, natural arm swing, relaxed posture, soft body movement, and a clean unobstructed silhouette.',
+        'Keep the subject clearly separated from the background and compose a coherent cinematic scene rather than an animated portrait.',
+      ].join(' ')
+    : sceneIntent.framingIntent === 'portrait_closeup'
+      ? 'Use portrait framing only because the scene asks for a close portrait composition.'
+      : 'Use medium-full cinematic staging when the prompt does not explicitly ask for a tight portrait.';
+  const compositionNeutralizationGuidance = sceneIntent.compositionNeutralized
+    ? [
+        'Treat saved references as identity-only guidance, not composition anchors.',
+        'Compose a fresh scene with the subject staged independently inside the requested environment.',
+        'Use identity cues from the references while leaving source-photo furniture, seat-back shapes, studio framing, and seated posture out of the new scene unless the prompt asks for them.',
+      ].join(' ')
+    : 'Treat saved references as identity-only guidance for likeness while composing the requested scene.';
   const promptGuidance = input.exactLikenessReady
     ? [
         `${KLING_EXACT_LIKENESS_IDENTITY_GUIDANCE}`,
-        `Use ${primaryReference.token} as the primary face identity.`,
+        fullBodyReference && primaryReference.role === 'full_body'
+          ? `Use ${fullBodyReference.token} as the full-figure identity and proportion guide.`
+          : '',
+        frontToken
+          ? `Use ${frontToken} as the primary face identity.`
+          : `Use ${primaryReference.token} as the primary identity guide.`,
         sideTokens.length
           ? `Use ${sideTokens.join(' and ')} for side/profile consistency.`
           : '',
-        fullBodyToken
+        fullBodyToken && primaryReference.role !== 'full_body'
           ? `Use ${fullBodyToken} for body proportion and outfit silhouette only.`
           : '',
+        compositionNeutralizationGuidance,
+        sceneStagingGuidance,
       ].filter(Boolean).join(' ')
     : '';
   const plannedStrategy: KlingCreateReferenceStrategy = additionalReferences.length > 0
@@ -435,6 +693,11 @@ export function buildKlingCreateReferencePlan(input: {
     promptGuidance,
     plannedStrategy,
     fallbackAllowed: additionalReferences.length === 0,
+    sceneIntent: sceneIntent.sceneIntent,
+    framingIntent: sceneIntent.framingIntent,
+    primaryReferenceRole: primaryReference.role,
+    supportingReferenceRoles: additionalReferences.map((reference) => reference.role),
+    compositionNeutralized: sceneIntent.compositionNeutralized,
   };
 }
 
@@ -496,17 +759,33 @@ function additionalReferenceImageUrls(body: GenerateVideoBody, primaryReference:
   });
 }
 
-function klingReferenceDiagnostics(input: {
+export function klingReferenceDiagnostics(input: {
   plan: KlingCreateReferencePlan | null;
   referenceStrategy: KlingCreateReferenceStrategy;
   exactLikenessRoute: string | null;
   providerRoute: string;
 }) {
   const references = input.plan?.references ?? [];
+  const supportingReferenceRoles = input.plan?.supportingReferenceRoles ?? [];
+  const fellBackToFrontOnly = input.plan
+    ? input.plan.references.length === 1 && input.plan.primaryReferenceRole === 'front_angle'
+    : input.referenceStrategy === 'front_only_fallback';
   return {
+    exactRouteActive: input.exactLikenessRoute === 'kling_reference',
+    exactRouteReason: input.exactLikenessRoute === 'kling_reference'
+      ? 'Kling exact likeness route is canary-proven.'
+      : null,
+    sceneIntent: input.plan?.sceneIntent ?? [],
+    framingIntent: input.plan?.framingIntent ?? null,
     referenceStrategy: input.referenceStrategy,
     referenceRolesUsed: references.map((reference) => reference.role),
     referenceCount: references.length,
+    primaryReferenceRole: input.plan?.primaryReferenceRole ?? null,
+    supportingReferenceRoles,
+    usedMultiReferencePlan: references.length > 1,
+    fellBackToFrontOnly,
+    compositionNeutralized: Boolean(input.plan?.compositionNeutralized),
+    referencePurpose: 'identity_only',
     exactLikenessRoute: input.exactLikenessRoute,
     providerRoute: input.providerRoute,
     privateUrlsRedacted: true,
@@ -1220,7 +1499,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })
       : null;
     const providerReferenceImageUrl = klingReferencePlan?.primaryReference.url ?? referenceImageUrl;
-    const additionalReferences = SINGLE_PROVIDER_MODE
+    const additionalReferences = klingReferencePlan
       ? klingReferencePlan?.additionalReferences.map((reference) => reference.url) ?? []
       : additionalReferenceImageUrls(body, referenceImageUrl);
     const aspectRatio = normalizeAspectRatio(body.aspectRatio);
@@ -1253,6 +1532,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       exactLikenessRoute,
       exactLikenessReady,
       referenceStrategy: klingReferencePlan?.plannedStrategy ?? null,
+      sceneIntent: klingReferencePlan?.sceneIntent ?? [],
+      framingIntent: klingReferencePlan?.framingIntent ?? null,
+      primaryReferenceRole: klingReferencePlan?.primaryReferenceRole ?? null,
       referenceRolesUsed: klingReferencePlan?.references.map((reference) => reference.role) ?? [],
       privateUrlsRedacted: true,
     });
@@ -1364,6 +1646,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           referenceStrategy: klingReferencePlan?.plannedStrategy ?? (additionalReferences.length ? 'multi_reference' : 'front_only_fallback'),
           referenceRolesUsed: klingReferencePlan?.references.map((reference) => reference.role) ?? ['front_angle'],
           referenceCount: klingReferencePlan?.references.length ?? 1,
+          sceneIntent: klingReferencePlan?.sceneIntent ?? [],
+          framingIntent: klingReferencePlan?.framingIntent ?? null,
+          primaryReferenceRole: klingReferencePlan?.primaryReferenceRole ?? null,
+          supportingReferenceRoles: klingReferencePlan?.supportingReferenceRoles ?? [],
+          usedMultiReferencePlan: (klingReferencePlan?.references.length ?? 0) > 1,
+          fellBackToFrontOnly: Boolean(klingReferencePlan && klingReferencePlan.references.length === 1 && klingReferencePlan.primaryReferenceRole === 'front_angle'),
+          compositionNeutralized: Boolean(klingReferencePlan?.compositionNeutralized),
           klingReferenceDiagnostics: klingReferenceDiagnostics({
             plan: klingReferencePlan,
             referenceStrategy: result.finalInputKeys?.includes('reference_images')
@@ -1541,7 +1830,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    if (!isValidHttpUrl(referenceImageUrl)) {
+    if (!isValidHttpUrl(providerReferenceImageUrl)) {
       return sendJson(res, 400, {
         error: 'Invalid reference image URL',
         received: '[redacted-reference-url]',
@@ -1557,7 +1846,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const referenceValidation = await validateReferenceImageUrl(referenceImageUrl);
+    const referenceValidation = await validateReferenceImageUrl(providerReferenceImageUrl);
     if (!referenceValidation.ok) {
       return sendJson(res, 400, {
         error: 'Reference image not accessible',
@@ -1582,10 +1871,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const model = (process.env.REPLICATE_IMAGE_TO_VIDEO_MODEL || KLING_IMAGE_TO_VIDEO_MODEL) as ReplicateModelIdentifier;
     const requestInput = {
       prompt: promptForModel,
-      start_image: referenceImageUrl,
+      start_image: providerReferenceImageUrl,
       ...(additionalReferences.length ? { reference_images: additionalReferences } : {}),
     };
-    const generationModeUsed = keyframeUrl ? 'identity-image-to-video' : 'reference-image-to-video';
+    const generationModeUsed: GenerationModeUsed = klingExactLikenessRequest
+      ? 'kling-exact-likeness-reference'
+      : keyframeUrl
+        ? 'identity-image-to-video'
+        : 'reference-image-to-video';
 
     console.log('GENERATION DEBUG', {
       hasReferenceImage: Boolean(referenceImageUrl),
@@ -1614,11 +1907,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const result = await runKlingImageToVideo({
       replicate,
       prompt: promptForModel,
-      referenceImageUrl,
+      referenceImageUrl: providerReferenceImageUrl,
       additionalReferences,
       primaryModel: model,
       durationSent: null,
       generationModeUsed,
+      fallbackToStartImageOnly: !klingExactLikenessRequest || additionalReferences.length === 0,
     });
 
     console.log('FINAL VIDEO URL:', result.videoUrl);
@@ -1628,7 +1922,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       videoUrl: result.videoUrl,
       provider: 'replicate',
       model: result.model,
-      displayEngine: generationModeUsed,
+      displayEngine: generationModeUsed === 'kling-exact-likeness-reference' ? 'Kling exact likeness' : generationModeUsed,
       generationMode: generationModeUsed,
       generationModeUsed,
       hasReferenceImage: true,
@@ -1636,8 +1930,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       durationSent: result.durationSent,
       identityId: textValue(body.identityId) || null,
       keyframeUrl: keyframeUrl || null,
-      referenceImageUrl,
+      exactLikenessRoute: klingExactLikenessRequest ? 'kling_reference' : null,
+      exactLikenessAvailable: klingExactLikenessRequest,
+      exactLikenessReason: klingExactLikenessRequest ? 'Kling exact likeness route is canary-proven.' : null,
+      referenceImageUrl: providerReferenceImageUrl,
       additionalReferenceImageUrls: additionalReferences,
+      referenceStrategy: klingReferencePlan?.plannedStrategy ?? (additionalReferences.length ? 'multi_reference' : 'front_only_fallback'),
+      referenceRolesUsed: klingReferencePlan?.references.map((reference) => reference.role) ?? ['front_angle'],
+      referenceCount: klingReferencePlan?.references.length ?? 1,
+      sceneIntent: klingReferencePlan?.sceneIntent ?? [],
+      framingIntent: klingReferencePlan?.framingIntent ?? null,
+      primaryReferenceRole: klingReferencePlan?.primaryReferenceRole ?? null,
+      supportingReferenceRoles: klingReferencePlan?.supportingReferenceRoles ?? [],
+      usedMultiReferencePlan: (klingReferencePlan?.references.length ?? 0) > 1,
+      fellBackToFrontOnly: Boolean(klingReferencePlan && klingReferencePlan.references.length === 1 && klingReferencePlan.primaryReferenceRole === 'front_angle'),
+      compositionNeutralized: Boolean(klingReferencePlan?.compositionNeutralized),
+      klingReferenceDiagnostics: klingReferenceDiagnostics({
+        plan: klingReferencePlan,
+        referenceStrategy: result.finalInputKeys?.includes('reference_images')
+          ? 'multi_reference'
+          : 'front_only_fallback',
+        exactLikenessRoute: klingExactLikenessRequest ? 'kling_reference' : null,
+        providerRoute: 'replicate_kling_image_to_video',
+      }),
       finalPrompt: promptForModel,
       warnings: [],
       rawOutput: {
