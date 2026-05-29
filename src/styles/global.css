@@ -1466,6 +1466,14 @@ button {
   box-shadow: var(--selected-shadow);
 }
 
+.provider-option.ready {
+  border-color: rgba(97, 216, 176, 0.7);
+}
+
+.provider-option.ready.active {
+  box-shadow: 0 14px 34px rgba(42, 169, 126, 0.18), var(--selected-shadow);
+}
+
 .provider-option strong,
 .provider-option small,
 .provider-meta span {

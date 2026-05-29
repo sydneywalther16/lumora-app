@@ -1111,6 +1111,7 @@ export default function CreateVideo({
   const [repairStatus, setRepairStatus] = useState('');
   const [skippedReferenceUrls, setSkippedReferenceUrls] = useState<string[]>([]);
   const [schemaWarning, setSchemaWarning] = useState('');
+  const [healthDiagnostics, setHealthDiagnostics] = useState<ApiHealthDiagnostics | null>(null);
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
   const [finalGeneratedPrompt, setFinalGeneratedPrompt] = useState('');
   const [generatedModel, setGeneratedModel] = useState('');
@@ -1233,7 +1234,16 @@ export default function CreateVideo({
     characterProfile?.providerIdentityProvider === 'openai_sora' &&
     characterProfile.providerCharacterStatus === 'ready' &&
     characterProfile.likenessProviderStatus === 'canary_succeeded';
-  const providerSelfCharacterReady = openAIProviderSelfCharacterReady || seedanceVideoReferenceReady;
+  const exactLikenessRouter = healthDiagnostics?.exactLikenessRouter;
+  const klingExactLikenessReady = Boolean(
+    selfReferenceMode &&
+    exactLikenessRouter?.route === 'kling_reference' &&
+    exactLikenessRouter?.canaryStatus === 'canary_succeeded' &&
+    exactLikenessRouter?.exactLikeness,
+  );
+  const klingReferenceSelected = engine === 'replicate';
+  const selectedKlingExactReady = klingReferenceSelected && klingExactLikenessReady;
+  const providerSelfCharacterReady = openAIProviderSelfCharacterReady || seedanceVideoReferenceReady || selectedKlingExactReady;
   const effectiveVerificationVideoPresent = hasEffectiveSelfVerificationVideo(characterProfile);
   const providerSelfCharacterSetupStarted =
     selfReferenceMode &&
@@ -1242,7 +1252,9 @@ export default function CreateVideo({
       effectiveVerificationVideoPresent ||
       characterProfile?.videoReferenceRouteStatus,
     );
-  const selfCharacterProviderStatusLabel = providerSelfCharacterReady
+  const selfCharacterProviderStatusLabel = selectedKlingExactReady
+    ? 'Kling exact likeness ready'
+    : providerSelfCharacterReady
     ? 'Verified self character ready'
     : providerSelfCharacterSetupStarted
       ? characterProfile?.videoReferenceRouteStatus === 'blocked' ||
@@ -1260,7 +1272,9 @@ export default function CreateVideo({
       : selfReferenceMode
         ? 'Record self verification video'
         : '';
-  const selfCharacterProviderStatusCopy = providerSelfCharacterReady
+  const selfCharacterProviderStatusCopy = selectedKlingExactReady
+    ? 'Using your saved self-character references for this scene.'
+    : providerSelfCharacterReady
     ? 'Verified self character ready.'
     : characterProfile?.providerCharacterStatus === 'ready' && characterProfile.likenessProviderStatus === 'character_created_usage_unmapped'
       ? 'Verified self character created. Video route not available yet.'
@@ -1359,6 +1373,10 @@ export default function CreateVideo({
       ? 'Demo Mode returns an instant preview and never spends render credits.'
     : isSoraEngine
       ? (providerSelfCharacterReady ? 'Exact self character route is ready.' : 'Verified self character route unavailable. Using soft self guidance.')
+    : klingReferenceSelected
+      ? selectedKlingExactReady
+        ? 'Using your saved self-character references for this scene.'
+        : 'Kling uses your self-character reference image first.'
       : 'Kling uses your self-character reference image first.';
   const continuityMemoryDirty = continuityMemory
     ? continuityMemoryChanged(
@@ -1424,7 +1442,7 @@ export default function CreateVideo({
       ? 'Add a scene idea'
     : !canGenerate
       ? 'Add reference before generating'
-    : providerSelfCharacterReady
+    : providerSelfCharacterReady && !selectedKlingExactReady
       ? 'Generate with My Self Character'
     : 'Generate AI Cast Video';
   const showCinematicStructure = Boolean(
@@ -1495,10 +1513,16 @@ export default function CreateVideo({
 
     api.healthDiagnostics()
       .then((diagnostics) => {
-        if (active) setSchemaWarning(characterProfileSchemaWarning(diagnostics));
+        if (active) {
+          setHealthDiagnostics(diagnostics);
+          setSchemaWarning(characterProfileSchemaWarning(diagnostics));
+        }
       })
       .catch(() => {
-        if (active) setSchemaWarning('');
+        if (active) {
+          setHealthDiagnostics(null);
+          setSchemaWarning('');
+        }
       });
 
     return () => {
@@ -3676,25 +3700,39 @@ export default function CreateVideo({
         <details className="advanced-create-details renderer-details">
           <summary>AI cast renderer</summary>
           <div className="provider-grid" role="radiogroup" aria-label="AI cast renderer">
-            {providerOptions.map((option) => (
-              <button
-                key={option.engine}
-                type="button"
-                role="radio"
-                aria-checked={engine === option.engine}
-                className={`provider-option ${engine === option.engine ? 'active' : ''}`}
-                onClick={() => setEngine(option.engine)}
-              >
-                <span>
-                  <strong>{option.label}</strong>
-                  <small>{option.description}</small>
-                </span>
-                <span className="provider-meta">
-                  <span>Speed {option.speed}</span>
-                  <span>Quality {option.quality}</span>
-                </span>
-              </button>
-            ))}
+            {providerOptions.map((option) => {
+              const optionActive = engine === option.engine;
+              const optionKlingReady = option.engine === 'replicate' && klingExactLikenessReady;
+              return (
+                <button
+                  key={option.engine}
+                  type="button"
+                  role="radio"
+                  aria-checked={optionActive}
+                  className={`provider-option ${optionActive ? 'active' : ''} ${optionKlingReady ? 'ready' : ''}`}
+                  onClick={() => setEngine(option.engine)}
+                >
+                  <span>
+                    <strong>{option.label}</strong>
+                    <small>
+                      {optionKlingReady
+                        ? 'Using your saved self-character references for generated scenes.'
+                        : option.description}
+                    </small>
+                  </span>
+                  <span className="provider-meta">
+                    <span>Speed {option.speed}</span>
+                    <span>Quality {option.quality}</span>
+                    {optionKlingReady ? (
+                      <>
+                        <span>Exact likeness ready</span>
+                        <span>Kling canary succeeded</span>
+                      </>
+                    ) : null}
+                  </span>
+                </button>
+              );
+            })}
           </div>
           <small className="muted">{engineRoutingMessage}</small>
         </details>
