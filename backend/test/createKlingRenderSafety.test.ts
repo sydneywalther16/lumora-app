@@ -84,9 +84,15 @@ const walkingReferencePlan = buildKlingCreateReferencePlan({
   primaryReference: 'https://assets.example/front.jpg',
   exactLikenessReady: true,
 });
-assert.equal(walkingReferencePlan?.plannedStrategy, 'multi_reference');
+assert.equal(walkingReferencePlan?.plannedStrategy, 'composite_identity_sheet');
+assert.equal(walkingReferencePlan?.sceneAnchorStrategy, 'composite_identity_sheet');
+assert.equal(walkingReferencePlan?.sceneAnchorGenerated, false);
+assert.equal(walkingReferencePlan?.sceneAnchorReason, 'scene_anchor_provider_not_configured');
 assert.equal(walkingReferencePlan?.fallbackAllowed, false);
 assert.equal(walkingReferencePlan?.primaryReferenceRole, 'full_body');
+assert.equal(walkingReferencePlan?.providerPrimaryReference.role, 'identity_sheet');
+assert.match(walkingReferencePlan?.providerPrimaryReference.url ?? '', /^data:image\/svg\+xml;base64,/);
+assert.equal(walkingReferencePlan?.providerAdditionalReferences.length, 0);
 assert.equal(walkingReferencePlan?.framingIntent, 'walking_full_body');
 assert.equal(walkingReferencePlan?.compositionNeutralized, true);
 assert.deepEqual(walkingReferencePlan?.references.map((reference) => reference.role), [
@@ -111,7 +117,7 @@ assert.doesNotMatch(walkingReferencePlan?.promptGuidance ?? '', /\bno nudity\b/i
 
 const walkingDiagnostics = klingReferenceDiagnostics({
   plan: walkingReferencePlan,
-  referenceStrategy: 'multi_reference',
+  referenceStrategy: 'composite_identity_sheet',
   exactLikenessRoute: 'kling_reference',
   providerRoute: 'replicate_kling_image_to_video',
 });
@@ -121,6 +127,9 @@ assert.deepEqual(walkingDiagnostics.supportingReferenceRoles, ['front_angle', 's
 assert.equal(walkingDiagnostics.usedMultiReferencePlan, true);
 assert.equal(walkingDiagnostics.fellBackToFrontOnly, false);
 assert.equal(walkingDiagnostics.compositionNeutralized, true);
+assert.equal(walkingDiagnostics.sceneAnchorStrategy, 'composite_identity_sheet');
+assert.equal(walkingDiagnostics.sceneAnchorGenerated, false);
+assert.equal(walkingDiagnostics.sceneAnchorReason, 'scene_anchor_provider_not_configured');
 assert.equal(walkingDiagnostics.privateUrlsRedacted, true);
 assert.equal(JSON.stringify(walkingDiagnostics).includes('assets.example'), false);
 
@@ -172,7 +181,7 @@ assert.match(createVideoSource, /Trying Kling exact likeness render\.\.\./);
 assert.match(createVideoSource, /Saving to Drafts/);
 assert.match(createVideoSource, /isClearlySafeKlingPrompt\(currentPrompt\)/);
 assert.match(createVideoSource, /isKlingComplexityError\(message\)/);
-assert.match(createVideoSource, /Kling exact-likeness scene created with full self-character references\./);
+assert.match(createVideoSource, /Kling exact-likeness scene created with scene-anchor identity planning\./);
 
 const studioListSource = readFileSync(join(process.cwd(), 'src/components/StudioList.tsx'), 'utf8');
 assert.match(studioListSource, /Kling exact likeness/);

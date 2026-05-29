@@ -55,6 +55,18 @@ type RemixProjectPayload = {
   referenceStrategy?: string | null;
   referenceRolesUsed?: string[] | null;
   referenceCount?: number | null;
+  sceneAnchorStrategy?: string | null;
+  sceneAnchorGenerated?: boolean | null;
+  sceneAnchorProvider?: string | null;
+  sceneAnchorReason?: string | null;
+  sceneIntent?: string[] | null;
+  framingIntent?: string | null;
+  primaryReferenceRole?: string | null;
+  supportingReferenceRoles?: string[] | null;
+  userSpecifiedOutfit?: boolean | null;
+  outfitTermsDetected?: string[] | null;
+  referenceOutfitCarryoverSuppressed?: boolean | null;
+  compositionCarryoverSuppressed?: boolean | null;
   renderProvider?: string | null;
   klingReferenceDiagnostics?: Record<string, unknown> | null;
 };

@@ -22,6 +22,18 @@ type ContinueStoryItem = {
   referenceStrategy?: string | null;
   referenceRolesUsed?: string[] | null;
   referenceCount?: number | null;
+  sceneAnchorStrategy?: string | null;
+  sceneAnchorGenerated?: boolean | null;
+  sceneAnchorProvider?: string | null;
+  sceneAnchorReason?: string | null;
+  sceneIntent?: string[] | null;
+  framingIntent?: string | null;
+  primaryReferenceRole?: string | null;
+  supportingReferenceRoles?: string[] | null;
+  userSpecifiedOutfit?: boolean | null;
+  outfitTermsDetected?: string[] | null;
+  referenceOutfitCarryoverSuppressed?: boolean | null;
+  compositionCarryoverSuppressed?: boolean | null;
   renderProvider?: string | null;
   klingReferenceDiagnostics?: Record<string, unknown> | null;
 };
@@ -79,6 +91,18 @@ export function prepareContinueStory(item: ContinueStoryItem, source: string) {
     referenceStrategy: item.referenceStrategy ?? null,
     referenceRolesUsed: item.referenceRolesUsed ?? null,
     referenceCount: item.referenceCount ?? null,
+    sceneAnchorStrategy: item.sceneAnchorStrategy ?? null,
+    sceneAnchorGenerated: item.sceneAnchorGenerated ?? null,
+    sceneAnchorProvider: item.sceneAnchorProvider ?? null,
+    sceneAnchorReason: item.sceneAnchorReason ?? null,
+    sceneIntent: item.sceneIntent ?? null,
+    framingIntent: item.framingIntent ?? null,
+    primaryReferenceRole: item.primaryReferenceRole ?? null,
+    supportingReferenceRoles: item.supportingReferenceRoles ?? null,
+    userSpecifiedOutfit: item.userSpecifiedOutfit ?? null,
+    outfitTermsDetected: item.outfitTermsDetected ?? null,
+    referenceOutfitCarryoverSuppressed: item.referenceOutfitCarryoverSuppressed ?? null,
+    compositionCarryoverSuppressed: item.compositionCarryoverSuppressed ?? null,
     renderProvider: item.renderProvider ?? null,
     klingReferenceDiagnostics: item.klingReferenceDiagnostics ?? null,
     source,

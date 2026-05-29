@@ -64,7 +64,9 @@ type KlingCreateReferenceRole =
   | 'side_angle_left'
   | 'side_angle_right'
   | 'full_body'
-  | 'additional_reference';
+  | 'additional_reference'
+  | 'identity_sheet'
+  | 'scene_anchor';
 
 type KlingCreateReferenceEntry = {
   role: KlingCreateReferenceRole;
@@ -74,7 +76,14 @@ type KlingCreateReferenceEntry = {
 };
 
 type KlingCreateReferenceStrategy =
-  | 'multi_reference'
+  | 'direct_identity_references'
+  | 'scene_anchor_still'
+  | 'composite_identity_sheet'
+  | 'front_only_fallback';
+
+type KlingSceneAnchorStrategy =
+  | 'direct_identity_references'
+  | 'scene_anchor_still'
   | 'composite_identity_sheet'
   | 'front_only_fallback';
 
@@ -109,14 +118,30 @@ type KlingCreateReferencePlan = {
   primaryReference: KlingCreateReferenceEntry;
   references: KlingCreateReferenceEntry[];
   additionalReferences: KlingCreateReferenceEntry[];
+  providerPrimaryReference: KlingCreateReferenceEntry;
+  providerAdditionalReferences: KlingCreateReferenceEntry[];
+  validationReferences: KlingCreateReferenceEntry[];
   promptGuidance: string;
+  identityPrompt: string;
+  scenePrompt: string;
+  motionPrompt: string;
+  providerPrompt: string;
   plannedStrategy: KlingCreateReferenceStrategy;
+  sceneAnchorStrategy: KlingSceneAnchorStrategy;
+  sceneAnchorGenerated: boolean;
+  sceneAnchorProvider: string | null;
+  sceneAnchorReason: string | null;
   fallbackAllowed: boolean;
   sceneIntent: KlingSceneIntent[];
   framingIntent: KlingFramingIntent;
   primaryReferenceRole: KlingCreateReferenceRole;
   supportingReferenceRoles: KlingCreateReferenceRole[];
   compositionNeutralized: boolean;
+  userSpecifiedOutfit: boolean;
+  outfitTermsDetected: string[];
+  referenceOutfitCarryoverSuppressed: boolean;
+  compositionCarryoverSuppressed: boolean;
+  riskyReferenceArtifacts: string[];
 };
 
 const SEEDANCE_MODEL = 'bytedance/seedance-2.0' as ReplicateModelIdentifier;
@@ -382,6 +407,181 @@ function hasPromptPattern(prompt: string, pattern: RegExp) {
   return pattern.test(prompt);
 }
 
+function escapeXml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function dataUrlFromSvg(svg: string) {
+  return `data:image/svg+xml;base64,${Buffer.from(svg, 'utf8').toString('base64')}`;
+}
+
+function isDataImageUrl(value: string) {
+  return /^data:image\/(?:svg\+xml|png|jpe?g|webp);base64,/i.test(value);
+}
+
+function isValidProviderImageInput(value: string) {
+  return isValidHttpUrl(value) || isDataImageUrl(value);
+}
+
+function sceneAnchorProviderStatus() {
+  const provider = textValue(process.env.KLING_SCENE_ANCHOR_PROVIDER || process.env.SCENE_ANCHOR_PROVIDER || '');
+  const openAiAnchorEnabled = booleanValue(process.env.OPENAI_SCENE_ANCHOR_ENABLED);
+  if (provider) {
+    return {
+      configured: true,
+      provider,
+      implemented: false,
+      reason: 'scene_anchor_provider_configured_not_implemented',
+    };
+  }
+  if (openAiAnchorEnabled && process.env.OPENAI_API_KEY) {
+    return {
+      configured: true,
+      provider: 'openai_image',
+      implemented: false,
+      reason: 'scene_anchor_provider_configured_not_implemented',
+    };
+  }
+  return {
+    configured: false,
+    provider: null,
+    implemented: false,
+    reason: 'scene_anchor_provider_not_configured',
+  };
+}
+
+export function detectKlingOutfitIntent(prompt: string) {
+  const normalizedPrompt = prompt.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+  const outfitNouns = [
+    'dress',
+    'gown',
+    'suit',
+    'tuxedo',
+    'robe',
+    'coat',
+    'jacket',
+    'blazer',
+    'skirt',
+    'jeans',
+    'pants',
+    'trousers',
+    'top',
+    'shirt',
+    'sweater',
+    'hoodie',
+    'uniform',
+    'outfit',
+  ];
+  const descriptors = [
+    'flowing',
+    'ivory',
+    'white',
+    'black',
+    'red',
+    'blue',
+    'green',
+    'gold',
+    'silver',
+    'silk',
+    'satin',
+    'linen',
+    'casual',
+    'formal',
+    'elegant',
+    'red carpet',
+    'storybook',
+  ];
+  const terms = new Set<string>();
+  const descriptorPattern = descriptors
+    .sort((a, b) => b.length - a.length)
+    .map((descriptor) => escapeRegExp(descriptor).replace(/\\ /g, '\\s+'))
+    .join('|');
+  const nounPattern = outfitNouns
+    .map((noun) => escapeRegExp(noun).replace(/\\ /g, '\\s+'))
+    .join('|');
+  const outfitPattern = new RegExp(
+    `\\b((?:(?:${descriptorPattern})\\s+){0,4}(?:${nounPattern}))\\b`,
+    'gi',
+  );
+
+  let match: RegExpExecArray | null;
+  while ((match = outfitPattern.exec(normalizedPrompt))) {
+    const term = match[1]?.replace(/\s+/g, ' ').trim();
+    if (term) terms.add(term);
+  }
+
+  const flowingIvoryDress = normalizedPrompt.match(/\bflowing\s+ivory\s+dress\b/i);
+  if (flowingIvoryDress) terms.add(flowingIvoryDress[0].toLowerCase());
+
+  return {
+    userSpecifiedOutfit: terms.size > 0,
+    outfitTermsDetected: Array.from(terms),
+  };
+}
+
+function detectRiskyReferenceArtifacts(sceneIntent: KlingSceneIntentAnalysis) {
+  const artifacts = new Set<string>();
+  if (sceneIntent.compositionNeutralized) {
+    artifacts.add('source_background');
+    artifacts.add('source_outfit');
+  }
+  if (
+    sceneIntent.sceneIntent.includes('walking') ||
+    sceneIntent.sceneIntent.includes('standing') ||
+    sceneIntent.sceneIntent.includes('open_space_environment')
+  ) {
+    artifacts.add('chair');
+    artifacts.add('seated_pose');
+    artifacts.add('sidewalk_or_street');
+    artifacts.add('bag_or_purse');
+    artifacts.add('studio_backdrop');
+    artifacts.add('tight_portrait_crop');
+    artifacts.add('furniture');
+  }
+  return Array.from(artifacts);
+}
+
+function buildCompositeIdentitySheetDataUrl(references: KlingCreateReferenceEntry[]) {
+  const cells = references.slice(0, 4);
+  const width = 1024;
+  const height = 1024;
+  const cellWidth = width / Math.max(1, cells.length);
+  const imageElements = cells.map((reference, index) => {
+    const x = index * cellWidth;
+    const label = reference.role === 'front_angle'
+      ? 'front'
+      : reference.role === 'side_angle_left'
+        ? 'left side'
+        : reference.role === 'side_angle_right'
+          ? 'right side'
+          : reference.role === 'full_body'
+            ? 'full body'
+            : 'identity';
+    return `
+      <g>
+        <clipPath id="clip${index}"><rect x="${x + 14}" y="52" width="${cellWidth - 28}" height="850" rx="22"/></clipPath>
+        <rect x="${x + 14}" y="52" width="${cellWidth - 28}" height="850" rx="22" fill="#f6f1e8"/>
+        <image href="${escapeXml(reference.url)}" x="${x + 14}" y="52" width="${cellWidth - 28}" height="850" preserveAspectRatio="xMidYMid slice" clip-path="url(#clip${index})"/>
+        <rect x="${x + 14}" y="52" width="${cellWidth - 28}" height="850" rx="22" fill="none" stroke="#d9cec0" stroke-width="3"/>
+        <text x="${x + cellWidth / 2}" y="952" text-anchor="middle" font-family="Arial, sans-serif" font-size="32" fill="#4f463d">${escapeXml(label)}</text>
+      </g>
+    `;
+  }).join('\n');
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+      <rect width="100%" height="100%" fill="#fbf8f1"/>
+      <text x="${width / 2}" y="34" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" fill="#6c5e51">identity reference sheet</text>
+      ${imageElements}
+    </svg>
+  `;
+  return dataUrlFromSvg(svg);
+}
+
 export function analyzeKlingSceneIntent(prompt: string): KlingSceneIntentAnalysis {
   const normalizedPrompt = ` ${prompt.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ')} `;
   const intents = new Set<KlingSceneIntent>();
@@ -562,7 +762,10 @@ export function buildKlingCreateReferencePlan(input: {
   if (!primary) return null;
 
   const urls = referenceUrlMap(input.body.referenceImageUrls);
-  const sceneIntent = analyzeKlingSceneIntent(textValue(input.body.prompt));
+  const userPrompt = textValue(input.body.prompt);
+  const sceneIntent = analyzeKlingSceneIntent(userPrompt);
+  const outfitIntent = detectKlingOutfitIntent(userPrompt);
+  const riskyReferenceArtifacts = detectRiskyReferenceArtifacts(sceneIntent);
   const explicitAdditional = Array.isArray(input.body.additionalReferenceImageUrls)
     ? input.body.additionalReferenceImageUrls.map(publicImageUrl)
     : [];
@@ -640,6 +843,58 @@ export function buildKlingCreateReferencePlan(input: {
   if (!primaryReference) return null;
 
   const additionalReferences = references.slice(1);
+  const sceneAnchorProvider = sceneAnchorProviderStatus();
+  const promptLooksLikeReferenceMatch = hasAnyPromptTerm(` ${userPrompt.toLowerCase()} `, [
+    ' match the reference ',
+    ' same outfit ',
+    ' same clothes ',
+    ' same clothing ',
+    ' same background ',
+    ' recreate the photo ',
+    ' like the reference photo ',
+    ' identity test ',
+    ' likeness test ',
+  ]);
+  const shouldUseSceneAnchor = (
+    input.exactLikenessReady &&
+    !promptLooksLikeReferenceMatch &&
+    (
+      sceneIntent.prefersFullBodyPrimary ||
+      sceneIntent.compositionNeutralized ||
+      outfitIntent.userSpecifiedOutfit
+    ) &&
+    sceneIntent.framingIntent !== 'portrait_closeup'
+  );
+  const directIdentityAllowed = !shouldUseSceneAnchor;
+  const plannedStrategy: KlingCreateReferenceStrategy = references.length === 1
+    ? 'front_only_fallback'
+    : shouldUseSceneAnchor && sceneAnchorProvider.configured && sceneAnchorProvider.implemented
+      ? 'scene_anchor_still'
+      : shouldUseSceneAnchor
+        ? 'composite_identity_sheet'
+        : 'direct_identity_references';
+  const sceneAnchorStrategy: KlingSceneAnchorStrategy = plannedStrategy;
+  const providerPrimaryReference: KlingCreateReferenceEntry = plannedStrategy === 'composite_identity_sheet'
+    ? {
+        role: 'identity_sheet',
+        label: 'composite identity sheet',
+        url: buildCompositeIdentitySheetDataUrl(references),
+        token: '@Element1',
+      }
+    : plannedStrategy === 'scene_anchor_still'
+      ? {
+          role: 'scene_anchor',
+          label: 'scene anchor still',
+          url: primaryReference.url,
+          token: '@Element1',
+        }
+      : primaryReference;
+  const providerAdditionalReferences = plannedStrategy === 'direct_identity_references' || plannedStrategy === 'front_only_fallback'
+    ? additionalReferences
+    : [];
+  const validationReferences = plannedStrategy === 'composite_identity_sheet'
+    ? references
+    : [providerPrimaryReference, ...providerAdditionalReferences].filter((reference) => !isDataImageUrl(reference.url));
   const sideTokens = references
     .filter((entry) => entry.role === 'side_angle_left' || entry.role === 'side_angle_right')
     .map((entry) => entry.token);
@@ -663,9 +918,30 @@ export function buildKlingCreateReferencePlan(input: {
         'Use identity cues from the references while leaving source-photo furniture, seat-back shapes, studio framing, and seated posture out of the new scene unless the prompt asks for them.',
       ].join(' ')
     : 'Treat saved references as identity-only guidance for likeness while composing the requested scene.';
+  const outfitGuidance = outfitIntent.userSpecifiedOutfit
+    ? `Prioritize the user-requested outfit over reference clothing: ${outfitIntent.outfitTermsDetected.join(', ')}.`
+    : 'Use scene-appropriate wardrobe from the user prompt, and only carry reference clothing forward when the user asks for it.';
+  const identityPrompt = [
+    KLING_EXACT_LIKENESS_IDENTITY_GUIDANCE,
+    'Identity references define facial identity, hair, eyes, body proportions, and motion continuity only.',
+  ].join(' ');
+  const scenePrompt = [
+    `Scene prompt: ${sanitizePromptText(userPrompt)}`,
+    outfitGuidance,
+    'Build a new scene matching the requested environment, outfit, lighting, and cinematic mood.',
+  ].join(' ');
+  const motionPrompt = sceneIntent.prefersFullBodyPrimary
+    ? 'Motion prompt: standing or walking naturally through open space with relaxed posture, natural arm swing, soft body movement, visible environment, and gentle camera motion.'
+    : 'Motion prompt: natural motion and gentle camera movement appropriate to the requested framing.';
+  const providerPrompt = [
+    'Use identity references for character identity only.',
+    'Build a new scene matching the scene prompt.',
+    'Keep the requested outfit and environment dominant over reference-photo clothing or background.',
+    'Use a clean unobstructed silhouette and subject-background separation for full-body or open-space scenes.',
+  ].join(' ');
   const promptGuidance = input.exactLikenessReady
     ? [
-        `${KLING_EXACT_LIKENESS_IDENTITY_GUIDANCE}`,
+        identityPrompt,
         fullBodyReference && primaryReference.role === 'full_body'
           ? `Use ${fullBodyReference.token} as the full-figure identity and proportion guide.`
           : '',
@@ -678,26 +954,48 @@ export function buildKlingCreateReferencePlan(input: {
         fullBodyToken && primaryReference.role !== 'full_body'
           ? `Use ${fullBodyToken} for body proportion and outfit silhouette only.`
           : '',
+        scenePrompt,
+        motionPrompt,
+        providerPrompt,
         compositionNeutralizationGuidance,
         sceneStagingGuidance,
       ].filter(Boolean).join(' ')
     : '';
-  const plannedStrategy: KlingCreateReferenceStrategy = additionalReferences.length > 0
-    ? 'multi_reference'
-    : 'front_only_fallback';
 
   return {
     primaryReference,
     references,
     additionalReferences,
+    providerPrimaryReference,
+    providerAdditionalReferences,
+    validationReferences,
     promptGuidance,
+    identityPrompt,
+    scenePrompt,
+    motionPrompt,
+    providerPrompt,
     plannedStrategy,
-    fallbackAllowed: additionalReferences.length === 0,
+    sceneAnchorStrategy,
+    sceneAnchorGenerated: plannedStrategy === 'scene_anchor_still' && sceneAnchorProvider.implemented,
+    sceneAnchorProvider: sceneAnchorProvider.provider,
+    sceneAnchorReason: plannedStrategy === 'composite_identity_sheet'
+      ? sceneAnchorProvider.reason
+      : plannedStrategy === 'scene_anchor_still'
+        ? 'scene_anchor_provider_ready'
+        : directIdentityAllowed
+          ? 'direct_identity_reference_scene'
+          : null,
+    fallbackAllowed: plannedStrategy === 'front_only_fallback',
     sceneIntent: sceneIntent.sceneIntent,
     framingIntent: sceneIntent.framingIntent,
     primaryReferenceRole: primaryReference.role,
     supportingReferenceRoles: additionalReferences.map((reference) => reference.role),
     compositionNeutralized: sceneIntent.compositionNeutralized,
+    userSpecifiedOutfit: outfitIntent.userSpecifiedOutfit,
+    outfitTermsDetected: outfitIntent.outfitTermsDetected,
+    referenceOutfitCarryoverSuppressed: outfitIntent.userSpecifiedOutfit && shouldUseSceneAnchor,
+    compositionCarryoverSuppressed: sceneIntent.compositionNeutralized && shouldUseSceneAnchor,
+    riskyReferenceArtifacts,
   };
 }
 
@@ -778,13 +1076,22 @@ export function klingReferenceDiagnostics(input: {
     sceneIntent: input.plan?.sceneIntent ?? [],
     framingIntent: input.plan?.framingIntent ?? null,
     referenceStrategy: input.referenceStrategy,
+    sceneAnchorStrategy: input.plan?.sceneAnchorStrategy ?? null,
+    sceneAnchorGenerated: Boolean(input.plan?.sceneAnchorGenerated),
+    sceneAnchorProvider: input.plan?.sceneAnchorProvider ?? null,
+    sceneAnchorReason: input.plan?.sceneAnchorReason ?? null,
     referenceRolesUsed: references.map((reference) => reference.role),
     referenceCount: references.length,
     primaryReferenceRole: input.plan?.primaryReferenceRole ?? null,
     supportingReferenceRoles,
-    usedMultiReferencePlan: references.length > 1,
+    usedMultiReferencePlan: references.length > 1 && input.referenceStrategy !== 'front_only_fallback',
     fellBackToFrontOnly,
     compositionNeutralized: Boolean(input.plan?.compositionNeutralized),
+    userSpecifiedOutfit: Boolean(input.plan?.userSpecifiedOutfit),
+    outfitTermsDetected: input.plan?.outfitTermsDetected ?? [],
+    referenceOutfitCarryoverSuppressed: Boolean(input.plan?.referenceOutfitCarryoverSuppressed),
+    compositionCarryoverSuppressed: Boolean(input.plan?.compositionCarryoverSuppressed),
+    riskyReferenceArtifacts: input.plan?.riskyReferenceArtifacts ?? [],
     referencePurpose: 'identity_only',
     exactLikenessRoute: input.exactLikenessRoute,
     providerRoute: input.providerRoute,
@@ -1498,10 +1805,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           exactLikenessReady,
         })
       : null;
-    const providerReferenceImageUrl = klingReferencePlan?.primaryReference.url ?? referenceImageUrl;
+    const providerReferenceImageUrl = klingReferencePlan?.providerPrimaryReference.url ?? referenceImageUrl;
     const additionalReferences = klingReferencePlan
-      ? klingReferencePlan?.additionalReferences.map((reference) => reference.url) ?? []
+      ? klingReferencePlan?.providerAdditionalReferences.map((reference) => reference.url) ?? []
       : additionalReferenceImageUrls(body, referenceImageUrl);
+    const responseReferenceImageUrl = klingReferencePlan?.primaryReference.url ?? providerReferenceImageUrl;
+    const responseAdditionalReferenceImageUrls = klingReferencePlan
+      ? klingReferencePlan.additionalReferences.map((reference) => reference.url)
+      : additionalReferences;
+    const referencesToValidate = klingReferencePlan?.validationReferences ?? [
+      { role: 'front_angle' as const, label: 'reference', url: providerReferenceImageUrl, token: '@Element1' },
+      ...additionalReferences.map((url, index) => ({
+        role: 'additional_reference' as const,
+        label: `reference ${index + 2}`,
+        url,
+        token: `@Element${index + 2}`,
+      })),
+    ];
     const aspectRatio = normalizeAspectRatio(body.aspectRatio);
     const durationSent = normalizeDuration(body.duration);
     const finalPrompt = buildFinalPrompt({
@@ -1532,6 +1852,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       exactLikenessRoute,
       exactLikenessReady,
       referenceStrategy: klingReferencePlan?.plannedStrategy ?? null,
+      sceneAnchorStrategy: klingReferencePlan?.sceneAnchorStrategy ?? null,
+      sceneAnchorGenerated: Boolean(klingReferencePlan?.sceneAnchorGenerated),
+      sceneAnchorProvider: klingReferencePlan?.sceneAnchorProvider ?? null,
+      userSpecifiedOutfit: Boolean(klingReferencePlan?.userSpecifiedOutfit),
+      outfitTermsDetected: klingReferencePlan?.outfitTermsDetected ?? [],
+      compositionCarryoverSuppressed: Boolean(klingReferencePlan?.compositionCarryoverSuppressed),
       sceneIntent: klingReferencePlan?.sceneIntent ?? [],
       framingIntent: klingReferencePlan?.framingIntent ?? null,
       primaryReferenceRole: klingReferencePlan?.primaryReferenceRole ?? null,
@@ -1546,38 +1872,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         skippedFallbackProviders: true,
       });
 
-      if (!isValidHttpUrl(providerReferenceImageUrl)) {
+      if (!isValidProviderImageInput(providerReferenceImageUrl)) {
         return sendJson(res, 400, {
           error: 'Invalid reference image URL',
           received: '[redacted-reference-url]',
         });
       }
 
-      const referenceValidation = await validateReferenceImageUrl(providerReferenceImageUrl);
-      if (!referenceValidation.ok) {
-        return sendJson(res, 400, {
-          error: 'Reference image not accessible',
-          referenceImageUrl: '[redacted-reference-url]',
-          status: referenceValidation.status,
-          contentType: referenceValidation.contentType,
-        });
-      }
-
-      for (const [index, additionalReference] of additionalReferences.entries()) {
-        if (!isValidHttpUrl(additionalReference)) {
+      for (const [index, reference] of referencesToValidate.entries()) {
+        if (!isValidHttpUrl(reference.url)) {
           return sendJson(res, 400, {
-            error: 'Invalid additional reference image URL',
-            referenceImageUrl: safeUrlLabel(index + 1),
+            error: index === 0 ? 'Invalid reference image URL' : 'Invalid additional reference image URL',
+            referenceImageUrl: safeUrlLabel(index),
           });
         }
 
-        const additionalValidation = await validateReferenceImageUrl(additionalReference);
-        if (!additionalValidation.ok) {
+        const referenceValidation = await validateReferenceImageUrl(reference.url);
+        if (!referenceValidation.ok) {
           return sendJson(res, 400, {
-            error: 'Additional reference image not accessible',
-            referenceImageUrl: safeUrlLabel(index + 1),
-            status: additionalValidation.status,
-            contentType: additionalValidation.contentType,
+            error: index === 0 ? 'Reference image not accessible' : 'Additional reference image not accessible',
+            referenceImageUrl: safeUrlLabel(index),
+            status: referenceValidation.status,
+            contentType: referenceValidation.contentType,
           });
         }
       }
@@ -1641,11 +1957,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           exactLikenessRoute: klingExactLikenessRequest ? 'kling_reference' : null,
           exactLikenessAvailable: klingExactLikenessRequest,
           exactLikenessReason: klingExactLikenessRequest ? 'Kling exact likeness route is canary-proven.' : null,
-          referenceImageUrl: providerReferenceImageUrl || primaryReferenceImageUrl || referenceImageUrl,
-          additionalReferenceImageUrls: additionalReferences,
-          referenceStrategy: klingReferencePlan?.plannedStrategy ?? (additionalReferences.length ? 'multi_reference' : 'front_only_fallback'),
+          referenceImageUrl: responseReferenceImageUrl || primaryReferenceImageUrl || referenceImageUrl,
+          additionalReferenceImageUrls: responseAdditionalReferenceImageUrls,
+          referenceStrategy: klingReferencePlan?.plannedStrategy ?? (additionalReferences.length ? 'direct_identity_references' : 'front_only_fallback'),
           referenceRolesUsed: klingReferencePlan?.references.map((reference) => reference.role) ?? ['front_angle'],
           referenceCount: klingReferencePlan?.references.length ?? 1,
+          sceneAnchorStrategy: klingReferencePlan?.sceneAnchorStrategy ?? null,
+          sceneAnchorGenerated: Boolean(klingReferencePlan?.sceneAnchorGenerated),
+          sceneAnchorProvider: klingReferencePlan?.sceneAnchorProvider ?? null,
+          sceneAnchorReason: klingReferencePlan?.sceneAnchorReason ?? null,
           sceneIntent: klingReferencePlan?.sceneIntent ?? [],
           framingIntent: klingReferencePlan?.framingIntent ?? null,
           primaryReferenceRole: klingReferencePlan?.primaryReferenceRole ?? null,
@@ -1653,11 +1973,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           usedMultiReferencePlan: (klingReferencePlan?.references.length ?? 0) > 1,
           fellBackToFrontOnly: Boolean(klingReferencePlan && klingReferencePlan.references.length === 1 && klingReferencePlan.primaryReferenceRole === 'front_angle'),
           compositionNeutralized: Boolean(klingReferencePlan?.compositionNeutralized),
+          userSpecifiedOutfit: Boolean(klingReferencePlan?.userSpecifiedOutfit),
+          outfitTermsDetected: klingReferencePlan?.outfitTermsDetected ?? [],
+          referenceOutfitCarryoverSuppressed: Boolean(klingReferencePlan?.referenceOutfitCarryoverSuppressed),
+          compositionCarryoverSuppressed: Boolean(klingReferencePlan?.compositionCarryoverSuppressed),
           klingReferenceDiagnostics: klingReferenceDiagnostics({
             plan: klingReferencePlan,
-            referenceStrategy: result.finalInputKeys?.includes('reference_images')
-              ? 'multi_reference'
-              : 'front_only_fallback',
+            referenceStrategy: klingReferencePlan?.plannedStrategy ?? (result.finalInputKeys?.includes('reference_images')
+              ? 'direct_identity_references'
+              : 'front_only_fallback'),
             exactLikenessRoute: klingExactLikenessRequest ? 'kling_reference' : null,
             providerRoute: 'replicate_kling_image_to_video',
           }),
@@ -1830,40 +2154,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    if (!isValidHttpUrl(providerReferenceImageUrl)) {
+    if (!isValidProviderImageInput(providerReferenceImageUrl)) {
       return sendJson(res, 400, {
         error: 'Invalid reference image URL',
         received: '[redacted-reference-url]',
       });
     }
 
-    for (const [index, additionalReference] of additionalReferences.entries()) {
-      if (!isValidHttpUrl(additionalReference)) {
+    for (const [index, reference] of referencesToValidate.entries()) {
+      if (!isValidHttpUrl(reference.url)) {
         return sendJson(res, 400, {
-          error: 'Invalid additional reference image URL',
-          received: safeUrlLabel(index + 1),
+          error: index === 0 ? 'Invalid reference image URL' : 'Invalid additional reference image URL',
+          received: safeUrlLabel(index),
         });
       }
     }
 
-    const referenceValidation = await validateReferenceImageUrl(providerReferenceImageUrl);
-    if (!referenceValidation.ok) {
-      return sendJson(res, 400, {
-        error: 'Reference image not accessible',
-        referenceImageUrl: '[redacted-reference-url]',
-        status: referenceValidation.status,
-        contentType: referenceValidation.contentType,
-      });
-    }
-
-    for (const [index, additionalReference] of additionalReferences.entries()) {
-      const additionalValidation = await validateReferenceImageUrl(additionalReference);
-      if (!additionalValidation.ok) {
+    for (const [index, reference] of referencesToValidate.entries()) {
+      const referenceValidation = await validateReferenceImageUrl(reference.url);
+      if (!referenceValidation.ok) {
         return sendJson(res, 400, {
-          error: 'Additional reference image not accessible',
-          referenceImageUrl: safeUrlLabel(index + 1),
-          status: additionalValidation.status,
-          contentType: additionalValidation.contentType,
+          error: index === 0 ? 'Reference image not accessible' : 'Additional reference image not accessible',
+          referenceImageUrl: safeUrlLabel(index),
+          status: referenceValidation.status,
+          contentType: referenceValidation.contentType,
         });
       }
     }
@@ -1933,9 +2247,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       exactLikenessRoute: klingExactLikenessRequest ? 'kling_reference' : null,
       exactLikenessAvailable: klingExactLikenessRequest,
       exactLikenessReason: klingExactLikenessRequest ? 'Kling exact likeness route is canary-proven.' : null,
-      referenceImageUrl: providerReferenceImageUrl,
-      additionalReferenceImageUrls: additionalReferences,
-      referenceStrategy: klingReferencePlan?.plannedStrategy ?? (additionalReferences.length ? 'multi_reference' : 'front_only_fallback'),
+      referenceImageUrl: responseReferenceImageUrl,
+      additionalReferenceImageUrls: responseAdditionalReferenceImageUrls,
+      referenceStrategy: klingReferencePlan?.plannedStrategy ?? (additionalReferences.length ? 'direct_identity_references' : 'front_only_fallback'),
       referenceRolesUsed: klingReferencePlan?.references.map((reference) => reference.role) ?? ['front_angle'],
       referenceCount: klingReferencePlan?.references.length ?? 1,
       sceneIntent: klingReferencePlan?.sceneIntent ?? [],
@@ -1945,11 +2259,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       usedMultiReferencePlan: (klingReferencePlan?.references.length ?? 0) > 1,
       fellBackToFrontOnly: Boolean(klingReferencePlan && klingReferencePlan.references.length === 1 && klingReferencePlan.primaryReferenceRole === 'front_angle'),
       compositionNeutralized: Boolean(klingReferencePlan?.compositionNeutralized),
+      sceneAnchorStrategy: klingReferencePlan?.sceneAnchorStrategy ?? null,
+      sceneAnchorGenerated: Boolean(klingReferencePlan?.sceneAnchorGenerated),
+      sceneAnchorProvider: klingReferencePlan?.sceneAnchorProvider ?? null,
+      sceneAnchorReason: klingReferencePlan?.sceneAnchorReason ?? null,
+      userSpecifiedOutfit: Boolean(klingReferencePlan?.userSpecifiedOutfit),
+      outfitTermsDetected: klingReferencePlan?.outfitTermsDetected ?? [],
+      referenceOutfitCarryoverSuppressed: Boolean(klingReferencePlan?.referenceOutfitCarryoverSuppressed),
+      compositionCarryoverSuppressed: Boolean(klingReferencePlan?.compositionCarryoverSuppressed),
       klingReferenceDiagnostics: klingReferenceDiagnostics({
         plan: klingReferencePlan,
-        referenceStrategy: result.finalInputKeys?.includes('reference_images')
-          ? 'multi_reference'
-          : 'front_only_fallback',
+        referenceStrategy: klingReferencePlan?.plannedStrategy ?? (result.finalInputKeys?.includes('reference_images')
+          ? 'direct_identity_references'
+          : 'front_only_fallback'),
         exactLikenessRoute: klingExactLikenessRequest ? 'kling_reference' : null,
         providerRoute: 'replicate_kling_image_to_video',
       }),

@@ -42,6 +42,18 @@ export type StudioProject = {
   referenceStrategy?: string | null;
   referenceRolesUsed?: string[] | null;
   referenceCount?: number | null;
+  sceneAnchorStrategy?: string | null;
+  sceneAnchorGenerated?: boolean | null;
+  sceneAnchorProvider?: string | null;
+  sceneAnchorReason?: string | null;
+  sceneIntent?: string[] | null;
+  framingIntent?: string | null;
+  primaryReferenceRole?: string | null;
+  supportingReferenceRoles?: string[] | null;
+  userSpecifiedOutfit?: boolean | null;
+  outfitTermsDetected?: string[] | null;
+  referenceOutfitCarryoverSuppressed?: boolean | null;
+  compositionCarryoverSuppressed?: boolean | null;
   renderProvider?: string | null;
   klingReferenceDiagnostics?: Record<string, unknown> | null;
   characterId: string | null;
@@ -151,6 +163,26 @@ export function loadStudioProjects(): StudioProject[] {
             ? project.referenceRolesUsed.filter((item): item is string => typeof item === 'string')
             : null,
           referenceCount: numberValue(project.referenceCount),
+          sceneAnchorStrategy: typeof project.sceneAnchorStrategy === 'string' ? project.sceneAnchorStrategy : null,
+          sceneAnchorGenerated: typeof project.sceneAnchorGenerated === 'boolean' ? project.sceneAnchorGenerated : null,
+          sceneAnchorProvider: typeof project.sceneAnchorProvider === 'string' ? project.sceneAnchorProvider : null,
+          sceneAnchorReason: typeof project.sceneAnchorReason === 'string' ? project.sceneAnchorReason : null,
+          sceneIntent: Array.isArray(project.sceneIntent)
+            ? project.sceneIntent.filter((item): item is string => typeof item === 'string')
+            : null,
+          framingIntent: typeof project.framingIntent === 'string' ? project.framingIntent : null,
+          primaryReferenceRole: typeof project.primaryReferenceRole === 'string' ? project.primaryReferenceRole : null,
+          supportingReferenceRoles: Array.isArray(project.supportingReferenceRoles)
+            ? project.supportingReferenceRoles.filter((item): item is string => typeof item === 'string')
+            : null,
+          userSpecifiedOutfit: typeof project.userSpecifiedOutfit === 'boolean' ? project.userSpecifiedOutfit : null,
+          outfitTermsDetected: Array.isArray(project.outfitTermsDetected)
+            ? project.outfitTermsDetected.filter((item): item is string => typeof item === 'string')
+            : null,
+          referenceOutfitCarryoverSuppressed:
+            typeof project.referenceOutfitCarryoverSuppressed === 'boolean' ? project.referenceOutfitCarryoverSuppressed : null,
+          compositionCarryoverSuppressed:
+            typeof project.compositionCarryoverSuppressed === 'boolean' ? project.compositionCarryoverSuppressed : null,
           renderProvider: typeof project.renderProvider === 'string' ? project.renderProvider : null,
           klingReferenceDiagnostics:
             project.klingReferenceDiagnostics && typeof project.klingReferenceDiagnostics === 'object'

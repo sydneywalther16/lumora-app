@@ -282,6 +282,18 @@ type GenerateVideoApiResponse = {
   exactLikenessReason?: string | null;
   exactLikenessProvider?: string | null;
   exactLikenessCanaryStatus?: string | null;
+  sceneAnchorStrategy?: string | null;
+  sceneAnchorGenerated?: boolean | null;
+  sceneAnchorProvider?: string | null;
+  sceneAnchorReason?: string | null;
+  sceneIntent?: unknown;
+  framingIntent?: string | null;
+  primaryReferenceRole?: string | null;
+  supportingReferenceRoles?: unknown;
+  userSpecifiedOutfit?: boolean | null;
+  outfitTermsDetected?: unknown;
+  referenceOutfitCarryoverSuppressed?: boolean | null;
+  compositionCarryoverSuppressed?: boolean | null;
   klingReferenceDiagnostics?: Record<string, unknown> | null;
   multimodalReferenceMode?: unknown;
   assetPersistence?: unknown;
@@ -609,6 +621,22 @@ function formatStringList(value: unknown): string[] {
   return value
     .map((item) => (typeof item === 'string' ? item.trim() : ''))
     .filter(Boolean);
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function stringFromRecord(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function booleanFromRecord(record: Record<string, unknown>, key: string): boolean | null {
+  const value = record[key];
+  return typeof value === 'boolean' ? value : null;
 }
 
 function formatSeedanceReferenceUrls(value: unknown): string[] {
@@ -1327,7 +1355,7 @@ export default function CreateVideo({
         ? 'Record self verification video'
         : '';
   const selfCharacterProviderStatusCopy = selectedKlingExactReady
-    ? 'Using your saved self-character references for this scene.'
+    ? 'Building a clean scene anchor for this render. Using identity references without copying reference backgrounds.'
     : providerSelfCharacterReady
     ? 'Verified self character ready.'
     : characterProfile?.providerCharacterStatus === 'ready' && characterProfile.likenessProviderStatus === 'character_created_usage_unmapped'
@@ -1429,7 +1457,7 @@ export default function CreateVideo({
       ? (providerSelfCharacterReady ? 'Exact self character route is ready.' : 'Verified self character route unavailable. Using soft self guidance.')
     : klingReferenceSelected
       ? selectedKlingExactReady
-        ? 'Using your saved self-character references for this scene.'
+        ? 'Building a clean scene anchor for this render. Using identity references without copying reference backgrounds. If no scene anchor provider is configured, Lumora uses a composite identity sheet to reduce reference-photo carryover.'
         : 'Kling uses your self-character reference image first.'
       : 'Kling uses your self-character reference image first.';
   const continuityMemoryDirty = continuityMemory
@@ -1685,9 +1713,21 @@ export default function CreateVideo({
             referenceStrategy: job.referenceStrategy ?? null,
             referenceRolesUsed: job.referenceRolesUsed ?? null,
             referenceCount: job.referenceCount ?? null,
+            sceneAnchorStrategy: job.sceneAnchorStrategy ?? null,
+            sceneAnchorGenerated: job.sceneAnchorGenerated ?? null,
+            sceneAnchorProvider: job.sceneAnchorProvider ?? null,
+            sceneAnchorReason: job.sceneAnchorReason ?? null,
+            sceneIntent: job.sceneIntent ?? null,
+            framingIntent: job.framingIntent ?? null,
+            primaryReferenceRole: job.primaryReferenceRole ?? null,
+            supportingReferenceRoles: job.supportingReferenceRoles ?? null,
+            userSpecifiedOutfit: job.userSpecifiedOutfit ?? null,
+            outfitTermsDetected: job.outfitTermsDetected ?? null,
+            referenceOutfitCarryoverSuppressed: job.referenceOutfitCarryoverSuppressed ?? null,
+            compositionCarryoverSuppressed: job.compositionCarryoverSuppressed ?? null,
             klingReferenceDiagnostics: job.klingReferenceDiagnostics ?? null,
             message: job.message ?? (job.exactLikenessRoute === 'kling_reference'
-              ? 'Kling exact-likeness scene created with full self-character references.'
+              ? 'Kling exact-likeness scene created with scene-anchor identity planning.'
               : job.textSelfGuidanceAvailable ? 'Rendered with soft self guidance.' : 'Your cinematic draft is saved.'),
             selfLikenessIntensity: job.selfLikenessIntensity ?? selfLikenessIntensity,
             textSelfGuidanceAvailable: job.textSelfGuidanceAvailable ?? null,
@@ -2944,7 +2984,7 @@ export default function CreateVideo({
       const nextReferenceStrategy = typeof data.referenceStrategy === 'string'
         ? data.referenceStrategy
         : nextExactLikenessRoute === 'kling_reference'
-          ? (nextAdditionalReferenceImageUrls.length ? 'multi_reference' : 'front_only_fallback')
+          ? (nextAdditionalReferenceImageUrls.length ? 'direct_identity_references' : 'front_only_fallback')
           : null;
       const nextReferenceRolesUsed = formatStringList(data.referenceRolesUsed);
       const nextReferenceCount = typeof data.referenceCount === 'number'
@@ -2952,6 +2992,34 @@ export default function CreateVideo({
         : nextExactLikenessRoute === 'kling_reference'
           ? 1 + nextAdditionalReferenceImageUrls.length
           : null;
+      const nextKlingDiagnostics = data.klingReferenceDiagnostics ?? null;
+      const nextKlingDiagnosticsRecord = recordValue(nextKlingDiagnostics);
+      const nextSceneAnchorStrategy = data.sceneAnchorStrategy ?? stringFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorStrategy');
+      const nextSceneAnchorGenerated = typeof data.sceneAnchorGenerated === 'boolean'
+        ? data.sceneAnchorGenerated
+        : booleanFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorGenerated');
+      const nextSceneAnchorProvider = data.sceneAnchorProvider ?? stringFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorProvider');
+      const nextSceneAnchorReason = data.sceneAnchorReason ?? stringFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorReason');
+      const nextSceneIntent = formatStringList(data.sceneIntent).length
+        ? formatStringList(data.sceneIntent)
+        : formatStringList(nextKlingDiagnosticsRecord.sceneIntent);
+      const nextFramingIntent = data.framingIntent ?? stringFromRecord(nextKlingDiagnosticsRecord, 'framingIntent');
+      const nextPrimaryReferenceRole = data.primaryReferenceRole ?? stringFromRecord(nextKlingDiagnosticsRecord, 'primaryReferenceRole');
+      const nextSupportingReferenceRoles = formatStringList(data.supportingReferenceRoles).length
+        ? formatStringList(data.supportingReferenceRoles)
+        : formatStringList(nextKlingDiagnosticsRecord.supportingReferenceRoles);
+      const nextUserSpecifiedOutfit = typeof data.userSpecifiedOutfit === 'boolean'
+        ? data.userSpecifiedOutfit
+        : booleanFromRecord(nextKlingDiagnosticsRecord, 'userSpecifiedOutfit');
+      const nextOutfitTermsDetected = formatStringList(data.outfitTermsDetected).length
+        ? formatStringList(data.outfitTermsDetected)
+        : formatStringList(nextKlingDiagnosticsRecord.outfitTermsDetected);
+      const nextReferenceOutfitCarryoverSuppressed = typeof data.referenceOutfitCarryoverSuppressed === 'boolean'
+        ? data.referenceOutfitCarryoverSuppressed
+        : booleanFromRecord(nextKlingDiagnosticsRecord, 'referenceOutfitCarryoverSuppressed');
+      const nextCompositionCarryoverSuppressed = typeof data.compositionCarryoverSuppressed === 'boolean'
+        ? data.compositionCarryoverSuppressed
+        : booleanFromRecord(nextKlingDiagnosticsRecord, 'compositionCarryoverSuppressed');
       const generatedMedia = resolveGeneratedVideoMedia({
         videoUrl: nextVideoUrl,
         outputUrl: nextVideoUrl,
@@ -3067,11 +3135,23 @@ export default function CreateVideo({
         referenceStrategy: nextReferenceStrategy,
         referenceRolesUsed: nextReferenceRolesUsed.length ? nextReferenceRolesUsed : null,
         referenceCount: nextReferenceCount,
-        klingReferenceDiagnostics: data.klingReferenceDiagnostics ?? null,
+        sceneAnchorStrategy: nextSceneAnchorStrategy,
+        sceneAnchorGenerated: nextSceneAnchorGenerated,
+        sceneAnchorProvider: nextSceneAnchorProvider,
+        sceneAnchorReason: nextSceneAnchorReason,
+        sceneIntent: nextSceneIntent.length ? nextSceneIntent : null,
+        framingIntent: nextFramingIntent,
+        primaryReferenceRole: nextPrimaryReferenceRole,
+        supportingReferenceRoles: nextSupportingReferenceRoles.length ? nextSupportingReferenceRoles : null,
+        userSpecifiedOutfit: nextUserSpecifiedOutfit,
+        outfitTermsDetected: nextOutfitTermsDetected.length ? nextOutfitTermsDetected : null,
+        referenceOutfitCarryoverSuppressed: nextReferenceOutfitCarryoverSuppressed,
+        compositionCarryoverSuppressed: nextCompositionCarryoverSuppressed,
+        klingReferenceDiagnostics: nextKlingDiagnostics,
         message: renderedWithLighterCastGuidance || renderedWithSoftSelfGuidance
           ? 'Rendered with soft self guidance.'
           : nextExactLikenessRoute === 'kling_reference'
-          ? 'Kling exact-likeness scene created with full self-character references.'
+          ? 'Kling exact-likeness scene created with scene-anchor identity planning.'
           : nextGenerationMode === 'seedance-multimodal-reference'
           ? 'Cast reference render created.'
           : nextGenerationMode === 'seedance-text-to-video'
@@ -3115,8 +3195,20 @@ export default function CreateVideo({
           referenceStrategy: nextReferenceStrategy,
           referenceRolesUsed: nextReferenceRolesUsed.length ? nextReferenceRolesUsed : null,
           referenceCount: nextReferenceCount,
+          sceneAnchorStrategy: nextSceneAnchorStrategy,
+          sceneAnchorGenerated: nextSceneAnchorGenerated,
+          sceneAnchorProvider: nextSceneAnchorProvider,
+          sceneAnchorReason: nextSceneAnchorReason,
+          sceneIntent: nextSceneIntent.length ? nextSceneIntent : null,
+          framingIntent: nextFramingIntent,
+          primaryReferenceRole: nextPrimaryReferenceRole,
+          supportingReferenceRoles: nextSupportingReferenceRoles.length ? nextSupportingReferenceRoles : null,
+          userSpecifiedOutfit: nextUserSpecifiedOutfit,
+          outfitTermsDetected: nextOutfitTermsDetected.length ? nextOutfitTermsDetected : null,
+          referenceOutfitCarryoverSuppressed: nextReferenceOutfitCarryoverSuppressed,
+          compositionCarryoverSuppressed: nextCompositionCarryoverSuppressed,
           renderProvider: nextExactLikenessRoute === 'kling_reference' ? 'kling' : generationProvider,
-          klingReferenceDiagnostics: data.klingReferenceDiagnostics ?? null,
+          klingReferenceDiagnostics: nextKlingDiagnostics,
           characterId,
           characterName,
           characterAvatar,
@@ -3893,7 +3985,7 @@ export default function CreateVideo({
                     <strong>{option.label}</strong>
                     <small>
                       {optionKlingReady
-                        ? 'Using your saved self-character references for generated scenes.'
+                        ? 'Uses identity references for scene generation without copying reference backgrounds.'
                         : option.description}
                     </small>
                   </span>
