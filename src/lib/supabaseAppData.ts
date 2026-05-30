@@ -1850,6 +1850,27 @@ function mapProjectRow(row: DbRow): StudioProject {
     characterAvatar: nullableString(row.character_avatar),
   };
   const generatedMedia = resolveGeneratedVideoMedia(rawProject);
+  const klingReferenceDiagnostics = isObject(row.kling_reference_diagnostics)
+    ? row.kling_reference_diagnostics as Record<string, unknown>
+    : null;
+  const diagnosticString = (key: string) => {
+    const value = klingReferenceDiagnostics?.[key];
+    return typeof value === 'string' ? value : null;
+  };
+  const diagnosticStringList = (key: string) => {
+    const value = klingReferenceDiagnostics?.[key];
+    return Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === 'string')
+      : null;
+  };
+  const diagnosticBoolean = (key: string) => {
+    const value = klingReferenceDiagnostics?.[key];
+    return typeof value === 'boolean' ? value : null;
+  };
+  const diagnosticRecord = (key: string) => {
+    const value = klingReferenceDiagnostics?.[key];
+    return isObject(value) ? value as Record<string, unknown> : null;
+  };
 
   return {
     id: stringValue(row.id),
@@ -1895,10 +1916,24 @@ function mapProjectRow(row: DbRow): StudioProject {
       ? row.reference_roles_used.filter((item): item is string => typeof item === 'string')
       : null,
     referenceCount: Number.isFinite(Number(row.reference_count)) ? Number(row.reference_count) : null,
+    sceneAnchorStrategy: diagnosticString('sceneAnchorStrategy'),
+    sceneAnchorGenerated: diagnosticBoolean('sceneAnchorGenerated'),
+    sceneAnchorProvider: diagnosticString('sceneAnchorProvider'),
+    sceneAnchorReason: diagnosticString('sceneAnchorReason'),
+    sceneAnchorValidation: diagnosticRecord('sceneAnchorValidation'),
+    primaryInputType: diagnosticString('primaryInputType'),
+    sceneIntent: diagnosticStringList('sceneIntent'),
+    framingIntent: diagnosticString('framingIntent'),
+    primaryReferenceRole: diagnosticString('primaryReferenceRole'),
+    supportingReferenceRoles: diagnosticStringList('supportingReferenceRoles'),
+    userSpecifiedOutfit: diagnosticBoolean('userSpecifiedOutfit'),
+    outfitTermsDetected: diagnosticStringList('outfitTermsDetected'),
+    environmentTermsDetected: diagnosticStringList('environmentTermsDetected'),
+    referenceOutfitCarryoverSuppressed: diagnosticBoolean('referenceOutfitCarryoverSuppressed'),
+    compositionCarryoverSuppressed: diagnosticBoolean('compositionCarryoverSuppressed'),
+    frontOnlyFallback: diagnosticBoolean('frontOnlyFallback'),
     renderProvider: nullableString(row.render_provider),
-    klingReferenceDiagnostics: isObject(row.kling_reference_diagnostics)
-      ? row.kling_reference_diagnostics as Record<string, unknown>
-      : null,
+    klingReferenceDiagnostics,
     characterId: nullableString(row.character_id),
     characterName: nullableString(row.character_name),
     characterAvatar: nullableString(row.character_avatar),

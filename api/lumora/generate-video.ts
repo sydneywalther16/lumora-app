@@ -114,6 +114,21 @@ type KlingSceneIntentAnalysis = {
   compositionNeutralized: boolean;
 };
 
+type KlingSceneAnchorValidation = {
+  faceVisible: boolean;
+  fullBodyVisible: boolean;
+  environmentMatch: boolean;
+  outfitMatch: boolean;
+  noFurnitureCarryover: boolean;
+  noPortraitCrop: boolean;
+  passed: boolean;
+  score: number;
+  attempts: number;
+  regenerated: boolean;
+  heuristicOnly: boolean;
+  failureReasons: string[];
+};
+
 type KlingCreateReferencePlan = {
   primaryReference: KlingCreateReferenceEntry;
   references: KlingCreateReferenceEntry[];
@@ -126,11 +141,16 @@ type KlingCreateReferencePlan = {
   scenePrompt: string;
   motionPrompt: string;
   providerPrompt: string;
+  sceneAnchorPrompt: string;
   plannedStrategy: KlingCreateReferenceStrategy;
   sceneAnchorStrategy: KlingSceneAnchorStrategy;
   sceneAnchorGenerated: boolean;
   sceneAnchorProvider: string | null;
   sceneAnchorReason: string | null;
+  sceneAnchorRequired: boolean;
+  sceneAnchorFailureReason: string | null;
+  sceneAnchorValidation: KlingSceneAnchorValidation | null;
+  primaryInputType: 'scene_anchor_still' | 'identity_sheet' | 'identity_reference';
   fallbackAllowed: boolean;
   sceneIntent: KlingSceneIntent[];
   framingIntent: KlingFramingIntent;
@@ -142,6 +162,8 @@ type KlingCreateReferencePlan = {
   referenceOutfitCarryoverSuppressed: boolean;
   compositionCarryoverSuppressed: boolean;
   riskyReferenceArtifacts: string[];
+  environmentTermsDetected: string[];
+  frontOnlyFallback: boolean;
 };
 
 const SEEDANCE_MODEL = 'bytedance/seedance-2.0' as ReplicateModelIdentifier;
@@ -439,11 +461,22 @@ function parseBase64DataUrl(value: string): { contentType: string; buffer: Buffe
 
 function sceneAnchorProviderStatus() {
   const provider = textValue(process.env.KLING_SCENE_ANCHOR_PROVIDER || process.env.SCENE_ANCHOR_PROVIDER || '');
+  const replicateSceneAnchorModel = textValue(process.env.REPLICATE_SCENE_ANCHOR_MODEL || process.env.REPLICATE_IMAGE_MODEL || '');
+  if ((provider === 'replicate' || !provider) && replicateSceneAnchorModel && process.env.REPLICATE_API_TOKEN) {
+    return {
+      configured: true,
+      provider: 'replicate',
+      model: replicateSceneAnchorModel,
+      implemented: true,
+      reason: 'replicate_scene_anchor_provider_ready',
+    };
+  }
   const openAiAnchorEnabled = booleanValue(process.env.OPENAI_SCENE_ANCHOR_ENABLED);
   if (provider) {
     return {
       configured: true,
       provider,
+      model: null,
       implemented: false,
       reason: 'scene_anchor_provider_configured_not_implemented',
     };
@@ -452,6 +485,7 @@ function sceneAnchorProviderStatus() {
     return {
       configured: true,
       provider: 'openai_image',
+      model: process.env.OPENAI_IMAGE_MODEL ?? 'gpt-image-1',
       implemented: false,
       reason: 'scene_anchor_provider_configured_not_implemented',
     };
@@ -459,6 +493,7 @@ function sceneAnchorProviderStatus() {
   return {
     configured: false,
     provider: null,
+    model: null,
     implemented: false,
     reason: 'scene_anchor_provider_not_configured',
   };
@@ -533,6 +568,31 @@ export function detectKlingOutfitIntent(prompt: string) {
   };
 }
 
+export function detectKlingEnvironmentIntent(prompt: string) {
+  const normalizedPrompt = prompt.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+  const environmentTerms = [
+    'flower garden',
+    'garden',
+    'meadow',
+    'field',
+    'forest',
+    'park',
+    'beach',
+    'plaza',
+    'courtyard',
+    'greenhouse',
+    'sunlit garden',
+    'golden hour',
+    'outdoor',
+    'outside',
+    'open space',
+  ];
+  return {
+    environmentDetected: environmentTerms.some((term) => normalizedPrompt.includes(term)),
+    environmentTermsDetected: environmentTerms.filter((term) => normalizedPrompt.includes(term)),
+  };
+}
+
 function detectRiskyReferenceArtifacts(sceneIntent: KlingSceneIntentAnalysis) {
   const artifacts = new Set<string>();
   if (sceneIntent.compositionNeutralized) {
@@ -591,6 +651,123 @@ function buildCompositeIdentitySheetDataUrl(references: KlingCreateReferenceEntr
   return dataUrlFromSvg(svg);
 }
 
+function buildKlingSceneAnchorPrompt(input: {
+  userPrompt: string;
+  sceneIntent: KlingSceneIntentAnalysis;
+  outfitTerms: string[];
+  environmentTerms: string[];
+  retryIndex?: number;
+}) {
+  const fullBodyScene = input.sceneIntent.prefersFullBodyPrimary || input.sceneIntent.compositionNeutralized;
+  const framing = fullBodyScene
+    ? 'full-body or three-quarter full-body cinematic scene anchor, medium-wide opening frame, visible ground and environment'
+    : input.sceneIntent.framingIntent === 'portrait_closeup'
+      ? 'portrait scene anchor matching the requested close-up framing'
+      : 'medium-full cinematic scene anchor with visible environment';
+  const outfit = input.outfitTerms.length
+    ? `Requested outfit must be visible and prioritized: ${input.outfitTerms.join(', ')}.`
+    : 'Use scene-appropriate wardrobe from the user prompt and avoid carrying source reference clothing unless requested.';
+  const environment = input.environmentTerms.length
+    ? `Requested environment must be visible: ${input.environmentTerms.join(', ')}.`
+    : 'Show the requested environment clearly around the subject.';
+  const retryGuidance = input.retryIndex && input.retryIndex > 0
+    ? 'Regenerate with stronger full-body staging, clearer environment visibility, and stronger outfit adherence.'
+    : '';
+
+  return [
+    'Create a new scene anchor still for a Kling exact-likeness video render.',
+    'Use the saved self-character references only for identity traits: face identity, hair color and style, skin tone, eye area, body proportions, and silhouette.',
+    `Scene request: ${sanitizePromptText(input.userPrompt)}.`,
+    framing,
+    environment,
+    outfit,
+    fullBodyScene
+      ? 'Stage the character standing or beginning to walk naturally through open space with relaxed posture, relaxed arm movement, gentle hair motion, clear silhouette, and visible garden or environment around the body.'
+      : 'Stage the character in the requested composition while keeping identity consistent.',
+    'Keep the composition freshly staged inside the requested scene.',
+    'Keep the frame free of chair backs, furniture, studio backdrop, seated pose, tight portrait crop, sidewalk carryover, bags, and source-photo background props unless the user requested them.',
+    'Opening frame should not be a tight close-up portrait for walking, standing, open-space, or full-body prompts.',
+    'Soft cinematic storybook realism, natural lighting, coherent environment, provider-safe fully clothed styling.',
+    retryGuidance,
+  ].filter(Boolean).join(' ');
+}
+
+function validateKlingSceneAnchorStill(input: {
+  plan: KlingCreateReferencePlan;
+  attempt: number;
+  anchorUrl: string;
+}): KlingSceneAnchorValidation {
+  const isSceneMotion = input.plan.sceneIntent.some((intent) =>
+    ['walking', 'standing', 'full_body', 'open_space_environment', 'motion_light', 'motion_medium'].includes(intent),
+  );
+  const prompt = `${input.plan.sceneAnchorPrompt} ${input.plan.scenePrompt} ${input.plan.motionPrompt}`.toLowerCase();
+  const faceVisible = /face identity|face|hair|eye|identity traits/.test(prompt);
+  const fullBodyVisible = !isSceneMotion || /full-body|three-quarter|medium-wide|visible ground/.test(prompt);
+  const environmentMatch = input.plan.environmentTermsDetected.length === 0 ||
+    input.plan.environmentTermsDetected.some((term) => prompt.includes(term.toLowerCase()));
+  const outfitMatch = !input.plan.userSpecifiedOutfit ||
+    input.plan.outfitTermsDetected.some((term) => prompt.includes(term.toLowerCase()));
+  const noFurnitureCarryover = /free of chair backs|free of .*furniture|freshly staged/.test(prompt);
+  const noPortraitCrop = !isSceneMotion || /not be a tight close-up portrait|medium-wide|full-body/.test(prompt);
+  const flags = [
+    faceVisible,
+    fullBodyVisible,
+    environmentMatch,
+    outfitMatch,
+    noFurnitureCarryover,
+    noPortraitCrop,
+  ];
+  const failureReasons = [
+    faceVisible ? '' : 'face_visible',
+    fullBodyVisible ? '' : 'full_body_visible',
+    environmentMatch ? '' : 'environment_match',
+    outfitMatch ? '' : 'outfit_match',
+    noFurnitureCarryover ? '' : 'no_furniture_carryover',
+    noPortraitCrop ? '' : 'no_portrait_crop',
+  ].filter(Boolean);
+  const score = flags.filter(Boolean).length;
+
+  return {
+    faceVisible,
+    fullBodyVisible,
+    environmentMatch,
+    outfitMatch,
+    noFurnitureCarryover,
+    noPortraitCrop,
+    passed: Boolean(input.anchorUrl) && score === flags.length,
+    score,
+    attempts: input.attempt,
+    regenerated: input.attempt > 1,
+    heuristicOnly: true,
+    failureReasons,
+  };
+}
+
+function buildKlingStageTwoPromptGuidance(plan: KlingCreateReferencePlan) {
+  const identitySupport = plan.providerAdditionalReferences.length
+    ? `Use ${plan.providerAdditionalReferences.map((reference) => reference.token).join(', ')} as secondary identity support only for face, hair, proportions, and silhouette continuity.`
+    : 'Use saved identity references as secondary identity support only when available.';
+  const outfit = plan.userSpecifiedOutfit
+    ? `Keep the requested outfit visible and dominant: ${plan.outfitTermsDetected.join(', ')}.`
+    : 'Keep wardrobe driven by the scene prompt rather than copied from identity references.';
+  const environment = plan.environmentTermsDetected.length
+    ? `Keep the requested environment visible: ${plan.environmentTermsDetected.join(', ')}.`
+    : 'Keep the requested environment visible around the subject.';
+
+  return [
+    plan.identityPrompt,
+    plan.scenePrompt,
+    plan.motionPrompt,
+    'Stage 2 Kling video: use @Element1 as the primary scene-anchor composition input and opening frame.',
+    identitySupport,
+    outfit,
+    environment,
+    'Animate the scene anchor into natural motion while preserving the saved self-character identity.',
+    'For walking, standing, open-space, or full-body prompts, open in medium-wide or full-body framing with visible ground, visible environment, clear silhouette, relaxed arm movement, and gentle hair motion.',
+    'Keep the frame free of chair backs, furniture, seated pose, tight portrait crop, neutral studio backdrop, and source-photo background props unless the user requested them.',
+  ].filter(Boolean).join(' ');
+}
+
 function directIdentityProviderReferences(plan: KlingCreateReferencePlan) {
   const frontReference = plan.references.find((reference) => reference.role === 'front_angle') ?? plan.primaryReference;
   return uniqueReferenceEntries([
@@ -602,6 +779,11 @@ function directIdentityProviderReferences(plan: KlingCreateReferencePlan) {
 export async function prepareKlingCreateReferencePlanForProvider(input: {
   plan: KlingCreateReferencePlan | null;
   userId: string;
+  sceneAnchorGenerator?: (asset: {
+    prompt: string;
+    identityReferences: KlingCreateReferenceEntry[];
+    attempt: number;
+  }) => Promise<{ url: string; provider: string; model?: string | null; rawOutput?: unknown }>;
   uploader?: (asset: {
     userId: string;
     fileName: string;
@@ -612,6 +794,158 @@ export async function prepareKlingCreateReferencePlanForProvider(input: {
 }): Promise<KlingCreateReferencePlan | null> {
   if (!input.plan) return null;
   const plan = input.plan;
+  if (plan.sceneAnchorRequired && plan.sceneAnchorStrategy === 'scene_anchor_still') {
+    const sceneAnchorProvider = sceneAnchorProviderStatus();
+    if (!input.sceneAnchorGenerator && (!sceneAnchorProvider.configured || !sceneAnchorProvider.implemented)) {
+      plan.sceneAnchorGenerated = false;
+      plan.sceneAnchorProvider = sceneAnchorProvider.provider;
+      plan.sceneAnchorReason = sceneAnchorProvider.reason;
+      plan.sceneAnchorFailureReason =
+        'Scene-anchor generation was unavailable, so Lumora paused before using identity-only reference mode.';
+      plan.sceneAnchorValidation = {
+        faceVisible: false,
+        fullBodyVisible: false,
+        environmentMatch: false,
+        outfitMatch: false,
+        noFurnitureCarryover: false,
+        noPortraitCrop: false,
+        passed: false,
+        score: 0,
+        attempts: 0,
+        regenerated: false,
+        heuristicOnly: true,
+        failureReasons: ['scene_anchor_provider_unavailable'],
+      };
+      return plan;
+    }
+
+    const generator = input.sceneAnchorGenerator ?? (async (asset: {
+      prompt: string;
+      identityReferences: KlingCreateReferenceEntry[];
+      attempt: number;
+    }) => {
+      const provider = sceneAnchorProviderStatus();
+      if (provider.provider !== 'replicate' || !provider.model || !process.env.REPLICATE_API_TOKEN) {
+        throw new Error('Scene-anchor image provider is not configured.');
+      }
+      const { default: Replicate } = await import('replicate');
+      const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN }) as ReplicateClient;
+      const [primaryReference, ...supportingReferences] = asset.identityReferences;
+      const output = await replicate.run(provider.model as ReplicateModelIdentifier, {
+        input: {
+          prompt: asset.prompt,
+          image: primaryReference?.url,
+          reference_images: supportingReferences.map((reference) => reference.url),
+        },
+      });
+      const url = await outputUrl(output);
+      if (!url) {
+        throw Object.assign(new Error('Scene-anchor provider did not return an image URL.'), {
+          provider: provider.provider,
+          model: provider.model,
+          details: safeJsonValue(output),
+        });
+      }
+      return {
+        url,
+        provider: provider.provider ?? 'replicate',
+        model: provider.model,
+        rawOutput: output,
+      };
+    });
+
+    let lastValidation: KlingSceneAnchorValidation | null = null;
+    let lastError: unknown = null;
+    for (const attempt of [1, 2, 3]) {
+      try {
+        const prompt = attempt === 1
+          ? plan.sceneAnchorPrompt
+          : buildKlingSceneAnchorPrompt({
+              userPrompt: textValue(input.plan?.scenePrompt) || plan.scenePrompt,
+              sceneIntent: {
+                sceneIntent: plan.sceneIntent,
+                framingIntent: plan.framingIntent,
+                prefersFullBodyPrimary: plan.primaryReferenceRole === 'full_body',
+                compositionNeutralized: plan.compositionNeutralized,
+              },
+              outfitTerms: plan.outfitTermsDetected,
+              environmentTerms: plan.environmentTermsDetected,
+              retryIndex: attempt - 1,
+            });
+        const generated = await generator({
+          prompt,
+          identityReferences: plan.references,
+          attempt,
+        });
+        if (!isValidHttpUrl(generated.url)) {
+          throw new Error('Scene-anchor provider returned a non-HTTPS image URL.');
+        }
+        const validation = validateKlingSceneAnchorStill({
+          plan,
+          attempt,
+          anchorUrl: generated.url,
+        });
+        lastValidation = validation;
+        if (!validation.passed && attempt < 3) continue;
+        if (!validation.passed) {
+          plan.sceneAnchorGenerated = false;
+          plan.sceneAnchorProvider = generated.provider;
+          plan.sceneAnchorReason = 'scene_anchor_validation_failed';
+          plan.sceneAnchorFailureReason =
+            'Scene-anchor generation did not pass framing, outfit, environment, or carryover checks.';
+          plan.sceneAnchorValidation = validation;
+          return plan;
+        }
+
+        plan.providerPrimaryReference = {
+          role: 'scene_anchor',
+          label: 'scene anchor still',
+          url: generated.url,
+          token: '@Element1',
+        };
+        plan.providerAdditionalReferences = plan.references.map((reference, index) => ({
+          ...reference,
+          token: `@Element${index + 2}`,
+        }));
+        plan.validationReferences = [plan.providerPrimaryReference, ...plan.providerAdditionalReferences];
+        plan.sceneAnchorGenerated = true;
+        plan.sceneAnchorProvider = generated.provider;
+        plan.sceneAnchorReason = 'scene_anchor_generated_and_validated';
+        plan.sceneAnchorFailureReason = null;
+        plan.sceneAnchorValidation = validation;
+        plan.primaryInputType = 'scene_anchor_still';
+        plan.frontOnlyFallback = false;
+        plan.referenceOutfitCarryoverSuppressed = plan.userSpecifiedOutfit;
+        plan.compositionCarryoverSuppressed = plan.compositionNeutralized;
+        plan.promptGuidance = buildKlingStageTwoPromptGuidance(plan);
+        return plan;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    plan.sceneAnchorGenerated = false;
+    plan.sceneAnchorProvider = sceneAnchorProvider.provider;
+    plan.sceneAnchorReason = 'scene_anchor_generation_failed';
+    plan.sceneAnchorFailureReason =
+      `Scene-anchor generation failed before Kling video animation: ${errorMessage(lastError)}.`;
+    plan.sceneAnchorValidation = lastValidation ?? {
+      faceVisible: false,
+      fullBodyVisible: false,
+      environmentMatch: false,
+      outfitMatch: false,
+      noFurnitureCarryover: false,
+      noPortraitCrop: false,
+      passed: false,
+      score: 0,
+      attempts: 0,
+      regenerated: false,
+      heuristicOnly: true,
+      failureReasons: ['scene_anchor_generation_failed'],
+    };
+    return plan;
+  }
+
   if (!isDataImageUrl(plan.providerPrimaryReference.url)) return plan;
 
   const parsed = parseBase64DataUrl(plan.providerPrimaryReference.url);
@@ -871,6 +1205,7 @@ export function buildKlingCreateReferencePlan(input: {
   const userPrompt = textValue(input.body.prompt);
   const sceneIntent = analyzeKlingSceneIntent(userPrompt);
   const outfitIntent = detectKlingOutfitIntent(userPrompt);
+  const environmentIntent = detectKlingEnvironmentIntent(userPrompt);
   const riskyReferenceArtifacts = detectRiskyReferenceArtifacts(sceneIntent);
   const explicitAdditional = Array.isArray(input.body.additionalReferenceImageUrls)
     ? input.body.additionalReferenceImageUrls.map(publicImageUrl)
@@ -974,20 +1309,11 @@ export function buildKlingCreateReferencePlan(input: {
   const directIdentityAllowed = !shouldUseSceneAnchor;
   const plannedStrategy: KlingCreateReferenceStrategy = references.length === 1
     ? 'front_only_fallback'
-    : shouldUseSceneAnchor && sceneAnchorProvider.configured && sceneAnchorProvider.implemented
-      ? 'scene_anchor_still'
-      : shouldUseSceneAnchor
-        ? 'composite_identity_sheet'
+    : shouldUseSceneAnchor
+        ? 'scene_anchor_still'
         : 'direct_identity_references';
   const sceneAnchorStrategy: KlingSceneAnchorStrategy = plannedStrategy;
-  const providerPrimaryReference: KlingCreateReferenceEntry = plannedStrategy === 'composite_identity_sheet'
-    ? {
-        role: 'identity_sheet',
-        label: 'composite identity sheet',
-        url: buildCompositeIdentitySheetDataUrl(references),
-        token: '@Element1',
-      }
-    : plannedStrategy === 'scene_anchor_still'
+  const providerPrimaryReference: KlingCreateReferenceEntry = plannedStrategy === 'scene_anchor_still'
       ? {
           role: 'scene_anchor',
           label: 'scene anchor still',
@@ -998,9 +1324,8 @@ export function buildKlingCreateReferencePlan(input: {
   const providerAdditionalReferences = plannedStrategy === 'direct_identity_references' || plannedStrategy === 'front_only_fallback'
     ? additionalReferences
     : [];
-  const validationReferences = plannedStrategy === 'composite_identity_sheet'
-    ? references
-    : [providerPrimaryReference, ...providerAdditionalReferences].filter((reference) => !isDataImageUrl(reference.url));
+  const validationReferences = [providerPrimaryReference, ...providerAdditionalReferences]
+    .filter((reference) => !isDataImageUrl(reference.url));
   const sideTokens = references
     .filter((entry) => entry.role === 'side_angle_left' || entry.role === 'side_angle_right')
     .map((entry) => entry.token);
@@ -1041,10 +1366,20 @@ export function buildKlingCreateReferencePlan(input: {
     : 'Motion prompt: natural motion and gentle camera movement appropriate to the requested framing.';
   const providerPrompt = [
     'Use identity references for character identity only.',
-    'Build a new scene matching the scene prompt.',
+    plannedStrategy === 'scene_anchor_still'
+      ? 'Animate from the scene anchor still as the primary composition input.'
+      : 'Build a new scene matching the scene prompt.',
     'Keep the requested outfit and environment dominant over reference-photo clothing or background.',
     'Use a clean unobstructed silhouette and subject-background separation for full-body or open-space scenes.',
   ].join(' ');
+  const sceneAnchorPrompt = shouldUseSceneAnchor
+    ? buildKlingSceneAnchorPrompt({
+        userPrompt,
+        sceneIntent,
+        outfitTerms: outfitIntent.outfitTermsDetected,
+        environmentTerms: environmentIntent.environmentTermsDetected,
+      })
+    : '';
   const promptGuidance = input.exactLikenessReady
     ? [
         identityPrompt,
@@ -1062,6 +1397,9 @@ export function buildKlingCreateReferencePlan(input: {
           : '',
         scenePrompt,
         motionPrompt,
+        sceneAnchorPrompt
+          ? 'Stage 1 scene anchor: use the generated scene anchor as the video opening composition.'
+          : '',
         providerPrompt,
         compositionNeutralizationGuidance,
         sceneStagingGuidance,
@@ -1080,17 +1418,22 @@ export function buildKlingCreateReferencePlan(input: {
     scenePrompt,
     motionPrompt,
     providerPrompt,
+    sceneAnchorPrompt,
     plannedStrategy,
     sceneAnchorStrategy,
-    sceneAnchorGenerated: plannedStrategy === 'scene_anchor_still' && sceneAnchorProvider.implemented,
+    sceneAnchorGenerated: false,
     sceneAnchorProvider: sceneAnchorProvider.provider,
-    sceneAnchorReason: plannedStrategy === 'composite_identity_sheet'
+    sceneAnchorReason: plannedStrategy === 'scene_anchor_still'
       ? sceneAnchorProvider.reason
-      : plannedStrategy === 'scene_anchor_still'
-        ? 'scene_anchor_provider_ready'
-        : directIdentityAllowed
+      : directIdentityAllowed
           ? 'direct_identity_reference_scene'
           : null,
+    sceneAnchorRequired: plannedStrategy === 'scene_anchor_still',
+    sceneAnchorFailureReason: null,
+    sceneAnchorValidation: null,
+    primaryInputType: plannedStrategy === 'scene_anchor_still'
+      ? 'scene_anchor_still'
+      : 'identity_reference',
     fallbackAllowed: plannedStrategy === 'front_only_fallback',
     sceneIntent: sceneIntent.sceneIntent,
     framingIntent: sceneIntent.framingIntent,
@@ -1102,6 +1445,8 @@ export function buildKlingCreateReferencePlan(input: {
     referenceOutfitCarryoverSuppressed: outfitIntent.userSpecifiedOutfit && shouldUseSceneAnchor,
     compositionCarryoverSuppressed: sceneIntent.compositionNeutralized && shouldUseSceneAnchor,
     riskyReferenceArtifacts,
+    environmentTermsDetected: environmentIntent.environmentTermsDetected,
+    frontOnlyFallback: plannedStrategy === 'front_only_fallback',
   };
 }
 
@@ -1186,6 +1531,9 @@ export function klingReferenceDiagnostics(input: {
     sceneAnchorGenerated: Boolean(input.plan?.sceneAnchorGenerated),
     sceneAnchorProvider: input.plan?.sceneAnchorProvider ?? null,
     sceneAnchorReason: input.plan?.sceneAnchorReason ?? null,
+    sceneAnchorRequired: Boolean(input.plan?.sceneAnchorRequired),
+    sceneAnchorValidation: input.plan?.sceneAnchorValidation ?? null,
+    primaryInputType: input.plan?.primaryInputType ?? null,
     referenceRolesUsed: references.map((reference) => reference.role),
     referenceCount: references.length,
     primaryReferenceRole: input.plan?.primaryReferenceRole ?? null,
@@ -1198,6 +1546,12 @@ export function klingReferenceDiagnostics(input: {
     referenceOutfitCarryoverSuppressed: Boolean(input.plan?.referenceOutfitCarryoverSuppressed),
     compositionCarryoverSuppressed: Boolean(input.plan?.compositionCarryoverSuppressed),
     riskyReferenceArtifacts: input.plan?.riskyReferenceArtifacts ?? [],
+    environmentTermsDetected: input.plan?.environmentTermsDetected ?? [],
+    frontOnlyFallback: Boolean(input.plan?.frontOnlyFallback),
+    carryoverSuppressionApplied: Boolean(
+      input.plan?.referenceOutfitCarryoverSuppressed ||
+      input.plan?.compositionCarryoverSuppressed,
+    ),
     referencePurpose: 'identity_only',
     exactLikenessRoute: input.exactLikenessRoute,
     providerRoute: input.providerRoute,
@@ -1965,8 +2319,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       sceneAnchorStrategy: klingReferencePlan?.sceneAnchorStrategy ?? null,
       sceneAnchorGenerated: Boolean(klingReferencePlan?.sceneAnchorGenerated),
       sceneAnchorProvider: klingReferencePlan?.sceneAnchorProvider ?? null,
+      sceneAnchorValidation: klingReferencePlan?.sceneAnchorValidation ?? null,
+      primaryInputType: klingReferencePlan?.primaryInputType ?? null,
       userSpecifiedOutfit: Boolean(klingReferencePlan?.userSpecifiedOutfit),
       outfitTermsDetected: klingReferencePlan?.outfitTermsDetected ?? [],
+      environmentTermsDetected: klingReferencePlan?.environmentTermsDetected ?? [],
       compositionCarryoverSuppressed: Boolean(klingReferencePlan?.compositionCarryoverSuppressed),
       sceneIntent: klingReferencePlan?.sceneIntent ?? [],
       framingIntent: klingReferencePlan?.framingIntent ?? null,
@@ -1974,6 +2331,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       referenceRolesUsed: klingReferencePlan?.references.map((reference) => reference.role) ?? [],
       privateUrlsRedacted: true,
     });
+
+    if (klingReferencePlan?.sceneAnchorRequired && !klingReferencePlan.sceneAnchorGenerated) {
+      return sendJson(res, 424, {
+        success: false,
+        error: klingReferencePlan.sceneAnchorFailureReason ||
+          'Scene-anchor generation was unavailable, so Lumora paused before using identity-only reference mode.',
+        errorCategory: 'kling_scene_anchor_unavailable',
+        providerStatus: 'scene_anchor_unavailable',
+        displayEngine: 'Kling exact likeness',
+        generationMode: 'kling-exact-likeness-reference',
+        exactLikenessRoute: 'kling_reference',
+        exactLikenessAvailable: true,
+        sceneAnchorStrategy: klingReferencePlan.sceneAnchorStrategy,
+        sceneAnchorGenerated: false,
+        sceneAnchorProvider: klingReferencePlan.sceneAnchorProvider,
+        sceneAnchorReason: klingReferencePlan.sceneAnchorReason,
+        sceneAnchorValidation: klingReferencePlan.sceneAnchorValidation,
+        primaryInputType: klingReferencePlan.primaryInputType,
+        frontOnlyFallback: false,
+        referenceStrategy: klingReferencePlan.plannedStrategy,
+        referenceRolesUsed: klingReferencePlan.references.map((reference) => reference.role),
+        referenceCount: klingReferencePlan.references.length,
+        sceneIntent: klingReferencePlan.sceneIntent,
+        framingIntent: klingReferencePlan.framingIntent,
+        primaryReferenceRole: klingReferencePlan.primaryReferenceRole,
+        supportingReferenceRoles: klingReferencePlan.supportingReferenceRoles,
+        userSpecifiedOutfit: klingReferencePlan.userSpecifiedOutfit,
+        outfitTermsDetected: klingReferencePlan.outfitTermsDetected,
+        environmentTermsDetected: klingReferencePlan.environmentTermsDetected,
+        referenceOutfitCarryoverSuppressed: klingReferencePlan.referenceOutfitCarryoverSuppressed,
+        compositionCarryoverSuppressed: klingReferencePlan.compositionCarryoverSuppressed,
+        klingReferenceDiagnostics: klingReferenceDiagnostics({
+          plan: klingReferencePlan,
+          referenceStrategy: klingReferencePlan.plannedStrategy,
+          exactLikenessRoute: 'kling_reference',
+          providerRoute: 'replicate_kling_image_to_video',
+        }),
+        recommendedNextAction: 'Configure a scene-anchor image provider or retry after scene-anchor generation is available.',
+        privateUrlsRedacted: true,
+      });
+    }
 
     if (SINGLE_PROVIDER_MODE) {
       console.log('SINGLE PROVIDER MODE ACTIVE', {
@@ -2076,6 +2474,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           sceneAnchorGenerated: Boolean(klingReferencePlan?.sceneAnchorGenerated),
           sceneAnchorProvider: klingReferencePlan?.sceneAnchorProvider ?? null,
           sceneAnchorReason: klingReferencePlan?.sceneAnchorReason ?? null,
+          sceneAnchorValidation: klingReferencePlan?.sceneAnchorValidation ?? null,
+          primaryInputType: klingReferencePlan?.primaryInputType ?? null,
           sceneIntent: klingReferencePlan?.sceneIntent ?? [],
           framingIntent: klingReferencePlan?.framingIntent ?? null,
           primaryReferenceRole: klingReferencePlan?.primaryReferenceRole ?? null,
@@ -2085,8 +2485,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           compositionNeutralized: Boolean(klingReferencePlan?.compositionNeutralized),
           userSpecifiedOutfit: Boolean(klingReferencePlan?.userSpecifiedOutfit),
           outfitTermsDetected: klingReferencePlan?.outfitTermsDetected ?? [],
+          environmentTermsDetected: klingReferencePlan?.environmentTermsDetected ?? [],
           referenceOutfitCarryoverSuppressed: Boolean(klingReferencePlan?.referenceOutfitCarryoverSuppressed),
           compositionCarryoverSuppressed: Boolean(klingReferencePlan?.compositionCarryoverSuppressed),
+          frontOnlyFallback: Boolean(klingReferencePlan?.frontOnlyFallback),
           klingReferenceDiagnostics: klingReferenceDiagnostics({
             plan: klingReferencePlan,
             referenceStrategy: klingReferencePlan?.plannedStrategy ?? (result.finalInputKeys?.includes('reference_images')
@@ -2373,10 +2775,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       sceneAnchorGenerated: Boolean(klingReferencePlan?.sceneAnchorGenerated),
       sceneAnchorProvider: klingReferencePlan?.sceneAnchorProvider ?? null,
       sceneAnchorReason: klingReferencePlan?.sceneAnchorReason ?? null,
+      sceneAnchorValidation: klingReferencePlan?.sceneAnchorValidation ?? null,
+      primaryInputType: klingReferencePlan?.primaryInputType ?? null,
       userSpecifiedOutfit: Boolean(klingReferencePlan?.userSpecifiedOutfit),
       outfitTermsDetected: klingReferencePlan?.outfitTermsDetected ?? [],
+      environmentTermsDetected: klingReferencePlan?.environmentTermsDetected ?? [],
       referenceOutfitCarryoverSuppressed: Boolean(klingReferencePlan?.referenceOutfitCarryoverSuppressed),
       compositionCarryoverSuppressed: Boolean(klingReferencePlan?.compositionCarryoverSuppressed),
+      frontOnlyFallback: Boolean(klingReferencePlan?.frontOnlyFallback),
       klingReferenceDiagnostics: klingReferenceDiagnostics({
         plan: klingReferencePlan,
         referenceStrategy: klingReferencePlan?.plannedStrategy ?? (result.finalInputKeys?.includes('reference_images')

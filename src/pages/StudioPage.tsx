@@ -151,7 +151,9 @@ export default function StudioPage() {
         creatorAvatar: project.creatorAvatar ?? null,
         title:
           project.title ||
-          (project.isDefaultSelfCharacter
+          (project.exactLikenessRoute === 'kling_reference' && project.sceneAnchorStrategy === 'scene_anchor_still'
+            ? 'Kling scene-anchor exact likeness'
+            : project.isDefaultSelfCharacter
             ? 'Soft self guidance'
             : project.characterName
               ? `Character: ${project.characterName}`
@@ -183,14 +185,18 @@ export default function StudioPage() {
         sceneAnchorGenerated: project.sceneAnchorGenerated ?? null,
         sceneAnchorProvider: project.sceneAnchorProvider ?? null,
         sceneAnchorReason: project.sceneAnchorReason ?? null,
+        sceneAnchorValidation: project.sceneAnchorValidation ?? null,
+        primaryInputType: project.primaryInputType ?? null,
         sceneIntent: project.sceneIntent ?? null,
         framingIntent: project.framingIntent ?? null,
         primaryReferenceRole: project.primaryReferenceRole ?? null,
         supportingReferenceRoles: project.supportingReferenceRoles ?? null,
         userSpecifiedOutfit: project.userSpecifiedOutfit ?? null,
         outfitTermsDetected: project.outfitTermsDetected ?? null,
+        environmentTermsDetected: project.environmentTermsDetected ?? null,
         referenceOutfitCarryoverSuppressed: project.referenceOutfitCarryoverSuppressed ?? null,
         compositionCarryoverSuppressed: project.compositionCarryoverSuppressed ?? null,
+        frontOnlyFallback: project.frontOnlyFallback ?? null,
         renderProvider: project.renderProvider ?? null,
         klingReferenceDiagnostics: project.klingReferenceDiagnostics ?? null,
         errorMessage: null,

@@ -26,14 +26,18 @@ type ContinueStoryItem = {
   sceneAnchorGenerated?: boolean | null;
   sceneAnchorProvider?: string | null;
   sceneAnchorReason?: string | null;
+  sceneAnchorValidation?: Record<string, unknown> | null;
+  primaryInputType?: string | null;
   sceneIntent?: string[] | null;
   framingIntent?: string | null;
   primaryReferenceRole?: string | null;
   supportingReferenceRoles?: string[] | null;
   userSpecifiedOutfit?: boolean | null;
   outfitTermsDetected?: string[] | null;
+  environmentTermsDetected?: string[] | null;
   referenceOutfitCarryoverSuppressed?: boolean | null;
   compositionCarryoverSuppressed?: boolean | null;
+  frontOnlyFallback?: boolean | null;
   renderProvider?: string | null;
   klingReferenceDiagnostics?: Record<string, unknown> | null;
 };
@@ -53,10 +57,10 @@ function exactKlingStagingHint(item: ContinueStoryItem) {
     primaryRole === 'full_body';
 
   if (!needsSceneStaging) {
-    return ' Keep the Kling exact-likeness route and saved self-character references active for identity continuity.';
+    return ' Keep the Kling exact-likeness route and scene-anchor-first identity planning active for identity continuity.';
   }
 
-  return ' Keep the Kling exact-likeness route active with medium-full or full-body cinematic staging, a clean unobstructed silhouette, and the saved self-character references used as identity guidance rather than portrait composition.';
+  return ' Keep the Kling exact-likeness route active with scene-anchor-first planning, medium-full or full-body cinematic staging, a clean unobstructed silhouette, and the saved self-character references used as identity guidance rather than portrait composition.';
 }
 
 function nextScenePrompt(item: ContinueStoryItem) {
@@ -95,14 +99,18 @@ export function prepareContinueStory(item: ContinueStoryItem, source: string) {
     sceneAnchorGenerated: item.sceneAnchorGenerated ?? null,
     sceneAnchorProvider: item.sceneAnchorProvider ?? null,
     sceneAnchorReason: item.sceneAnchorReason ?? null,
+    sceneAnchorValidation: item.sceneAnchorValidation ?? null,
+    primaryInputType: item.primaryInputType ?? null,
     sceneIntent: item.sceneIntent ?? null,
     framingIntent: item.framingIntent ?? null,
     primaryReferenceRole: item.primaryReferenceRole ?? null,
     supportingReferenceRoles: item.supportingReferenceRoles ?? null,
     userSpecifiedOutfit: item.userSpecifiedOutfit ?? null,
     outfitTermsDetected: item.outfitTermsDetected ?? null,
+    environmentTermsDetected: item.environmentTermsDetected ?? null,
     referenceOutfitCarryoverSuppressed: item.referenceOutfitCarryoverSuppressed ?? null,
     compositionCarryoverSuppressed: item.compositionCarryoverSuppressed ?? null,
+    frontOnlyFallback: item.frontOnlyFallback ?? null,
     renderProvider: item.renderProvider ?? null,
     klingReferenceDiagnostics: item.klingReferenceDiagnostics ?? null,
     source,

@@ -286,14 +286,18 @@ type GenerateVideoApiResponse = {
   sceneAnchorGenerated?: boolean | null;
   sceneAnchorProvider?: string | null;
   sceneAnchorReason?: string | null;
+  sceneAnchorValidation?: Record<string, unknown> | null;
+  primaryInputType?: string | null;
   sceneIntent?: unknown;
   framingIntent?: string | null;
   primaryReferenceRole?: string | null;
   supportingReferenceRoles?: unknown;
   userSpecifiedOutfit?: boolean | null;
   outfitTermsDetected?: unknown;
+  environmentTermsDetected?: unknown;
   referenceOutfitCarryoverSuppressed?: boolean | null;
   compositionCarryoverSuppressed?: boolean | null;
+  frontOnlyFallback?: boolean | null;
   klingReferenceDiagnostics?: Record<string, unknown> | null;
   multimodalReferenceMode?: unknown;
   assetPersistence?: unknown;
@@ -689,6 +693,9 @@ function klingProviderFailureMessage(category: string | null | undefined, fallba
   }
   if (category === 'kling_input_schema') {
     return 'Kling rejected the render payload shape. Check provider diagnostics before retrying this exact-likeness route.';
+  }
+  if (category === 'kling_scene_anchor_unavailable') {
+    return 'Scene-anchor generation was unavailable, so Lumora paused before using identity-only reference mode.';
   }
   if (category === 'kling_provider_unavailable') {
     return 'Kling is temporarily unavailable. Your scene is safe to retry later.';
@@ -1499,12 +1506,12 @@ export default function CreateVideo({
     headline: klingExactRenderStateActive
       ? generationStatusState === 'verifying_output'
         ? 'Saving to Drafts'
-        : 'Trying Kling exact likeness render...'
+        : 'Generating scene anchor...'
       : renderStateHeadline(generationStatusState),
     body: klingExactRenderStateActive
       ? generationStatusState === 'verifying_output'
         ? 'Lumora is verifying the Kling video before marking the draft ready.'
-        : 'Using your saved self-character references for this scene.'
+        : 'Scene-anchor-first exact likeness is staging the requested outfit, environment, framing, and motion before Kling animation.'
       : status && !isProviderTechnicalText(status)
       ? status
       : renderStateBody(generationStatusState, renderCooldownSeconds),
@@ -1717,14 +1724,18 @@ export default function CreateVideo({
             sceneAnchorGenerated: job.sceneAnchorGenerated ?? null,
             sceneAnchorProvider: job.sceneAnchorProvider ?? null,
             sceneAnchorReason: job.sceneAnchorReason ?? null,
+            sceneAnchorValidation: job.sceneAnchorValidation ?? null,
+            primaryInputType: job.primaryInputType ?? null,
             sceneIntent: job.sceneIntent ?? null,
             framingIntent: job.framingIntent ?? null,
             primaryReferenceRole: job.primaryReferenceRole ?? null,
             supportingReferenceRoles: job.supportingReferenceRoles ?? null,
             userSpecifiedOutfit: job.userSpecifiedOutfit ?? null,
             outfitTermsDetected: job.outfitTermsDetected ?? null,
+            environmentTermsDetected: job.environmentTermsDetected ?? null,
             referenceOutfitCarryoverSuppressed: job.referenceOutfitCarryoverSuppressed ?? null,
             compositionCarryoverSuppressed: job.compositionCarryoverSuppressed ?? null,
+            frontOnlyFallback: job.frontOnlyFallback ?? null,
             klingReferenceDiagnostics: job.klingReferenceDiagnostics ?? null,
             message: job.message ?? (job.exactLikenessRoute === 'kling_reference'
               ? 'Kling exact-likeness scene created with scene-anchor identity planning.'
@@ -2722,7 +2733,7 @@ export default function CreateVideo({
         invisiblePlan = await buildCinematicStructureForPrompt({ source: 'generate', promptOverride: currentPrompt });
       }
       if (selectedKlingExactReadyForRequest) {
-        setStatus('Trying Kling exact likeness render...');
+        setStatus('Generating scene anchor...');
       } else if (invisiblePlan && selectedRenderPreference !== 'success_first') {
         setStatus('Preparing your cast for the render...');
       } else {
@@ -3000,6 +3011,11 @@ export default function CreateVideo({
         : booleanFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorGenerated');
       const nextSceneAnchorProvider = data.sceneAnchorProvider ?? stringFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorProvider');
       const nextSceneAnchorReason = data.sceneAnchorReason ?? stringFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorReason');
+      const nextSceneAnchorValidation =
+        recordValue(data.sceneAnchorValidation).passed !== undefined
+          ? recordValue(data.sceneAnchorValidation)
+          : recordValue(nextKlingDiagnosticsRecord.sceneAnchorValidation);
+      const nextPrimaryInputType = data.primaryInputType ?? stringFromRecord(nextKlingDiagnosticsRecord, 'primaryInputType');
       const nextSceneIntent = formatStringList(data.sceneIntent).length
         ? formatStringList(data.sceneIntent)
         : formatStringList(nextKlingDiagnosticsRecord.sceneIntent);
@@ -3014,12 +3030,18 @@ export default function CreateVideo({
       const nextOutfitTermsDetected = formatStringList(data.outfitTermsDetected).length
         ? formatStringList(data.outfitTermsDetected)
         : formatStringList(nextKlingDiagnosticsRecord.outfitTermsDetected);
+      const nextEnvironmentTermsDetected = formatStringList(data.environmentTermsDetected).length
+        ? formatStringList(data.environmentTermsDetected)
+        : formatStringList(nextKlingDiagnosticsRecord.environmentTermsDetected);
       const nextReferenceOutfitCarryoverSuppressed = typeof data.referenceOutfitCarryoverSuppressed === 'boolean'
         ? data.referenceOutfitCarryoverSuppressed
         : booleanFromRecord(nextKlingDiagnosticsRecord, 'referenceOutfitCarryoverSuppressed');
       const nextCompositionCarryoverSuppressed = typeof data.compositionCarryoverSuppressed === 'boolean'
         ? data.compositionCarryoverSuppressed
         : booleanFromRecord(nextKlingDiagnosticsRecord, 'compositionCarryoverSuppressed');
+      const nextFrontOnlyFallback = typeof data.frontOnlyFallback === 'boolean'
+        ? data.frontOnlyFallback
+        : booleanFromRecord(nextKlingDiagnosticsRecord, 'frontOnlyFallback');
       const generatedMedia = resolveGeneratedVideoMedia({
         videoUrl: nextVideoUrl,
         outputUrl: nextVideoUrl,
@@ -3139,14 +3161,18 @@ export default function CreateVideo({
         sceneAnchorGenerated: nextSceneAnchorGenerated,
         sceneAnchorProvider: nextSceneAnchorProvider,
         sceneAnchorReason: nextSceneAnchorReason,
+        sceneAnchorValidation: Object.keys(nextSceneAnchorValidation).length ? nextSceneAnchorValidation : null,
+        primaryInputType: nextPrimaryInputType,
         sceneIntent: nextSceneIntent.length ? nextSceneIntent : null,
         framingIntent: nextFramingIntent,
         primaryReferenceRole: nextPrimaryReferenceRole,
         supportingReferenceRoles: nextSupportingReferenceRoles.length ? nextSupportingReferenceRoles : null,
         userSpecifiedOutfit: nextUserSpecifiedOutfit,
         outfitTermsDetected: nextOutfitTermsDetected.length ? nextOutfitTermsDetected : null,
+        environmentTermsDetected: nextEnvironmentTermsDetected.length ? nextEnvironmentTermsDetected : null,
         referenceOutfitCarryoverSuppressed: nextReferenceOutfitCarryoverSuppressed,
         compositionCarryoverSuppressed: nextCompositionCarryoverSuppressed,
+        frontOnlyFallback: nextFrontOnlyFallback,
         klingReferenceDiagnostics: nextKlingDiagnostics,
         message: renderedWithLighterCastGuidance || renderedWithSoftSelfGuidance
           ? 'Rendered with soft self guidance.'
@@ -3199,14 +3225,18 @@ export default function CreateVideo({
           sceneAnchorGenerated: nextSceneAnchorGenerated,
           sceneAnchorProvider: nextSceneAnchorProvider,
           sceneAnchorReason: nextSceneAnchorReason,
+          sceneAnchorValidation: Object.keys(nextSceneAnchorValidation).length ? nextSceneAnchorValidation : null,
+          primaryInputType: nextPrimaryInputType,
           sceneIntent: nextSceneIntent.length ? nextSceneIntent : null,
           framingIntent: nextFramingIntent,
           primaryReferenceRole: nextPrimaryReferenceRole,
           supportingReferenceRoles: nextSupportingReferenceRoles.length ? nextSupportingReferenceRoles : null,
           userSpecifiedOutfit: nextUserSpecifiedOutfit,
           outfitTermsDetected: nextOutfitTermsDetected.length ? nextOutfitTermsDetected : null,
+          environmentTermsDetected: nextEnvironmentTermsDetected.length ? nextEnvironmentTermsDetected : null,
           referenceOutfitCarryoverSuppressed: nextReferenceOutfitCarryoverSuppressed,
           compositionCarryoverSuppressed: nextCompositionCarryoverSuppressed,
+          frontOnlyFallback: nextFrontOnlyFallback,
           renderProvider: nextExactLikenessRoute === 'kling_reference' ? 'kling' : generationProvider,
           klingReferenceDiagnostics: nextKlingDiagnostics,
           characterId,
@@ -4194,11 +4224,12 @@ export default function CreateVideo({
             {(generationStatusState === 'queued' || generationStatusState === 'processing' || generationStatusState === 'rate_limited') ? (
               <ol className="success-ladder-progress" aria-label="Render progress">
                 {[
-                  selectedKlingExactReady ? 'Preparing saved self references' : 'Preparing cast',
+                  selectedKlingExactReady ? 'Generating scene anchor' : 'Preparing cast',
                   selectedKlingExactReady
-                    ? 'Trying Kling exact likeness render'
+                    ? 'Scene anchor approved'
                     : successFirstLighterReferencePath ? 'Creating soft self-guided draft' : 'Trying storybook cinematic take',
-                  'Saving to Drafts',
+                  selectedKlingExactReady ? 'Animating with Kling exact likeness' : 'Saving to Drafts',
+                  ...(selectedKlingExactReady ? ['Saving to Drafts'] : []),
                 ].map((step, index) => (
                   <li key={step} className={index === 0 || generationStatusState === 'processing' ? 'active' : ''}>
                     {step}

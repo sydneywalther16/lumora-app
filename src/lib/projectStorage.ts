@@ -46,14 +46,18 @@ export type StudioProject = {
   sceneAnchorGenerated?: boolean | null;
   sceneAnchorProvider?: string | null;
   sceneAnchorReason?: string | null;
+  sceneAnchorValidation?: Record<string, unknown> | null;
+  primaryInputType?: string | null;
   sceneIntent?: string[] | null;
   framingIntent?: string | null;
   primaryReferenceRole?: string | null;
   supportingReferenceRoles?: string[] | null;
   userSpecifiedOutfit?: boolean | null;
   outfitTermsDetected?: string[] | null;
+  environmentTermsDetected?: string[] | null;
   referenceOutfitCarryoverSuppressed?: boolean | null;
   compositionCarryoverSuppressed?: boolean | null;
+  frontOnlyFallback?: boolean | null;
   renderProvider?: string | null;
   klingReferenceDiagnostics?: Record<string, unknown> | null;
   characterId: string | null;
@@ -167,6 +171,11 @@ export function loadStudioProjects(): StudioProject[] {
           sceneAnchorGenerated: typeof project.sceneAnchorGenerated === 'boolean' ? project.sceneAnchorGenerated : null,
           sceneAnchorProvider: typeof project.sceneAnchorProvider === 'string' ? project.sceneAnchorProvider : null,
           sceneAnchorReason: typeof project.sceneAnchorReason === 'string' ? project.sceneAnchorReason : null,
+          sceneAnchorValidation:
+            project.sceneAnchorValidation && typeof project.sceneAnchorValidation === 'object'
+              ? project.sceneAnchorValidation as Record<string, unknown>
+              : null,
+          primaryInputType: typeof project.primaryInputType === 'string' ? project.primaryInputType : null,
           sceneIntent: Array.isArray(project.sceneIntent)
             ? project.sceneIntent.filter((item): item is string => typeof item === 'string')
             : null,
@@ -179,10 +188,14 @@ export function loadStudioProjects(): StudioProject[] {
           outfitTermsDetected: Array.isArray(project.outfitTermsDetected)
             ? project.outfitTermsDetected.filter((item): item is string => typeof item === 'string')
             : null,
+          environmentTermsDetected: Array.isArray(project.environmentTermsDetected)
+            ? project.environmentTermsDetected.filter((item): item is string => typeof item === 'string')
+            : null,
           referenceOutfitCarryoverSuppressed:
             typeof project.referenceOutfitCarryoverSuppressed === 'boolean' ? project.referenceOutfitCarryoverSuppressed : null,
           compositionCarryoverSuppressed:
             typeof project.compositionCarryoverSuppressed === 'boolean' ? project.compositionCarryoverSuppressed : null,
+          frontOnlyFallback: typeof project.frontOnlyFallback === 'boolean' ? project.frontOnlyFallback : null,
           renderProvider: typeof project.renderProvider === 'string' ? project.renderProvider : null,
           klingReferenceDiagnostics:
             project.klingReferenceDiagnostics && typeof project.klingReferenceDiagnostics === 'object'

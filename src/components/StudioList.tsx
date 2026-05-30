@@ -89,6 +89,9 @@ function getPostedProjectIds(): string[] {
 
 function getJobCharacterLabel(job: GenerationJob) {
   if (job.exactLikenessRoute === 'kling_reference' || job.generationMode === 'kling-exact-likeness-reference') {
+    if (job.sceneAnchorStrategy === 'scene_anchor_still' || job.primaryInputType === 'scene_anchor_still') {
+      return 'Kling scene-anchor exact likeness';
+    }
     return 'Kling exact likeness';
   }
 
@@ -399,14 +402,18 @@ export default function StudioList({ jobs, onPublished }: Props) {
         sceneAnchorGenerated: job.sceneAnchorGenerated ?? null,
         sceneAnchorProvider: job.sceneAnchorProvider ?? null,
         sceneAnchorReason: job.sceneAnchorReason ?? null,
+        sceneAnchorValidation: job.sceneAnchorValidation ?? null,
+        primaryInputType: job.primaryInputType ?? null,
         sceneIntent: job.sceneIntent ?? null,
         framingIntent: job.framingIntent ?? null,
         primaryReferenceRole: job.primaryReferenceRole ?? null,
         supportingReferenceRoles: job.supportingReferenceRoles ?? null,
         userSpecifiedOutfit: job.userSpecifiedOutfit ?? null,
         outfitTermsDetected: job.outfitTermsDetected ?? null,
+        environmentTermsDetected: job.environmentTermsDetected ?? null,
         referenceOutfitCarryoverSuppressed: job.referenceOutfitCarryoverSuppressed ?? null,
         compositionCarryoverSuppressed: job.compositionCarryoverSuppressed ?? null,
+        frontOnlyFallback: job.frontOnlyFallback ?? null,
         renderProvider: job.renderProvider ?? null,
         klingReferenceDiagnostics: job.klingReferenceDiagnostics ?? null,
       }),
