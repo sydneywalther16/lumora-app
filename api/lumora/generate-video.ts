@@ -428,6 +428,15 @@ function isValidProviderImageInput(value: string) {
   return isValidHttpUrl(value) || isDataImageUrl(value);
 }
 
+function parseBase64DataUrl(value: string): { contentType: string; buffer: Buffer } | null {
+  const match = value.match(/^data:([^;,]+)?(?:;[^,]*)?;base64,(.+)$/);
+  if (!match) return null;
+  return {
+    contentType: match[1] ?? 'application/octet-stream',
+    buffer: Buffer.from(match[2], 'base64'),
+  };
+}
+
 function sceneAnchorProviderStatus() {
   const provider = textValue(process.env.KLING_SCENE_ANCHOR_PROVIDER || process.env.SCENE_ANCHOR_PROVIDER || '');
   const openAiAnchorEnabled = booleanValue(process.env.OPENAI_SCENE_ANCHOR_ENABLED);
@@ -580,6 +589,103 @@ function buildCompositeIdentitySheetDataUrl(references: KlingCreateReferenceEntr
     </svg>
   `;
   return dataUrlFromSvg(svg);
+}
+
+function directIdentityProviderReferences(plan: KlingCreateReferencePlan) {
+  const frontReference = plan.references.find((reference) => reference.role === 'front_angle') ?? plan.primaryReference;
+  return uniqueReferenceEntries([
+    frontReference,
+    ...plan.references.filter((reference) => reference.url !== frontReference.url),
+  ]).slice(0, 4);
+}
+
+export async function prepareKlingCreateReferencePlanForProvider(input: {
+  plan: KlingCreateReferencePlan | null;
+  userId: string;
+  uploader?: (asset: {
+    userId: string;
+    fileName: string;
+    contentType: string;
+    buffer: Buffer;
+    folder: string;
+  }) => Promise<{ publicUrl: string }>;
+}): Promise<KlingCreateReferencePlan | null> {
+  if (!input.plan) return null;
+  const plan = input.plan;
+  if (!isDataImageUrl(plan.providerPrimaryReference.url)) return plan;
+
+  const parsed = parseBase64DataUrl(plan.providerPrimaryReference.url);
+  if (!parsed) {
+    const directReferences = directIdentityProviderReferences(plan);
+    plan.providerPrimaryReference = directReferences[0] ?? plan.primaryReference;
+    plan.providerAdditionalReferences = directReferences.slice(1);
+    plan.validationReferences = directReferences;
+    plan.plannedStrategy = 'direct_identity_references';
+    plan.sceneAnchorStrategy = 'direct_identity_references';
+    plan.sceneAnchorProvider = null;
+    plan.sceneAnchorReason = 'composite_identity_sheet_invalid_direct_identity_fallback';
+    plan.referenceOutfitCarryoverSuppressed = false;
+    plan.compositionCarryoverSuppressed = false;
+    return plan;
+  }
+
+  try {
+    const upload = input.uploader
+      ? await input.uploader({
+          userId: input.userId,
+          fileName: 'kling-composite-identity-sheet.svg',
+          contentType: parsed.contentType,
+          buffer: parsed.buffer,
+          folder: 'kling-scene-anchors',
+        })
+      : await (async () => {
+          const { uploadGeneratedAsset } = await import('../../backend/src/services/storageService');
+          return uploadGeneratedAsset({
+            userId: input.userId,
+            fileName: 'kling-composite-identity-sheet.svg',
+            contentType: parsed.contentType,
+            buffer: parsed.buffer,
+            folder: 'kling-scene-anchors',
+          });
+        })();
+
+    if (!isValidHttpUrl(upload.publicUrl)) {
+      throw new Error('Composite identity sheet upload did not return a provider-accessible HTTPS URL.');
+    }
+
+    plan.providerPrimaryReference = {
+      ...plan.providerPrimaryReference,
+      url: upload.publicUrl,
+    };
+    plan.validationReferences = [
+      {
+        ...plan.providerPrimaryReference,
+        url: upload.publicUrl,
+      },
+    ];
+    plan.sceneAnchorProvider = 'lumora_composite_identity_sheet';
+    plan.sceneAnchorReason = 'composite_identity_sheet_materialized';
+    return plan;
+  } catch (error) {
+    console.warn('Kling composite identity sheet materialization failed; falling back to direct identity references.', {
+      error: errorMessage(error),
+      privateUrlsRedacted: true,
+    });
+    const directReferences = directIdentityProviderReferences(plan);
+    plan.providerPrimaryReference = directReferences[0] ?? plan.primaryReference;
+    plan.providerAdditionalReferences = directReferences.slice(1);
+    plan.validationReferences = directReferences;
+    plan.plannedStrategy = directReferences.length > 1 ? 'direct_identity_references' : 'front_only_fallback';
+    plan.sceneAnchorStrategy = plan.plannedStrategy;
+    plan.sceneAnchorGenerated = false;
+    plan.sceneAnchorProvider = null;
+    plan.sceneAnchorReason = 'composite_identity_sheet_upload_failed_direct_identity_fallback';
+    plan.fallbackAllowed = directReferences.length <= 1;
+    plan.supportingReferenceRoles = directReferences.slice(1).map((reference) => reference.role);
+    plan.referenceOutfitCarryoverSuppressed = false;
+    plan.compositionCarryoverSuppressed = false;
+    return plan;
+  }
 }
 
 export function analyzeKlingSceneIntent(prompt: string): KlingSceneIntentAnalysis {
@@ -1798,13 +1904,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       exactLikenessReady,
       exactLikenessCanaryStatus,
     });
-    const klingReferencePlan = klingExactLikenessRequest
+    let klingReferencePlan = klingExactLikenessRequest
       ? buildKlingCreateReferencePlan({
           body,
           primaryReference: primaryReferenceImageUrl || referenceImageUrl,
           exactLikenessReady,
         })
       : null;
+    klingReferencePlan = await prepareKlingCreateReferencePlanForProvider({
+      plan: klingReferencePlan,
+      userId: (textValue(body.userId) || generationUserKey || 'local').replace(/[^a-zA-Z0-9_-]/g, '-'),
+    });
     const providerReferenceImageUrl = klingReferencePlan?.providerPrimaryReference.url ?? referenceImageUrl;
     const additionalReferences = klingReferencePlan
       ? klingReferencePlan?.providerAdditionalReferences.map((reference) => reference.url) ?? []

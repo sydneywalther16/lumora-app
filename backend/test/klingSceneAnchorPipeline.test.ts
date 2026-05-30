@@ -4,6 +4,7 @@ import {
   buildKlingCreateReferencePlan,
   detectKlingOutfitIntent,
   klingReferenceDiagnostics,
+  prepareKlingCreateReferencePlanForProvider,
 } from '../../api/lumora/generate-video';
 import { prepareContinueStory } from '../../src/lib/continueStory';
 
@@ -71,6 +72,63 @@ try {
   assert.match(plan.promptGuidance, /Prioritize the user-requested outfit over reference clothing: flowing ivory dress/i);
   assert.match(plan.promptGuidance, /Build a new scene matching the requested environment, outfit, lighting, and cinematic mood/i);
   assert.match(plan.promptGuidance, /leaving source-photo furniture, seat-back shapes, studio framing, and seated posture out/i);
+
+  const materializedPlan = await prepareKlingCreateReferencePlanForProvider({
+    plan: buildKlingCreateReferencePlan({
+      body: {
+        prompt: gardenDressPrompt,
+        referenceImageUrls: {
+          frontFaceUrl: 'https://assets.example/front.jpg',
+          leftAngleUrl: 'https://assets.example/left.jpg',
+          rightAngleUrl: 'https://assets.example/right.jpg',
+          fullBodyUrl: 'https://assets.example/full-body-street-jeans.jpg',
+        },
+      },
+      primaryReference: 'https://assets.example/front.jpg',
+      exactLikenessReady: true,
+    }),
+    userId: 'unit-test-user',
+    uploader: async (asset) => {
+      assert.equal(asset.contentType, 'image/svg+xml');
+      assert.equal(asset.fileName, 'kling-composite-identity-sheet.svg');
+      assert.equal(asset.folder, 'kling-scene-anchors');
+      return { publicUrl: 'https://assets.example/generated/composite-identity-sheet.svg' };
+    },
+  });
+  assert.ok(materializedPlan);
+  assert.equal(materializedPlan.providerPrimaryReference.role, 'identity_sheet');
+  assert.equal(materializedPlan.providerPrimaryReference.url, 'https://assets.example/generated/composite-identity-sheet.svg');
+  assert.equal(materializedPlan.providerAdditionalReferences.length, 0);
+  assert.equal(materializedPlan.validationReferences.length, 1);
+  assert.equal(materializedPlan.sceneAnchorProvider, 'lumora_composite_identity_sheet');
+  assert.equal(materializedPlan.sceneAnchorReason, 'composite_identity_sheet_materialized');
+
+  const storageFallbackPlan = await prepareKlingCreateReferencePlanForProvider({
+    plan: buildKlingCreateReferencePlan({
+      body: {
+        prompt: gardenDressPrompt,
+        referenceImageUrls: {
+          frontFaceUrl: 'https://assets.example/front.jpg',
+          leftAngleUrl: 'https://assets.example/left.jpg',
+          rightAngleUrl: 'https://assets.example/right.jpg',
+          fullBodyUrl: 'https://assets.example/full-body-street-jeans.jpg',
+        },
+      },
+      primaryReference: 'https://assets.example/front.jpg',
+      exactLikenessReady: true,
+    }),
+    userId: 'unit-test-user',
+    uploader: async () => {
+      throw new Error('storage unavailable');
+    },
+  });
+  assert.ok(storageFallbackPlan);
+  assert.equal(storageFallbackPlan.plannedStrategy, 'direct_identity_references');
+  assert.equal(storageFallbackPlan.sceneAnchorReason, 'composite_identity_sheet_upload_failed_direct_identity_fallback');
+  assert.equal(storageFallbackPlan.providerPrimaryReference.role, 'front_angle');
+  assert.equal(storageFallbackPlan.providerPrimaryReference.url, 'https://assets.example/front.jpg');
+  assert.equal(storageFallbackPlan.providerAdditionalReferences.some((reference) => reference.role === 'full_body'), true);
+  assert.equal(storageFallbackPlan.compositionCarryoverSuppressed, false);
 
   const diagnostics = klingReferenceDiagnostics({
     plan,
