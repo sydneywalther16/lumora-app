@@ -57,8 +57,10 @@ type RemixProjectPayload = {
   referenceCount?: number | null;
   sceneAnchorStrategy?: string | null;
   sceneAnchorGenerated?: boolean | null;
+  sceneAnchorPersisted?: boolean | null;
   sceneAnchorProvider?: string | null;
   sceneAnchorReason?: string | null;
+  sceneAnchorFailureCategory?: string | null;
   sceneAnchorValidation?: Record<string, unknown> | null;
   primaryInputType?: string | null;
   sceneIntent?: string[] | null;

@@ -283,9 +283,13 @@ type GenerateVideoApiResponse = {
   exactLikenessProvider?: string | null;
   exactLikenessCanaryStatus?: string | null;
   sceneAnchorStrategy?: string | null;
+  sceneAnchorEnabled?: boolean | null;
+  sceneAnchorModel?: string | null;
   sceneAnchorGenerated?: boolean | null;
+  sceneAnchorPersisted?: boolean | null;
   sceneAnchorProvider?: string | null;
   sceneAnchorReason?: string | null;
+  sceneAnchorFailureCategory?: string | null;
   sceneAnchorValidation?: Record<string, unknown> | null;
   primaryInputType?: string | null;
   sceneIntent?: unknown;
@@ -695,7 +699,10 @@ function klingProviderFailureMessage(category: string | null | undefined, fallba
     return 'Kling rejected the render payload shape. Check provider diagnostics before retrying this exact-likeness route.';
   }
   if (category === 'kling_scene_anchor_unavailable') {
-    return 'Scene-anchor generation was unavailable, so Lumora paused before using identity-only reference mode.';
+    return 'Scene-anchor provider is not configured. Configure a scene-anchor image provider, or use identity-only fallback.';
+  }
+  if (category === 'kling_scene_anchor_generation_failed') {
+    return 'Scene anchor generation failed. Retry scene anchor, use identity-only fallback, or edit scene.';
   }
   if (category === 'kling_provider_unavailable') {
     return 'Kling is temporarily unavailable. Your scene is safe to retry later.';
@@ -1464,7 +1471,7 @@ export default function CreateVideo({
       ? (providerSelfCharacterReady ? 'Exact self character route is ready.' : 'Verified self character route unavailable. Using soft self guidance.')
     : klingReferenceSelected
       ? selectedKlingExactReady
-        ? 'Building a clean scene anchor for this render. Using identity references without copying reference backgrounds. If no scene anchor provider is configured, Lumora uses a composite identity sheet to reduce reference-photo carryover.'
+        ? 'Building a clean scene anchor for this render. Using identity references without copying reference backgrounds.'
         : 'Kling uses your self-character reference image first.'
       : 'Kling uses your self-character reference image first.';
   const continuityMemoryDirty = continuityMemory
@@ -1521,9 +1528,12 @@ export default function CreateVideo({
         ...creatorRenderStateCopy('paused'),
         title: 'Kling exact likeness render paused.',
         body: generationError,
-        suggestedNextStep: 'Suggested next step: retry Kling later, edit the scene, or switch to soft guidance.',
+        suggestedNextStep: /scene[-\s]?anchor/i.test(generationError)
+          ? 'Suggested next step: retry scene anchor, use identity-only fallback, or edit scene.'
+          : 'Suggested next step: retry Kling later, edit the scene, or switch to soft guidance.',
       }
     : creatorRenderStateCopy('paused');
+  const sceneAnchorPauseActive = selectedKlingExactReady && /scene[-\s]?anchor/i.test(generationError);
   const suggestedTakePrompt = buildSafeTakePrompt(
     generationSafeRewrite || activePrompt,
     { displayName: characterName },
@@ -2560,6 +2570,7 @@ export default function CreateVideo({
     renderPreferenceOverride?: RenderSuccessMode;
     durationOverride?: number;
     forceNewTake?: boolean;
+    allowIdentityOnlyKlingFallback?: boolean;
   } = {}) {
     if (generationInFlightRef.current) return;
 
@@ -2872,6 +2883,7 @@ export default function CreateVideo({
             exactLikenessRoute: selectedKlingExactReadyForRequest ? 'kling_reference' : null,
             exactLikenessReady: selectedKlingExactReadyForRequest,
             exactLikenessCanaryStatus: selectedKlingExactReadyForRequest ? 'canary_succeeded' : null,
+            allowIdentityOnlyKlingFallback: Boolean(options.allowIdentityOnlyKlingFallback),
           }),
         });
 
@@ -2915,6 +2927,9 @@ export default function CreateVideo({
       }
 
       console.log('GENERATION RESPONSE:', data);
+      if (selectedKlingExactReadyForRequest && data.sceneAnchorGenerated) {
+        setStatus('Scene anchor approved. Animating with Kling exact likeness...');
+      }
 
       if (isAsyncRenderResponse(data)) {
         const jobId = asyncRenderJobId(data);
@@ -3009,8 +3024,12 @@ export default function CreateVideo({
       const nextSceneAnchorGenerated = typeof data.sceneAnchorGenerated === 'boolean'
         ? data.sceneAnchorGenerated
         : booleanFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorGenerated');
+      const nextSceneAnchorPersisted = typeof data.sceneAnchorPersisted === 'boolean'
+        ? data.sceneAnchorPersisted
+        : booleanFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorPersisted');
       const nextSceneAnchorProvider = data.sceneAnchorProvider ?? stringFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorProvider');
       const nextSceneAnchorReason = data.sceneAnchorReason ?? stringFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorReason');
+      const nextSceneAnchorFailureCategory = data.sceneAnchorFailureCategory ?? stringFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorFailureCategory');
       const nextSceneAnchorValidation =
         recordValue(data.sceneAnchorValidation).passed !== undefined
           ? recordValue(data.sceneAnchorValidation)
@@ -3159,8 +3178,10 @@ export default function CreateVideo({
         referenceCount: nextReferenceCount,
         sceneAnchorStrategy: nextSceneAnchorStrategy,
         sceneAnchorGenerated: nextSceneAnchorGenerated,
+        sceneAnchorPersisted: nextSceneAnchorPersisted,
         sceneAnchorProvider: nextSceneAnchorProvider,
         sceneAnchorReason: nextSceneAnchorReason,
+        sceneAnchorFailureCategory: nextSceneAnchorFailureCategory,
         sceneAnchorValidation: Object.keys(nextSceneAnchorValidation).length ? nextSceneAnchorValidation : null,
         primaryInputType: nextPrimaryInputType,
         sceneIntent: nextSceneIntent.length ? nextSceneIntent : null,
@@ -3223,8 +3244,10 @@ export default function CreateVideo({
           referenceCount: nextReferenceCount,
           sceneAnchorStrategy: nextSceneAnchorStrategy,
           sceneAnchorGenerated: nextSceneAnchorGenerated,
+          sceneAnchorPersisted: nextSceneAnchorPersisted,
           sceneAnchorProvider: nextSceneAnchorProvider,
           sceneAnchorReason: nextSceneAnchorReason,
+          sceneAnchorFailureCategory: nextSceneAnchorFailureCategory,
           sceneAnchorValidation: Object.keys(nextSceneAnchorValidation).length ? nextSceneAnchorValidation : null,
           primaryInputType: nextPrimaryInputType,
           sceneIntent: nextSceneIntent.length ? nextSceneIntent : null,
@@ -3476,6 +3499,18 @@ export default function CreateVideo({
       renderPreferenceOverride: 'success_first',
       durationOverride: overrides.duration,
       forceNewTake: true,
+    });
+  }
+
+  async function handleUseIdentityOnlyKlingFallback() {
+    setGenerationSafeRewrite('');
+    setGenerationModerationDetail('Identity-only fallback may copy the saved reference pose, outfit, or background more strongly than scene-anchor mode.');
+    setGenerationModerationStages(['Using identity-only Kling fallback', 'Animating with Kling exact likeness']);
+    setGenerationError('');
+    setStatus('Using identity-only Kling fallback...');
+    await handleGenerate({
+      forceNewTake: true,
+      allowIdentityOnlyKlingFallback: true,
     });
   }
 
@@ -4377,12 +4412,26 @@ export default function CreateVideo({
               {!activeReferenceRepair ? (
                 <div className="focused-next-take">
                   <strong>Ultra-safe scene</strong>
-                  <p>This scene uses the simplest render path before adding complexity.</p>
+                  <p>
+                    {sceneAnchorPauseActive
+                      ? 'Scene-anchor mode protects the composition. Identity-only fallback is available, but it can copy source pose, outfit, or background more strongly.'
+                      : 'This scene uses the simplest render path before adding complexity.'}
+                  </p>
                   <blockquote className="next-take-preview">{ULTRA_SAFE_SCENE_PROMPT}</blockquote>
                   <div className="next-take-actions">
+                    {sceneAnchorPauseActive ? (
+                      <button
+                        type="button"
+                        className="primary-btn cinematic-generate-btn"
+                        onClick={() => void handleUseIdentityOnlyKlingFallback()}
+                        disabled={tryTakeBusy}
+                      >
+                        Use identity-only Kling fallback
+                      </button>
+                    ) : null}
                     <button
                       type="button"
-                      className="primary-btn cinematic-generate-btn"
+                      className={sceneAnchorPauseActive ? 'ghost-btn' : 'primary-btn cinematic-generate-btn'}
                       onClick={() => void handleTryUltraSafeScene()}
                       disabled={tryTakeBusy}
                     >

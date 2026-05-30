@@ -94,6 +94,18 @@ function textSelfGuidanceDiagnostics(row: LatestRenderRow | null) {
   };
 }
 
+function sceneAnchorDiagnostics() {
+  return {
+    sceneAnchorEnabled: env.SCENE_ANCHOR_ENABLED,
+    sceneAnchorProvider: env.SCENE_ANCHOR_PROVIDER || 'fal',
+    sceneAnchorModel: env.SCENE_ANCHOR_MODEL ?? null,
+    sceneAnchorConfigured: Boolean(env.SCENE_ANCHOR_ENABLED && env.SCENE_ANCHOR_PROVIDER !== 'none' && env.SCENE_ANCHOR_MODEL),
+    sceneAnchorFallbackMode: env.SCENE_ANCHOR_FALLBACK_MODE,
+    primaryKlingInputType: 'scene_anchor_still_when_generated',
+    privateUrlsRedacted: true,
+  };
+}
+
 async function openAISoraDiagnostics(row: LatestRenderRow | null) {
   const readiness = getOpenAISoraProviderReadiness();
   const identity = await getSelfProviderCharacterDiagnostics({
@@ -165,6 +177,7 @@ async function exactLikenessDiagnostics(row: LatestRenderRow | null) {
     exactLikenessAvailable: choice.exactLikeness,
     exactLikenessProvider: choice.exactLikeness ? choice.provider : null,
     exactLikenessReason: choice.reason,
+    ...sceneAnchorDiagnostics(),
     softGuidanceAvailable: true,
     selfVerificationVideoPresent: selfVerificationVideo.selfVerificationVideoPresent,
     selfVerificationConsentPresent: selfVerificationVideo.selfVerificationConsentPresent,

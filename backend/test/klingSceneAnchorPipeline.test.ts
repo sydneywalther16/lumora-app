@@ -1,31 +1,33 @@
 import assert from 'node:assert/strict';
 import {
   analyzeKlingSceneIntent,
+  buildFalSceneAnchorPayload,
   buildKlingCreateReferencePlan,
+  createFalSceneAnchorStill,
   detectKlingEnvironmentIntent,
   detectKlingOutfitIntent,
   klingReferenceDiagnostics,
+  parseSceneAnchorImageOutput,
   prepareKlingCreateReferencePlanForProvider,
+  sceneAnchorProviderStatus,
 } from '../../api/lumora/generate-video';
 import { prepareContinueStory } from '../../src/lib/continueStory';
 
 const originalSceneAnchorEnv = {
-  KLING_SCENE_ANCHOR_PROVIDER: process.env.KLING_SCENE_ANCHOR_PROVIDER,
+  SCENE_ANCHOR_ENABLED: process.env.SCENE_ANCHOR_ENABLED,
   SCENE_ANCHOR_PROVIDER: process.env.SCENE_ANCHOR_PROVIDER,
-  OPENAI_SCENE_ANCHOR_ENABLED: process.env.OPENAI_SCENE_ANCHOR_ENABLED,
-  OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-  REPLICATE_API_TOKEN: process.env.REPLICATE_API_TOKEN,
-  REPLICATE_IMAGE_MODEL: process.env.REPLICATE_IMAGE_MODEL,
-  REPLICATE_SCENE_ANCHOR_MODEL: process.env.REPLICATE_SCENE_ANCHOR_MODEL,
+  SCENE_ANCHOR_MODEL: process.env.SCENE_ANCHOR_MODEL,
+  SCENE_ANCHOR_FALLBACK_MODE: process.env.SCENE_ANCHOR_FALLBACK_MODE,
+  FAL_KEY: process.env.FAL_KEY,
+  KLING_API_KEY: process.env.KLING_API_KEY,
 };
 
-delete process.env.KLING_SCENE_ANCHOR_PROVIDER;
+delete process.env.SCENE_ANCHOR_ENABLED;
 delete process.env.SCENE_ANCHOR_PROVIDER;
-delete process.env.OPENAI_SCENE_ANCHOR_ENABLED;
-delete process.env.OPENAI_API_KEY;
-delete process.env.REPLICATE_API_TOKEN;
-delete process.env.REPLICATE_IMAGE_MODEL;
-delete process.env.REPLICATE_SCENE_ANCHOR_MODEL;
+delete process.env.SCENE_ANCHOR_MODEL;
+delete process.env.SCENE_ANCHOR_FALLBACK_MODE;
+delete process.env.FAL_KEY;
+delete process.env.KLING_API_KEY;
 
 try {
   const gardenDressPrompt =
@@ -60,9 +62,11 @@ try {
   assert.equal(plan.plannedStrategy, 'scene_anchor_still');
   assert.equal(plan.sceneAnchorStrategy, 'scene_anchor_still');
   assert.equal(plan.sceneAnchorGenerated, false);
-  assert.equal(plan.sceneAnchorProvider, null);
-  assert.equal(plan.sceneAnchorReason, 'scene_anchor_provider_not_configured');
+  assert.equal(plan.sceneAnchorProvider, 'fal');
+  assert.equal(plan.sceneAnchorReason, 'scene_anchor_provider_disabled');
+  assert.equal(plan.sceneAnchorFailureCategory, 'scene_anchor_provider_disabled');
   assert.equal(plan.sceneAnchorRequired, true);
+  assert.equal(plan.sceneAnchorPersisted, false);
   assert.equal(plan.primaryReferenceRole, 'full_body');
   assert.equal(plan.providerPrimaryReference.role, 'scene_anchor');
   assert.equal(plan.providerPrimaryReference.url, 'https://assets.example/full-body-street-jeans.jpg');
@@ -117,6 +121,8 @@ try {
   assert.equal(materializedPlan.validationReferences.length, 5);
   assert.equal(materializedPlan.sceneAnchorProvider, 'unit_scene_anchor');
   assert.equal(materializedPlan.sceneAnchorGenerated, true);
+  assert.equal(materializedPlan.sceneAnchorPersisted, true);
+  assert.equal(materializedPlan.sceneAnchorFailureCategory, null);
   assert.equal(materializedPlan.sceneAnchorReason, 'scene_anchor_generated_and_validated');
   assert.equal(materializedPlan.sceneAnchorValidation?.passed, true);
   assert.equal(materializedPlan.sceneAnchorValidation?.fullBodyVisible, true);
@@ -145,9 +151,100 @@ try {
   assert.ok(unavailablePlan);
   assert.equal(unavailablePlan.plannedStrategy, 'scene_anchor_still');
   assert.equal(unavailablePlan.sceneAnchorGenerated, false);
-  assert.equal(unavailablePlan.sceneAnchorReason, 'scene_anchor_provider_not_configured');
-  assert.match(unavailablePlan.sceneAnchorFailureReason ?? '', /paused before using identity-only reference mode/i);
+  assert.equal(unavailablePlan.sceneAnchorReason, 'scene_anchor_provider_disabled');
+  assert.equal(unavailablePlan.sceneAnchorFailureCategory, 'scene_anchor_provider_disabled');
+  assert.match(unavailablePlan.sceneAnchorFailureReason ?? '', /Scene-anchor provider is not configured/i);
   assert.equal(unavailablePlan.sceneAnchorValidation?.passed, false);
+
+  process.env.SCENE_ANCHOR_ENABLED = 'true';
+  process.env.SCENE_ANCHOR_PROVIDER = 'fal';
+  delete process.env.SCENE_ANCHOR_MODEL;
+  process.env.FAL_KEY = 'fal-test-key';
+  const missingModel = sceneAnchorProviderStatus();
+  assert.equal(missingModel.sceneAnchorEnabled, true);
+  assert.equal(missingModel.configured, false);
+  assert.equal(missingModel.reason, 'scene_anchor_provider_not_configured');
+
+  const viduPayload = buildFalSceneAnchorPayload({
+    model: 'fal-ai/vidu/reference-to-image',
+    prompt: 'Scene anchor prompt',
+    identityReferences: materializedPlan.references,
+  });
+  assert.deepEqual(Object.keys(viduPayload).sort(), ['aspect_ratio', 'prompt', 'reference_image_urls']);
+  assert.equal((viduPayload.reference_image_urls as string[]).length, 4);
+  assert.equal(JSON.stringify(viduPayload).includes('assets.example'), true);
+
+  const parsedTopLevelImage = parseSceneAnchorImageOutput({
+    image: {
+      content_type: 'image/png',
+      url: 'https://fal.example/output.png',
+    },
+  });
+  assert.equal(parsedTopLevelImage?.url, 'https://fal.example/output.png');
+
+  process.env.SCENE_ANCHOR_MODEL = 'fal-ai/vidu/reference-to-image';
+  const submitBody = {
+    request_id: 'scene-anchor-request-1',
+    status_url: 'https://queue.fal.run/fal-ai/vidu/reference-to-image/requests/scene-anchor-request-1/status',
+    response_url: 'https://queue.fal.run/fal-ai/vidu/reference-to-image/requests/scene-anchor-request-1/response',
+  };
+  let submitSeen = false;
+  let persistedSeen = false;
+  const falGenerated = await createFalSceneAnchorStill({
+    prompt: 'Scene anchor prompt',
+    identityReferences: materializedPlan.references,
+    attempt: 1,
+    userId: 'unit-test-user',
+    sleepFn: async () => undefined,
+    fetchImpl: async (input, init) => {
+      const url = String(input);
+      if (init?.method === 'POST') {
+        submitSeen = true;
+        assert.equal(url, 'https://queue.fal.run/fal-ai/vidu/reference-to-image');
+        const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
+        assert.ok(Array.isArray(body.reference_image_urls));
+        return new Response(JSON.stringify(submitBody), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/status')) {
+        return new Response(JSON.stringify({ status: 'COMPLETED' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/response')) {
+        return new Response(JSON.stringify({
+          image: {
+            content_type: 'image/png',
+            url: 'https://fal.example/scene-anchor.png',
+          },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url === 'https://fal.example/scene-anchor.png') {
+        return new Response(new Uint8Array([137, 80, 78, 71]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    },
+    uploader: async (asset) => {
+      persistedSeen = true;
+      assert.equal(asset.folder, 'kling-scene-anchors');
+      assert.equal(asset.contentType, 'image/png');
+      return { publicUrl: 'https://assets.example/persisted/scene-anchor.png' };
+    },
+  });
+  assert.equal(submitSeen, true);
+  assert.equal(persistedSeen, true);
+  assert.equal(falGenerated.url, 'https://assets.example/persisted/scene-anchor.png');
+  assert.equal(falGenerated.provider, 'fal');
+  assert.equal(falGenerated.persisted, true);
 
   const diagnostics = klingReferenceDiagnostics({
     plan: materializedPlan,
@@ -159,6 +256,8 @@ try {
   assert.equal(diagnostics.referenceStrategy, 'scene_anchor_still');
   assert.equal(diagnostics.sceneAnchorStrategy, 'scene_anchor_still');
   assert.equal(diagnostics.sceneAnchorGenerated, true);
+  assert.equal(diagnostics.sceneAnchorPersisted, true);
+  assert.equal(diagnostics.sceneAnchorFailureCategory, null);
   assert.equal(diagnostics.primaryInputType, 'scene_anchor_still');
   assert.equal((diagnostics.sceneAnchorValidation as Record<string, unknown>).passed, true);
   assert.equal(diagnostics.userSpecifiedOutfit, true);
@@ -250,26 +349,12 @@ try {
     });
   }
 } finally {
-  if (typeof originalSceneAnchorEnv.KLING_SCENE_ANCHOR_PROVIDER === 'string') {
-    process.env.KLING_SCENE_ANCHOR_PROVIDER = originalSceneAnchorEnv.KLING_SCENE_ANCHOR_PROVIDER;
-  }
-  if (typeof originalSceneAnchorEnv.SCENE_ANCHOR_PROVIDER === 'string') {
-    process.env.SCENE_ANCHOR_PROVIDER = originalSceneAnchorEnv.SCENE_ANCHOR_PROVIDER;
-  }
-  if (typeof originalSceneAnchorEnv.OPENAI_SCENE_ANCHOR_ENABLED === 'string') {
-    process.env.OPENAI_SCENE_ANCHOR_ENABLED = originalSceneAnchorEnv.OPENAI_SCENE_ANCHOR_ENABLED;
-  }
-  if (typeof originalSceneAnchorEnv.OPENAI_API_KEY === 'string') {
-    process.env.OPENAI_API_KEY = originalSceneAnchorEnv.OPENAI_API_KEY;
-  }
-  if (typeof originalSceneAnchorEnv.REPLICATE_API_TOKEN === 'string') {
-    process.env.REPLICATE_API_TOKEN = originalSceneAnchorEnv.REPLICATE_API_TOKEN;
-  }
-  if (typeof originalSceneAnchorEnv.REPLICATE_IMAGE_MODEL === 'string') {
-    process.env.REPLICATE_IMAGE_MODEL = originalSceneAnchorEnv.REPLICATE_IMAGE_MODEL;
-  }
-  if (typeof originalSceneAnchorEnv.REPLICATE_SCENE_ANCHOR_MODEL === 'string') {
-    process.env.REPLICATE_SCENE_ANCHOR_MODEL = originalSceneAnchorEnv.REPLICATE_SCENE_ANCHOR_MODEL;
+  for (const [key, value] of Object.entries(originalSceneAnchorEnv)) {
+    if (typeof value === 'string') {
+      process.env[key] = value;
+    } else {
+      delete process.env[key];
+    }
   }
 }
 

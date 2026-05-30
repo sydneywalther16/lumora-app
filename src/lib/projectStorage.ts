@@ -44,8 +44,10 @@ export type StudioProject = {
   referenceCount?: number | null;
   sceneAnchorStrategy?: string | null;
   sceneAnchorGenerated?: boolean | null;
+  sceneAnchorPersisted?: boolean | null;
   sceneAnchorProvider?: string | null;
   sceneAnchorReason?: string | null;
+  sceneAnchorFailureCategory?: string | null;
   sceneAnchorValidation?: Record<string, unknown> | null;
   primaryInputType?: string | null;
   sceneIntent?: string[] | null;
@@ -169,8 +171,10 @@ export function loadStudioProjects(): StudioProject[] {
           referenceCount: numberValue(project.referenceCount),
           sceneAnchorStrategy: typeof project.sceneAnchorStrategy === 'string' ? project.sceneAnchorStrategy : null,
           sceneAnchorGenerated: typeof project.sceneAnchorGenerated === 'boolean' ? project.sceneAnchorGenerated : null,
+          sceneAnchorPersisted: typeof project.sceneAnchorPersisted === 'boolean' ? project.sceneAnchorPersisted : null,
           sceneAnchorProvider: typeof project.sceneAnchorProvider === 'string' ? project.sceneAnchorProvider : null,
           sceneAnchorReason: typeof project.sceneAnchorReason === 'string' ? project.sceneAnchorReason : null,
+          sceneAnchorFailureCategory: typeof project.sceneAnchorFailureCategory === 'string' ? project.sceneAnchorFailureCategory : null,
           sceneAnchorValidation:
             project.sceneAnchorValidation && typeof project.sceneAnchorValidation === 'object'
               ? project.sceneAnchorValidation as Record<string, unknown>

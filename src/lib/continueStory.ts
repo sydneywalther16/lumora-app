@@ -24,8 +24,10 @@ type ContinueStoryItem = {
   referenceCount?: number | null;
   sceneAnchorStrategy?: string | null;
   sceneAnchorGenerated?: boolean | null;
+  sceneAnchorPersisted?: boolean | null;
   sceneAnchorProvider?: string | null;
   sceneAnchorReason?: string | null;
+  sceneAnchorFailureCategory?: string | null;
   sceneAnchorValidation?: Record<string, unknown> | null;
   primaryInputType?: string | null;
   sceneIntent?: string[] | null;
@@ -97,8 +99,10 @@ export function prepareContinueStory(item: ContinueStoryItem, source: string) {
     referenceCount: item.referenceCount ?? null,
     sceneAnchorStrategy: item.sceneAnchorStrategy ?? null,
     sceneAnchorGenerated: item.sceneAnchorGenerated ?? null,
+    sceneAnchorPersisted: item.sceneAnchorPersisted ?? null,
     sceneAnchorProvider: item.sceneAnchorProvider ?? null,
     sceneAnchorReason: item.sceneAnchorReason ?? null,
+    sceneAnchorFailureCategory: item.sceneAnchorFailureCategory ?? null,
     sceneAnchorValidation: item.sceneAnchorValidation ?? null,
     primaryInputType: item.primaryInputType ?? null,
     sceneIntent: item.sceneIntent ?? null,
