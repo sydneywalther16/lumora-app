@@ -73,6 +73,15 @@ import {
   normalizeVerifiedVideoOutputUrl,
 } from '../lib/renderCompletion';
 import { createSelfCharacterStatusCopy, hasEffectiveSelfVerificationVideo } from '../lib/selfCharacterSetup';
+import {
+  applyViralScenePreset,
+  buildAiCastReadiness,
+  buildSceneAnchorCreateGuidance,
+  buildViralCaptionSuggestions,
+  polishKlingCinematicPrompt,
+  viralScenePresets,
+  type ViralScenePreset,
+} from '../lib/aiCastExperience';
 
 type CreateVideoProps = {
   refreshKey?: number;
@@ -336,6 +345,9 @@ type GenerateVideoApiResponse = {
   retryAvailableAt?: string | null;
   selfLikenessIntensity?: SelfLikenessIntensity | null;
   textSelfGuidanceAvailable?: boolean | null;
+  audioConfigured?: boolean | null;
+  viralPresetUsed?: string | null;
+  promptPolished?: boolean | null;
 };
 
 type GenerationStatusState = 'idle' | 'queued' | 'processing' | 'verifying_output' | 'rate_limited' | 'completed' | 'failed';
@@ -1215,6 +1227,8 @@ export default function CreateVideo({
   const [generatedReferenceImageUrl, setGeneratedReferenceImageUrl] = useState<string | null>(null);
   const [generatedMode, setGeneratedMode] = useState<GenerationMode | null>(null);
   const [generationWarnings, setGenerationWarnings] = useState<string[]>([]);
+  const [viralPresetUsed, setViralPresetUsed] = useState<string | null>(null);
+  const [promptPolished, setPromptPolished] = useState(false);
   const [activeRenderJobId, setActiveRenderJobId] = useState<string | null>(null);
   const [renderCooldownUntil, setRenderCooldownUntil] = useState<string | null>(null);
   const [renderCooldownSeconds, setRenderCooldownSeconds] = useState(0);
@@ -1339,6 +1353,12 @@ export default function CreateVideo({
   );
   const klingReferenceSelected = engine === 'replicate';
   const selectedKlingExactReady = klingReferenceSelected && klingExactLikenessReady;
+  const sceneAnchorConfigured = Boolean(healthDiagnostics?.sceneAnchorConfigured);
+  const sceneAnchorGuidance = buildSceneAnchorCreateGuidance({
+    klingReferenceSelected,
+    klingExactReady: selectedKlingExactReady,
+    sceneAnchorConfigured,
+  });
   const providerSelfCharacterReady = openAIProviderSelfCharacterReady || seedanceVideoReferenceReady || selectedKlingExactReady;
   const effectiveVerificationVideoPresent = hasEffectiveSelfVerificationVideo(characterProfile);
   const providerSelfCharacterSetupStarted =
@@ -1369,7 +1389,9 @@ export default function CreateVideo({
         ? 'Record self verification video'
         : '';
   const selfCharacterProviderStatusCopy = selectedKlingExactReady
-    ? 'Building a clean scene anchor for this render. Using identity references without copying reference backgrounds.'
+    ? sceneAnchorConfigured
+      ? 'Scene-anchor-first exact likeness. Lumora will stage the scene first, then animate with Kling.'
+      : 'Scene anchor provider not configured yet. Identity-only fallback may copy reference outfit/background.'
     : providerSelfCharacterReady
     ? 'Verified self character ready.'
     : characterProfile?.providerCharacterStatus === 'ready' && characterProfile.likenessProviderStatus === 'character_created_usage_unmapped'
@@ -1471,9 +1493,22 @@ export default function CreateVideo({
       ? (providerSelfCharacterReady ? 'Exact self character route is ready.' : 'Verified self character route unavailable. Using soft self guidance.')
     : klingReferenceSelected
       ? selectedKlingExactReady
-        ? 'Building a clean scene anchor for this render. Using identity references without copying reference backgrounds.'
+        ? sceneAnchorConfigured
+          ? 'Scene-anchor-first exact likeness. Lumora will stage the scene first, then animate with Kling.'
+          : 'Scene anchor provider not configured yet. Configure scene anchor image provider for Sora-level staging.'
         : 'Kling uses your self-character reference image first.'
       : 'Kling uses your self-character reference image first.';
+  const aiCastReadiness = buildAiCastReadiness({
+    selfCharacterSaved: Boolean(hasSelfCharacter && (characterName || characterProfile || identityProfile)),
+    verificationVideoSaved: effectiveVerificationVideoPresent,
+    klingExactLikenessReady,
+    sceneAnchorConfigured,
+    draftsReady: true,
+    continueStoryReady: true,
+    audioConfigured: false,
+    viralPolishReady: true,
+  });
+  const captionSuggestions = buildViralCaptionSuggestions(activePrompt, characterName);
   const continuityMemoryDirty = continuityMemory
     ? continuityMemoryChanged(
         continuityMemoryDraft,
@@ -2565,6 +2600,23 @@ export default function CreateVideo({
     );
   }
 
+  function handleApplyViralPreset(preset: ViralScenePreset) {
+    setActivePrompt(applyViralScenePreset(activePrompt, preset));
+    setViralPresetUsed(preset.id);
+    setStatus(`${preset.label} added. Review the prompt before generating.`);
+    window.setTimeout(() => promptTextareaRef.current?.focus(), 0);
+  }
+
+  function handlePolishPrompt() {
+    const polished = polishKlingCinematicPrompt(activePrompt);
+    setActivePrompt(polished.prompt);
+    setPromptPolished(true);
+    setStatus(polished.promptPolished
+      ? 'Prompt polished for Kling scene-first staging.'
+      : 'Prompt already has strong cinematic staging.');
+    window.setTimeout(() => promptTextareaRef.current?.focus(), 0);
+  }
+
   async function handleGenerate(options: {
     promptOverride?: string;
     renderPreferenceOverride?: RenderSuccessMode;
@@ -2884,6 +2936,8 @@ export default function CreateVideo({
             exactLikenessReady: selectedKlingExactReadyForRequest,
             exactLikenessCanaryStatus: selectedKlingExactReadyForRequest ? 'canary_succeeded' : null,
             allowIdentityOnlyKlingFallback: Boolean(options.allowIdentityOnlyKlingFallback),
+            viralPresetUsed,
+            promptPolished,
           }),
         });
 
@@ -3061,6 +3115,15 @@ export default function CreateVideo({
       const nextFrontOnlyFallback = typeof data.frontOnlyFallback === 'boolean'
         ? data.frontOnlyFallback
         : booleanFromRecord(nextKlingDiagnosticsRecord, 'frontOnlyFallback');
+      const nextViralPresetUsed = typeof data.viralPresetUsed === 'string'
+        ? data.viralPresetUsed
+        : viralPresetUsed;
+      const nextPromptPolished = typeof data.promptPolished === 'boolean'
+        ? data.promptPolished
+        : promptPolished;
+      const nextAudioConfigured = typeof data.audioConfigured === 'boolean'
+        ? data.audioConfigured
+        : false;
       const generatedMedia = resolveGeneratedVideoMedia({
         videoUrl: nextVideoUrl,
         outputUrl: nextVideoUrl,
@@ -3195,6 +3258,9 @@ export default function CreateVideo({
         compositionCarryoverSuppressed: nextCompositionCarryoverSuppressed,
         frontOnlyFallback: nextFrontOnlyFallback,
         klingReferenceDiagnostics: nextKlingDiagnostics,
+        audioConfigured: nextAudioConfigured,
+        viralPresetUsed: nextViralPresetUsed,
+        promptPolished: nextPromptPolished,
         message: renderedWithLighterCastGuidance || renderedWithSoftSelfGuidance
           ? 'Rendered with soft self guidance.'
           : nextExactLikenessRoute === 'kling_reference'
@@ -3261,7 +3327,15 @@ export default function CreateVideo({
           compositionCarryoverSuppressed: nextCompositionCarryoverSuppressed,
           frontOnlyFallback: nextFrontOnlyFallback,
           renderProvider: nextExactLikenessRoute === 'kling_reference' ? 'kling' : generationProvider,
-          klingReferenceDiagnostics: nextKlingDiagnostics,
+          klingReferenceDiagnostics: {
+            ...recordValue(nextKlingDiagnostics),
+            audioConfigured: nextAudioConfigured,
+            viralPresetUsed: nextViralPresetUsed,
+            promptPolished: nextPromptPolished,
+          },
+          audioConfigured: nextAudioConfigured,
+          viralPresetUsed: nextViralPresetUsed,
+          promptPolished: nextPromptPolished,
           characterId,
           characterName,
           characterAvatar,
@@ -3550,6 +3624,8 @@ export default function CreateVideo({
             referenceImageUrls: referencePayload,
             referenceImages: isSeedanceEngine ? seedanceReferenceImages : undefined,
             renderPreference,
+            viralPresetUsed,
+            promptPolished,
           },
         });
         setStatus('Draft saved to your account.');
@@ -3634,6 +3710,24 @@ export default function CreateVideo({
           )}
         </div>
 
+        <section className="ai-cast-readiness-card" aria-label="Sora-worthy readiness checklist">
+          <div className="row-between">
+            <div>
+              <span className="eyebrow">Sora-worthy readiness</span>
+              <strong>AI Cast Studio checklist</strong>
+            </div>
+            <span className="tiny-pill">Studio mode</span>
+          </div>
+          <div className="ai-cast-readiness-grid">
+            {aiCastReadiness.map((item) => (
+              <span key={item.key} className={`readiness-chip ${item.ready ? 'ready' : 'pending'}`}>
+                <strong>{item.label}</strong>
+                <small>{item.status}</small>
+              </span>
+            ))}
+          </div>
+        </section>
+
         <details className="advanced-create-details minimal-title-details">
           <summary>Title</summary>
           <label className="field-block">
@@ -3651,6 +3745,39 @@ export default function CreateVideo({
             placeholder="Describe the generated scene for your cast member..."
           />
         </label>
+
+        <section className="viral-polish-panel" aria-label="Viral AI cast scene tools">
+          <div className="row-between">
+            <div>
+              <span className="eyebrow">Viral Scene Presets</span>
+              <strong>Tap a safe AI-cast setup</strong>
+            </div>
+            <button type="button" className="ghost-btn compact-action" onClick={handlePolishPrompt} disabled={!hasPrompt}>
+              Prompt polish
+            </button>
+          </div>
+          <div className="chip-row wrap viral-preset-row">
+            {viralScenePresets.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                className={`chip ${viralPresetUsed === preset.id ? 'active' : ''}`}
+                onClick={() => handleApplyViralPreset(preset)}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          <details className="compact-reference-details caption-helper-details">
+            <summary>Caption helper</summary>
+            <div className="caption-helper-grid">
+              <p><strong>Short</strong>{captionSuggestions.short}</p>
+              <p><strong>Dramatic</strong>{captionSuggestions.dramatic}</p>
+              <p><strong>Reality-show</strong>{captionSuggestions.realityShow}</p>
+              <p><strong>Dreamy</strong>{captionSuggestions.dreamyCinematic}</p>
+            </div>
+          </details>
+        </section>
 
         <div className="field-block minimal-style-field">
           <span>Cinematic style</span>
@@ -4100,6 +4227,13 @@ export default function CreateVideo({
               <div style={{ display: 'grid', gap: '6px', marginTop: '10px' }}>
                 <span className="tiny-pill" style={{ width: 'fit-content' }}>{selfCharacterProviderStatusLabel}</span>
                 <span className="muted">{selfCharacterProviderStatusCopy}</span>
+                {sceneAnchorGuidance ? (
+                  <div className={`scene-anchor-guidance-card ${sceneAnchorConfigured ? 'ready' : 'pending'}`}>
+                    <strong>{sceneAnchorGuidance.title}</strong>
+                    <span>{sceneAnchorGuidance.body}</span>
+                    <small>{sceneAnchorGuidance.helper}</small>
+                  </div>
+                ) : null}
                 {!effectiveVerificationVideoPresent && onOpenSelfVerificationSetup ? (
                   <button
                     type="button"

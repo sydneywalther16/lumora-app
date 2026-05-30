@@ -106,6 +106,43 @@ function sceneAnchorDiagnostics() {
   };
 }
 
+function recordMetadata(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function lastAiCastStudioDiagnostics(row: LatestRenderRow | null) {
+  const sceneMetadata = recordMetadata(row?.sceneMetadata);
+  const klingDiagnostics = recordMetadata(sceneMetadata.klingReferenceDiagnostics);
+  const text = (key: string) => {
+    const direct = sceneMetadata[key];
+    const nested = klingDiagnostics[key];
+    if (typeof direct === 'string' && direct.trim()) return direct.trim();
+    if (typeof nested === 'string' && nested.trim()) return nested.trim();
+    return null;
+  };
+  const bool = (key: string, fallback = false) => {
+    const direct = sceneMetadata[key];
+    const nested = klingDiagnostics[key];
+    if (typeof direct === 'boolean') return direct;
+    if (typeof nested === 'boolean') return nested;
+    return fallback;
+  };
+  const exactRoute = text('exactLikenessRoute');
+  const exactProvider = text('exactProvider') ?? text('exactLikenessProvider');
+
+  return {
+    exactRouteActive: exactRoute === 'kling_reference' || bool('exactRouteActive'),
+    exactProvider: exactProvider ?? (exactRoute === 'kling_reference' ? 'kling' : null),
+    sceneAnchorStrategy: text('sceneAnchorStrategy'),
+    lastRenderReferenceStrategy: text('lastRenderReferenceStrategy') ?? text('referenceStrategy'),
+    audioConfigured: bool('audioConfigured', false),
+    viralPresetUsed: text('viralPresetUsed'),
+    promptPolished: bool('promptPolished', false),
+  };
+}
+
 async function openAISoraDiagnostics(row: LatestRenderRow | null) {
   const readiness = getOpenAISoraProviderReadiness();
   const identity = await getSelfProviderCharacterDiagnostics({
@@ -178,6 +215,7 @@ async function exactLikenessDiagnostics(row: LatestRenderRow | null) {
     exactLikenessProvider: choice.exactLikeness ? choice.provider : null,
     exactLikenessReason: choice.reason,
     ...sceneAnchorDiagnostics(),
+    ...lastAiCastStudioDiagnostics(row),
     softGuidanceAvailable: true,
     selfVerificationVideoPresent: selfVerificationVideo.selfVerificationVideoPresent,
     selfVerificationConsentPresent: selfVerificationVideo.selfVerificationConsentPresent,

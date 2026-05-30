@@ -364,6 +364,9 @@ export type GenerationResponse = {
   compositionCarryoverSuppressed?: boolean | null;
   frontOnlyFallback?: boolean | null;
   klingReferenceDiagnostics?: Record<string, unknown> | null;
+  audioConfigured?: boolean | null;
+  viralPresetUsed?: string | null;
+  promptPolished?: boolean | null;
   selfLikenessIntensity?: SelfLikenessIntensity | null;
   textSelfGuidanceAvailable?: boolean | null;
   providerStatus?: string | null;
@@ -452,6 +455,9 @@ export type GenerationJob = {
   frontOnlyFallback?: boolean | null;
   renderProvider?: string | null;
   klingReferenceDiagnostics?: Record<string, unknown> | null;
+  audioConfigured?: boolean | null;
+  viralPresetUsed?: string | null;
+  promptPolished?: boolean | null;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
@@ -850,6 +856,19 @@ export type ApiHealthDiagnostics = {
   };
   runwayLikenessProvider?: Record<string, unknown>;
   klingLikenessProvider?: Record<string, unknown>;
+  sceneAnchorEnabled?: boolean;
+  sceneAnchorProvider?: string;
+  sceneAnchorModel?: string | null;
+  sceneAnchorConfigured?: boolean;
+  sceneAnchorFallbackMode?: string;
+  sceneAnchorPrivateUrlsRedacted?: boolean;
+  exactRouteActive?: boolean;
+  exactProvider?: string | null;
+  sceneAnchorStrategy?: string | null;
+  lastRenderReferenceStrategy?: string | null;
+  audioConfigured?: boolean;
+  viralPresetUsed?: string | null;
+  promptPolished?: boolean;
   lumoraIdentityPackStatus?: string;
   likenessProviderRegistry?: Array<{
     id: string;

@@ -19,6 +19,7 @@ import { openContinueStory } from '../lib/continueStory';
 import { trackCreatorEvent } from '../lib/creatorEvents';
 import { buildSafeTakePrompt, creatorRenderStateCopy } from '../lib/renderStateCopy';
 import { getVerifiedVideoOutputUrl, hasVerifiedVideoOutput, lighterCastGuidanceMessage } from '../lib/renderCompletion';
+import { buildDraftAiCastLabels, buildViralCaptionSuggestions } from '../lib/aiCastExperience';
 
 type Props = {
   jobs: GenerationJob[];
@@ -89,9 +90,6 @@ function getPostedProjectIds(): string[] {
 
 function getJobCharacterLabel(job: GenerationJob) {
   if (job.exactLikenessRoute === 'kling_reference' || job.generationMode === 'kling-exact-likeness-reference') {
-    if (job.sceneAnchorStrategy === 'scene_anchor_still' || job.primaryInputType === 'scene_anchor_still') {
-      return 'Kling scene-anchor exact likeness';
-    }
     return 'Kling exact likeness';
   }
 
@@ -416,6 +414,9 @@ export default function StudioList({ jobs, onPublished }: Props) {
         frontOnlyFallback: job.frontOnlyFallback ?? null,
         renderProvider: job.renderProvider ?? null,
         klingReferenceDiagnostics: job.klingReferenceDiagnostics ?? null,
+        audioConfigured: job.audioConfigured ?? null,
+        viralPresetUsed: job.viralPresetUsed ?? null,
+        promptPolished: job.promptPolished ?? null,
       }),
     );
     if (job.exactLikenessRoute === 'kling_reference' || job.generationMode === 'kling-exact-likeness-reference') {
@@ -453,6 +454,9 @@ export default function StudioList({ jobs, onPublished }: Props) {
     </div>
   ) : null;
   const selectedVideoUrl = verifiedJobVideoUrl(selectedJob);
+  const selectedCaptionSuggestions = selectedJob
+    ? buildViralCaptionSuggestions(selectedJob.prompt || selectedJob.caption || '', selectedJob.characterName)
+    : null;
 
   if (!jobs.length || !visibleJobs.length) {
     return (
@@ -492,6 +496,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
           const statusValue = (job.status || '').toLowerCase();
           const showProviderDetail = false;
           const previewItem = verifiedVideoUrl ? { ...job, videoUrl: verifiedVideoUrl, outputUrl: verifiedVideoUrl } : job;
+          const draftLabels = buildDraftAiCastLabels(job);
 
           return (
             <article
@@ -570,6 +575,12 @@ export default function StudioList({ jobs, onPublished }: Props) {
               {lighterCastGuidanceMessage(job as unknown as Record<string, unknown>) ? (
                 <p className="muted">{lighterCastGuidanceMessage(job as unknown as Record<string, unknown>)}</p>
               ) : null}
+
+              <div className="draft-ai-cast-labels" aria-label="AI cast render metadata">
+                {draftLabels.map((label) => (
+                  <span key={label} className="tiny-pill">{label}</span>
+                ))}
+              </div>
 
               <div className="draft-card-footer">
                 <div className="draft-action-row focused-draft-actions">
@@ -722,6 +733,25 @@ export default function StudioList({ jobs, onPublished }: Props) {
                 style={{ minHeight: '112px' }}
               />
             </label>
+
+            {selectedCaptionSuggestions ? (
+              <details className="compact-reference-details caption-helper-details" style={{ marginTop: '10px' }}>
+                <summary>Viral caption helper</summary>
+                <div className="caption-helper-grid">
+                  {Object.entries(selectedCaptionSuggestions).map(([key, value]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className="caption-suggestion-btn"
+                      onClick={() => setCaptionDraft(value)}
+                    >
+                      <strong>{key.replace(/([A-Z])/g, ' $1')}</strong>
+                      <span>{value}</span>
+                    </button>
+                  ))}
+                </div>
+              </details>
+            ) : null}
 
             <div style={{ display: 'flex', gap: '10px', marginTop: '16px', flexWrap: 'wrap' }}>
               <label className="field-block" style={{ minWidth: '180px', margin: 0 }}>

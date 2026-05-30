@@ -883,6 +883,120 @@ button {
   margin-bottom: 14px;
 }
 
+.ai-cast-readiness-card,
+.viral-polish-panel,
+.scene-anchor-guidance-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--surface-border);
+  border-radius: 18px;
+  background: var(--panel-background);
+  box-shadow: var(--surface-shadow);
+}
+
+.ai-cast-readiness-card,
+.viral-polish-panel {
+  margin-bottom: 14px;
+}
+
+.ai-cast-readiness-grid,
+.draft-ai-cast-labels,
+.caption-helper-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.readiness-chip {
+  display: grid;
+  gap: 2px;
+  flex: 1 1 128px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--control-border);
+  border-radius: 14px;
+  background: var(--control-background);
+}
+
+.readiness-chip.ready {
+  border-color: color-mix(in srgb, var(--success-text) 46%, var(--control-border));
+}
+
+.readiness-chip.pending {
+  border-color: color-mix(in srgb, var(--warning-border) 70%, var(--control-border));
+}
+
+.readiness-chip strong,
+.readiness-chip small,
+.scene-anchor-guidance-card strong,
+.scene-anchor-guidance-card span,
+.scene-anchor-guidance-card small {
+  min-width: 0;
+  white-space: normal;
+}
+
+.readiness-chip small {
+  color: var(--muted-text);
+  font-weight: 750;
+}
+
+.viral-polish-panel .compact-action {
+  flex: 0 0 auto;
+  min-height: 38px;
+}
+
+.caption-helper-details {
+  width: 100%;
+}
+
+.caption-helper-grid {
+  margin: 0 12px 12px;
+}
+
+.caption-helper-grid p,
+.caption-suggestion-btn {
+  flex: 1 1 160px;
+  min-width: 0;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--control-border);
+  border-radius: 14px;
+  background: var(--control-background);
+  color: var(--control-text);
+  text-align: left;
+}
+
+.caption-helper-grid p strong,
+.caption-suggestion-btn strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-primary);
+  text-transform: capitalize;
+}
+
+.caption-suggestion-btn {
+  cursor: pointer;
+}
+
+.scene-anchor-guidance-card {
+  gap: 4px;
+  padding: 10px 12px;
+  box-shadow: none;
+}
+
+.scene-anchor-guidance-card.ready {
+  border-color: color-mix(in srgb, var(--success-text) 46%, var(--surface-border));
+}
+
+.scene-anchor-guidance-card.pending {
+  border-color: color-mix(in srgb, var(--warning-border) 70%, var(--surface-border));
+}
+
+.draft-ai-cast-labels {
+  margin-top: 10px;
+}
+
 .reference-mode-copy {
   display: grid;
   gap: 5px;

@@ -1641,6 +1641,12 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
     const generatedMedia = resolveGeneratedVideoMedia(project);
     const thumbnailUrl = generatedMedia.hasVerifiedVideo ? generatedMedia.thumbnailUrl : getBestThumbnail(project);
     const posterUrl = generatedMedia.hasVerifiedVideo ? generatedMedia.posterUrl : getBestPoster(project);
+    const klingDiagnostics = cleanJsonRecord({
+      ...(project.klingReferenceDiagnostics ?? {}),
+      audioConfigured: project.audioConfigured ?? null,
+      viralPresetUsed: project.viralPresetUsed ?? null,
+      promptPolished: project.promptPolished ?? null,
+    });
     payload = {
       id: project.id,
       user_id: userId,
@@ -1677,7 +1683,7 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
       reference_roles_used: project.referenceRolesUsed ?? null,
       reference_count: project.referenceCount ?? null,
       render_provider: project.renderProvider ?? null,
-      kling_reference_diagnostics: cleanJsonRecord(project.klingReferenceDiagnostics),
+      kling_reference_diagnostics: klingDiagnostics,
       character_id: project.characterId,
       character_name: project.characterName,
       character_avatar: storageUrl(project.characterAvatar, 'Project character avatar'),
@@ -1934,6 +1940,9 @@ function mapProjectRow(row: DbRow): StudioProject {
     frontOnlyFallback: diagnosticBoolean('frontOnlyFallback'),
     renderProvider: nullableString(row.render_provider),
     klingReferenceDiagnostics,
+    audioConfigured: diagnosticBoolean('audioConfigured'),
+    viralPresetUsed: diagnosticString('viralPresetUsed'),
+    promptPolished: diagnosticBoolean('promptPolished'),
     characterId: nullableString(row.character_id),
     characterName: nullableString(row.character_name),
     characterAvatar: nullableString(row.character_avatar),

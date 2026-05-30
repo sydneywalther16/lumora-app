@@ -62,6 +62,9 @@ export type StudioProject = {
   frontOnlyFallback?: boolean | null;
   renderProvider?: string | null;
   klingReferenceDiagnostics?: Record<string, unknown> | null;
+  audioConfigured?: boolean | null;
+  viralPresetUsed?: string | null;
+  promptPolished?: boolean | null;
   characterId: string | null;
   characterName: string | null;
   characterAvatar?: string | null;
@@ -205,6 +208,9 @@ export function loadStudioProjects(): StudioProject[] {
             project.klingReferenceDiagnostics && typeof project.klingReferenceDiagnostics === 'object'
               ? project.klingReferenceDiagnostics as Record<string, unknown>
               : null,
+          audioConfigured: typeof project.audioConfigured === 'boolean' ? project.audioConfigured : null,
+          viralPresetUsed: typeof project.viralPresetUsed === 'string' ? project.viralPresetUsed : null,
+          promptPolished: typeof project.promptPolished === 'boolean' ? project.promptPolished : null,
           characterId: typeof project.characterId === 'string' ? project.characterId : null,
           characterAvatar: typeof project.characterAvatar === 'string' ? project.characterAvatar : null,
           isDefaultSelfCharacter:

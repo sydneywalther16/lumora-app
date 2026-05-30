@@ -39,6 +39,8 @@ type GenerateVideoBody = {
   exactLikenessReady?: unknown;
   exactLikenessCanaryStatus?: unknown;
   allowIdentityOnlyKlingFallback?: unknown;
+  viralPresetUsed?: unknown;
+  promptPolished?: unknown;
 };
 
 type ReplicateClient = {
@@ -2036,6 +2038,8 @@ export function klingReferenceDiagnostics(input: {
   referenceStrategy: KlingCreateReferenceStrategy;
   exactLikenessRoute: string | null;
   providerRoute: string;
+  viralPresetUsed?: string | null;
+  promptPolished?: boolean;
 }) {
   const references = input.plan?.references ?? [];
   const supportingReferenceRoles = input.plan?.supportingReferenceRoles ?? [];
@@ -2081,7 +2085,13 @@ export function klingReferenceDiagnostics(input: {
     ),
     referencePurpose: 'identity_only',
     exactLikenessRoute: input.exactLikenessRoute,
+    exactProvider: input.exactLikenessRoute === 'kling_reference' ? 'kling' : null,
     providerRoute: input.providerRoute,
+    sceneAnchorConfigured: sceneAnchorProviderStatus().configured,
+    lastRenderReferenceStrategy: input.referenceStrategy,
+    audioConfigured: false,
+    viralPresetUsed: input.viralPresetUsed ?? null,
+    promptPolished: Boolean(input.promptPolished),
     privateUrlsRedacted: true,
     referenceUrlLabels: references.map((_reference, index) => safeUrlLabel(index)),
   };
@@ -2779,6 +2789,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const exactLikenessRoute = textValue(body.exactLikenessRoute);
     const exactLikenessCanaryStatus = textValue(body.exactLikenessCanaryStatus);
     const exactLikenessReady = booleanValue(body.exactLikenessReady) || exactLikenessCanaryStatus === 'canary_succeeded';
+    const viralPresetUsed = textValue(body.viralPresetUsed) || null;
+    const promptPolished = booleanValue(body.promptPolished);
     const klingExactLikenessRequest = isKlingExactLikenessRequest({
       engine: 'replicate',
       exactLikenessRoute,
@@ -2909,11 +2921,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         environmentTermsDetected: klingReferencePlan.environmentTermsDetected,
         referenceOutfitCarryoverSuppressed: klingReferencePlan.referenceOutfitCarryoverSuppressed,
         compositionCarryoverSuppressed: klingReferencePlan.compositionCarryoverSuppressed,
+        audioConfigured: false,
+        viralPresetUsed,
+        promptPolished,
         klingReferenceDiagnostics: klingReferenceDiagnostics({
           plan: klingReferencePlan,
           referenceStrategy: klingReferencePlan.plannedStrategy,
           exactLikenessRoute: 'kling_reference',
           providerRoute: 'replicate_kling_image_to_video',
+          viralPresetUsed,
+          promptPolished,
         }),
         recommendedNextAction: 'Configure a scene-anchor image provider or retry after scene-anchor generation is available.',
         privateUrlsRedacted: true,
@@ -3047,6 +3064,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               : 'front_only_fallback'),
             exactLikenessRoute: klingExactLikenessRequest ? 'kling_reference' : null,
             providerRoute: 'replicate_kling_image_to_video',
+            viralPresetUsed,
+            promptPolished,
           }),
           finalPrompt: promptForModel,
           warnings: [],
@@ -3338,6 +3357,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       referenceOutfitCarryoverSuppressed: Boolean(klingReferencePlan?.referenceOutfitCarryoverSuppressed),
       compositionCarryoverSuppressed: Boolean(klingReferencePlan?.compositionCarryoverSuppressed),
       frontOnlyFallback: Boolean(klingReferencePlan?.frontOnlyFallback),
+      audioConfigured: false,
+      viralPresetUsed,
+      promptPolished,
       klingReferenceDiagnostics: klingReferenceDiagnostics({
         plan: klingReferencePlan,
         referenceStrategy: klingReferencePlan?.plannedStrategy ?? (result.finalInputKeys?.includes('reference_images')
@@ -3345,6 +3367,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           : 'front_only_fallback'),
         exactLikenessRoute: klingExactLikenessRequest ? 'kling_reference' : null,
         providerRoute: 'replicate_kling_image_to_video',
+        viralPresetUsed,
+        promptPolished,
       }),
       finalPrompt: promptForModel,
       warnings: [],

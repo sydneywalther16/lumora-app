@@ -1,4 +1,5 @@
 import type { GenerationMode, ReferenceImageUrls } from './api';
+import { buildContinueStoryScaffold } from './aiCastExperience';
 
 type ContinueStoryItem = {
   id: string;
@@ -42,6 +43,9 @@ type ContinueStoryItem = {
   frontOnlyFallback?: boolean | null;
   renderProvider?: string | null;
   klingReferenceDiagnostics?: Record<string, unknown> | null;
+  audioConfigured?: boolean | null;
+  viralPresetUsed?: string | null;
+  promptPolished?: boolean | null;
 };
 
 function exactKlingStagingHint(item: ContinueStoryItem) {
@@ -69,7 +73,8 @@ function nextScenePrompt(item: ContinueStoryItem) {
   const storyText = item.caption || item.prompt || item.title || 'this cinematic moment';
   const characterText = item.characterName ? ` Keep ${item.characterName}'s emotional continuity alive.` : '';
   const exactKlingHint = exactKlingStagingHint(item);
-  return `Continue from this moment: ${storyText}. Create the next cinematic scene with a clear emotional turn, visual continuity, and one memorable detail.${characterText}${exactKlingHint}`;
+  const sceneAnchorScaffold = buildContinueStoryScaffold(item);
+  return `Continue from this moment: ${storyText}. Create the next cinematic scene with a clear emotional turn, visual continuity, and one memorable detail.${characterText}${exactKlingHint}${sceneAnchorScaffold}`;
 }
 
 export function prepareContinueStory(item: ContinueStoryItem, source: string) {
@@ -117,6 +122,9 @@ export function prepareContinueStory(item: ContinueStoryItem, source: string) {
     frontOnlyFallback: item.frontOnlyFallback ?? null,
     renderProvider: item.renderProvider ?? null,
     klingReferenceDiagnostics: item.klingReferenceDiagnostics ?? null,
+    audioConfigured: item.audioConfigured ?? null,
+    viralPresetUsed: item.viralPresetUsed ?? null,
+    promptPolished: item.promptPolished ?? null,
     source,
   };
 
