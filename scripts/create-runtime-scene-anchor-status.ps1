@@ -19,9 +19,9 @@ function Print-List {
     $Values
   )
   if ($Values -and $Values.Count -gt 0) {
-    Write-Host "$Label: $($Values -join ', ')"
+    Write-Host ("{0}: {1}" -f $Label, ($Values -join ', '))
   } else {
-    Write-Host "$Label: none"
+    Write-Host ("{0}: none" -f $Label)
   }
 }
 
