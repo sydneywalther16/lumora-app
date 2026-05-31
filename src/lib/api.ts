@@ -354,6 +354,9 @@ export type GenerationResponse = {
   sceneAnchorHttpStatus?: number | null;
   sceneAnchorErrorType?: string | null;
   sceneAnchorErrorMessage?: string | null;
+  sceneAnchorErrorMessageRedacted?: string | null;
+  sceneAnchorErrorBodyRedacted?: string | null;
+  createRuntimeSceneAnchorConfigured?: boolean | null;
   sceneAnchorPayloadFieldNames?: string[] | null;
   sceneAnchorReferenceCount?: number | null;
   sceneAnchorSubmittedReferenceCount?: number | null;
@@ -465,6 +468,9 @@ export type GenerationJob = {
   sceneAnchorHttpStatus?: number | null;
   sceneAnchorErrorType?: string | null;
   sceneAnchorErrorMessage?: string | null;
+  sceneAnchorErrorMessageRedacted?: string | null;
+  sceneAnchorErrorBodyRedacted?: string | null;
+  createRuntimeSceneAnchorConfigured?: boolean | null;
   sceneAnchorPayloadFieldNames?: string[] | null;
   sceneAnchorReferenceCount?: number | null;
   sceneAnchorSubmittedReferenceCount?: number | null;

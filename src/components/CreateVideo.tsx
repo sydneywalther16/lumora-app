@@ -302,6 +302,9 @@ type GenerateVideoApiResponse = {
   sceneAnchorHttpStatus?: number | null;
   sceneAnchorErrorType?: string | null;
   sceneAnchorErrorMessage?: string | null;
+  sceneAnchorErrorMessageRedacted?: string | null;
+  sceneAnchorErrorBodyRedacted?: string | null;
+  createRuntimeSceneAnchorConfigured?: boolean | null;
   sceneAnchorPayloadFieldNames?: string[] | null;
   sceneAnchorReferenceCount?: number | null;
   sceneAnchorSubmittedReferenceCount?: number | null;
@@ -754,7 +757,7 @@ function klingProviderFailureMessage(category: string | null | undefined, fallba
     return 'Scene anchor provider blocked this image request.';
   }
   if (category === 'scene_anchor_provider_disabled' || category === 'scene_anchor_provider_not_configured' || category === 'scene_anchor_fal_key_missing') {
-    return 'Scene-anchor provider is not configured. Configure a scene-anchor image provider, or use identity-only fallback.';
+    return 'Create runtime is missing scene-anchor configuration. Configure the Vercel Create runtime, or use identity-only fallback.';
   }
   if (category && category.startsWith('scene_anchor_')) {
     return 'Scene anchor generation failed. Check diagnostics before retrying.';
@@ -3153,7 +3156,9 @@ export default function CreateVideo({
         ? data.sceneAnchorHttpStatus
         : numberFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorHttpStatus');
       const nextSceneAnchorErrorType = data.sceneAnchorErrorType ?? stringFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorErrorType');
-      const nextSceneAnchorErrorMessage = data.sceneAnchorErrorMessage ?? stringFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorErrorMessage');
+      const nextSceneAnchorErrorMessage = data.sceneAnchorErrorMessageRedacted ??
+        data.sceneAnchorErrorMessage ??
+        stringFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorErrorMessage');
       const nextSceneAnchorPayloadFieldNames = formatStringList(data.sceneAnchorPayloadFieldNames).length
         ? formatStringList(data.sceneAnchorPayloadFieldNames)
         : formatStringList(nextKlingDiagnosticsRecord.sceneAnchorPayloadFieldNames);

@@ -203,6 +203,38 @@ type KlingSceneAnchorVideoStatus = {
   failureCategory: string | null;
 };
 
+export type CreateRuntimeSceneAnchorStatus = {
+  ok: true;
+  runtime: string;
+  sceneAnchorEnabled: boolean;
+  sceneAnchorProvider: string;
+  sceneAnchorModel: string | null;
+  sceneAnchorFallbackMode: string;
+  sceneAnchorConfigured: boolean;
+  sceneAnchorImplemented: boolean;
+  sceneAnchorReason: string;
+  missingConfig: string[];
+  falKeyPresent: boolean;
+  klingApiKeyPresent: boolean;
+  sceneAnchorFalCredentialPresent: boolean;
+  klingEnabled: boolean;
+  klingReferenceModel: string | null;
+  klingSceneAnchorVideoModel: string | null;
+  klingSceneAnchorVideoModelConfigured: boolean;
+  klingSceneAnchorVideoModelImplemented: boolean;
+  klingSceneAnchorVideoModelReason: string;
+  enableRenderProbe: boolean;
+  nodeEnv: string | null;
+  build: {
+    vercelEnv: string | null;
+    vercelGitCommitSha: string | null;
+    vercelGitCommitRef: string | null;
+    vercelUrlPresent: boolean;
+  };
+  recommendedNextAction: string;
+  privateUrlsRedacted: true;
+};
+
 type KlingCreateReferencePlan = {
   primaryReference: KlingCreateReferenceEntry;
   references: KlingCreateReferenceEntry[];
@@ -659,6 +691,80 @@ export function sceneAnchorProviderStatus(envSource: NodeJS.ProcessEnv = process
     fallbackMode,
     reason: 'scene_anchor_fal_provider_ready',
     failureCategory: null,
+  };
+}
+
+function detectCreateRuntime(envSource: NodeJS.ProcessEnv = process.env) {
+  if (booleanValue(envSource.VERCEL) || textValue(envSource.VERCEL_ENV) || textValue(envSource.VERCEL_URL)) return 'vercel';
+  if (textValue(envSource.RENDER) || textValue(envSource.RENDER_SERVICE_ID) || textValue(envSource.RENDER_EXTERNAL_URL)) return 'render';
+  if (textValue(envSource.AWS_LAMBDA_FUNCTION_NAME)) return 'serverless';
+  return 'local';
+}
+
+function createRuntimeSceneAnchorMissingConfig(envSource: NodeJS.ProcessEnv = process.env) {
+  const missing: string[] = [];
+  const enabled = booleanValue(envSource.SCENE_ANCHOR_ENABLED);
+  const provider = (textValue(envSource.SCENE_ANCHOR_PROVIDER) || 'fal').toLowerCase();
+  const model = textValue(envSource.SCENE_ANCHOR_MODEL);
+  if (!enabled) missing.push('SCENE_ANCHOR_ENABLED');
+  if (enabled && provider !== 'none') {
+    if (!model) missing.push('SCENE_ANCHOR_MODEL');
+    if (provider === 'fal' && !textValue(envSource.FAL_KEY) && !textValue(envSource.KLING_API_KEY)) {
+      missing.push('FAL_KEY or KLING_API_KEY');
+    }
+    if (provider === 'openai' && !textValue(envSource.OPENAI_API_KEY)) {
+      missing.push('OPENAI_API_KEY');
+    }
+  }
+  return Array.from(new Set(missing));
+}
+
+export function buildCreateRuntimeSceneAnchorStatus(
+  envSource: NodeJS.ProcessEnv = process.env,
+): CreateRuntimeSceneAnchorStatus {
+  const sceneAnchor = sceneAnchorProviderStatus(envSource);
+  const stage2 = klingSceneAnchorVideoModelStatus(envSource);
+  const missingConfig = createRuntimeSceneAnchorMissingConfig(envSource);
+  const runtime = detectCreateRuntime(envSource);
+  const falKeyPresent = Boolean(textValue(envSource.FAL_KEY));
+  const klingApiKeyPresent = Boolean(textValue(envSource.KLING_API_KEY));
+  const sceneAnchorReady = sceneAnchor.sceneAnchorEnabled && sceneAnchor.configured && sceneAnchor.implemented;
+  const stage2Ready = stage2.configured && stage2.implemented;
+  const recommendedNextAction = !sceneAnchorReady
+    ? `Set missing scene-anchor env vars on the Create runtime (${runtime === 'vercel' ? 'Vercel' : runtime}), then redeploy. Render diagnostics do not prove Create runtime config.`
+    : !stage2Ready
+      ? `Set KLING_SCENE_ANCHOR_VIDEO_MODEL on the Create runtime (${runtime === 'vercel' ? 'Vercel' : runtime}), then redeploy.`
+      : 'Create runtime scene-anchor config is ready. If Create still pauses, inspect the per-render sceneAnchorFailureCategory and redacted provider message.';
+  return {
+    ok: true,
+    runtime,
+    sceneAnchorEnabled: sceneAnchor.sceneAnchorEnabled,
+    sceneAnchorProvider: sceneAnchor.provider ?? 'unknown',
+    sceneAnchorModel: sceneAnchor.model,
+    sceneAnchorFallbackMode: sceneAnchor.fallbackMode,
+    sceneAnchorConfigured: sceneAnchor.configured,
+    sceneAnchorImplemented: sceneAnchor.implemented,
+    sceneAnchorReason: sceneAnchor.reason,
+    missingConfig,
+    falKeyPresent,
+    klingApiKeyPresent,
+    sceneAnchorFalCredentialPresent: Boolean(configuredSceneAnchorFalKey(envSource)),
+    klingEnabled: booleanValue(envSource.KLING_ENABLED),
+    klingReferenceModel: textValue(envSource.KLING_REFERENCE_MODEL) || null,
+    klingSceneAnchorVideoModel: stage2.model,
+    klingSceneAnchorVideoModelConfigured: stage2.configured,
+    klingSceneAnchorVideoModelImplemented: stage2.implemented,
+    klingSceneAnchorVideoModelReason: stage2.reason,
+    enableRenderProbe: booleanValue(envSource.ENABLE_RENDER_PROBE),
+    nodeEnv: textValue(envSource.NODE_ENV) || null,
+    build: {
+      vercelEnv: textValue(envSource.VERCEL_ENV) || null,
+      vercelGitCommitSha: textValue(envSource.VERCEL_GIT_COMMIT_SHA) || null,
+      vercelGitCommitRef: textValue(envSource.VERCEL_GIT_COMMIT_REF) || null,
+      vercelUrlPresent: Boolean(textValue(envSource.VERCEL_URL)),
+    },
+    recommendedNextAction,
+    privateUrlsRedacted: true,
   };
 }
 
@@ -1204,6 +1310,16 @@ export async function createFalSceneAnchorStill(input: {
     model: status.model,
     identityReferences: input.identityReferences,
   });
+  const payloadShape = sceneAnchorPayloadShapeSummary(payload);
+  console.info('CREATE_RUNTIME_SCENE_ANCHOR_PAYLOAD_SHAPE', {
+    provider: 'fal',
+    model: status.model,
+    payloadFieldNames: payloadShape.fieldNames,
+    referenceCount: referencePlan.submittedReferenceCount,
+    aspectRatio: textValue(objectRecord(payload).aspect_ratio) || null,
+    promptLength: input.prompt.length,
+    privateUrlsRedacted: true,
+  });
   const submitted = await falSceneAnchorJson<unknown>({
     path: falQueueUrl(status.model),
     method: 'POST',
@@ -1214,7 +1330,7 @@ export async function createFalSceneAnchorStill(input: {
     throw Object.assign(new Error(errorMessage(error)), {
       ...objectRecord(error),
       failureCategory: objectRecord(error).failureCategory ?? 'scene_anchor_fal_submit_failed',
-      sceneAnchorPayloadShapeSummary: sceneAnchorPayloadShapeSummary(payload),
+      sceneAnchorPayloadShapeSummary: payloadShape,
       sceneAnchorReferencePlan: {
         plannedReferenceCount: referencePlan.plannedReferenceCount,
         submittedReferenceCount: referencePlan.submittedReferenceCount,
@@ -1235,7 +1351,7 @@ export async function createFalSceneAnchorStill(input: {
     throw Object.assign(new Error(errorMessage(error)), {
       ...objectRecord(error),
       failureCategory: objectRecord(error).failureCategory ?? 'scene_anchor_fal_poll_failed',
-      sceneAnchorPayloadShapeSummary: sceneAnchorPayloadShapeSummary(payload),
+      sceneAnchorPayloadShapeSummary: payloadShape,
       sceneAnchorReferencePlan: {
         plannedReferenceCount: referencePlan.plannedReferenceCount,
         submittedReferenceCount: referencePlan.submittedReferenceCount,
@@ -1262,7 +1378,7 @@ export async function createFalSceneAnchorStill(input: {
       requestId: result.requestId,
       providerStatus: result.status,
       outputShape: outputShapeLabel(result.output),
-      payloadShape: sceneAnchorPayloadShapeSummary(payload),
+      payloadShape,
       referencePlan: {
         plannedReferenceCount: referencePlan.plannedReferenceCount,
         submittedReferenceCount: referencePlan.submittedReferenceCount,
@@ -3508,6 +3624,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sceneAnchorStrategy: klingReferencePlan.sceneAnchorStrategy,
         sceneAnchorEnabled: sceneAnchorProviderReadiness.sceneAnchorEnabled,
         sceneAnchorModel: sceneAnchorProviderReadiness.model,
+        createRuntimeSceneAnchorConfigured: sceneAnchorProviderReadiness.configured,
         sceneAnchorGenerated: false,
         sceneAnchorPersisted: false,
         sceneAnchorProvider: sceneAnchorProviderReadiness.provider,
@@ -3672,6 +3789,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sceneAnchorHttpStatus: klingReferencePlan.sceneAnchorHttpStatus,
         sceneAnchorErrorType: klingReferencePlan.sceneAnchorErrorType,
         sceneAnchorErrorMessage: klingReferencePlan.sceneAnchorErrorMessage,
+        sceneAnchorErrorMessageRedacted: klingReferencePlan.sceneAnchorErrorMessage,
+        createRuntimeSceneAnchorConfigured: sceneAnchorProviderStatus().configured,
         sceneAnchorErrorBodyRedacted: klingReferencePlan.sceneAnchorErrorBodyRedacted,
         sceneAnchorPayloadFieldNames: klingReferencePlan.sceneAnchorPayloadFieldNames,
         sceneAnchorReferenceCount: klingReferencePlan.sceneAnchorReferenceCount,
