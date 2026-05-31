@@ -207,6 +207,8 @@ assert.match(createVideoSource, /isClearlySafeKlingPrompt\(currentPrompt\)/);
 assert.match(createVideoSource, /isKlingComplexityError\(message\)/);
 assert.match(createVideoSource, /Kling exact-likeness scene created with scene-anchor identity planning\./);
 assert.match(createVideoSource, /stage2ProviderRouteType/);
+assert.match(createVideoSource, /image provider rejected the payload shape/);
+assert.match(createVideoSource, /could not read the image output/);
 
 const aiCastExperienceSource = readFileSync(join(process.cwd(), 'src/lib/aiCastExperience.ts'), 'utf8');
 assert.match(aiCastExperienceSource, /Image-to-video stage/);
@@ -214,6 +216,8 @@ assert.match(aiCastExperienceSource, /Image-to-video stage/);
 const generateVideoSource = readFileSync(join(process.cwd(), 'api/lumora/generate-video.ts'), 'utf8');
 assert.match(generateVideoSource, /KLING_SCENE_ANCHOR_VIDEO_MODEL/);
 assert.match(generateVideoSource, /buildKlingSceneAnchorImageToVideoPayload/);
+assert.match(generateVideoSource, /reference_image_urls/);
+assert.match(generateVideoSource, /scene_anchor_output_parse_failed/);
 assert.match(generateVideoSource, /fal_kling_scene_anchor_image_to_video/);
 assert.match(generateVideoSource, /Scene anchor video model is not configured\./);
 assert.match(generateVideoSource, /rawReferenceVisualInputsSentToStage2: false/);

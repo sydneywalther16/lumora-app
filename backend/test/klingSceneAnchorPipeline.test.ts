@@ -10,6 +10,7 @@ import {
   detectKlingOutfitIntent,
   klingReferenceDiagnostics,
   parseSceneAnchorImageOutput,
+  planFalSceneAnchorReferences,
   prepareKlingCreateReferencePlanForProvider,
   sceneAnchorProviderStatus,
 } from '../../api/lumora/generate-video';
@@ -124,7 +125,26 @@ try {
       assert.match(asset.prompt, /flowing ivory dress/i);
       assert.equal(asset.identityReferences.length, 4);
       assert.equal(asset.identityReferences[0].role, 'full_body');
-      return { url: 'https://assets.example/generated/garden-scene-anchor.png', provider: 'unit_scene_anchor' };
+      return {
+        url: 'https://assets.example/generated/garden-scene-anchor.png',
+        provider: 'unit_scene_anchor',
+        rawOutput: {
+          payloadShape: {
+            fieldNames: ['aspect_ratio', 'prompt', 'reference_image_urls'],
+            referenceImageUrlCount: 3,
+            privateUrlsRedacted: true,
+          },
+          referencePlan: {
+            plannedReferenceCount: 4,
+            submittedReferenceCount: 3,
+            submittedReferenceRoles: ['front_angle', 'full_body', 'side_angle_left'],
+            droppedReferenceRoles: ['side_angle_right'],
+            providerReferenceLimit: 3,
+            privateUrlsRedacted: true,
+          },
+          outputParsed: true,
+        },
+      };
     },
   });
   assert.ok(materializedPlan);
@@ -204,6 +224,52 @@ try {
   assert.match(unavailablePlan.sceneAnchorFailureReason ?? '', /Scene-anchor provider is not configured/i);
   assert.equal(unavailablePlan.sceneAnchorValidation?.passed, false);
 
+  const failedSchemaPlan = await prepareKlingCreateReferencePlanForProvider({
+    plan: buildKlingCreateReferencePlan({
+      body: {
+        prompt: gardenDressPrompt,
+        referenceImageUrls: {
+          frontFaceUrl: 'https://assets.example/front.jpg',
+          leftAngleUrl: 'https://assets.example/left.jpg',
+          rightAngleUrl: 'https://assets.example/right.jpg',
+          fullBodyUrl: 'https://assets.example/full-body-street-jeans.jpg',
+        },
+      },
+      primaryReference: 'https://assets.example/front.jpg',
+      exactLikenessReady: true,
+    }),
+    userId: 'unit-test-user',
+    sceneAnchorGenerator: async () => {
+      throw Object.assign(new Error('Provider rejected payload shape at [redacted-url].'), {
+        failureCategory: 'scene_anchor_model_schema_unmapped',
+        falHttpStatus: 422,
+        falErrorType: 'validation_error',
+        falErrorMessage: 'unknown field image_urls',
+        sceneAnchorPayloadShapeSummary: {
+          fieldNames: ['aspect_ratio', 'prompt', 'reference_image_urls'],
+          referenceImageUrlCount: 3,
+          privateUrlsRedacted: true,
+        },
+        sceneAnchorReferencePlan: {
+          plannedReferenceCount: 4,
+          submittedReferenceCount: 3,
+          submittedReferenceRoles: ['front_angle', 'full_body', 'side_angle_left'],
+          droppedReferenceRoles: ['side_angle_right'],
+          providerReferenceLimit: 3,
+          privateUrlsRedacted: true,
+        },
+      });
+    },
+  });
+  assert.ok(failedSchemaPlan);
+  assert.equal(failedSchemaPlan.sceneAnchorFailureCategory, 'scene_anchor_model_schema_unmapped');
+  assert.equal(failedSchemaPlan.sceneAnchorHttpStatus, 422);
+  assert.equal(failedSchemaPlan.sceneAnchorErrorType, 'validation_error');
+  assert.match(failedSchemaPlan.sceneAnchorErrorMessage ?? '', /unknown field/);
+  assert.deepEqual(failedSchemaPlan.sceneAnchorPayloadFieldNames, ['aspect_ratio', 'prompt', 'reference_image_urls']);
+  assert.equal(failedSchemaPlan.sceneAnchorSubmittedReferenceCount, 3);
+  assert.deepEqual(failedSchemaPlan.sceneAnchorDroppedReferenceRoles, ['side_angle_right']);
+
   process.env.SCENE_ANCHOR_ENABLED = 'true';
   process.env.SCENE_ANCHOR_PROVIDER = 'fal';
   delete process.env.SCENE_ANCHOR_MODEL;
@@ -219,8 +285,19 @@ try {
     identityReferences: materializedPlan.references,
   });
   assert.deepEqual(Object.keys(viduPayload).sort(), ['aspect_ratio', 'prompt', 'reference_image_urls']);
-  assert.equal((viduPayload.reference_image_urls as string[]).length, 4);
+  assert.equal((viduPayload.reference_image_urls as string[]).length, 3);
   assert.equal(JSON.stringify(viduPayload).includes('assets.example'), true);
+  assert.equal('image_urls' in viduPayload, false);
+  assert.equal('elements' in viduPayload, false);
+  const viduReferencePlan = planFalSceneAnchorReferences({
+    model: 'fal-ai/vidu/reference-to-image',
+    identityReferences: materializedPlan.references,
+  });
+  assert.equal(viduReferencePlan.plannedReferenceCount, 4);
+  assert.equal(viduReferencePlan.submittedReferenceCount, 3);
+  assert.deepEqual(viduReferencePlan.submittedReferenceRoles, ['front_angle', 'full_body', 'side_angle_left']);
+  assert.deepEqual(viduReferencePlan.droppedReferenceRoles, ['side_angle_right']);
+  assert.equal(viduReferencePlan.providerReferenceLimit, 3);
 
   const parsedTopLevelImage = parseSceneAnchorImageOutput({
     image: {
@@ -229,6 +306,17 @@ try {
     },
   });
   assert.equal(parsedTopLevelImage?.url, 'https://fal.example/output.png');
+  const parsedImagesArray = parseSceneAnchorImageOutput({
+    output: {
+      images: [
+        {
+          mime_type: 'image/png',
+          url: 'https://fal.example/output-from-array',
+        },
+      ],
+    },
+  });
+  assert.equal(parsedImagesArray?.url, 'https://fal.example/output-from-array');
 
   process.env.SCENE_ANCHOR_MODEL = 'fal-ai/vidu/reference-to-image';
   const submitBody = {
@@ -251,6 +339,8 @@ try {
         assert.equal(url, 'https://queue.fal.run/fal-ai/vidu/reference-to-image');
         const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
         assert.ok(Array.isArray(body.reference_image_urls));
+        assert.equal((body.reference_image_urls as unknown[]).length, 3);
+        assert.equal('image_urls' in body, false);
         return new Response(JSON.stringify(submitBody), {
           status: 200,
           headers: { 'content-type': 'application/json' },
@@ -293,6 +383,10 @@ try {
   assert.equal(falGenerated.url, 'https://assets.example/persisted/scene-anchor.png');
   assert.equal(falGenerated.provider, 'fal');
   assert.equal(falGenerated.persisted, true);
+  const falRawOutput = falGenerated.rawOutput as Record<string, unknown>;
+  const falReferencePlan = falRawOutput.referencePlan as Record<string, unknown>;
+  assert.equal(falReferencePlan.submittedReferenceCount, 3);
+  assert.deepEqual(falReferencePlan.droppedReferenceRoles, ['side_angle_right']);
 
   const diagnostics = klingReferenceDiagnostics({
     plan: materializedPlan,
@@ -306,6 +400,12 @@ try {
   assert.equal(diagnostics.sceneAnchorGenerated, true);
   assert.equal(diagnostics.sceneAnchorPersisted, true);
   assert.equal(diagnostics.sceneAnchorFailureCategory, null);
+  assert.deepEqual(diagnostics.sceneAnchorPayloadFieldNames, ['aspect_ratio', 'prompt', 'reference_image_urls']);
+  assert.equal(diagnostics.sceneAnchorReferenceCount, 4);
+  assert.equal(diagnostics.sceneAnchorSubmittedReferenceCount, 3);
+  assert.deepEqual(diagnostics.sceneAnchorDroppedReferenceRoles, ['side_angle_right']);
+  assert.equal(diagnostics.sceneAnchorProviderReferenceLimit, 3);
+  assert.equal(diagnostics.sceneAnchorOutputParsed, true);
   assert.equal(diagnostics.primaryInputType, 'scene_anchor_still');
   assert.equal(diagnostics.primaryVideoInputType, 'scene_anchor');
   assert.equal(diagnostics.primaryVideoInputSource, 'scene_anchor');

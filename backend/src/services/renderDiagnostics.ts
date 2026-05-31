@@ -95,15 +95,135 @@ function textSelfGuidanceDiagnostics(row: LatestRenderRow | null) {
 }
 
 function sceneAnchorDiagnostics() {
+  const missingConfig = [
+    env.SCENE_ANCHOR_ENABLED ? null : 'SCENE_ANCHOR_ENABLED',
+    env.SCENE_ANCHOR_PROVIDER && env.SCENE_ANCHOR_PROVIDER !== 'none' ? null : 'SCENE_ANCHOR_PROVIDER',
+    env.SCENE_ANCHOR_MODEL ? null : 'SCENE_ANCHOR_MODEL',
+    env.SCENE_ANCHOR_PROVIDER === 'fal' && !env.FAL_KEY && !env.KLING_API_KEY ? 'FAL_KEY or KLING_API_KEY' : null,
+  ].filter((item): item is string => Boolean(item));
+  const configured = missingConfig.length === 0;
   return {
     sceneAnchorEnabled: env.SCENE_ANCHOR_ENABLED,
     sceneAnchorProvider: env.SCENE_ANCHOR_PROVIDER || 'fal',
     sceneAnchorModel: env.SCENE_ANCHOR_MODEL ?? null,
-    sceneAnchorConfigured: Boolean(env.SCENE_ANCHOR_ENABLED && env.SCENE_ANCHOR_PROVIDER !== 'none' && env.SCENE_ANCHOR_MODEL),
+    sceneAnchorConfigured: configured,
     sceneAnchorFallbackMode: env.SCENE_ANCHOR_FALLBACK_MODE,
     primaryKlingInputType: 'scene_anchor_still_when_generated',
+    sceneAnchor: {
+      enabled: env.SCENE_ANCHOR_ENABLED,
+      provider: env.SCENE_ANCHOR_PROVIDER || 'fal',
+      model: env.SCENE_ANCHOR_MODEL ?? null,
+      fallbackMode: env.SCENE_ANCHOR_FALLBACK_MODE,
+      configured,
+      missingConfig,
+      lastFailureCategory: null,
+      lastProviderStatus: null,
+      lastProviderErrorSummary: null,
+      lastPayloadShapeSummary: null,
+      recommendedNextAction: configured
+        ? 'Run a scene-anchor Create render and inspect per-render diagnostics if it pauses.'
+        : 'Configure the missing scene-anchor environment values.',
+      privateUrlsRedacted: true,
+    },
     privateUrlsRedacted: true,
   };
+}
+
+function sceneAnchorHealthFromRow(row: LatestRenderRow | null) {
+  const base = sceneAnchorDiagnostics().sceneAnchor;
+  const metadata = recordMetadata(row?.sceneMetadata);
+  const klingDiagnostics = recordMetadata(metadata.klingReferenceDiagnostics);
+  const text = (key: string) => {
+    const direct = metadata[key];
+    const nested = klingDiagnostics[key];
+    if (typeof direct === 'string' && direct.trim()) return redactMessage(direct.trim());
+    if (typeof nested === 'string' && nested.trim()) return redactMessage(nested.trim());
+    return null;
+  };
+  const number = (key: string) => {
+    const direct = metadata[key];
+    const nested = klingDiagnostics[key];
+    const value = Number(direct ?? nested);
+    return Number.isFinite(value) ? value : null;
+  };
+  const stringArray = (key: string) => {
+    const direct = metadata[key];
+    const nested = klingDiagnostics[key];
+    const value = Array.isArray(direct) ? direct : Array.isArray(nested) ? nested : [];
+    return value.filter((item): item is string => typeof item === 'string');
+  };
+  const lastFailureCategory = text('sceneAnchorFailureCategory') ??
+    (row?.errorCategory?.startsWith('scene_anchor_') ? row.errorCategory : null);
+  const lastPayloadShapeSummary = stringArray('sceneAnchorPayloadFieldNames').length ||
+    number('sceneAnchorSubmittedReferenceCount') !== null ||
+    number('sceneAnchorProviderReferenceLimit') !== null
+    ? {
+        fieldNames: stringArray('sceneAnchorPayloadFieldNames'),
+        plannedReferenceCount: number('sceneAnchorReferenceCount'),
+        submittedReferenceCount: number('sceneAnchorSubmittedReferenceCount'),
+        submittedReferenceRoles: stringArray('sceneAnchorReferenceRolesUsed'),
+        droppedReferenceRoles: stringArray('sceneAnchorDroppedReferenceRoles'),
+        providerReferenceLimit: number('sceneAnchorProviderReferenceLimit'),
+        privateUrlsRedacted: true,
+      }
+    : null;
+  const lastProviderErrorSummary = text('sceneAnchorErrorMessage') ?? redactMessage(row?.errorMessage ?? null);
+  return {
+    ...base,
+    lastFailureCategory,
+    lastProviderStatus: text('sceneAnchorReason') ?? row?.providerStatus ?? null,
+    lastProviderErrorSummary,
+    lastPayloadShapeSummary,
+    recommendedNextAction: lastFailureCategory === 'scene_anchor_model_schema_unmapped'
+      ? 'Fix the scene-anchor provider payload shape before retrying.'
+      : lastFailureCategory === 'scene_anchor_output_parse_failed'
+        ? 'Inspect the redacted output shape and update scene-anchor output parsing.'
+        : lastFailureCategory === 'scene_anchor_provider_moderation_block'
+          ? 'Edit the scene-anchor prompt and retry with provider-safe staging.'
+          : base.configured
+            ? 'Retry the scene-anchor render or inspect the last provider summary.'
+            : 'Configure the missing scene-anchor environment values.',
+    privateUrlsRedacted: true,
+  };
+}
+
+export async function buildSceneAnchorHealthDiagnostics() {
+  try {
+    const latest = await query<LatestRenderRow>(
+      `select
+         id,
+         user_id as "userId",
+         project_id as "projectId",
+         character_id as "characterId",
+         status,
+         provider,
+         provider_prediction_id as "providerPredictionId",
+         provider_status as "providerStatus",
+         provider_model as "providerModel",
+         output_url as "outputUrl",
+         result_asset_url as "resultAssetUrl",
+         error_category as "errorCategory",
+         error_message as "errorMessage",
+         retry_after_seconds as "retryAfterSeconds",
+         retry_available_at as "retryAvailableAt",
+         scene_metadata as "sceneMetadata",
+         render_success_group_id as "renderSuccessGroupId",
+         render_success_role as "renderSuccessRole",
+         render_success_attempt_tier as "renderSuccessAttemptTier",
+         render_success_reference_count as "renderSuccessReferenceCount",
+         render_success_paid as "renderSuccessPaid",
+         updated_at as "updatedAt",
+         created_at as "createdAt"
+       from generation_jobs
+       where scene_metadata ? 'klingReferenceDiagnostics'
+          or error_category like 'scene_anchor_%'
+       order by updated_at desc nulls last, created_at desc
+       limit 1`,
+    );
+    return sceneAnchorHealthFromRow(latest.rows[0] ?? null);
+  } catch {
+    return sceneAnchorHealthFromRow(null);
+  }
 }
 
 function recordMetadata(value: unknown): Record<string, unknown> {

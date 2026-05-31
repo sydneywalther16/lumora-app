@@ -48,6 +48,16 @@ export type StudioProject = {
   sceneAnchorProvider?: string | null;
   sceneAnchorReason?: string | null;
   sceneAnchorFailureCategory?: string | null;
+  sceneAnchorHttpStatus?: number | null;
+  sceneAnchorErrorType?: string | null;
+  sceneAnchorErrorMessage?: string | null;
+  sceneAnchorPayloadFieldNames?: string[] | null;
+  sceneAnchorReferenceCount?: number | null;
+  sceneAnchorSubmittedReferenceCount?: number | null;
+  sceneAnchorReferenceRolesUsed?: string[] | null;
+  sceneAnchorDroppedReferenceRoles?: string[] | null;
+  sceneAnchorProviderReferenceLimit?: number | null;
+  sceneAnchorOutputParsed?: boolean | null;
   sceneAnchorValidation?: Record<string, unknown> | null;
   primaryInputType?: string | null;
   primaryVideoInputType?: string | null;
@@ -189,6 +199,22 @@ export function loadStudioProjects(): StudioProject[] {
           sceneAnchorProvider: typeof project.sceneAnchorProvider === 'string' ? project.sceneAnchorProvider : null,
           sceneAnchorReason: typeof project.sceneAnchorReason === 'string' ? project.sceneAnchorReason : null,
           sceneAnchorFailureCategory: typeof project.sceneAnchorFailureCategory === 'string' ? project.sceneAnchorFailureCategory : null,
+          sceneAnchorHttpStatus: typeof project.sceneAnchorHttpStatus === 'number' ? project.sceneAnchorHttpStatus : null,
+          sceneAnchorErrorType: typeof project.sceneAnchorErrorType === 'string' ? project.sceneAnchorErrorType : null,
+          sceneAnchorErrorMessage: typeof project.sceneAnchorErrorMessage === 'string' ? project.sceneAnchorErrorMessage : null,
+          sceneAnchorPayloadFieldNames: Array.isArray(project.sceneAnchorPayloadFieldNames)
+            ? project.sceneAnchorPayloadFieldNames.filter((item): item is string => typeof item === 'string')
+            : null,
+          sceneAnchorReferenceCount: typeof project.sceneAnchorReferenceCount === 'number' ? project.sceneAnchorReferenceCount : null,
+          sceneAnchorSubmittedReferenceCount: typeof project.sceneAnchorSubmittedReferenceCount === 'number' ? project.sceneAnchorSubmittedReferenceCount : null,
+          sceneAnchorReferenceRolesUsed: Array.isArray(project.sceneAnchorReferenceRolesUsed)
+            ? project.sceneAnchorReferenceRolesUsed.filter((item): item is string => typeof item === 'string')
+            : null,
+          sceneAnchorDroppedReferenceRoles: Array.isArray(project.sceneAnchorDroppedReferenceRoles)
+            ? project.sceneAnchorDroppedReferenceRoles.filter((item): item is string => typeof item === 'string')
+            : null,
+          sceneAnchorProviderReferenceLimit: typeof project.sceneAnchorProviderReferenceLimit === 'number' ? project.sceneAnchorProviderReferenceLimit : null,
+          sceneAnchorOutputParsed: typeof project.sceneAnchorOutputParsed === 'boolean' ? project.sceneAnchorOutputParsed : null,
           sceneAnchorValidation:
             project.sceneAnchorValidation && typeof project.sceneAnchorValidation === 'object'
               ? project.sceneAnchorValidation as Record<string, unknown>

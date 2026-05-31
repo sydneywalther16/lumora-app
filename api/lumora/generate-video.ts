@@ -175,8 +175,10 @@ type SceneAnchorFailureCategory =
   | 'scene_anchor_fal_submit_failed'
   | 'scene_anchor_fal_poll_failed'
   | 'scene_anchor_output_missing'
+  | 'scene_anchor_output_parse_failed'
   | 'scene_anchor_asset_download_failed'
   | 'scene_anchor_asset_persist_failed'
+  | 'scene_anchor_provider_moderation_block'
   | 'scene_anchor_generation_failed'
   | 'scene_anchor_validation_failed';
 
@@ -223,6 +225,16 @@ type KlingCreateReferencePlan = {
   sceneAnchorPersisted: boolean;
   sceneAnchorFailureReason: string | null;
   sceneAnchorValidation: KlingSceneAnchorValidation | null;
+  sceneAnchorHttpStatus: number | null;
+  sceneAnchorErrorType: string | null;
+  sceneAnchorErrorMessage: string | null;
+  sceneAnchorPayloadFieldNames: string[] | null;
+  sceneAnchorReferenceCount: number | null;
+  sceneAnchorSubmittedReferenceCount: number | null;
+  sceneAnchorReferenceRolesUsed: string[] | null;
+  sceneAnchorDroppedReferenceRoles: string[] | null;
+  sceneAnchorProviderReferenceLimit: number | null;
+  sceneAnchorOutputParsed: boolean | null;
   primaryInputType: 'scene_anchor_still' | 'identity_sheet' | 'identity_reference';
   primaryVideoInputType: KlingPrimaryVideoInputType;
   primaryVideoInputSource: KlingPrimaryVideoInputSource;
@@ -672,12 +684,57 @@ function modelSupportsFalSceneAnchorReferences(model: string) {
   );
 }
 
+function sceneAnchorReferenceLimitForModel(model: string) {
+  const normalized = model.toLowerCase();
+  if (normalized === 'fal-ai/vidu/reference-to-image') return 3;
+  if (normalized.includes('/kontext/max/multi') || normalized.includes('flux-pro/kontext/max/multi')) return 4;
+  return null;
+}
+
+function preferredSceneAnchorReferenceScore(reference: KlingCreateReferenceEntry) {
+  if (reference.role === 'front_angle') return 0;
+  if (reference.role === 'full_body') return 1;
+  if (reference.role === 'side_angle_left') return 2;
+  if (reference.role === 'side_angle_right') return 3;
+  if (reference.role === 'identity_sheet') return 4;
+  return 5;
+}
+
+export function planFalSceneAnchorReferences(input: {
+  model: string;
+  identityReferences: KlingCreateReferenceEntry[];
+}) {
+  const providerReferenceLimit = sceneAnchorReferenceLimitForModel(input.model);
+  const planned = input.identityReferences.filter((reference) => isValidHttpUrl(reference.url));
+  const ordered = [...planned].sort((a, b) => {
+    const scoreDiff = preferredSceneAnchorReferenceScore(a) - preferredSceneAnchorReferenceScore(b);
+    return scoreDiff || input.identityReferences.indexOf(a) - input.identityReferences.indexOf(b);
+  });
+  const submitted = typeof providerReferenceLimit === 'number'
+    ? ordered.slice(0, providerReferenceLimit)
+    : ordered;
+  const submittedSet = new Set(submitted.map((reference) => `${reference.role}:${reference.url}`));
+  const dropped = ordered.filter((reference) => !submittedSet.has(`${reference.role}:${reference.url}`));
+  return {
+    plannedReferences: planned,
+    submittedReferences: submitted,
+    droppedReferences: dropped,
+    plannedReferenceCount: planned.length,
+    submittedReferenceCount: submitted.length,
+    droppedReferenceRoles: dropped.map((reference) => reference.role),
+    submittedReferenceRoles: submitted.map((reference) => reference.role),
+    providerReferenceLimit,
+    privateUrlsRedacted: true,
+  };
+}
+
 export function buildFalSceneAnchorPayload(input: {
   model: string;
   prompt: string;
   identityReferences: KlingCreateReferenceEntry[];
 }) {
-  const urls = input.identityReferences.map((reference) => reference.url).filter(isValidHttpUrl);
+  const referencePlan = planFalSceneAnchorReferences(input);
+  const urls = referencePlan.submittedReferences.map((reference) => reference.url);
   const primaryUrl = urls[0] ?? '';
   const model = input.model.toLowerCase();
   if (!urls.length) {
@@ -688,7 +745,7 @@ export function buildFalSceneAnchorPayload(input: {
   if (model === 'fal-ai/vidu/reference-to-image') {
     return {
       prompt: input.prompt,
-      reference_image_urls: urls.slice(0, 7),
+      reference_image_urls: urls,
       aspect_ratio: '9:16',
     };
   }
@@ -826,7 +883,17 @@ function outputShapeLabel(output: unknown) {
   return typeof output;
 }
 
-function sceneAnchorProviderHttpErrorCategory(status: number): SceneAnchorFailureCategory {
+function isSceneAnchorModerationError(value: unknown) {
+  const lower = redactSceneAnchorProviderText(value, 2000).toLowerCase();
+  return lower.includes('moderation') ||
+    lower.includes('safety') ||
+    lower.includes('sensitive') ||
+    lower.includes('flagged') ||
+    lower.includes('policy');
+}
+
+function sceneAnchorProviderHttpErrorCategory(status: number, payload?: unknown): SceneAnchorFailureCategory {
+  if (isSceneAnchorModerationError(payload)) return 'scene_anchor_provider_moderation_block';
   if (status === 400 || status === 422 || status === 404) return 'scene_anchor_model_schema_unmapped';
   if (status === 401 || status === 403) return 'scene_anchor_fal_key_missing';
   if (status >= 500 || status === 429) return 'scene_anchor_fal_submit_failed';
@@ -856,8 +923,14 @@ async function falSceneAnchorJson<T>(input: {
     : await response.text().catch(() => null);
   if (!response.ok) {
     throw Object.assign(new Error(redactSceneAnchorProviderText(payload) || 'Fal scene-anchor request failed.'), {
-      failureCategory: sceneAnchorProviderHttpErrorCategory(response.status),
+      failureCategory: sceneAnchorProviderHttpErrorCategory(response.status, payload),
       falHttpStatus: response.status,
+      falErrorType: textValue(objectRecord(payload).type) || textValue(objectRecord(payload).error_type) || null,
+      falErrorMessage: redactSceneAnchorProviderText(
+        textValue(objectRecord(payload).message) ||
+        textValue(objectRecord(payload).error) ||
+        payload,
+      ),
       falErrorBodyRedacted: redactSceneAnchorProviderText(payload),
       endpointUsed: input.path.replace(/https:\/\/queue\.fal\.run\/.+$/i, 'https://queue.fal.run/[model]'),
       payloadShapeSummary: input.body === undefined ? null : sceneAnchorPayloadShapeSummary(input.body),
@@ -908,16 +981,42 @@ export function parseSceneAnchorImageOutput(output: unknown): { url: string; con
   }
   if (!output || typeof output !== 'object') return null;
   const record = output as Record<string, unknown>;
-  const contentType = textValue(record.content_type) || textValue(record.contentType) || null;
+  const contentType =
+    textValue(record.content_type) ||
+    textValue(record.contentType) ||
+    textValue(record.mime_type) ||
+    textValue(record.mimeType) ||
+    textValue(record.media_type) ||
+    textValue(record.mediaType) ||
+    null;
   const url = maybeUrl(record.url);
   if (url && isValidHttpUrl(url) && (contentType?.toLowerCase().startsWith('image/') || isLikelyImageUrl(url))) {
     return { url, contentType };
   }
-  for (const key of ['image', 'images', 'output', 'data', 'result', 'file']) {
+  for (const key of ['image', 'images', 'output', 'data', 'result', 'file', 'files', 'asset', 'assets']) {
     const parsed = parseSceneAnchorImageOutput(record[key]);
     if (parsed) return parsed;
   }
   return null;
+}
+
+function sceneAnchorOutputLooksImageLike(output: unknown): boolean {
+  if (!output) return false;
+  const record = objectRecord(output);
+  const text = redactSceneAnchorProviderText(output, 2000).toLowerCase();
+  return Boolean(
+    record.image ||
+    record.images ||
+    record.output ||
+    record.data ||
+    record.result ||
+    record.url ||
+    text.includes('image/') ||
+    text.includes('.png') ||
+    text.includes('.jpg') ||
+    text.includes('.jpeg') ||
+    text.includes('.webp'),
+  );
 }
 
 async function pollFalSceneAnchorImage(input: {
@@ -953,8 +1052,11 @@ async function pollFalSceneAnchorImage(input: {
     if (sceneAnchorTerminalStatus(status)) {
       if (!sceneAnchorSucceededStatus(status)) {
         throw Object.assign(new Error(redactSceneAnchorProviderText(latest) || 'Fal scene-anchor generation failed.'), {
-          failureCategory: 'scene_anchor_generation_failed',
+          failureCategory: isSceneAnchorModerationError(latest)
+            ? 'scene_anchor_provider_moderation_block'
+            : 'scene_anchor_generation_failed',
           providerStatus: status,
+          providerErrorSummary: redactSceneAnchorProviderText(latest),
         });
       }
       const result = await falSceneAnchorJson<unknown>({
@@ -966,9 +1068,13 @@ async function pollFalSceneAnchorImage(input: {
       const resultImage = parseSceneAnchorImageOutput(result);
       if (resultImage) return { output: result, image: resultImage, requestId, status };
       throw Object.assign(new Error('Fal scene-anchor response did not include an image URL.'), {
-        failureCategory: 'scene_anchor_output_missing',
+        failureCategory: sceneAnchorOutputLooksImageLike(result)
+          ? 'scene_anchor_output_parse_failed'
+          : 'scene_anchor_output_missing',
         providerStatus: status,
         providerOutputShape: outputShapeLabel(result),
+        sceneAnchorOutputParsed: false,
+        providerErrorSummary: redactSceneAnchorProviderText(result),
       });
     }
     await sleepForPoll(3_000);
@@ -1090,6 +1196,10 @@ export async function createFalSceneAnchorStill(input: {
     prompt: input.prompt,
     identityReferences: input.identityReferences,
   });
+  const referencePlan = planFalSceneAnchorReferences({
+    model: status.model,
+    identityReferences: input.identityReferences,
+  });
   const submitted = await falSceneAnchorJson<unknown>({
     path: falQueueUrl(status.model),
     method: 'POST',
@@ -1100,6 +1210,15 @@ export async function createFalSceneAnchorStill(input: {
     throw Object.assign(new Error(errorMessage(error)), {
       ...objectRecord(error),
       failureCategory: objectRecord(error).failureCategory ?? 'scene_anchor_fal_submit_failed',
+      sceneAnchorPayloadShapeSummary: sceneAnchorPayloadShapeSummary(payload),
+      sceneAnchorReferencePlan: {
+        plannedReferenceCount: referencePlan.plannedReferenceCount,
+        submittedReferenceCount: referencePlan.submittedReferenceCount,
+        droppedReferenceRoles: referencePlan.droppedReferenceRoles,
+        providerReferenceLimit: referencePlan.providerReferenceLimit,
+        submittedReferenceRoles: referencePlan.submittedReferenceRoles,
+        privateUrlsRedacted: true,
+      },
     });
   });
   const result = await pollFalSceneAnchorImage({
@@ -1108,6 +1227,20 @@ export async function createFalSceneAnchorStill(input: {
     key,
     fetchImpl: input.fetchImpl,
     sleepFn: input.sleepFn,
+  }).catch((error) => {
+    throw Object.assign(new Error(errorMessage(error)), {
+      ...objectRecord(error),
+      failureCategory: objectRecord(error).failureCategory ?? 'scene_anchor_fal_poll_failed',
+      sceneAnchorPayloadShapeSummary: sceneAnchorPayloadShapeSummary(payload),
+      sceneAnchorReferencePlan: {
+        plannedReferenceCount: referencePlan.plannedReferenceCount,
+        submittedReferenceCount: referencePlan.submittedReferenceCount,
+        droppedReferenceRoles: referencePlan.droppedReferenceRoles,
+        providerReferenceLimit: referencePlan.providerReferenceLimit,
+        submittedReferenceRoles: referencePlan.submittedReferenceRoles,
+        privateUrlsRedacted: true,
+      },
+    });
   });
   const persisted = await downloadAndPersistSceneAnchorImage({
     userId: input.userId,
@@ -1126,6 +1259,15 @@ export async function createFalSceneAnchorStill(input: {
       providerStatus: result.status,
       outputShape: outputShapeLabel(result.output),
       payloadShape: sceneAnchorPayloadShapeSummary(payload),
+      referencePlan: {
+        plannedReferenceCount: referencePlan.plannedReferenceCount,
+        submittedReferenceCount: referencePlan.submittedReferenceCount,
+        droppedReferenceRoles: referencePlan.droppedReferenceRoles,
+        providerReferenceLimit: referencePlan.providerReferenceLimit,
+        submittedReferenceRoles: referencePlan.submittedReferenceRoles,
+        privateUrlsRedacted: true,
+      },
+      outputParsed: true,
       imagePersisted: true,
       imageContentType: persisted.contentType,
       imageSizeBytes: persisted.sizeBytes,
@@ -1594,6 +1736,61 @@ function syncKlingVideoStageMetadata(plan: KlingCreateReferencePlan) {
   return plan;
 }
 
+function numberOrNull(value: unknown) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function stringArrayOrNull(value: unknown) {
+  if (!Array.isArray(value)) return null;
+  const strings = value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  return strings.length ? strings : null;
+}
+
+function objectRecordWithKeys(value: unknown) {
+  const record = objectRecord(value);
+  return Object.keys(record).length ? record : null;
+}
+
+function applySceneAnchorFailureDiagnostics(plan: KlingCreateReferencePlan, error: unknown) {
+  const record = objectRecord(error);
+  const payloadShape =
+    objectRecordWithKeys(record.sceneAnchorPayloadShapeSummary) ??
+    objectRecordWithKeys(record.payloadShapeSummary) ??
+    objectRecordWithKeys(objectRecord(record.details).payloadShape) ??
+    {};
+  const referencePlan = objectRecord(record.sceneAnchorReferencePlan);
+  plan.sceneAnchorHttpStatus = numberOrNull(record.falHttpStatus ?? record.statusCode ?? record.status);
+  plan.sceneAnchorErrorType =
+    textValue(record.falErrorType) ||
+    textValue(record.errorType) ||
+    textValue(record.name) ||
+    null;
+  plan.sceneAnchorErrorMessage = redactSceneAnchorProviderText(
+    textValue(record.falErrorMessage) ||
+    textValue(record.providerErrorSummary) ||
+    errorMessage(error),
+    700,
+  );
+  plan.sceneAnchorPayloadFieldNames = stringArrayOrNull(payloadShape.fieldNames);
+  plan.sceneAnchorReferenceCount =
+    numberOrNull(referencePlan.plannedReferenceCount) ??
+    (plan.references.length || null);
+  plan.sceneAnchorSubmittedReferenceCount =
+    numberOrNull(referencePlan.submittedReferenceCount) ??
+    numberOrNull(payloadShape.referenceImageUrlCount) ??
+    numberOrNull(payloadShape.imageUrlCount);
+  plan.sceneAnchorReferenceRolesUsed =
+    stringArrayOrNull(referencePlan.submittedReferenceRoles) ??
+    plan.references.map((reference) => reference.role);
+  plan.sceneAnchorDroppedReferenceRoles = stringArrayOrNull(referencePlan.droppedReferenceRoles);
+  plan.sceneAnchorProviderReferenceLimit = numberOrNull(referencePlan.providerReferenceLimit);
+  plan.sceneAnchorOutputParsed = typeof record.sceneAnchorOutputParsed === 'boolean'
+    ? record.sceneAnchorOutputParsed
+    : null;
+}
+
 function buildKlingStageTwoPromptGuidance(plan: KlingCreateReferencePlan) {
   const sceneAnchorIsReady = plan.sceneAnchorGenerated && plan.providerPrimaryReference.role === 'scene_anchor';
   const identitySupport = sceneAnchorIsReady
@@ -1794,6 +1991,25 @@ export async function prepareKlingCreateReferencePlanForProvider(input: {
         plan.sceneAnchorPersisted = generated.persisted !== false;
         plan.sceneAnchorFailureReason = null;
         plan.sceneAnchorValidation = validation;
+        const rawOutput = objectRecord(generated.rawOutput);
+        const rawReferencePlan = objectRecord(rawOutput.referencePlan);
+        const rawPayloadShape = objectRecord(rawOutput.payloadShape);
+        plan.sceneAnchorHttpStatus = null;
+        plan.sceneAnchorErrorType = null;
+        plan.sceneAnchorErrorMessage = null;
+        plan.sceneAnchorPayloadFieldNames = stringArrayOrNull(rawPayloadShape.fieldNames);
+        plan.sceneAnchorReferenceCount =
+          numberOrNull(rawReferencePlan.plannedReferenceCount) ?? plan.references.length;
+        plan.sceneAnchorSubmittedReferenceCount =
+          numberOrNull(rawReferencePlan.submittedReferenceCount) ??
+          numberOrNull(rawPayloadShape.referenceImageUrlCount) ??
+          numberOrNull(rawPayloadShape.imageUrlCount);
+        plan.sceneAnchorReferenceRolesUsed =
+          stringArrayOrNull(rawReferencePlan.submittedReferenceRoles) ??
+          plan.references.map((reference) => reference.role);
+        plan.sceneAnchorDroppedReferenceRoles = stringArrayOrNull(rawReferencePlan.droppedReferenceRoles);
+        plan.sceneAnchorProviderReferenceLimit = numberOrNull(rawReferencePlan.providerReferenceLimit);
+        plan.sceneAnchorOutputParsed = Boolean(rawOutput.outputParsed ?? true);
         plan.primaryInputType = 'scene_anchor_still';
         plan.frontOnlyFallback = false;
         plan.referenceOutfitCarryoverSuppressed = plan.userSpecifiedOutfit;
@@ -1813,6 +2029,7 @@ export async function prepareKlingCreateReferencePlanForProvider(input: {
     plan.sceneAnchorPersisted = false;
     plan.sceneAnchorFailureReason =
       `Scene anchor generation failed. Retry scene anchor, use identity-only fallback, or edit scene. ${errorMessage(lastError)}.`;
+    applySceneAnchorFailureDiagnostics(plan, lastError);
     plan.sceneAnchorValidation = lastValidation ?? {
       faceVisible: false,
       fullBodyVisible: false,
@@ -2325,6 +2542,16 @@ export function buildKlingCreateReferencePlan(input: {
     sceneAnchorPersisted: false,
     sceneAnchorFailureReason: null,
     sceneAnchorValidation: null,
+    sceneAnchorHttpStatus: null,
+    sceneAnchorErrorType: null,
+    sceneAnchorErrorMessage: null,
+    sceneAnchorPayloadFieldNames: null,
+    sceneAnchorReferenceCount: null,
+    sceneAnchorSubmittedReferenceCount: null,
+    sceneAnchorReferenceRolesUsed: null,
+    sceneAnchorDroppedReferenceRoles: null,
+    sceneAnchorProviderReferenceLimit: null,
+    sceneAnchorOutputParsed: null,
     primaryInputType: plannedStrategy === 'scene_anchor_still'
       ? 'scene_anchor_still'
       : 'identity_reference',
@@ -2462,6 +2689,16 @@ export function klingReferenceDiagnostics(input: {
     sceneAnchorFailureCategory: input.plan?.sceneAnchorFailureCategory ?? null,
     sceneAnchorRequired: Boolean(input.plan?.sceneAnchorRequired),
     sceneAnchorValidation: input.plan?.sceneAnchorValidation ?? null,
+    sceneAnchorHttpStatus: input.plan?.sceneAnchorHttpStatus ?? null,
+    sceneAnchorErrorType: input.plan?.sceneAnchorErrorType ?? null,
+    sceneAnchorErrorMessage: input.plan?.sceneAnchorErrorMessage ?? null,
+    sceneAnchorPayloadFieldNames: input.plan?.sceneAnchorPayloadFieldNames ?? null,
+    sceneAnchorReferenceCount: input.plan?.sceneAnchorReferenceCount ?? null,
+    sceneAnchorSubmittedReferenceCount: input.plan?.sceneAnchorSubmittedReferenceCount ?? null,
+    sceneAnchorReferenceRolesUsed: input.plan?.sceneAnchorReferenceRolesUsed ?? null,
+    sceneAnchorDroppedReferenceRoles: input.plan?.sceneAnchorDroppedReferenceRoles ?? null,
+    sceneAnchorProviderReferenceLimit: input.plan?.sceneAnchorProviderReferenceLimit ?? null,
+    sceneAnchorOutputParsed: input.plan?.sceneAnchorOutputParsed ?? null,
     primaryInputType: input.plan?.primaryInputType ?? null,
     primaryVideoInputType: input.plan?.primaryVideoInputType ?? null,
     primaryVideoInputSource: input.plan?.primaryVideoInputSource ?? null,
@@ -3402,12 +3639,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         (klingReferencePlan.sceneAnchorReason === 'scene_anchor_generation_failed'
           ? 'scene_anchor_generation_failed'
           : 'scene_anchor_provider_not_configured');
-      const errorCategory = sceneAnchorFailureCategory === 'scene_anchor_provider_disabled' ||
-        sceneAnchorFailureCategory === 'scene_anchor_provider_not_configured' ||
-        sceneAnchorFailureCategory === 'scene_anchor_fal_key_missing' ||
-        sceneAnchorFailureCategory === 'scene_anchor_provider_not_implemented'
-        ? 'kling_scene_anchor_unavailable'
-        : 'kling_scene_anchor_generation_failed';
+      const errorCategory = sceneAnchorFailureCategory;
       return sendJson(res, 424, {
         success: false,
         error: klingReferencePlan.sceneAnchorFailureReason ||
@@ -3426,6 +3658,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sceneAnchorProvider: klingReferencePlan.sceneAnchorProvider,
         sceneAnchorReason: klingReferencePlan.sceneAnchorReason,
         sceneAnchorFailureCategory,
+        sceneAnchorHttpStatus: klingReferencePlan.sceneAnchorHttpStatus,
+        sceneAnchorErrorType: klingReferencePlan.sceneAnchorErrorType,
+        sceneAnchorErrorMessage: klingReferencePlan.sceneAnchorErrorMessage,
+        sceneAnchorPayloadFieldNames: klingReferencePlan.sceneAnchorPayloadFieldNames,
+        sceneAnchorReferenceCount: klingReferencePlan.sceneAnchorReferenceCount,
+        sceneAnchorSubmittedReferenceCount: klingReferencePlan.sceneAnchorSubmittedReferenceCount,
+        sceneAnchorReferenceRolesUsed: klingReferencePlan.sceneAnchorReferenceRolesUsed,
+        sceneAnchorDroppedReferenceRoles: klingReferencePlan.sceneAnchorDroppedReferenceRoles,
+        sceneAnchorProviderReferenceLimit: klingReferencePlan.sceneAnchorProviderReferenceLimit,
+        sceneAnchorOutputParsed: klingReferencePlan.sceneAnchorOutputParsed,
         sceneAnchorValidation: klingReferencePlan.sceneAnchorValidation,
         primaryInputType: klingReferencePlan.primaryInputType,
         primaryVideoInputType: klingReferencePlan.primaryVideoInputType,
@@ -3456,11 +3698,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           plan: klingReferencePlan,
           referenceStrategy: klingReferencePlan.plannedStrategy,
           exactLikenessRoute: 'kling_reference',
-          providerRoute: 'replicate_kling_image_to_video',
+          providerRoute: 'fal_scene_anchor_image_generation',
           viralPresetUsed,
           promptPolished,
         }),
-        recommendedNextAction: 'Configure a scene-anchor image provider or retry after scene-anchor generation is available.',
+        recommendedNextAction: sceneAnchorFailureCategory === 'scene_anchor_model_schema_unmapped'
+          ? 'Fix the scene-anchor provider payload shape before retrying.'
+          : sceneAnchorFailureCategory === 'scene_anchor_output_parse_failed'
+            ? 'Update output parsing or inspect the redacted provider response shape before retrying.'
+            : sceneAnchorFailureCategory === 'scene_anchor_provider_moderation_block'
+              ? 'Edit the scene-anchor prompt and keep using provider-safe staging.'
+              : 'Check scene-anchor diagnostics before retrying, or explicitly choose identity-only fallback.',
         privateUrlsRedacted: true,
       });
     }
@@ -3531,6 +3779,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sceneAnchorProvider: klingReferencePlan.sceneAnchorProvider,
         sceneAnchorReason: klingReferencePlan.sceneAnchorReason,
         sceneAnchorFailureCategory: null,
+        sceneAnchorHttpStatus: klingReferencePlan.sceneAnchorHttpStatus,
+        sceneAnchorErrorType: klingReferencePlan.sceneAnchorErrorType,
+        sceneAnchorErrorMessage: klingReferencePlan.sceneAnchorErrorMessage,
+        sceneAnchorPayloadFieldNames: klingReferencePlan.sceneAnchorPayloadFieldNames,
+        sceneAnchorReferenceCount: klingReferencePlan.sceneAnchorReferenceCount,
+        sceneAnchorSubmittedReferenceCount: klingReferencePlan.sceneAnchorSubmittedReferenceCount,
+        sceneAnchorReferenceRolesUsed: klingReferencePlan.sceneAnchorReferenceRolesUsed,
+        sceneAnchorDroppedReferenceRoles: klingReferencePlan.sceneAnchorDroppedReferenceRoles,
+        sceneAnchorProviderReferenceLimit: klingReferencePlan.sceneAnchorProviderReferenceLimit,
+        sceneAnchorOutputParsed: klingReferencePlan.sceneAnchorOutputParsed,
         sceneAnchorValidation: klingReferencePlan.sceneAnchorValidation,
         primaryInputType: klingReferencePlan.primaryInputType,
         primaryVideoInputType: 'scene_anchor',

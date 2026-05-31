@@ -29,6 +29,16 @@ type ContinueStoryItem = {
   sceneAnchorProvider?: string | null;
   sceneAnchorReason?: string | null;
   sceneAnchorFailureCategory?: string | null;
+  sceneAnchorHttpStatus?: number | null;
+  sceneAnchorErrorType?: string | null;
+  sceneAnchorErrorMessage?: string | null;
+  sceneAnchorPayloadFieldNames?: string[] | null;
+  sceneAnchorReferenceCount?: number | null;
+  sceneAnchorSubmittedReferenceCount?: number | null;
+  sceneAnchorReferenceRolesUsed?: string[] | null;
+  sceneAnchorDroppedReferenceRoles?: string[] | null;
+  sceneAnchorProviderReferenceLimit?: number | null;
+  sceneAnchorOutputParsed?: boolean | null;
   sceneAnchorValidation?: Record<string, unknown> | null;
   primaryInputType?: string | null;
   primaryVideoInputType?: string | null;
@@ -119,6 +129,16 @@ export function prepareContinueStory(item: ContinueStoryItem, source: string) {
     sceneAnchorProvider: item.sceneAnchorProvider ?? null,
     sceneAnchorReason: item.sceneAnchorReason ?? null,
     sceneAnchorFailureCategory: item.sceneAnchorFailureCategory ?? null,
+    sceneAnchorHttpStatus: item.sceneAnchorHttpStatus ?? null,
+    sceneAnchorErrorType: item.sceneAnchorErrorType ?? null,
+    sceneAnchorErrorMessage: item.sceneAnchorErrorMessage ?? null,
+    sceneAnchorPayloadFieldNames: item.sceneAnchorPayloadFieldNames ?? null,
+    sceneAnchorReferenceCount: item.sceneAnchorReferenceCount ?? null,
+    sceneAnchorSubmittedReferenceCount: item.sceneAnchorSubmittedReferenceCount ?? null,
+    sceneAnchorReferenceRolesUsed: item.sceneAnchorReferenceRolesUsed ?? null,
+    sceneAnchorDroppedReferenceRoles: item.sceneAnchorDroppedReferenceRoles ?? null,
+    sceneAnchorProviderReferenceLimit: item.sceneAnchorProviderReferenceLimit ?? null,
+    sceneAnchorOutputParsed: item.sceneAnchorOutputParsed ?? null,
     sceneAnchorValidation: item.sceneAnchorValidation ?? null,
     primaryInputType: item.primaryInputType ?? null,
     primaryVideoInputType: item.primaryVideoInputType ?? null,

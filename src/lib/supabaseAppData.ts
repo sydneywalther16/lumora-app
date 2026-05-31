@@ -1654,6 +1654,16 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
       stage2ProviderModel: project.stage2ProviderModel ?? null,
       stage2ProviderRouteType: project.stage2ProviderRouteType ?? null,
       rawReferenceVisualInputsSentToStage2: project.rawReferenceVisualInputsSentToStage2 ?? null,
+      sceneAnchorHttpStatus: project.sceneAnchorHttpStatus ?? null,
+      sceneAnchorErrorType: project.sceneAnchorErrorType ?? null,
+      sceneAnchorErrorMessage: project.sceneAnchorErrorMessage ?? null,
+      sceneAnchorPayloadFieldNames: project.sceneAnchorPayloadFieldNames ?? null,
+      sceneAnchorReferenceCount: project.sceneAnchorReferenceCount ?? null,
+      sceneAnchorSubmittedReferenceCount: project.sceneAnchorSubmittedReferenceCount ?? null,
+      sceneAnchorReferenceRolesUsed: project.sceneAnchorReferenceRolesUsed ?? null,
+      sceneAnchorDroppedReferenceRoles: project.sceneAnchorDroppedReferenceRoles ?? null,
+      sceneAnchorProviderReferenceLimit: project.sceneAnchorProviderReferenceLimit ?? null,
+      sceneAnchorOutputParsed: project.sceneAnchorOutputParsed ?? null,
       audioConfigured: project.audioConfigured ?? null,
       viralPresetUsed: project.viralPresetUsed ?? null,
       promptPolished: project.promptPolished ?? null,
@@ -1937,6 +1947,25 @@ function mapProjectRow(row: DbRow): StudioProject {
     sceneAnchorGenerated: diagnosticBoolean('sceneAnchorGenerated'),
     sceneAnchorProvider: diagnosticString('sceneAnchorProvider'),
     sceneAnchorReason: diagnosticString('sceneAnchorReason'),
+    sceneAnchorFailureCategory: diagnosticString('sceneAnchorFailureCategory'),
+    sceneAnchorHttpStatus: Number.isFinite(Number(klingReferenceDiagnostics?.sceneAnchorHttpStatus))
+      ? Number(klingReferenceDiagnostics?.sceneAnchorHttpStatus)
+      : null,
+    sceneAnchorErrorType: diagnosticString('sceneAnchorErrorType'),
+    sceneAnchorErrorMessage: diagnosticString('sceneAnchorErrorMessage'),
+    sceneAnchorPayloadFieldNames: diagnosticStringList('sceneAnchorPayloadFieldNames'),
+    sceneAnchorReferenceCount: Number.isFinite(Number(klingReferenceDiagnostics?.sceneAnchorReferenceCount))
+      ? Number(klingReferenceDiagnostics?.sceneAnchorReferenceCount)
+      : null,
+    sceneAnchorSubmittedReferenceCount: Number.isFinite(Number(klingReferenceDiagnostics?.sceneAnchorSubmittedReferenceCount))
+      ? Number(klingReferenceDiagnostics?.sceneAnchorSubmittedReferenceCount)
+      : null,
+    sceneAnchorReferenceRolesUsed: diagnosticStringList('sceneAnchorReferenceRolesUsed'),
+    sceneAnchorDroppedReferenceRoles: diagnosticStringList('sceneAnchorDroppedReferenceRoles'),
+    sceneAnchorProviderReferenceLimit: Number.isFinite(Number(klingReferenceDiagnostics?.sceneAnchorProviderReferenceLimit))
+      ? Number(klingReferenceDiagnostics?.sceneAnchorProviderReferenceLimit)
+      : null,
+    sceneAnchorOutputParsed: diagnosticBoolean('sceneAnchorOutputParsed'),
     sceneAnchorValidation: diagnosticRecord('sceneAnchorValidation'),
     primaryInputType: diagnosticString('primaryInputType'),
     primaryVideoInputType: diagnosticString('primaryVideoInputType'),

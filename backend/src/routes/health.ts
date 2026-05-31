@@ -5,7 +5,7 @@ import { getEnvironmentDiagnostics } from '../lib/envDiagnostics';
 import { buildAssetPersistenceDiagnostics } from '../services/assetPersistence';
 import { buildAiCastPostDiagnostics } from '../services/aiCastPostDiagnostics';
 import { buildProviderFallbackDiagnostics } from '../services/providerFallbackOrchestrator';
-import { buildLastRenderDiagnostics } from '../services/renderDiagnostics';
+import { buildLastRenderDiagnostics, buildSceneAnchorHealthDiagnostics } from '../services/renderDiagnostics';
 import { buildAsyncRenderJobDiagnostics } from '../services/renderJobPoller';
 import { buildDatabaseDiagnostics, serializeDiagnosticError } from '../services/schemaDiagnostics';
 import { buildReferenceCleanupDiagnostics } from '../services/referenceCleanup';
@@ -148,6 +148,7 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
     const selfVerificationVideo = await getSelfVerificationVideoDiagnostics();
     const latestSeedanceVideoReferenceCanary = await getLatestSeedanceVideoReferenceCanaryStatus();
     const referenceRouteStatus = await getReferenceRouteSummary({});
+    const sceneAnchor = await safeHealthDiagnostic('sceneAnchor', buildSceneAnchorHealthDiagnostics);
     const referenceCleanup = await safeHealthDiagnostic('referenceCleanup', buildReferenceCleanupDiagnostics);
     const referenceCleanupRecord = referenceCleanup && typeof referenceCleanup === 'object'
       ? referenceCleanup as Record<string, unknown>
@@ -220,6 +221,7 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
       sceneAnchorConfigured: Boolean(env.SCENE_ANCHOR_ENABLED && env.SCENE_ANCHOR_PROVIDER !== 'none' && env.SCENE_ANCHOR_MODEL),
       sceneAnchorFallbackMode: env.SCENE_ANCHOR_FALLBACK_MODE,
       sceneAnchorPrivateUrlsRedacted: true,
+      sceneAnchor,
       exactRouteActive: exactLikeness.route === 'kling_reference' && exactLikeness.exactLikeness,
       exactProvider: exactLikeness.exactLikeness ? exactLikeness.provider : null,
       sceneAnchorStrategy: null,

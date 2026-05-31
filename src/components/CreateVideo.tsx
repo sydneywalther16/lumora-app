@@ -299,6 +299,16 @@ type GenerateVideoApiResponse = {
   sceneAnchorProvider?: string | null;
   sceneAnchorReason?: string | null;
   sceneAnchorFailureCategory?: string | null;
+  sceneAnchorHttpStatus?: number | null;
+  sceneAnchorErrorType?: string | null;
+  sceneAnchorErrorMessage?: string | null;
+  sceneAnchorPayloadFieldNames?: string[] | null;
+  sceneAnchorReferenceCount?: number | null;
+  sceneAnchorSubmittedReferenceCount?: number | null;
+  sceneAnchorReferenceRolesUsed?: string[] | null;
+  sceneAnchorDroppedReferenceRoles?: string[] | null;
+  sceneAnchorProviderReferenceLimit?: number | null;
+  sceneAnchorOutputParsed?: boolean | null;
   sceneAnchorValidation?: Record<string, unknown> | null;
   primaryInputType?: string | null;
   primaryVideoInputType?: string | null;
@@ -731,6 +741,21 @@ function klingProviderFailureMessage(category: string | null | undefined, fallba
   }
   if (category === 'kling_scene_anchor_generation_failed') {
     return 'Scene anchor generation failed. Retry scene anchor, use identity-only fallback, or edit scene.';
+  }
+  if (category === 'scene_anchor_model_schema_unmapped') {
+    return 'Kling scene anchor failed because the image provider rejected the payload shape.';
+  }
+  if (category === 'scene_anchor_output_parse_failed') {
+    return 'Kling scene anchor generated a response, but Lumora could not read the image output.';
+  }
+  if (category === 'scene_anchor_provider_moderation_block') {
+    return 'Scene anchor provider blocked this image request.';
+  }
+  if (category === 'scene_anchor_provider_disabled' || category === 'scene_anchor_provider_not_configured' || category === 'scene_anchor_fal_key_missing') {
+    return 'Scene-anchor provider is not configured. Configure a scene-anchor image provider, or use identity-only fallback.';
+  }
+  if (category && category.startsWith('scene_anchor_')) {
+    return 'Scene anchor generation failed. Check diagnostics before retrying.';
   }
   if (category === 'kling_provider_unavailable') {
     return 'Kling is temporarily unavailable. Your scene is safe to retry later.';
@@ -1785,6 +1810,17 @@ export default function CreateVideo({
             sceneAnchorGenerated: job.sceneAnchorGenerated ?? null,
             sceneAnchorProvider: job.sceneAnchorProvider ?? null,
             sceneAnchorReason: job.sceneAnchorReason ?? null,
+            sceneAnchorFailureCategory: job.sceneAnchorFailureCategory ?? null,
+            sceneAnchorHttpStatus: job.sceneAnchorHttpStatus ?? null,
+            sceneAnchorErrorType: job.sceneAnchorErrorType ?? null,
+            sceneAnchorErrorMessage: job.sceneAnchorErrorMessage ?? null,
+            sceneAnchorPayloadFieldNames: job.sceneAnchorPayloadFieldNames ?? null,
+            sceneAnchorReferenceCount: job.sceneAnchorReferenceCount ?? null,
+            sceneAnchorSubmittedReferenceCount: job.sceneAnchorSubmittedReferenceCount ?? null,
+            sceneAnchorReferenceRolesUsed: job.sceneAnchorReferenceRolesUsed ?? null,
+            sceneAnchorDroppedReferenceRoles: job.sceneAnchorDroppedReferenceRoles ?? null,
+            sceneAnchorProviderReferenceLimit: job.sceneAnchorProviderReferenceLimit ?? null,
+            sceneAnchorOutputParsed: job.sceneAnchorOutputParsed ?? null,
             sceneAnchorValidation: job.sceneAnchorValidation ?? null,
             primaryInputType: job.primaryInputType ?? null,
             primaryVideoInputType: job.primaryVideoInputType ?? null,
@@ -3111,6 +3147,32 @@ export default function CreateVideo({
       const nextSceneAnchorProvider = data.sceneAnchorProvider ?? stringFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorProvider');
       const nextSceneAnchorReason = data.sceneAnchorReason ?? stringFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorReason');
       const nextSceneAnchorFailureCategory = data.sceneAnchorFailureCategory ?? stringFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorFailureCategory');
+      const nextSceneAnchorHttpStatus = typeof data.sceneAnchorHttpStatus === 'number'
+        ? data.sceneAnchorHttpStatus
+        : numberFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorHttpStatus');
+      const nextSceneAnchorErrorType = data.sceneAnchorErrorType ?? stringFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorErrorType');
+      const nextSceneAnchorErrorMessage = data.sceneAnchorErrorMessage ?? stringFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorErrorMessage');
+      const nextSceneAnchorPayloadFieldNames = formatStringList(data.sceneAnchorPayloadFieldNames).length
+        ? formatStringList(data.sceneAnchorPayloadFieldNames)
+        : formatStringList(nextKlingDiagnosticsRecord.sceneAnchorPayloadFieldNames);
+      const nextSceneAnchorReferenceCount = typeof data.sceneAnchorReferenceCount === 'number'
+        ? data.sceneAnchorReferenceCount
+        : numberFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorReferenceCount');
+      const nextSceneAnchorSubmittedReferenceCount = typeof data.sceneAnchorSubmittedReferenceCount === 'number'
+        ? data.sceneAnchorSubmittedReferenceCount
+        : numberFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorSubmittedReferenceCount');
+      const nextSceneAnchorReferenceRolesUsed = formatStringList(data.sceneAnchorReferenceRolesUsed).length
+        ? formatStringList(data.sceneAnchorReferenceRolesUsed)
+        : formatStringList(nextKlingDiagnosticsRecord.sceneAnchorReferenceRolesUsed);
+      const nextSceneAnchorDroppedReferenceRoles = formatStringList(data.sceneAnchorDroppedReferenceRoles).length
+        ? formatStringList(data.sceneAnchorDroppedReferenceRoles)
+        : formatStringList(nextKlingDiagnosticsRecord.sceneAnchorDroppedReferenceRoles);
+      const nextSceneAnchorProviderReferenceLimit = typeof data.sceneAnchorProviderReferenceLimit === 'number'
+        ? data.sceneAnchorProviderReferenceLimit
+        : numberFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorProviderReferenceLimit');
+      const nextSceneAnchorOutputParsed = typeof data.sceneAnchorOutputParsed === 'boolean'
+        ? data.sceneAnchorOutputParsed
+        : booleanFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorOutputParsed');
       const nextSceneAnchorValidation =
         recordValue(data.sceneAnchorValidation).passed !== undefined
           ? recordValue(data.sceneAnchorValidation)
@@ -3289,6 +3351,16 @@ export default function CreateVideo({
         sceneAnchorProvider: nextSceneAnchorProvider,
         sceneAnchorReason: nextSceneAnchorReason,
         sceneAnchorFailureCategory: nextSceneAnchorFailureCategory,
+        sceneAnchorHttpStatus: nextSceneAnchorHttpStatus,
+        sceneAnchorErrorType: nextSceneAnchorErrorType,
+        sceneAnchorErrorMessage: nextSceneAnchorErrorMessage,
+        sceneAnchorPayloadFieldNames: nextSceneAnchorPayloadFieldNames.length ? nextSceneAnchorPayloadFieldNames : null,
+        sceneAnchorReferenceCount: nextSceneAnchorReferenceCount,
+        sceneAnchorSubmittedReferenceCount: nextSceneAnchorSubmittedReferenceCount,
+        sceneAnchorReferenceRolesUsed: nextSceneAnchorReferenceRolesUsed.length ? nextSceneAnchorReferenceRolesUsed : null,
+        sceneAnchorDroppedReferenceRoles: nextSceneAnchorDroppedReferenceRoles.length ? nextSceneAnchorDroppedReferenceRoles : null,
+        sceneAnchorProviderReferenceLimit: nextSceneAnchorProviderReferenceLimit,
+        sceneAnchorOutputParsed: nextSceneAnchorOutputParsed,
         sceneAnchorValidation: Object.keys(nextSceneAnchorValidation).length ? nextSceneAnchorValidation : null,
         primaryInputType: nextPrimaryInputType,
         primaryVideoInputType: nextPrimaryVideoInputType,
@@ -3369,6 +3441,16 @@ export default function CreateVideo({
           sceneAnchorProvider: nextSceneAnchorProvider,
           sceneAnchorReason: nextSceneAnchorReason,
           sceneAnchorFailureCategory: nextSceneAnchorFailureCategory,
+          sceneAnchorHttpStatus: nextSceneAnchorHttpStatus,
+          sceneAnchorErrorType: nextSceneAnchorErrorType,
+          sceneAnchorErrorMessage: nextSceneAnchorErrorMessage,
+          sceneAnchorPayloadFieldNames: nextSceneAnchorPayloadFieldNames.length ? nextSceneAnchorPayloadFieldNames : null,
+          sceneAnchorReferenceCount: nextSceneAnchorReferenceCount,
+          sceneAnchorSubmittedReferenceCount: nextSceneAnchorSubmittedReferenceCount,
+          sceneAnchorReferenceRolesUsed: nextSceneAnchorReferenceRolesUsed.length ? nextSceneAnchorReferenceRolesUsed : null,
+          sceneAnchorDroppedReferenceRoles: nextSceneAnchorDroppedReferenceRoles.length ? nextSceneAnchorDroppedReferenceRoles : null,
+          sceneAnchorProviderReferenceLimit: nextSceneAnchorProviderReferenceLimit,
+          sceneAnchorOutputParsed: nextSceneAnchorOutputParsed,
           sceneAnchorValidation: Object.keys(nextSceneAnchorValidation).length ? nextSceneAnchorValidation : null,
           primaryInputType: nextPrimaryInputType,
           primaryVideoInputType: nextPrimaryVideoInputType,
@@ -3406,6 +3488,16 @@ export default function CreateVideo({
             stage2ProviderModel: nextStage2ProviderModel,
             stage2ProviderRouteType: nextStage2ProviderRouteType,
             rawReferenceVisualInputsSentToStage2: nextRawReferenceVisualInputsSentToStage2,
+            sceneAnchorHttpStatus: nextSceneAnchorHttpStatus,
+            sceneAnchorErrorType: nextSceneAnchorErrorType,
+            sceneAnchorErrorMessage: nextSceneAnchorErrorMessage,
+            sceneAnchorPayloadFieldNames: nextSceneAnchorPayloadFieldNames.length ? nextSceneAnchorPayloadFieldNames : null,
+            sceneAnchorReferenceCount: nextSceneAnchorReferenceCount,
+            sceneAnchorSubmittedReferenceCount: nextSceneAnchorSubmittedReferenceCount,
+            sceneAnchorReferenceRolesUsed: nextSceneAnchorReferenceRolesUsed.length ? nextSceneAnchorReferenceRolesUsed : null,
+            sceneAnchorDroppedReferenceRoles: nextSceneAnchorDroppedReferenceRoles.length ? nextSceneAnchorDroppedReferenceRoles : null,
+            sceneAnchorProviderReferenceLimit: nextSceneAnchorProviderReferenceLimit,
+            sceneAnchorOutputParsed: nextSceneAnchorOutputParsed,
             audioConfigured: nextAudioConfigured,
             viralPresetUsed: nextViralPresetUsed,
             promptPolished: nextPromptPolished,

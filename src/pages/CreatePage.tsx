@@ -61,6 +61,16 @@ type RemixProjectPayload = {
   sceneAnchorProvider?: string | null;
   sceneAnchorReason?: string | null;
   sceneAnchorFailureCategory?: string | null;
+  sceneAnchorHttpStatus?: number | null;
+  sceneAnchorErrorType?: string | null;
+  sceneAnchorErrorMessage?: string | null;
+  sceneAnchorPayloadFieldNames?: string[] | null;
+  sceneAnchorReferenceCount?: number | null;
+  sceneAnchorSubmittedReferenceCount?: number | null;
+  sceneAnchorReferenceRolesUsed?: string[] | null;
+  sceneAnchorDroppedReferenceRoles?: string[] | null;
+  sceneAnchorProviderReferenceLimit?: number | null;
+  sceneAnchorOutputParsed?: boolean | null;
   sceneAnchorValidation?: Record<string, unknown> | null;
   primaryInputType?: string | null;
   primaryVideoInputType?: string | null;
