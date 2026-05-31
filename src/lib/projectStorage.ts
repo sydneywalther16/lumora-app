@@ -50,6 +50,14 @@ export type StudioProject = {
   sceneAnchorFailureCategory?: string | null;
   sceneAnchorValidation?: Record<string, unknown> | null;
   primaryInputType?: string | null;
+  primaryVideoInputType?: string | null;
+  primaryVideoInputSource?: string | null;
+  identityReferencesPassedToVideoStage?: boolean | null;
+  identityReferenceCount?: number | null;
+  identityReferenceMode?: string | null;
+  startFrameSource?: string | null;
+  posterFrameSource?: string | null;
+  firstFrameSource?: string | null;
   sceneIntent?: string[] | null;
   framingIntent?: string | null;
   primaryReferenceRole?: string | null;
@@ -183,6 +191,15 @@ export function loadStudioProjects(): StudioProject[] {
               ? project.sceneAnchorValidation as Record<string, unknown>
               : null,
           primaryInputType: typeof project.primaryInputType === 'string' ? project.primaryInputType : null,
+          primaryVideoInputType: typeof project.primaryVideoInputType === 'string' ? project.primaryVideoInputType : null,
+          primaryVideoInputSource: typeof project.primaryVideoInputSource === 'string' ? project.primaryVideoInputSource : null,
+          identityReferencesPassedToVideoStage:
+            typeof project.identityReferencesPassedToVideoStage === 'boolean' ? project.identityReferencesPassedToVideoStage : null,
+          identityReferenceCount: numberValue(project.identityReferenceCount),
+          identityReferenceMode: typeof project.identityReferenceMode === 'string' ? project.identityReferenceMode : null,
+          startFrameSource: typeof project.startFrameSource === 'string' ? project.startFrameSource : null,
+          posterFrameSource: typeof project.posterFrameSource === 'string' ? project.posterFrameSource : null,
+          firstFrameSource: typeof project.firstFrameSource === 'string' ? project.firstFrameSource : null,
           sceneIntent: Array.isArray(project.sceneIntent)
             ? project.sceneIntent.filter((item): item is string => typeof item === 'string')
             : null,

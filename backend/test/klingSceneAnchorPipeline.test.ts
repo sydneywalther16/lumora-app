@@ -3,6 +3,7 @@ import {
   analyzeKlingSceneIntent,
   buildFalSceneAnchorPayload,
   buildKlingCreateReferencePlan,
+  buildKlingVideoStageRequestInput,
   createFalSceneAnchorStill,
   detectKlingEnvironmentIntent,
   detectKlingOutfitIntent,
@@ -71,6 +72,14 @@ try {
   assert.equal(plan.providerPrimaryReference.role, 'scene_anchor');
   assert.equal(plan.providerPrimaryReference.url, 'https://assets.example/full-body-street-jeans.jpg');
   assert.equal(plan.primaryInputType, 'scene_anchor_still');
+  assert.equal(plan.primaryVideoInputType, 'scene_anchor');
+  assert.equal(plan.primaryVideoInputSource, 'scene_anchor');
+  assert.equal(plan.identityReferencesPassedToVideoStage, false);
+  assert.equal(plan.identityReferenceCount, 4);
+  assert.equal(plan.identityReferenceMode, 'stage1_only');
+  assert.equal(plan.startFrameSource, 'scene_anchor');
+  assert.equal(plan.posterFrameSource, 'video_frame');
+  assert.equal(plan.firstFrameSource, 'scene_anchor');
   assert.equal(plan.providerAdditionalReferences.length, 0);
   assert.deepEqual(plan.validationReferences.map((reference) => reference.role), ['scene_anchor']);
   assert.equal(plan.userSpecifiedOutfit, true);
@@ -116,9 +125,16 @@ try {
   assert.ok(materializedPlan);
   assert.equal(materializedPlan.providerPrimaryReference.role, 'scene_anchor');
   assert.equal(materializedPlan.providerPrimaryReference.url, 'https://assets.example/generated/garden-scene-anchor.png');
-  assert.equal(materializedPlan.providerAdditionalReferences.length, 4);
-  assert.equal(materializedPlan.providerAdditionalReferences[0].role, 'full_body');
-  assert.equal(materializedPlan.validationReferences.length, 5);
+  assert.equal(materializedPlan.providerAdditionalReferences.length, 0);
+  assert.equal(materializedPlan.validationReferences.length, 1);
+  assert.equal(materializedPlan.primaryVideoInputType, 'scene_anchor');
+  assert.equal(materializedPlan.primaryVideoInputSource, 'scene_anchor');
+  assert.equal(materializedPlan.identityReferencesPassedToVideoStage, false);
+  assert.equal(materializedPlan.identityReferenceCount, 4);
+  assert.equal(materializedPlan.identityReferenceMode, 'stage1_only');
+  assert.equal(materializedPlan.startFrameSource, 'scene_anchor');
+  assert.equal(materializedPlan.posterFrameSource, 'video_frame');
+  assert.equal(materializedPlan.firstFrameSource, 'scene_anchor');
   assert.equal(materializedPlan.sceneAnchorProvider, 'unit_scene_anchor');
   assert.equal(materializedPlan.sceneAnchorGenerated, true);
   assert.equal(materializedPlan.sceneAnchorPersisted, true);
@@ -128,9 +144,20 @@ try {
   assert.equal(materializedPlan.sceneAnchorValidation?.fullBodyVisible, true);
   assert.equal(materializedPlan.sceneAnchorValidation?.outfitMatch, true);
   assert.equal(materializedPlan.frontOnlyFallback, false);
-  assert.match(materializedPlan.promptGuidance, /use @Element1 as the primary scene-anchor composition input/i);
-  assert.match(materializedPlan.promptGuidance, /@Element2, @Element3, @Element4, @Element5 as secondary identity support only/i);
+  assert.match(materializedPlan.promptGuidance, /animate this exact staged scene/i);
+  assert.match(materializedPlan.promptGuidance, /Begin directly from the provided scene anchor/i);
+  assert.match(materializedPlan.promptGuidance, /Do not transition from a portrait\/reference image/i);
+  assert.doesNotMatch(materializedPlan.promptGuidance, /@Element2, @Element3, @Element4, @Element5 as secondary identity support/i);
   assert.doesNotMatch(materializedPlan.promptGuidance, /Use @Element1 as the full-figure identity/i);
+
+  const videoStageInput = buildKlingVideoStageRequestInput({
+    prompt: materializedPlan.promptGuidance,
+    startImageUrl: materializedPlan.providerPrimaryReference.url,
+    additionalReferences: materializedPlan.references.map((reference) => reference.url),
+    identityReferencesPassedToVideoStage: materializedPlan.identityReferencesPassedToVideoStage,
+  });
+  assert.equal(videoStageInput.start_image, 'https://assets.example/generated/garden-scene-anchor.png');
+  assert.equal('reference_images' in videoStageInput, false);
 
   const unavailablePlan = await prepareKlingCreateReferencePlanForProvider({
     plan: buildKlingCreateReferencePlan({
@@ -259,6 +286,14 @@ try {
   assert.equal(diagnostics.sceneAnchorPersisted, true);
   assert.equal(diagnostics.sceneAnchorFailureCategory, null);
   assert.equal(diagnostics.primaryInputType, 'scene_anchor_still');
+  assert.equal(diagnostics.primaryVideoInputType, 'scene_anchor');
+  assert.equal(diagnostics.primaryVideoInputSource, 'scene_anchor');
+  assert.equal(diagnostics.identityReferencesPassedToVideoStage, false);
+  assert.equal(diagnostics.identityReferenceCount, 4);
+  assert.equal(diagnostics.identityReferenceMode, 'stage1_only');
+  assert.equal(diagnostics.startFrameSource, 'scene_anchor');
+  assert.equal(diagnostics.posterFrameSource, 'video_frame');
+  assert.equal(diagnostics.firstFrameSource, 'scene_anchor');
   assert.equal((diagnostics.sceneAnchorValidation as Record<string, unknown>).passed, true);
   assert.equal(diagnostics.userSpecifiedOutfit, true);
   assert.deepEqual(diagnostics.outfitTermsDetected, ['flowing ivory dress']);
@@ -316,6 +351,14 @@ try {
       sceneAnchorReason: materializedPlan.sceneAnchorReason,
       sceneAnchorValidation: materializedPlan.sceneAnchorValidation,
       primaryInputType: materializedPlan.primaryInputType,
+      primaryVideoInputType: materializedPlan.primaryVideoInputType,
+      primaryVideoInputSource: materializedPlan.primaryVideoInputSource,
+      identityReferencesPassedToVideoStage: materializedPlan.identityReferencesPassedToVideoStage,
+      identityReferenceCount: materializedPlan.identityReferenceCount,
+      identityReferenceMode: materializedPlan.identityReferenceMode,
+      startFrameSource: materializedPlan.startFrameSource,
+      posterFrameSource: materializedPlan.posterFrameSource,
+      firstFrameSource: materializedPlan.firstFrameSource,
       sceneIntent: materializedPlan.sceneIntent,
       framingIntent: materializedPlan.framingIntent,
       primaryReferenceRole: materializedPlan.primaryReferenceRole,
@@ -333,6 +376,11 @@ try {
     assert.equal(payload.referenceStrategy, 'scene_anchor_still');
     assert.equal(payload.sceneAnchorStrategy, 'scene_anchor_still');
     assert.equal(payload.primaryInputType, 'scene_anchor_still');
+    assert.equal(payload.primaryVideoInputType, 'scene_anchor');
+    assert.equal(payload.primaryVideoInputSource, 'scene_anchor');
+    assert.equal(payload.identityReferencesPassedToVideoStage, false);
+    assert.equal(payload.identityReferenceMode, 'stage1_only');
+    assert.equal(payload.startFrameSource, 'scene_anchor');
     assert.equal((payload.sceneAnchorValidation as Record<string, unknown>).passed, true);
     assert.equal(payload.compositionCarryoverSuppressed, true);
     assert.deepEqual(payload.outfitTermsDetected, ['flowing ivory dress']);

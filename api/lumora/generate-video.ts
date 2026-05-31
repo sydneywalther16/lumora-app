@@ -90,6 +90,35 @@ type KlingSceneAnchorStrategy =
   | 'composite_identity_sheet'
   | 'front_only_fallback';
 
+type KlingPrimaryVideoInputType =
+  | 'scene_anchor'
+  | 'identity_reference'
+  | 'identity_sheet'
+  | 'unknown';
+
+type KlingPrimaryVideoInputSource =
+  | 'scene_anchor'
+  | 'front_identity_reference'
+  | 'side_identity_reference'
+  | 'full_body_identity_reference'
+  | 'additional_identity_reference'
+  | 'identity_sheet'
+  | 'unknown';
+
+type KlingIdentityReferenceMode =
+  | 'stage1_only'
+  | 'video_stage_secondary'
+  | 'identity_prompt_only';
+
+type KlingFrameSource =
+  | 'scene_anchor'
+  | 'video_frame'
+  | 'provider_poster'
+  | 'provider_video'
+  | 'identity_reference'
+  | 'identity_sheet'
+  | 'unknown';
+
 type KlingSceneIntent =
   | 'portrait_closeup'
   | 'seated'
@@ -181,6 +210,14 @@ type KlingCreateReferencePlan = {
   sceneAnchorFailureReason: string | null;
   sceneAnchorValidation: KlingSceneAnchorValidation | null;
   primaryInputType: 'scene_anchor_still' | 'identity_sheet' | 'identity_reference';
+  primaryVideoInputType: KlingPrimaryVideoInputType;
+  primaryVideoInputSource: KlingPrimaryVideoInputSource;
+  identityReferencesPassedToVideoStage: boolean;
+  identityReferenceCount: number;
+  identityReferenceMode: KlingIdentityReferenceMode;
+  startFrameSource: KlingFrameSource;
+  posterFrameSource: KlingFrameSource;
+  firstFrameSource: KlingFrameSource;
   fallbackAllowed: boolean;
   sceneIntent: KlingSceneIntent[];
   framingIntent: KlingFramingIntent;
@@ -1233,10 +1270,58 @@ function validateKlingSceneAnchorStill(input: {
   };
 }
 
+function primaryVideoSourceForReference(reference: KlingCreateReferenceEntry | null | undefined): KlingPrimaryVideoInputSource {
+  if (!reference) return 'unknown';
+  if (reference.role === 'scene_anchor') return 'scene_anchor';
+  if (reference.role === 'identity_sheet') return 'identity_sheet';
+  if (reference.role === 'front_angle') return 'front_identity_reference';
+  if (reference.role === 'full_body') return 'full_body_identity_reference';
+  if (reference.role === 'side_angle_left' || reference.role === 'side_angle_right') return 'side_identity_reference';
+  if (reference.role === 'additional_reference') return 'additional_identity_reference';
+  return 'unknown';
+}
+
+function syncKlingVideoStageMetadata(plan: KlingCreateReferencePlan) {
+  const sceneAnchorIsReady = plan.sceneAnchorGenerated && plan.providerPrimaryReference.role === 'scene_anchor';
+  const sceneAnchorPlanned = plan.providerPrimaryReference.role === 'scene_anchor' || plan.primaryInputType === 'scene_anchor_still';
+  const primaryIsIdentitySheet = plan.providerPrimaryReference.role === 'identity_sheet';
+  const primaryInputType: KlingPrimaryVideoInputType = sceneAnchorPlanned
+    ? 'scene_anchor'
+    : primaryIsIdentitySheet
+      ? 'identity_sheet'
+      : plan.primaryInputType === 'identity_sheet'
+        ? 'identity_sheet'
+        : 'identity_reference';
+  const identityRefsPassed = !sceneAnchorPlanned && plan.providerAdditionalReferences.length > 0;
+
+  plan.primaryVideoInputType = primaryInputType;
+  plan.primaryVideoInputSource = sceneAnchorPlanned
+    ? 'scene_anchor'
+    : primaryVideoSourceForReference(plan.providerPrimaryReference);
+  plan.identityReferencesPassedToVideoStage = identityRefsPassed;
+  plan.identityReferenceCount = plan.references.length;
+  plan.identityReferenceMode = sceneAnchorPlanned
+    ? 'stage1_only'
+    : identityRefsPassed
+      ? 'video_stage_secondary'
+      : 'identity_prompt_only';
+  plan.startFrameSource = sceneAnchorPlanned
+    ? 'scene_anchor'
+    : primaryInputType === 'identity_sheet'
+      ? 'identity_sheet'
+      : 'identity_reference';
+  plan.posterFrameSource = 'video_frame';
+  plan.firstFrameSource = sceneAnchorPlanned ? 'scene_anchor' : 'provider_video';
+  return plan;
+}
+
 function buildKlingStageTwoPromptGuidance(plan: KlingCreateReferencePlan) {
-  const identitySupport = plan.providerAdditionalReferences.length
-    ? `Use ${plan.providerAdditionalReferences.map((reference) => reference.token).join(', ')} as secondary identity support only for face, hair, proportions, and silhouette continuity.`
-    : 'Use saved identity references as secondary identity support only when available.';
+  const sceneAnchorIsReady = plan.sceneAnchorGenerated && plan.providerPrimaryReference.role === 'scene_anchor';
+  const identitySupport = sceneAnchorIsReady
+    ? 'Saved identity references are baked into the scene anchor from Stage 1; use them as continuity guidance only, not as video-stage start frames.'
+    : plan.providerAdditionalReferences.length
+      ? `Use ${plan.providerAdditionalReferences.map((reference) => reference.token).join(', ')} as secondary identity support only for face, hair, proportions, and silhouette continuity.`
+      : 'Use saved identity references as secondary identity support only when available.';
   const outfit = plan.userSpecifiedOutfit
     ? `Keep the requested outfit visible and dominant: ${plan.outfitTermsDetected.join(', ')}.`
     : 'Keep wardrobe driven by the scene prompt rather than copied from identity references.';
@@ -1248,12 +1333,19 @@ function buildKlingStageTwoPromptGuidance(plan: KlingCreateReferencePlan) {
     plan.identityPrompt,
     plan.scenePrompt,
     plan.motionPrompt,
-    'Stage 2 Kling video: use @Element1 as the primary scene-anchor composition input and opening frame.',
+    sceneAnchorIsReady
+      ? 'Stage 2 Kling video: animate this exact staged scene. Begin directly from the provided scene anchor as the opening frame and primary start image.'
+      : 'Stage 2 Kling video: use @Element1 as the primary visual input.',
     identitySupport,
     outfit,
     environment,
-    'Animate the scene anchor into natural motion while preserving the saved self-character identity.',
+    sceneAnchorIsReady
+      ? 'Preserve the existing outfit, environment, framing, and clean silhouette from the scene anchor while keeping the same character identity, copper hair, face, and body proportions.'
+      : 'Animate the provided visual input into natural motion while preserving the saved self-character identity.',
     'For walking, standing, open-space, or full-body prompts, open in medium-wide or full-body framing with visible ground, visible environment, clear silhouette, relaxed arm movement, and gentle hair motion.',
+    sceneAnchorIsReady
+      ? 'Do not transition from a portrait/reference image. Do not introduce a front-facing portrait opening.'
+      : '',
     'Keep the frame free of chair backs, furniture, seated pose, tight portrait crop, neutral studio backdrop, and source-photo background props unless the user requested them.',
   ].filter(Boolean).join(' ');
 }
@@ -1293,7 +1385,7 @@ function applyExplicitKlingIdentityOnlyFallback(plan: KlingCreateReferencePlan):
     plan.motionPrompt,
     'Identity-only Kling fallback: use saved references only for identity while building the requested scene. This fallback may copy reference-photo pose, outfit, or background more strongly than scene-anchor mode.',
   ].filter(Boolean).join(' ');
-  return plan;
+  return syncKlingVideoStageMetadata(plan);
 }
 
 export async function prepareKlingCreateReferencePlanForProvider(input: {
@@ -1344,7 +1436,7 @@ export async function prepareKlingCreateReferencePlanForProvider(input: {
         heuristicOnly: true,
         failureReasons: [sceneAnchorProvider.reason],
       };
-      return plan;
+      return syncKlingVideoStageMetadata(plan);
     }
 
     const generator = input.sceneAnchorGenerator ?? (async (asset: {
@@ -1405,7 +1497,7 @@ export async function prepareKlingCreateReferencePlanForProvider(input: {
           plan.sceneAnchorFailureReason =
             'Scene-anchor generation did not pass framing, outfit, environment, or carryover checks.';
           plan.sceneAnchorValidation = validation;
-          return plan;
+          return syncKlingVideoStageMetadata(plan);
         }
 
         plan.providerPrimaryReference = {
@@ -1414,11 +1506,8 @@ export async function prepareKlingCreateReferencePlanForProvider(input: {
           url: generated.url,
           token: '@Element1',
         };
-        plan.providerAdditionalReferences = plan.references.map((reference, index) => ({
-          ...reference,
-          token: `@Element${index + 2}`,
-        }));
-        plan.validationReferences = [plan.providerPrimaryReference, ...plan.providerAdditionalReferences];
+        plan.providerAdditionalReferences = [];
+        plan.validationReferences = [plan.providerPrimaryReference];
         plan.sceneAnchorGenerated = true;
         plan.sceneAnchorProvider = generated.provider;
         plan.sceneAnchorReason = 'scene_anchor_generated_and_validated';
@@ -1430,6 +1519,7 @@ export async function prepareKlingCreateReferencePlanForProvider(input: {
         plan.frontOnlyFallback = false;
         plan.referenceOutfitCarryoverSuppressed = plan.userSpecifiedOutfit;
         plan.compositionCarryoverSuppressed = plan.compositionNeutralized;
+        syncKlingVideoStageMetadata(plan);
         plan.promptGuidance = buildKlingStageTwoPromptGuidance(plan);
         return plan;
       } catch (error) {
@@ -1458,10 +1548,10 @@ export async function prepareKlingCreateReferencePlanForProvider(input: {
       heuristicOnly: true,
       failureReasons: ['scene_anchor_generation_failed'],
     };
-    return plan;
+    return syncKlingVideoStageMetadata(plan);
   }
 
-  if (!isDataImageUrl(plan.providerPrimaryReference.url)) return plan;
+  if (!isDataImageUrl(plan.providerPrimaryReference.url)) return syncKlingVideoStageMetadata(plan);
 
   const parsed = parseBase64DataUrl(plan.providerPrimaryReference.url);
   if (!parsed) {
@@ -1477,7 +1567,7 @@ export async function prepareKlingCreateReferencePlanForProvider(input: {
     plan.sceneAnchorPersisted = false;
     plan.referenceOutfitCarryoverSuppressed = false;
     plan.compositionCarryoverSuppressed = false;
-    return plan;
+    return syncKlingVideoStageMetadata(plan);
   }
 
   try {
@@ -1518,7 +1608,7 @@ export async function prepareKlingCreateReferencePlanForProvider(input: {
     plan.sceneAnchorReason = 'composite_identity_sheet_materialized';
     plan.sceneAnchorFailureCategory = null;
     plan.sceneAnchorPersisted = true;
-    return plan;
+    return syncKlingVideoStageMetadata(plan);
   } catch (error) {
     console.warn('Kling composite identity sheet materialization failed; falling back to direct identity references.', {
       error: errorMessage(error),
@@ -1539,7 +1629,7 @@ export async function prepareKlingCreateReferencePlanForProvider(input: {
     plan.supportingReferenceRoles = directReferences.slice(1).map((reference) => reference.role);
     plan.referenceOutfitCarryoverSuppressed = false;
     plan.compositionCarryoverSuppressed = false;
-    return plan;
+    return syncKlingVideoStageMetadata(plan);
   }
 }
 
@@ -1927,7 +2017,7 @@ export function buildKlingCreateReferencePlan(input: {
       ].filter(Boolean).join(' ')
     : '';
 
-  return {
+  const plan: KlingCreateReferencePlan = {
     primaryReference,
     references,
     additionalReferences,
@@ -1959,6 +2049,26 @@ export function buildKlingCreateReferencePlan(input: {
     primaryInputType: plannedStrategy === 'scene_anchor_still'
       ? 'scene_anchor_still'
       : 'identity_reference',
+    primaryVideoInputType: plannedStrategy === 'scene_anchor_still'
+      ? 'scene_anchor'
+      : providerPrimaryReference.role === 'identity_sheet'
+        ? 'identity_sheet'
+        : 'identity_reference',
+    primaryVideoInputSource: plannedStrategy === 'scene_anchor_still'
+      ? 'scene_anchor'
+      : primaryVideoSourceForReference(providerPrimaryReference),
+    identityReferencesPassedToVideoStage: providerAdditionalReferences.length > 0,
+    identityReferenceCount: references.length,
+    identityReferenceMode: providerAdditionalReferences.length > 0
+      ? 'video_stage_secondary'
+      : 'identity_prompt_only',
+    startFrameSource: plannedStrategy === 'scene_anchor_still'
+      ? 'scene_anchor'
+      : providerPrimaryReference.role === 'identity_sheet'
+        ? 'identity_sheet'
+        : 'identity_reference',
+    posterFrameSource: 'video_frame',
+    firstFrameSource: plannedStrategy === 'scene_anchor_still' ? 'scene_anchor' : 'provider_video',
     fallbackAllowed: plannedStrategy === 'front_only_fallback',
     sceneIntent: sceneIntent.sceneIntent,
     framingIntent: sceneIntent.framingIntent,
@@ -1973,6 +2083,8 @@ export function buildKlingCreateReferencePlan(input: {
     environmentTermsDetected: environmentIntent.environmentTermsDetected,
     frontOnlyFallback: plannedStrategy === 'front_only_fallback',
   };
+
+  return syncKlingVideoStageMetadata(plan);
 }
 
 function firstReferenceImageUrl(
@@ -2065,6 +2177,14 @@ export function klingReferenceDiagnostics(input: {
     sceneAnchorRequired: Boolean(input.plan?.sceneAnchorRequired),
     sceneAnchorValidation: input.plan?.sceneAnchorValidation ?? null,
     primaryInputType: input.plan?.primaryInputType ?? null,
+    primaryVideoInputType: input.plan?.primaryVideoInputType ?? null,
+    primaryVideoInputSource: input.plan?.primaryVideoInputSource ?? null,
+    identityReferencesPassedToVideoStage: Boolean(input.plan?.identityReferencesPassedToVideoStage),
+    identityReferenceCount: input.plan?.identityReferenceCount ?? references.length,
+    identityReferenceMode: input.plan?.identityReferenceMode ?? null,
+    startFrameSource: input.plan?.startFrameSource ?? null,
+    posterFrameSource: input.plan?.posterFrameSource ?? null,
+    firstFrameSource: input.plan?.firstFrameSource ?? null,
     referenceRolesUsed: references.map((reference) => reference.role),
     referenceCount: references.length,
     primaryReferenceRole: input.plan?.primaryReferenceRole ?? null,
@@ -2137,6 +2257,23 @@ function normalizeDuration(value: unknown): number {
     : Number.parseInt(textValue(value), 10);
 
   return Number.isFinite(duration) && duration > 0 ? Math.round(duration) : 8;
+}
+
+export function buildKlingVideoStageRequestInput(input: {
+  prompt: string;
+  startImageUrl: string;
+  additionalReferences?: string[];
+  identityReferencesPassedToVideoStage?: boolean;
+}) {
+  const additionalReferences = input.identityReferencesPassedToVideoStage === false
+    ? []
+    : input.additionalReferences ?? [];
+
+  return {
+    prompt: input.prompt,
+    start_image: input.startImageUrl,
+    ...(additionalReferences.length ? { reference_images: additionalReferences } : {}),
+  };
 }
 
 function isSeedanceEngine(body: GenerateVideoBody): boolean {
@@ -2655,6 +2792,7 @@ async function runKlingImageToVideo(input: {
   providerFallback?: boolean;
   safetyFallback?: boolean;
   fallbackToStartImageOnly?: boolean;
+  identityReferencesPassedToVideoStage?: boolean;
 }) {
   const models = uniqueModels([
     input.primaryModel ?? KLING_IMAGE_TO_VIDEO_MODEL,
@@ -2692,11 +2830,12 @@ async function runKlingImageToVideo(input: {
       await sleep(KLING_SECONDARY_FALLBACK_DELAY_MS);
     }
 
-    const requestInput = {
+    const requestInput = buildKlingVideoStageRequestInput({
       prompt: input.prompt,
-      start_image: input.referenceImageUrl,
-      ...(input.additionalReferences.length ? { reference_images: input.additionalReferences } : {}),
-    };
+      startImageUrl: input.referenceImageUrl,
+      additionalReferences: input.additionalReferences,
+      identityReferencesPassedToVideoStage: input.identityReferencesPassedToVideoStage,
+    });
 
     try {
       return await runReplicateWithRateLimitRetry({
@@ -2813,6 +2952,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const additionalReferences = klingReferencePlan
       ? klingReferencePlan?.providerAdditionalReferences.map((reference) => reference.url) ?? []
       : additionalReferenceImageUrls(body, referenceImageUrl);
+    const identityReferencesPassedToVideoStage = klingReferencePlan
+      ? klingReferencePlan.identityReferencesPassedToVideoStage
+      : additionalReferences.length > 0;
     const responseReferenceImageUrl = klingReferencePlan?.primaryReference.url ?? providerReferenceImageUrl;
     const responseAdditionalReferenceImageUrls = klingReferencePlan
       ? klingReferencePlan.additionalReferences.map((reference) => reference.url)
@@ -2872,6 +3014,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       sceneIntent: klingReferencePlan?.sceneIntent ?? [],
       framingIntent: klingReferencePlan?.framingIntent ?? null,
       primaryReferenceRole: klingReferencePlan?.primaryReferenceRole ?? null,
+      primaryVideoInputType: klingReferencePlan?.primaryVideoInputType ?? null,
+      primaryVideoInputSource: klingReferencePlan?.primaryVideoInputSource ?? null,
+      identityReferencesPassedToVideoStage,
+      identityReferenceCount: klingReferencePlan?.identityReferenceCount ?? additionalReferences.length + 1,
+      startFrameSource: klingReferencePlan?.startFrameSource ?? null,
+      posterFrameSource: klingReferencePlan?.posterFrameSource ?? null,
+      firstFrameSource: klingReferencePlan?.firstFrameSource ?? null,
       referenceRolesUsed: klingReferencePlan?.references.map((reference) => reference.role) ?? [],
       privateUrlsRedacted: true,
     });
@@ -2908,6 +3057,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sceneAnchorFailureCategory,
         sceneAnchorValidation: klingReferencePlan.sceneAnchorValidation,
         primaryInputType: klingReferencePlan.primaryInputType,
+        primaryVideoInputType: klingReferencePlan.primaryVideoInputType,
+        primaryVideoInputSource: klingReferencePlan.primaryVideoInputSource,
+        identityReferencesPassedToVideoStage: klingReferencePlan.identityReferencesPassedToVideoStage,
+        identityReferenceCount: klingReferencePlan.identityReferenceCount,
+        identityReferenceMode: klingReferencePlan.identityReferenceMode,
+        startFrameSource: klingReferencePlan.startFrameSource,
+        posterFrameSource: klingReferencePlan.posterFrameSource,
+        firstFrameSource: klingReferencePlan.firstFrameSource,
         frontOnlyFallback: false,
         referenceStrategy: klingReferencePlan.plannedStrategy,
         referenceRolesUsed: klingReferencePlan.references.map((reference) => reference.role),
@@ -2971,11 +3128,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const model = (process.env.REPLICATE_IMAGE_TO_VIDEO_MODEL || KLING_IMAGE_TO_VIDEO_MODEL) as ReplicateModelIdentifier;
-      const requestInput = {
+      const requestInput = buildKlingVideoStageRequestInput({
         prompt: promptForModel,
-        start_image: providerReferenceImageUrl,
-        ...(additionalReferences.length ? { reference_images: additionalReferences } : {}),
-      };
+        startImageUrl: providerReferenceImageUrl,
+        additionalReferences,
+        identityReferencesPassedToVideoStage,
+      });
       const generationModeUsed: GenerationModeUsed = klingExactLikenessRequest
         ? 'kling-exact-likeness-reference'
         : keyframeUrl
@@ -2990,6 +3148,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         prompt: requestInput.prompt,
         inputKeys: Object.keys(requestInput),
         referenceCount: 1 + additionalReferences.length,
+        identityReferencesPassedToVideoStage,
         privateUrlsRedacted: true,
       });
 
@@ -3044,6 +3203,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           sceneAnchorFailureCategory: klingReferencePlan?.sceneAnchorFailureCategory ?? null,
           sceneAnchorValidation: klingReferencePlan?.sceneAnchorValidation ?? null,
           primaryInputType: klingReferencePlan?.primaryInputType ?? null,
+          primaryVideoInputType: klingReferencePlan?.primaryVideoInputType ?? null,
+          primaryVideoInputSource: klingReferencePlan?.primaryVideoInputSource ?? null,
+          identityReferencesPassedToVideoStage,
+          identityReferenceCount: klingReferencePlan?.identityReferenceCount ?? 1 + additionalReferences.length,
+          identityReferenceMode: klingReferencePlan?.identityReferenceMode ?? null,
+          startFrameSource: klingReferencePlan?.startFrameSource ?? null,
+          posterFrameSource: klingReferencePlan?.posterFrameSource ?? null,
+          firstFrameSource: klingReferencePlan?.firstFrameSource ?? null,
           sceneIntent: klingReferencePlan?.sceneIntent ?? [],
           framingIntent: klingReferencePlan?.framingIntent ?? null,
           primaryReferenceRole: klingReferencePlan?.primaryReferenceRole ?? null,
@@ -3265,11 +3432,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const model = (process.env.REPLICATE_IMAGE_TO_VIDEO_MODEL || KLING_IMAGE_TO_VIDEO_MODEL) as ReplicateModelIdentifier;
-    const requestInput = {
+    const requestInput = buildKlingVideoStageRequestInput({
       prompt: promptForModel,
-      start_image: providerReferenceImageUrl,
-      ...(additionalReferences.length ? { reference_images: additionalReferences } : {}),
-    };
+      startImageUrl: providerReferenceImageUrl,
+      additionalReferences,
+      identityReferencesPassedToVideoStage,
+    });
     const generationModeUsed: GenerationModeUsed = klingExactLikenessRequest
       ? 'kling-exact-likeness-reference'
       : keyframeUrl
@@ -3283,6 +3451,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       finalPrompt: promptForModel,
       generationModeUsed,
       identityId: textValue(body.identityId),
+      identityReferencesPassedToVideoStage,
       privateUrlsRedacted: true,
     });
     console.log('GENERATION ENGINE USED', {
@@ -3294,6 +3463,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       prompt: requestInput.prompt,
       inputKeys: Object.keys(requestInput),
       referenceCount: 1 + additionalReferences.length,
+      identityReferencesPassedToVideoStage,
       privateUrlsRedacted: true,
     });
 
@@ -3308,7 +3478,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       primaryModel: model,
       durationSent: null,
       generationModeUsed,
-      fallbackToStartImageOnly: !klingExactLikenessRequest || additionalReferences.length === 0,
+      fallbackToStartImageOnly: !klingExactLikenessRequest || additionalReferences.length === 0 || identityReferencesPassedToVideoStage === false,
+      identityReferencesPassedToVideoStage,
     });
 
     console.log('FINAL VIDEO URL:', result.videoUrl);
@@ -3351,6 +3522,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       sceneAnchorFailureCategory: klingReferencePlan?.sceneAnchorFailureCategory ?? null,
       sceneAnchorValidation: klingReferencePlan?.sceneAnchorValidation ?? null,
       primaryInputType: klingReferencePlan?.primaryInputType ?? null,
+      primaryVideoInputType: klingReferencePlan?.primaryVideoInputType ?? null,
+      primaryVideoInputSource: klingReferencePlan?.primaryVideoInputSource ?? null,
+      identityReferencesPassedToVideoStage,
+      identityReferenceCount: klingReferencePlan?.identityReferenceCount ?? 1 + additionalReferences.length,
+      identityReferenceMode: klingReferencePlan?.identityReferenceMode ?? null,
+      startFrameSource: klingReferencePlan?.startFrameSource ?? null,
+      posterFrameSource: klingReferencePlan?.posterFrameSource ?? null,
+      firstFrameSource: klingReferencePlan?.firstFrameSource ?? null,
       userSpecifiedOutfit: Boolean(klingReferencePlan?.userSpecifiedOutfit),
       outfitTermsDetected: klingReferencePlan?.outfitTermsDetected ?? [],
       environmentTermsDetected: klingReferencePlan?.environmentTermsDetected ?? [],

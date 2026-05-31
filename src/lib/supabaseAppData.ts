@@ -1643,6 +1643,14 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
     const posterUrl = generatedMedia.hasVerifiedVideo ? generatedMedia.posterUrl : getBestPoster(project);
     const klingDiagnostics = cleanJsonRecord({
       ...(project.klingReferenceDiagnostics ?? {}),
+      primaryVideoInputType: project.primaryVideoInputType ?? null,
+      primaryVideoInputSource: project.primaryVideoInputSource ?? null,
+      identityReferencesPassedToVideoStage: project.identityReferencesPassedToVideoStage ?? null,
+      identityReferenceCount: project.identityReferenceCount ?? null,
+      identityReferenceMode: project.identityReferenceMode ?? null,
+      startFrameSource: project.startFrameSource ?? null,
+      posterFrameSource: project.posterFrameSource ?? null,
+      firstFrameSource: project.firstFrameSource ?? null,
       audioConfigured: project.audioConfigured ?? null,
       viralPresetUsed: project.viralPresetUsed ?? null,
       promptPolished: project.promptPolished ?? null,
@@ -1928,6 +1936,16 @@ function mapProjectRow(row: DbRow): StudioProject {
     sceneAnchorReason: diagnosticString('sceneAnchorReason'),
     sceneAnchorValidation: diagnosticRecord('sceneAnchorValidation'),
     primaryInputType: diagnosticString('primaryInputType'),
+    primaryVideoInputType: diagnosticString('primaryVideoInputType'),
+    primaryVideoInputSource: diagnosticString('primaryVideoInputSource'),
+    identityReferencesPassedToVideoStage: diagnosticBoolean('identityReferencesPassedToVideoStage'),
+    identityReferenceCount: Number.isFinite(Number(klingReferenceDiagnostics?.identityReferenceCount))
+      ? Number(klingReferenceDiagnostics?.identityReferenceCount)
+      : null,
+    identityReferenceMode: diagnosticString('identityReferenceMode'),
+    startFrameSource: diagnosticString('startFrameSource'),
+    posterFrameSource: diagnosticString('posterFrameSource'),
+    firstFrameSource: diagnosticString('firstFrameSource'),
     sceneIntent: diagnosticStringList('sceneIntent'),
     framingIntent: diagnosticString('framingIntent'),
     primaryReferenceRole: diagnosticString('primaryReferenceRole'),

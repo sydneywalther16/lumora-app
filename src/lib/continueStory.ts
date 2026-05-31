@@ -31,6 +31,14 @@ type ContinueStoryItem = {
   sceneAnchorFailureCategory?: string | null;
   sceneAnchorValidation?: Record<string, unknown> | null;
   primaryInputType?: string | null;
+  primaryVideoInputType?: string | null;
+  primaryVideoInputSource?: string | null;
+  identityReferencesPassedToVideoStage?: boolean | null;
+  identityReferenceCount?: number | null;
+  identityReferenceMode?: string | null;
+  startFrameSource?: string | null;
+  posterFrameSource?: string | null;
+  firstFrameSource?: string | null;
   sceneIntent?: string[] | null;
   framingIntent?: string | null;
   primaryReferenceRole?: string | null;
@@ -110,6 +118,14 @@ export function prepareContinueStory(item: ContinueStoryItem, source: string) {
     sceneAnchorFailureCategory: item.sceneAnchorFailureCategory ?? null,
     sceneAnchorValidation: item.sceneAnchorValidation ?? null,
     primaryInputType: item.primaryInputType ?? null,
+    primaryVideoInputType: item.primaryVideoInputType ?? null,
+    primaryVideoInputSource: item.primaryVideoInputSource ?? null,
+    identityReferencesPassedToVideoStage: item.identityReferencesPassedToVideoStage ?? null,
+    identityReferenceCount: item.identityReferenceCount ?? null,
+    identityReferenceMode: item.identityReferenceMode ?? null,
+    startFrameSource: item.startFrameSource ?? null,
+    posterFrameSource: item.posterFrameSource ?? null,
+    firstFrameSource: item.firstFrameSource ?? null,
     sceneIntent: item.sceneIntent ?? null,
     framingIntent: item.framingIntent ?? null,
     primaryReferenceRole: item.primaryReferenceRole ?? null,

@@ -67,11 +67,15 @@ const klingDraftLabels = buildDraftAiCastLabels({
   generationMode: 'kling-exact-likeness-reference',
   sceneAnchorStrategy: 'scene_anchor_still',
   primaryInputType: 'scene_anchor_still',
+  startFrameSource: 'scene_anchor',
+  identityReferencesPassedToVideoStage: false,
   audioConfigured: false,
 });
 assert.deepEqual(klingDraftLabels, [
   'Kling exact likeness',
   'Scene-anchor-first',
+  'Starts from scene anchor',
+  'Identity references baked into anchor',
   'Continue Story ready',
   'No audio',
 ]);

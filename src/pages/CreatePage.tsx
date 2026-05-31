@@ -63,6 +63,14 @@ type RemixProjectPayload = {
   sceneAnchorFailureCategory?: string | null;
   sceneAnchorValidation?: Record<string, unknown> | null;
   primaryInputType?: string | null;
+  primaryVideoInputType?: string | null;
+  primaryVideoInputSource?: string | null;
+  identityReferencesPassedToVideoStage?: boolean | null;
+  identityReferenceCount?: number | null;
+  identityReferenceMode?: string | null;
+  startFrameSource?: string | null;
+  posterFrameSource?: string | null;
+  firstFrameSource?: string | null;
   sceneIntent?: string[] | null;
   framingIntent?: string | null;
   primaryReferenceRole?: string | null;

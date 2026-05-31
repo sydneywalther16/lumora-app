@@ -46,6 +46,9 @@ type DraftLabelInput = {
   generationMode?: string | null;
   sceneAnchorStrategy?: string | null;
   primaryInputType?: string | null;
+  startFrameSource?: string | null;
+  identityReferencesPassedToVideoStage?: boolean | null;
+  identityReferenceMode?: string | null;
   referenceStrategy?: string | null;
   sceneAnchorGenerated?: boolean | null;
   audioConfigured?: boolean | null;
@@ -56,6 +59,10 @@ type ContinueStoryInput = {
   generationMode?: string | null;
   sceneAnchorStrategy?: string | null;
   referenceStrategy?: string | null;
+  startFrameSource?: string | null;
+  identityReferencesPassedToVideoStage?: boolean | null;
+  identityReferenceMode?: string | null;
+  klingReferenceDiagnostics?: Record<string, unknown> | null;
   outfitTermsDetected?: string[] | null;
   environmentTermsDetected?: string[] | null;
   framingIntent?: string | null;
@@ -252,6 +259,10 @@ export function buildDraftAiCastLabels(job: DraftLabelInput): string[] {
     labels.push('Kling exact likeness');
     if (job.sceneAnchorStrategy === 'scene_anchor_still' || job.primaryInputType === 'scene_anchor_still') {
       labels.push('Scene-anchor-first');
+      if (job.startFrameSource === 'scene_anchor') labels.push('Starts from scene anchor');
+      if (job.identityReferencesPassedToVideoStage === false || job.identityReferenceMode === 'stage1_only') {
+        labels.push('Identity references baked into anchor');
+      }
     } else if (
       job.referenceStrategy === 'direct_identity_references' ||
       job.sceneAnchorStrategy === 'direct_identity_references'
@@ -280,8 +291,12 @@ export function buildContinueStoryScaffold(item: ContinueStoryInput) {
   const environment = item.environmentTermsDetected?.length
     ? ` Keep visual continuity with ${item.environmentTermsDetected.join(', ')} unless the next beat changes setting.`
     : '';
-  const anchor = item.sceneAnchorStrategy === 'scene_anchor_still'
-    ? ' Continue with scene-anchor-first exact-likeness planning.'
+  const diagnostics = item.klingReferenceDiagnostics ?? {};
+  const diagnosticSceneAnchorStrategy = typeof diagnostics.sceneAnchorStrategy === 'string'
+    ? diagnostics.sceneAnchorStrategy
+    : null;
+  const anchor = (item.sceneAnchorStrategy ?? diagnosticSceneAnchorStrategy) === 'scene_anchor_still'
+    ? ' Continue with scene-anchor-first exact-likeness planning, using the previous scene context or a new scene anchor as the start frame rather than a raw front portrait.'
     : ' Continue with Kling exact-likeness identity planning.';
   const framing = item.framingIntent
     ? ` Keep the framing language aligned with ${item.framingIntent.replace(/_/g, ' ')}.`

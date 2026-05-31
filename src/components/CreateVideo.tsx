@@ -301,6 +301,14 @@ type GenerateVideoApiResponse = {
   sceneAnchorFailureCategory?: string | null;
   sceneAnchorValidation?: Record<string, unknown> | null;
   primaryInputType?: string | null;
+  primaryVideoInputType?: string | null;
+  primaryVideoInputSource?: string | null;
+  identityReferencesPassedToVideoStage?: boolean | null;
+  identityReferenceCount?: number | null;
+  identityReferenceMode?: string | null;
+  startFrameSource?: string | null;
+  posterFrameSource?: string | null;
+  firstFrameSource?: string | null;
   sceneIntent?: unknown;
   framingIntent?: string | null;
   primaryReferenceRole?: string | null;
@@ -657,6 +665,11 @@ function stringFromRecord(record: Record<string, unknown>, key: string): string 
 function booleanFromRecord(record: Record<string, unknown>, key: string): boolean | null {
   const value = record[key];
   return typeof value === 'boolean' ? value : null;
+}
+
+function numberFromRecord(record: Record<string, unknown>, key: string): number | null {
+  const value = record[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 function formatSeedanceReferenceUrls(value: unknown): string[] {
@@ -1771,6 +1784,14 @@ export default function CreateVideo({
             sceneAnchorReason: job.sceneAnchorReason ?? null,
             sceneAnchorValidation: job.sceneAnchorValidation ?? null,
             primaryInputType: job.primaryInputType ?? null,
+            primaryVideoInputType: job.primaryVideoInputType ?? null,
+            primaryVideoInputSource: job.primaryVideoInputSource ?? null,
+            identityReferencesPassedToVideoStage: job.identityReferencesPassedToVideoStage ?? null,
+            identityReferenceCount: job.identityReferenceCount ?? null,
+            identityReferenceMode: job.identityReferenceMode ?? null,
+            startFrameSource: job.startFrameSource ?? null,
+            posterFrameSource: job.posterFrameSource ?? null,
+            firstFrameSource: job.firstFrameSource ?? null,
             sceneIntent: job.sceneIntent ?? null,
             framingIntent: job.framingIntent ?? null,
             primaryReferenceRole: job.primaryReferenceRole ?? null,
@@ -3089,6 +3110,18 @@ export default function CreateVideo({
           ? recordValue(data.sceneAnchorValidation)
           : recordValue(nextKlingDiagnosticsRecord.sceneAnchorValidation);
       const nextPrimaryInputType = data.primaryInputType ?? stringFromRecord(nextKlingDiagnosticsRecord, 'primaryInputType');
+      const nextPrimaryVideoInputType = data.primaryVideoInputType ?? stringFromRecord(nextKlingDiagnosticsRecord, 'primaryVideoInputType');
+      const nextPrimaryVideoInputSource = data.primaryVideoInputSource ?? stringFromRecord(nextKlingDiagnosticsRecord, 'primaryVideoInputSource');
+      const nextIdentityReferencesPassedToVideoStage = typeof data.identityReferencesPassedToVideoStage === 'boolean'
+        ? data.identityReferencesPassedToVideoStage
+        : booleanFromRecord(nextKlingDiagnosticsRecord, 'identityReferencesPassedToVideoStage');
+      const nextIdentityReferenceCount = typeof data.identityReferenceCount === 'number'
+        ? data.identityReferenceCount
+        : numberFromRecord(nextKlingDiagnosticsRecord, 'identityReferenceCount');
+      const nextIdentityReferenceMode = data.identityReferenceMode ?? stringFromRecord(nextKlingDiagnosticsRecord, 'identityReferenceMode');
+      const nextStartFrameSource = data.startFrameSource ?? stringFromRecord(nextKlingDiagnosticsRecord, 'startFrameSource');
+      const nextPosterFrameSource = data.posterFrameSource ?? stringFromRecord(nextKlingDiagnosticsRecord, 'posterFrameSource');
+      const nextFirstFrameSource = data.firstFrameSource ?? stringFromRecord(nextKlingDiagnosticsRecord, 'firstFrameSource');
       const nextSceneIntent = formatStringList(data.sceneIntent).length
         ? formatStringList(data.sceneIntent)
         : formatStringList(nextKlingDiagnosticsRecord.sceneIntent);
@@ -3247,6 +3280,14 @@ export default function CreateVideo({
         sceneAnchorFailureCategory: nextSceneAnchorFailureCategory,
         sceneAnchorValidation: Object.keys(nextSceneAnchorValidation).length ? nextSceneAnchorValidation : null,
         primaryInputType: nextPrimaryInputType,
+        primaryVideoInputType: nextPrimaryVideoInputType,
+        primaryVideoInputSource: nextPrimaryVideoInputSource,
+        identityReferencesPassedToVideoStage: nextIdentityReferencesPassedToVideoStage,
+        identityReferenceCount: nextIdentityReferenceCount,
+        identityReferenceMode: nextIdentityReferenceMode,
+        startFrameSource: nextStartFrameSource,
+        posterFrameSource: nextPosterFrameSource,
+        firstFrameSource: nextFirstFrameSource,
         sceneIntent: nextSceneIntent.length ? nextSceneIntent : null,
         framingIntent: nextFramingIntent,
         primaryReferenceRole: nextPrimaryReferenceRole,
@@ -3316,6 +3357,14 @@ export default function CreateVideo({
           sceneAnchorFailureCategory: nextSceneAnchorFailureCategory,
           sceneAnchorValidation: Object.keys(nextSceneAnchorValidation).length ? nextSceneAnchorValidation : null,
           primaryInputType: nextPrimaryInputType,
+          primaryVideoInputType: nextPrimaryVideoInputType,
+          primaryVideoInputSource: nextPrimaryVideoInputSource,
+          identityReferencesPassedToVideoStage: nextIdentityReferencesPassedToVideoStage,
+          identityReferenceCount: nextIdentityReferenceCount,
+          identityReferenceMode: nextIdentityReferenceMode,
+          startFrameSource: nextStartFrameSource,
+          posterFrameSource: nextPosterFrameSource,
+          firstFrameSource: nextFirstFrameSource,
           sceneIntent: nextSceneIntent.length ? nextSceneIntent : null,
           framingIntent: nextFramingIntent,
           primaryReferenceRole: nextPrimaryReferenceRole,
@@ -3329,6 +3378,14 @@ export default function CreateVideo({
           renderProvider: nextExactLikenessRoute === 'kling_reference' ? 'kling' : generationProvider,
           klingReferenceDiagnostics: {
             ...recordValue(nextKlingDiagnostics),
+            primaryVideoInputType: nextPrimaryVideoInputType,
+            primaryVideoInputSource: nextPrimaryVideoInputSource,
+            identityReferencesPassedToVideoStage: nextIdentityReferencesPassedToVideoStage,
+            identityReferenceCount: nextIdentityReferenceCount,
+            identityReferenceMode: nextIdentityReferenceMode,
+            startFrameSource: nextStartFrameSource,
+            posterFrameSource: nextPosterFrameSource,
+            firstFrameSource: nextFirstFrameSource,
             audioConfigured: nextAudioConfigured,
             viralPresetUsed: nextViralPresetUsed,
             promptPolished: nextPromptPolished,
@@ -4694,7 +4751,12 @@ export default function CreateVideo({
               </span>
             </div>
           ) : null}
-          {generatedReferenceThumbnailUrl && generatedMode !== 'seedance-multimodal-reference' ? (
+          {generationResult.exactLikenessRoute === 'kling_reference' && generationResult.startFrameSource === 'scene_anchor' ? (
+            <div className="reference-result-row">
+              <span className="tiny-pill">Starts from scene anchor</span>
+              <span className="muted">Identity references were baked into the anchor instead of used as the video opening frame.</span>
+            </div>
+          ) : generatedReferenceThumbnailUrl && generatedMode !== 'seedance-multimodal-reference' ? (
             <div className="reference-result-row">
               <SelfReferencePreview
                 label="Reference image used for likeness"

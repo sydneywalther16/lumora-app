@@ -95,6 +95,11 @@ assert.equal(walkingReferencePlan?.primaryReferenceRole, 'full_body');
 assert.equal(walkingReferencePlan?.providerPrimaryReference.role, 'scene_anchor');
 assert.equal(walkingReferencePlan?.providerPrimaryReference.url, 'https://assets.example/full.jpg');
 assert.equal(walkingReferencePlan?.providerAdditionalReferences.length, 0);
+assert.equal(walkingReferencePlan?.primaryVideoInputType, 'scene_anchor');
+assert.equal(walkingReferencePlan?.primaryVideoInputSource, 'scene_anchor');
+assert.equal(walkingReferencePlan?.identityReferencesPassedToVideoStage, false);
+assert.equal(walkingReferencePlan?.identityReferenceMode, 'stage1_only');
+assert.equal(walkingReferencePlan?.startFrameSource, 'scene_anchor');
 assert.equal(walkingReferencePlan?.framingIntent, 'walking_full_body');
 assert.equal(walkingReferencePlan?.compositionNeutralized, true);
 assert.deepEqual(walkingReferencePlan?.references.map((reference) => reference.role), [
@@ -136,6 +141,13 @@ assert.equal(walkingDiagnostics.sceneAnchorGenerated, false);
 assert.equal(walkingDiagnostics.sceneAnchorReason, 'scene_anchor_provider_disabled');
 assert.equal(walkingDiagnostics.sceneAnchorFailureCategory, 'scene_anchor_provider_disabled');
 assert.equal(walkingDiagnostics.primaryInputType, 'scene_anchor_still');
+assert.equal(walkingDiagnostics.primaryVideoInputType, 'scene_anchor');
+assert.equal(walkingDiagnostics.primaryVideoInputSource, 'scene_anchor');
+assert.equal(walkingDiagnostics.identityReferencesPassedToVideoStage, false);
+assert.equal(walkingDiagnostics.identityReferenceMode, 'stage1_only');
+assert.equal(walkingDiagnostics.startFrameSource, 'scene_anchor');
+assert.equal(walkingDiagnostics.posterFrameSource, 'video_frame');
+assert.equal(walkingDiagnostics.firstFrameSource, 'scene_anchor');
 assert.equal(walkingDiagnostics.privateUrlsRedacted, true);
 assert.equal(JSON.stringify(walkingDiagnostics).includes('assets.example'), false);
 
@@ -239,7 +251,10 @@ try {
   const payload = JSON.parse(storage.get('lumora_remix_project') ?? '{}') as Record<string, unknown>;
   assert.equal(payload.exactLikenessRoute, 'kling_reference');
   assert.equal((payload.klingReferenceDiagnostics as Record<string, unknown>).primaryReferenceRole, 'full_body');
+  assert.equal((payload.klingReferenceDiagnostics as Record<string, unknown>).startFrameSource, 'scene_anchor');
+  assert.equal((payload.klingReferenceDiagnostics as Record<string, unknown>).identityReferencesPassedToVideoStage, false);
   assert.match(String(payload.prompt), /medium-full or full-body cinematic staging/i);
+  assert.match(String(payload.prompt), /rather than a raw front portrait/i);
   assert.equal(storage.get('lumora_remix_render_engine'), 'replicate');
 } finally {
   Object.defineProperty(globalThis, 'window', {
