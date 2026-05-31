@@ -915,6 +915,11 @@ export type ApiHealthDiagnostics = {
     lastProviderStatus: string | null;
     lastProviderErrorSummary: string | null;
     lastPayloadShapeSummary: Record<string, unknown> | null;
+    falHttpStatus?: number | null;
+    falErrorType?: string | null;
+    falErrorMessage?: string | null;
+    falErrorBodyRedacted?: string | null;
+    outputParsed?: boolean | null;
     recommendedNextAction: string;
     privateUrlsRedacted: boolean;
   };

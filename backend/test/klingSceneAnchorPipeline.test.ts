@@ -241,7 +241,7 @@ try {
     userId: 'unit-test-user',
     sceneAnchorGenerator: async () => {
       throw Object.assign(new Error('Provider rejected payload shape at [redacted-url].'), {
-        failureCategory: 'scene_anchor_model_schema_unmapped',
+        failureCategory: 'scene_anchor_input_schema',
         falHttpStatus: 422,
         falErrorType: 'validation_error',
         falErrorMessage: 'unknown field image_urls',
@@ -262,7 +262,7 @@ try {
     },
   });
   assert.ok(failedSchemaPlan);
-  assert.equal(failedSchemaPlan.sceneAnchorFailureCategory, 'scene_anchor_model_schema_unmapped');
+  assert.equal(failedSchemaPlan.sceneAnchorFailureCategory, 'scene_anchor_input_schema');
   assert.equal(failedSchemaPlan.sceneAnchorHttpStatus, 422);
   assert.equal(failedSchemaPlan.sceneAnchorErrorType, 'validation_error');
   assert.match(failedSchemaPlan.sceneAnchorErrorMessage ?? '', /unknown field/);
@@ -280,7 +280,7 @@ try {
   assert.equal(missingModel.reason, 'scene_anchor_provider_not_configured');
 
   const viduPayload = buildFalSceneAnchorPayload({
-    model: 'fal-ai/vidu/reference-to-image',
+    model: 'fal-ai/vidu/q2/reference-to-image',
     prompt: 'Scene anchor prompt',
     identityReferences: materializedPlan.references,
   });
@@ -290,7 +290,7 @@ try {
   assert.equal('image_urls' in viduPayload, false);
   assert.equal('elements' in viduPayload, false);
   const viduReferencePlan = planFalSceneAnchorReferences({
-    model: 'fal-ai/vidu/reference-to-image',
+    model: 'fal-ai/vidu/q2/reference-to-image',
     identityReferences: materializedPlan.references,
   });
   assert.equal(viduReferencePlan.plannedReferenceCount, 4);
@@ -318,11 +318,11 @@ try {
   });
   assert.equal(parsedImagesArray?.url, 'https://fal.example/output-from-array');
 
-  process.env.SCENE_ANCHOR_MODEL = 'fal-ai/vidu/reference-to-image';
+  process.env.SCENE_ANCHOR_MODEL = 'fal-ai/vidu/q2/reference-to-image';
   const submitBody = {
     request_id: 'scene-anchor-request-1',
-    status_url: 'https://queue.fal.run/fal-ai/vidu/reference-to-image/requests/scene-anchor-request-1/status',
-    response_url: 'https://queue.fal.run/fal-ai/vidu/reference-to-image/requests/scene-anchor-request-1/response',
+    status_url: 'https://queue.fal.run/fal-ai/vidu/q2/reference-to-image/requests/scene-anchor-request-1/status',
+    response_url: 'https://queue.fal.run/fal-ai/vidu/q2/reference-to-image/requests/scene-anchor-request-1/response',
   };
   let submitSeen = false;
   let persistedSeen = false;
@@ -336,7 +336,7 @@ try {
       const url = String(input);
       if (init?.method === 'POST') {
         submitSeen = true;
-        assert.equal(url, 'https://queue.fal.run/fal-ai/vidu/reference-to-image');
+        assert.equal(url, 'https://queue.fal.run/fal-ai/vidu/q2/reference-to-image');
         const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
         assert.ok(Array.isArray(body.reference_image_urls));
         assert.equal((body.reference_image_urls as unknown[]).length, 3);

@@ -120,6 +120,11 @@ function sceneAnchorDiagnostics() {
       lastProviderStatus: null,
       lastProviderErrorSummary: null,
       lastPayloadShapeSummary: null,
+      falHttpStatus: null,
+      falErrorType: null,
+      falErrorMessage: null,
+      falErrorBodyRedacted: null,
+      outputParsed: null,
       recommendedNextAction: configured
         ? 'Run a scene-anchor Create render and inspect per-render diagnostics if it pauses.'
         : 'Configure the missing scene-anchor environment values.',
@@ -174,7 +179,17 @@ function sceneAnchorHealthFromRow(row: LatestRenderRow | null) {
     lastProviderStatus: text('sceneAnchorReason') ?? row?.providerStatus ?? null,
     lastProviderErrorSummary,
     lastPayloadShapeSummary,
-    recommendedNextAction: lastFailureCategory === 'scene_anchor_model_schema_unmapped'
+    falHttpStatus: number('sceneAnchorHttpStatus'),
+    falErrorType: text('sceneAnchorErrorType'),
+    falErrorMessage: text('sceneAnchorErrorMessage'),
+    falErrorBodyRedacted: text('sceneAnchorErrorBodyRedacted') ?? text('sceneAnchorErrorMessage'),
+    outputParsed: typeof metadata.sceneAnchorOutputParsed === 'boolean'
+      ? metadata.sceneAnchorOutputParsed
+      : typeof klingDiagnostics.sceneAnchorOutputParsed === 'boolean'
+        ? klingDiagnostics.sceneAnchorOutputParsed
+        : null,
+    recommendedNextAction: lastFailureCategory === 'scene_anchor_input_schema' ||
+      lastFailureCategory === 'scene_anchor_model_schema_unmapped'
       ? 'Fix the scene-anchor provider payload shape before retrying.'
       : lastFailureCategory === 'scene_anchor_output_parse_failed'
         ? 'Inspect the redacted output shape and update scene-anchor output parsing.'

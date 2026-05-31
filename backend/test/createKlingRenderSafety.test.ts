@@ -217,6 +217,8 @@ const generateVideoSource = readFileSync(join(process.cwd(), 'api/lumora/generat
 assert.match(generateVideoSource, /KLING_SCENE_ANCHOR_VIDEO_MODEL/);
 assert.match(generateVideoSource, /buildKlingSceneAnchorImageToVideoPayload/);
 assert.match(generateVideoSource, /reference_image_urls/);
+assert.match(generateVideoSource, /fal-ai\/vidu\/q2\/reference-to-image/);
+assert.match(generateVideoSource, /scene_anchor_input_schema/);
 assert.match(generateVideoSource, /scene_anchor_output_parse_failed/);
 assert.match(generateVideoSource, /fal_kling_scene_anchor_image_to_video/);
 assert.match(generateVideoSource, /Scene anchor video model is not configured\./);

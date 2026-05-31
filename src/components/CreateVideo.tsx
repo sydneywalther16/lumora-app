@@ -742,8 +742,10 @@ function klingProviderFailureMessage(category: string | null | undefined, fallba
   if (category === 'kling_scene_anchor_generation_failed') {
     return 'Scene anchor generation failed. Retry scene anchor, use identity-only fallback, or edit scene.';
   }
-  if (category === 'scene_anchor_model_schema_unmapped') {
-    return 'Kling scene anchor failed because the image provider rejected the payload shape.';
+  if (category === 'scene_anchor_input_schema' || category === 'scene_anchor_model_schema_unmapped') {
+    return fallback && fallback !== category
+      ? `Kling scene anchor failed because the image provider rejected the payload shape. ${fallback}`
+      : 'Kling scene anchor failed because the image provider rejected the payload shape.';
   }
   if (category === 'scene_anchor_output_parse_failed') {
     return 'Kling scene anchor generated a response, but Lumora could not read the image output.';

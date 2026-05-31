@@ -171,6 +171,7 @@ type SceneAnchorFailureCategory =
   | 'scene_anchor_provider_not_configured'
   | 'scene_anchor_provider_not_implemented'
   | 'scene_anchor_fal_key_missing'
+  | 'scene_anchor_input_schema'
   | 'scene_anchor_model_schema_unmapped'
   | 'scene_anchor_fal_submit_failed'
   | 'scene_anchor_fal_poll_failed'
@@ -228,6 +229,7 @@ type KlingCreateReferencePlan = {
   sceneAnchorHttpStatus: number | null;
   sceneAnchorErrorType: string | null;
   sceneAnchorErrorMessage: string | null;
+  sceneAnchorErrorBodyRedacted: string | null;
   sceneAnchorPayloadFieldNames: string[] | null;
   sceneAnchorReferenceCount: number | null;
   sceneAnchorSubmittedReferenceCount: number | null;
@@ -678,6 +680,7 @@ function modelSupportsFalSceneAnchorReferences(model: string) {
   const normalized = model.toLowerCase();
   return (
     normalized === 'fal-ai/vidu/reference-to-image' ||
+    normalized === 'fal-ai/vidu/q2/reference-to-image' ||
     normalized === 'fal-ai/minimax/image-01/subject-reference' ||
     normalized.includes('/kontext/max/multi') ||
     normalized.includes('flux-pro/kontext/max/multi')
@@ -686,7 +689,7 @@ function modelSupportsFalSceneAnchorReferences(model: string) {
 
 function sceneAnchorReferenceLimitForModel(model: string) {
   const normalized = model.toLowerCase();
-  if (normalized === 'fal-ai/vidu/reference-to-image') return 3;
+  if (normalized === 'fal-ai/vidu/reference-to-image' || normalized === 'fal-ai/vidu/q2/reference-to-image') return 3;
   if (normalized.includes('/kontext/max/multi') || normalized.includes('flux-pro/kontext/max/multi')) return 4;
   return null;
 }
@@ -742,7 +745,7 @@ export function buildFalSceneAnchorPayload(input: {
       failureCategory: 'scene_anchor_provider_not_configured',
     });
   }
-  if (model === 'fal-ai/vidu/reference-to-image') {
+  if (model === 'fal-ai/vidu/reference-to-image' || model === 'fal-ai/vidu/q2/reference-to-image') {
     return {
       prompt: input.prompt,
       reference_image_urls: urls,
@@ -894,7 +897,8 @@ function isSceneAnchorModerationError(value: unknown) {
 
 function sceneAnchorProviderHttpErrorCategory(status: number, payload?: unknown): SceneAnchorFailureCategory {
   if (isSceneAnchorModerationError(payload)) return 'scene_anchor_provider_moderation_block';
-  if (status === 400 || status === 422 || status === 404) return 'scene_anchor_model_schema_unmapped';
+  if (status === 400 || status === 422) return 'scene_anchor_input_schema';
+  if (status === 404) return 'scene_anchor_model_schema_unmapped';
   if (status === 401 || status === 403) return 'scene_anchor_fal_key_missing';
   if (status >= 500 || status === 429) return 'scene_anchor_fal_submit_failed';
   return 'scene_anchor_generation_failed';
@@ -1773,6 +1777,10 @@ function applySceneAnchorFailureDiagnostics(plan: KlingCreateReferencePlan, erro
     errorMessage(error),
     700,
   );
+  plan.sceneAnchorErrorBodyRedacted = redactSceneAnchorProviderText(
+    record.falErrorBodyRedacted ?? record.errorBody ?? record.body ?? null,
+    1200,
+  ) || null;
   plan.sceneAnchorPayloadFieldNames = stringArrayOrNull(payloadShape.fieldNames);
   plan.sceneAnchorReferenceCount =
     numberOrNull(referencePlan.plannedReferenceCount) ??
@@ -1997,6 +2005,7 @@ export async function prepareKlingCreateReferencePlanForProvider(input: {
         plan.sceneAnchorHttpStatus = null;
         plan.sceneAnchorErrorType = null;
         plan.sceneAnchorErrorMessage = null;
+        plan.sceneAnchorErrorBodyRedacted = null;
         plan.sceneAnchorPayloadFieldNames = stringArrayOrNull(rawPayloadShape.fieldNames);
         plan.sceneAnchorReferenceCount =
           numberOrNull(rawReferencePlan.plannedReferenceCount) ?? plan.references.length;
@@ -2545,6 +2554,7 @@ export function buildKlingCreateReferencePlan(input: {
     sceneAnchorHttpStatus: null,
     sceneAnchorErrorType: null,
     sceneAnchorErrorMessage: null,
+    sceneAnchorErrorBodyRedacted: null,
     sceneAnchorPayloadFieldNames: null,
     sceneAnchorReferenceCount: null,
     sceneAnchorSubmittedReferenceCount: null,
@@ -2692,6 +2702,7 @@ export function klingReferenceDiagnostics(input: {
     sceneAnchorHttpStatus: input.plan?.sceneAnchorHttpStatus ?? null,
     sceneAnchorErrorType: input.plan?.sceneAnchorErrorType ?? null,
     sceneAnchorErrorMessage: input.plan?.sceneAnchorErrorMessage ?? null,
+    sceneAnchorErrorBodyRedacted: input.plan?.sceneAnchorErrorBodyRedacted ?? null,
     sceneAnchorPayloadFieldNames: input.plan?.sceneAnchorPayloadFieldNames ?? null,
     sceneAnchorReferenceCount: input.plan?.sceneAnchorReferenceCount ?? null,
     sceneAnchorSubmittedReferenceCount: input.plan?.sceneAnchorSubmittedReferenceCount ?? null,
@@ -3661,6 +3672,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sceneAnchorHttpStatus: klingReferencePlan.sceneAnchorHttpStatus,
         sceneAnchorErrorType: klingReferencePlan.sceneAnchorErrorType,
         sceneAnchorErrorMessage: klingReferencePlan.sceneAnchorErrorMessage,
+        sceneAnchorErrorBodyRedacted: klingReferencePlan.sceneAnchorErrorBodyRedacted,
         sceneAnchorPayloadFieldNames: klingReferencePlan.sceneAnchorPayloadFieldNames,
         sceneAnchorReferenceCount: klingReferencePlan.sceneAnchorReferenceCount,
         sceneAnchorSubmittedReferenceCount: klingReferencePlan.sceneAnchorSubmittedReferenceCount,
@@ -3702,7 +3714,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           viralPresetUsed,
           promptPolished,
         }),
-        recommendedNextAction: sceneAnchorFailureCategory === 'scene_anchor_model_schema_unmapped'
+        recommendedNextAction: sceneAnchorFailureCategory === 'scene_anchor_input_schema' ||
+          sceneAnchorFailureCategory === 'scene_anchor_model_schema_unmapped'
           ? 'Fix the scene-anchor provider payload shape before retrying.'
           : sceneAnchorFailureCategory === 'scene_anchor_output_parse_failed'
             ? 'Update output parsing or inspect the redacted provider response shape before retrying.'
@@ -3782,6 +3795,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sceneAnchorHttpStatus: klingReferencePlan.sceneAnchorHttpStatus,
         sceneAnchorErrorType: klingReferencePlan.sceneAnchorErrorType,
         sceneAnchorErrorMessage: klingReferencePlan.sceneAnchorErrorMessage,
+        sceneAnchorErrorBodyRedacted: klingReferencePlan.sceneAnchorErrorBodyRedacted,
         sceneAnchorPayloadFieldNames: klingReferencePlan.sceneAnchorPayloadFieldNames,
         sceneAnchorReferenceCount: klingReferencePlan.sceneAnchorReferenceCount,
         sceneAnchorSubmittedReferenceCount: klingReferencePlan.sceneAnchorSubmittedReferenceCount,

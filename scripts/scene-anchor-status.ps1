@@ -29,6 +29,14 @@ function Print-SceneAnchorStatus {
   }
   Write-Host "last failure category: $($SceneAnchor.lastFailureCategory)"
   Write-Host "last provider status: $($SceneAnchor.lastProviderStatus)"
+  Write-Host "fal HTTP status: $($SceneAnchor.falHttpStatus)"
+  Write-Host "fal error type: $($SceneAnchor.falErrorType)"
+  if ($SceneAnchor.falErrorMessage) {
+    Write-Host "fal error message: $($SceneAnchor.falErrorMessage)"
+  }
+  if ($SceneAnchor.falErrorBodyRedacted) {
+    Write-Host "fal error body redacted: $($SceneAnchor.falErrorBodyRedacted)"
+  }
   if ($SceneAnchor.lastProviderErrorSummary) {
     Write-Host "last provider error summary: $($SceneAnchor.lastProviderErrorSummary)"
   }
@@ -37,10 +45,12 @@ function Print-SceneAnchorStatus {
     if ($shape.fieldNames) { Write-Host "payload fields: $($shape.fieldNames -join ', ')" }
     Write-Host "planned reference count: $($shape.plannedReferenceCount)"
     Write-Host "submitted reference count: $($shape.submittedReferenceCount)"
+    Write-Host "reference count submitted: $($shape.submittedReferenceCount)"
     if ($shape.submittedReferenceRoles) { Write-Host "submitted reference roles: $($shape.submittedReferenceRoles -join ', ')" }
     if ($shape.droppedReferenceRoles) { Write-Host "dropped reference roles: $($shape.droppedReferenceRoles -join ', ')" }
     Write-Host "provider reference limit: $($shape.providerReferenceLimit)"
   }
+  Write-Host "output parsed: $($SceneAnchor.outputParsed)"
   Write-Host "private URLs redacted: $($SceneAnchor.privateUrlsRedacted)"
   if ($SceneAnchor.recommendedNextAction) {
     Write-Host "recommended next action: $($SceneAnchor.recommendedNextAction)"

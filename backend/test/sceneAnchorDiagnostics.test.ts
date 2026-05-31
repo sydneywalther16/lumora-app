@@ -14,7 +14,7 @@ const original = {
 try {
   env.SCENE_ANCHOR_ENABLED = true;
   env.SCENE_ANCHOR_PROVIDER = 'fal';
-  env.SCENE_ANCHOR_MODEL = 'fal-ai/vidu/reference-to-image';
+  env.SCENE_ANCHOR_MODEL = 'fal-ai/vidu/q2/reference-to-image';
   env.SCENE_ANCHOR_FALLBACK_MODE = 'pause';
   env.FAL_KEY = 'test-fal-key';
   env.KLING_API_KEY = undefined;
@@ -22,7 +22,7 @@ try {
   const diagnostics = await buildSceneAnchorHealthDiagnostics();
   assert.equal(diagnostics.enabled, true);
   assert.equal(diagnostics.provider, 'fal');
-  assert.equal(diagnostics.model, 'fal-ai/vidu/reference-to-image');
+  assert.equal(diagnostics.model, 'fal-ai/vidu/q2/reference-to-image');
   assert.equal(diagnostics.configured, true);
   assert.deepEqual(diagnostics.missingConfig, []);
   assert.equal(diagnostics.privateUrlsRedacted, true);
