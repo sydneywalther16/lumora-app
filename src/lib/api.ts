@@ -361,6 +361,9 @@ export type GenerationResponse = {
   startFrameSource?: string | null;
   posterFrameSource?: string | null;
   firstFrameSource?: string | null;
+  stage2ProviderModel?: string | null;
+  stage2ProviderRouteType?: string | null;
+  rawReferenceVisualInputsSentToStage2?: boolean | null;
   sceneIntent?: string[] | null;
   framingIntent?: string | null;
   primaryReferenceRole?: string | null;
@@ -459,6 +462,9 @@ export type GenerationJob = {
   startFrameSource?: string | null;
   posterFrameSource?: string | null;
   firstFrameSource?: string | null;
+  stage2ProviderModel?: string | null;
+  stage2ProviderRouteType?: string | null;
+  rawReferenceVisualInputsSentToStage2?: boolean | null;
   sceneIntent?: string[] | null;
   framingIntent?: string | null;
   primaryReferenceRole?: string | null;
@@ -882,6 +888,16 @@ export type ApiHealthDiagnostics = {
   exactProvider?: string | null;
   sceneAnchorStrategy?: string | null;
   lastRenderReferenceStrategy?: string | null;
+  primaryVideoInputType?: string | null;
+  primaryVideoInputSource?: string | null;
+  startFrameSource?: string | null;
+  posterFrameSource?: string | null;
+  firstFrameSource?: string | null;
+  stage2ProviderModel?: string | null;
+  stage2ProviderRouteType?: string | null;
+  rawReferenceVisualInputsSentToStage2?: boolean;
+  identityReferencesPassedToVideoStage?: boolean;
+  identityReferenceMode?: string | null;
   audioConfigured?: boolean;
   viralPresetUsed?: string | null;
   promptPolished?: boolean;

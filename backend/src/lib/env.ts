@@ -47,6 +47,7 @@ const envSchema = z.object({
   KLING_MODEL: z.string().min(1).optional(),
   KLING_REFERENCE_MODEL: z.string().min(1).default('fal-ai/kling-video/o1/standard/reference-to-video'),
   KLING_ELEMENTS_MODEL: z.string().min(1).optional(),
+  KLING_SCENE_ANCHOR_VIDEO_MODEL: z.string().min(1).optional(),
   SCENE_ANCHOR_ENABLED: booleanEnv.default(false),
   SCENE_ANCHOR_PROVIDER: z.string().default('fal'),
   SCENE_ANCHOR_MODEL: z.string().min(1).optional(),

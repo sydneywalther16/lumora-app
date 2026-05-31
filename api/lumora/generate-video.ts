@@ -119,6 +119,11 @@ type KlingFrameSource =
   | 'identity_sheet'
   | 'unknown';
 
+type KlingStage2ProviderRouteType =
+  | 'image_to_video'
+  | 'reference_to_video'
+  | 'unknown';
+
 type KlingSceneIntent =
   | 'portrait_closeup'
   | 'seated'
@@ -186,6 +191,15 @@ type SceneAnchorProviderStatus = {
   failureCategory: SceneAnchorFailureCategory | null;
 };
 
+type KlingSceneAnchorVideoStatus = {
+  configured: boolean;
+  implemented: boolean;
+  model: string | null;
+  routeType: KlingStage2ProviderRouteType;
+  reason: string;
+  failureCategory: string | null;
+};
+
 type KlingCreateReferencePlan = {
   primaryReference: KlingCreateReferenceEntry;
   references: KlingCreateReferenceEntry[];
@@ -218,6 +232,9 @@ type KlingCreateReferencePlan = {
   startFrameSource: KlingFrameSource;
   posterFrameSource: KlingFrameSource;
   firstFrameSource: KlingFrameSource;
+  stage2ProviderModel: string | null;
+  stage2ProviderRouteType: KlingStage2ProviderRouteType;
+  rawReferenceVisualInputsSentToStage2: boolean;
   fallbackAllowed: boolean;
   sceneIntent: KlingSceneIntent[];
   framingIntent: KlingFramingIntent;
@@ -710,6 +727,97 @@ function sceneAnchorPayloadShapeSummary(payload: unknown) {
   };
 }
 
+function klingSceneAnchorVideoModelStatus(envSource: NodeJS.ProcessEnv = process.env): KlingSceneAnchorVideoStatus {
+  const model = textValue(envSource.KLING_SCENE_ANCHOR_VIDEO_MODEL);
+  if (!model) {
+    return {
+      configured: false,
+      implemented: false,
+      model: null,
+      routeType: 'image_to_video',
+      reason: 'kling_scene_anchor_video_model_missing',
+      failureCategory: 'kling_scene_anchor_video_model_not_configured',
+    };
+  }
+  if (!configuredSceneAnchorFalKey(envSource)) {
+    return {
+      configured: false,
+      implemented: false,
+      model,
+      routeType: 'image_to_video',
+      reason: 'kling_scene_anchor_video_fal_key_missing',
+      failureCategory: 'kling_scene_anchor_video_fal_key_missing',
+    };
+  }
+  const normalized = model.toLowerCase();
+  const implemented =
+    normalized === 'fal-ai/kling-video/v2.1/master/image-to-video' ||
+    normalized === 'fal-ai/kling-video/v2.1/standard/image-to-video' ||
+    normalized === 'fal-ai/kling-video/o1/image-to-video' ||
+    normalized === 'fal-ai/kling-video/o1/standard/image-to-video';
+  return {
+    configured: implemented,
+    implemented,
+    model,
+    routeType: 'image_to_video',
+    reason: implemented
+      ? 'kling_scene_anchor_video_model_ready'
+      : 'kling_scene_anchor_video_model_schema_unmapped',
+    failureCategory: implemented ? null : 'kling_scene_anchor_video_model_unsupported',
+  };
+}
+
+function normalizeKlingSceneAnchorVideoDuration(value: unknown): '5' | '10' {
+  const duration = normalizeDuration(value);
+  return duration > 5 ? '10' : '5';
+}
+
+export function buildKlingSceneAnchorImageToVideoPayload(input: {
+  model: string;
+  prompt: string;
+  sceneAnchorUrl: string;
+  duration?: unknown;
+}) {
+  const normalizedModel = input.model.toLowerCase();
+  const duration = normalizeKlingSceneAnchorVideoDuration(input.duration);
+  if (
+    normalizedModel === 'fal-ai/kling-video/v2.1/master/image-to-video' ||
+    normalizedModel === 'fal-ai/kling-video/v2.1/standard/image-to-video'
+  ) {
+    return {
+      prompt: input.prompt,
+      image_url: input.sceneAnchorUrl,
+      duration,
+    };
+  }
+  if (
+    normalizedModel === 'fal-ai/kling-video/o1/image-to-video' ||
+    normalizedModel === 'fal-ai/kling-video/o1/standard/image-to-video'
+  ) {
+    return {
+      prompt: input.prompt,
+      start_image_url: input.sceneAnchorUrl,
+      duration,
+    };
+  }
+  throw Object.assign(new Error(`Kling scene-anchor image-to-video schema is not mapped for ${input.model}.`), {
+    failureCategory: 'kling_scene_anchor_video_model_unsupported',
+  });
+}
+
+function klingSceneAnchorVideoPayloadShapeSummary(payload: unknown) {
+  const record = objectRecord(payload);
+  return {
+    fieldNames: Object.keys(record).sort(),
+    hasPrompt: Boolean(textValue(record.prompt)),
+    hasImageUrl: Boolean(record.image_url),
+    hasStartImageUrl: Boolean(record.start_image_url),
+    hasReferenceImages: Boolean(record.reference_images) || Boolean(record.image_urls) || Boolean(record.elements),
+    duration: textValue(record.duration) || null,
+    privateUrlsRedacted: true,
+  };
+}
+
 function outputShapeLabel(output: unknown) {
   if (Array.isArray(output)) return `array(${output.length})`;
   if (output && typeof output === 'object') {
@@ -1026,6 +1134,172 @@ export async function createFalSceneAnchorStill(input: {
   };
 }
 
+async function pollFalKlingSceneAnchorVideo(input: {
+  model: string;
+  submitted: unknown;
+  key: string;
+}) {
+  const requestId = falRequestId(input.submitted);
+  const submittedVideoUrl = await outputUrl(input.submitted);
+  if (submittedVideoUrl) {
+    return {
+      output: input.submitted,
+      videoUrl: submittedVideoUrl,
+      requestId,
+      status: sceneAnchorStatusFromResponse(input.submitted),
+    };
+  }
+  if (!requestId) {
+    throw Object.assign(new Error('Fal Kling scene-anchor video submission did not return a request id or video output.'), {
+      failureCategory: 'kling_scene_anchor_video_submit_failed',
+    });
+  }
+
+  const statusUrl = rawFalQueueUrl(objectRecord(input.submitted).status_url) ??
+    falQueueUrl(input.model, `/requests/${encodeURIComponent(requestId)}/status`);
+  const responseUrl = rawFalQueueUrl(objectRecord(input.submitted).response_url) ??
+    falQueueUrl(input.model, `/requests/${encodeURIComponent(requestId)}/response`);
+  let latest: unknown = input.submitted;
+  const deadline = Date.now() + 180_000;
+  while (Date.now() < deadline) {
+    latest = await falSceneAnchorJson<unknown>({
+      path: statusUrl,
+      method: 'GET',
+      key: input.key,
+    });
+    const latestVideoUrl = await outputUrl(latest);
+    if (latestVideoUrl) {
+      return {
+        output: latest,
+        videoUrl: latestVideoUrl,
+        requestId,
+        status: sceneAnchorStatusFromResponse(latest),
+      };
+    }
+    const status = sceneAnchorStatusFromResponse(latest);
+    if (sceneAnchorTerminalStatus(status)) {
+      if (!sceneAnchorSucceededStatus(status)) {
+        throw Object.assign(new Error(redactSceneAnchorProviderText(latest) || 'Fal Kling scene-anchor video generation failed.'), {
+          failureCategory: 'kling_scene_anchor_video_generation_failed',
+          providerStatus: status,
+        });
+      }
+      const result = await falSceneAnchorJson<unknown>({
+        path: responseUrl,
+        method: 'GET',
+        key: input.key,
+      });
+      const resultVideoUrl = await outputUrl(result);
+      if (resultVideoUrl) {
+        return {
+          output: result,
+          videoUrl: resultVideoUrl,
+          requestId,
+          status,
+        };
+      }
+      throw Object.assign(new Error('Fal Kling scene-anchor video response did not include a video URL.'), {
+        failureCategory: 'kling_scene_anchor_video_output_missing',
+        providerStatus: status,
+        providerOutputShape: outputShapeLabel(result),
+      });
+    }
+    await sleep(3_000);
+  }
+
+  throw Object.assign(new Error('Fal Kling scene-anchor video generation timed out before returning a video.'), {
+    failureCategory: 'kling_scene_anchor_video_poll_failed',
+  });
+}
+
+async function runFalKlingSceneAnchorImageToVideo(input: {
+  prompt: string;
+  sceneAnchorUrl: string;
+  durationSent: number | null;
+}): Promise<ReplicateRunResult> {
+  const status = klingSceneAnchorVideoModelStatus();
+  if (!status.configured || !status.model) {
+    throw Object.assign(new Error('Scene anchor video model is not configured.'), {
+      failureCategory: status.failureCategory ?? 'kling_scene_anchor_video_model_not_configured',
+      providerStatus: status,
+    });
+  }
+  const key = configuredSceneAnchorFalKey();
+  if (!key) {
+    throw Object.assign(new Error('Fal key is missing for Kling scene-anchor image-to-video.'), {
+      failureCategory: 'kling_scene_anchor_video_fal_key_missing',
+      providerStatus: status,
+    });
+  }
+  const payload = buildKlingSceneAnchorImageToVideoPayload({
+    model: status.model,
+    prompt: input.prompt,
+    sceneAnchorUrl: input.sceneAnchorUrl,
+    duration: input.durationSent,
+  });
+  const endpoint = falQueueUrl(status.model);
+  const attempts: unknown[] = [];
+  try {
+    const submitted = await falSceneAnchorJson<unknown>({
+      path: endpoint,
+      method: 'POST',
+      body: payload,
+      key,
+    });
+    const result = await pollFalKlingSceneAnchorVideo({
+      model: status.model,
+      submitted,
+      key,
+    });
+    attempts.push({
+      provider: 'fal',
+      model: status.model,
+      inputKeys: Object.keys(payload),
+      success: true,
+      routeType: 'image_to_video',
+      requestId: result.requestId,
+    });
+    return {
+      videoUrl: result.videoUrl,
+      model: status.model as ReplicateModelIdentifier,
+      rawOutput: {
+        provider: 'fal',
+        requestId: result.requestId,
+        providerStatus: result.status,
+        outputShape: outputShapeLabel(result.output),
+        payloadShape: klingSceneAnchorVideoPayloadShapeSummary(payload),
+        stage2ProviderRouteType: 'image_to_video',
+        primaryVideoInputType: 'scene_anchor',
+        rawReferenceVisualInputsSentToStage2: false,
+        privateUrlsRedacted: true,
+      },
+      attempts,
+      durationSent: Number(payload.duration),
+      finalInputKeys: Object.keys(payload),
+    };
+  } catch (error) {
+    attempts.push({
+      provider: 'fal',
+      model: status.model,
+      inputKeys: Object.keys(payload),
+      success: false,
+      routeType: 'image_to_video',
+      details: safeJsonValue(error),
+    });
+    throw Object.assign(new Error(errorMessage(error)), {
+      provider: 'fal',
+      model: status.model,
+      details: {
+        error: safeJsonValue(error),
+        attempts,
+        payloadShape: klingSceneAnchorVideoPayloadShapeSummary(payload),
+        privateUrlsRedacted: true,
+      },
+      failureCategory: objectRecord(error).failureCategory ?? 'kling_scene_anchor_video_generation_failed',
+    });
+  }
+}
+
 export function detectKlingOutfitIntent(prompt: string) {
   const normalizedPrompt = prompt.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
   const outfitNouns = [
@@ -1312,6 +1586,11 @@ function syncKlingVideoStageMetadata(plan: KlingCreateReferencePlan) {
       : 'identity_reference';
   plan.posterFrameSource = 'video_frame';
   plan.firstFrameSource = sceneAnchorPlanned ? 'scene_anchor' : 'provider_video';
+  plan.stage2ProviderModel = sceneAnchorPlanned
+    ? klingSceneAnchorVideoModelStatus().model
+    : null;
+  plan.stage2ProviderRouteType = sceneAnchorPlanned ? 'image_to_video' : 'reference_to_video';
+  plan.rawReferenceVisualInputsSentToStage2 = identityRefsPassed;
   return plan;
 }
 
@@ -2069,6 +2348,13 @@ export function buildKlingCreateReferencePlan(input: {
         : 'identity_reference',
     posterFrameSource: 'video_frame',
     firstFrameSource: plannedStrategy === 'scene_anchor_still' ? 'scene_anchor' : 'provider_video',
+    stage2ProviderModel: plannedStrategy === 'scene_anchor_still'
+      ? klingSceneAnchorVideoModelStatus().model
+      : null,
+    stage2ProviderRouteType: plannedStrategy === 'scene_anchor_still'
+      ? 'image_to_video'
+      : 'reference_to_video',
+    rawReferenceVisualInputsSentToStage2: providerAdditionalReferences.length > 0,
     fallbackAllowed: plannedStrategy === 'front_only_fallback',
     sceneIntent: sceneIntent.sceneIntent,
     framingIntent: sceneIntent.framingIntent,
@@ -2185,6 +2471,9 @@ export function klingReferenceDiagnostics(input: {
     startFrameSource: input.plan?.startFrameSource ?? null,
     posterFrameSource: input.plan?.posterFrameSource ?? null,
     firstFrameSource: input.plan?.firstFrameSource ?? null,
+    stage2ProviderModel: input.plan?.stage2ProviderModel ?? null,
+    stage2ProviderRouteType: input.plan?.stage2ProviderRouteType ?? null,
+    rawReferenceVisualInputsSentToStage2: Boolean(input.plan?.rawReferenceVisualInputsSentToStage2),
     referenceRolesUsed: references.map((reference) => reference.role),
     referenceCount: references.length,
     primaryReferenceRole: input.plan?.primaryReferenceRole ?? null,
@@ -2541,6 +2830,10 @@ function klingGenerationErrorCategory(error: unknown): string {
 
   if (isBillingOrCreditError(error)) return 'kling_billing_required';
   if (isSensitiveFilterError(error)) return 'kling_provider_safety_filter';
+  if (lower.includes('scene_anchor_video_model_not_configured')) return 'kling_scene_anchor_video_model_not_configured';
+  if (lower.includes('scene_anchor_video_model_unsupported')) return 'kling_scene_anchor_video_model_unsupported';
+  if (lower.includes('scene_anchor_video_output_missing')) return 'kling_scene_anchor_video_output_missing';
+  if (lower.includes('scene_anchor_video_poll_failed')) return 'kling_scene_anchor_video_poll_failed';
   if (statusCode === 400 || statusCode === 422 || lower.includes('invalid input') || lower.includes('validation')) {
     return 'kling_input_schema';
   }
@@ -2901,9 +3194,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const token = process.env.REPLICATE_API_TOKEN;
-    if (!token) {
-      return sendJson(res, 500, { error: 'Missing REPLICATE_API_TOKEN' });
-    }
 
     const generationUserKey = activeGenerationUserKey(body);
     if (!acquireActiveGeneration(generationUserKey)) {
@@ -2943,6 +3233,78 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           exactLikenessReady,
         })
       : null;
+    const sceneAnchorProviderReadiness = sceneAnchorProviderStatus();
+    const sceneAnchorVideoReadiness = klingReferencePlan?.sceneAnchorRequired
+      ? klingSceneAnchorVideoModelStatus()
+      : null;
+    if (
+      klingReferencePlan?.sceneAnchorRequired &&
+      !booleanValue(body.allowIdentityOnlyKlingFallback) &&
+      sceneAnchorProviderReadiness.configured &&
+      sceneAnchorProviderReadiness.implemented &&
+      !sceneAnchorVideoReadiness?.configured
+    ) {
+      const videoFailureCategory =
+        sceneAnchorVideoReadiness?.failureCategory ?? 'kling_scene_anchor_video_model_not_configured';
+      return sendJson(res, 424, {
+        success: false,
+        error: videoFailureCategory === 'kling_scene_anchor_video_model_not_configured'
+          ? 'Scene anchor video model is not configured.'
+          : 'Scene anchor video model is not supported yet.',
+        errorCategory: videoFailureCategory,
+        providerStatus: 'scene_anchor_video_model_unavailable',
+        displayEngine: 'Kling exact likeness',
+        generationMode: 'kling-exact-likeness-reference',
+        exactLikenessRoute: 'kling_reference',
+        exactLikenessAvailable: true,
+        sceneAnchorStrategy: klingReferencePlan.sceneAnchorStrategy,
+        sceneAnchorEnabled: sceneAnchorProviderReadiness.sceneAnchorEnabled,
+        sceneAnchorModel: sceneAnchorProviderReadiness.model,
+        sceneAnchorGenerated: false,
+        sceneAnchorPersisted: false,
+        sceneAnchorProvider: sceneAnchorProviderReadiness.provider,
+        sceneAnchorReason: sceneAnchorVideoReadiness?.reason ?? 'kling_scene_anchor_video_model_missing',
+        sceneAnchorFailureCategory: videoFailureCategory,
+        primaryInputType: klingReferencePlan.primaryInputType,
+        primaryVideoInputType: 'scene_anchor',
+        primaryVideoInputSource: 'scene_anchor',
+        identityReferencesPassedToVideoStage: false,
+        identityReferenceCount: klingReferencePlan.references.length,
+        identityReferenceMode: 'stage1_only',
+        startFrameSource: 'scene_anchor',
+        posterFrameSource: 'video_frame',
+        firstFrameSource: 'scene_anchor',
+        stage2ProviderModel: sceneAnchorVideoReadiness?.model ?? null,
+        stage2ProviderRouteType: 'image_to_video',
+        rawReferenceVisualInputsSentToStage2: false,
+        frontOnlyFallback: false,
+        referenceStrategy: klingReferencePlan.plannedStrategy,
+        referenceRolesUsed: klingReferencePlan.references.map((reference) => reference.role),
+        referenceCount: klingReferencePlan.references.length,
+        sceneIntent: klingReferencePlan.sceneIntent,
+        framingIntent: klingReferencePlan.framingIntent,
+        primaryReferenceRole: klingReferencePlan.primaryReferenceRole,
+        supportingReferenceRoles: klingReferencePlan.supportingReferenceRoles,
+        userSpecifiedOutfit: klingReferencePlan.userSpecifiedOutfit,
+        outfitTermsDetected: klingReferencePlan.outfitTermsDetected,
+        environmentTermsDetected: klingReferencePlan.environmentTermsDetected,
+        referenceOutfitCarryoverSuppressed: klingReferencePlan.referenceOutfitCarryoverSuppressed,
+        compositionCarryoverSuppressed: klingReferencePlan.compositionCarryoverSuppressed,
+        audioConfigured: false,
+        viralPresetUsed,
+        promptPolished,
+        klingReferenceDiagnostics: klingReferenceDiagnostics({
+          plan: klingReferencePlan,
+          referenceStrategy: klingReferencePlan.plannedStrategy,
+          exactLikenessRoute: 'kling_reference',
+          providerRoute: 'fal_kling_scene_anchor_image_to_video',
+          viralPresetUsed,
+          promptPolished,
+        }),
+        recommendedNextAction: 'Configure KLING_SCENE_ANCHOR_VIDEO_MODEL or explicitly choose identity-only Kling fallback.',
+        privateUrlsRedacted: true,
+      });
+    }
     klingReferencePlan = await prepareKlingCreateReferencePlanForProvider({
       plan: klingReferencePlan,
       userId: (textValue(body.userId) || generationUserKey || 'local').replace(/[^a-zA-Z0-9_-]/g, '-'),
@@ -2968,6 +3330,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         token: `@Element${index + 2}`,
       })),
     ];
+    const sceneAnchorImageToVideoStageActive = Boolean(
+      klingReferencePlan?.sceneAnchorGenerated &&
+      klingReferencePlan.sceneAnchorPersisted &&
+      klingReferencePlan.primaryVideoInputType === 'scene_anchor' &&
+      klingReferencePlan.stage2ProviderRouteType === 'image_to_video',
+    );
     const aspectRatio = normalizeAspectRatio(body.aspectRatio);
     const durationSent = normalizeDuration(body.duration);
     const finalPrompt = buildFinalPrompt({
@@ -3021,6 +3389,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       startFrameSource: klingReferencePlan?.startFrameSource ?? null,
       posterFrameSource: klingReferencePlan?.posterFrameSource ?? null,
       firstFrameSource: klingReferencePlan?.firstFrameSource ?? null,
+      stage2ProviderModel: klingReferencePlan?.stage2ProviderModel ?? null,
+      stage2ProviderRouteType: klingReferencePlan?.stage2ProviderRouteType ?? null,
+      rawReferenceVisualInputsSentToStage2: Boolean(klingReferencePlan?.rawReferenceVisualInputsSentToStage2),
       referenceRolesUsed: klingReferencePlan?.references.map((reference) => reference.role) ?? [],
       privateUrlsRedacted: true,
     });
@@ -3094,6 +3465,118 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
+    if (sceneAnchorImageToVideoStageActive && klingReferencePlan) {
+      if (!isValidHttpUrl(providerReferenceImageUrl)) {
+        return sendJson(res, 400, {
+          error: 'Scene anchor image is not provider-accessible.',
+          received: '[redacted-scene-anchor-url]',
+        });
+      }
+
+      const referenceValidation = await validateReferenceImageUrl(providerReferenceImageUrl);
+      if (!referenceValidation.ok) {
+        return sendJson(res, 400, {
+          error: 'Scene anchor image is not accessible',
+          referenceImageUrl: '[redacted-scene-anchor-url]',
+          status: referenceValidation.status,
+          contentType: referenceValidation.contentType,
+        });
+      }
+
+      console.log('FINAL INPUT SENT TO KLING SCENE ANCHOR I2V', {
+        prompt: promptForModel,
+        inputKeys: ['prompt', klingReferencePlan.stage2ProviderModel?.includes('/o1/') ? 'start_image_url' : 'image_url', 'duration'],
+        stage2ProviderModel: klingReferencePlan.stage2ProviderModel,
+        stage2ProviderRouteType: 'image_to_video',
+        primaryVideoInputType: 'scene_anchor',
+        identityReferencesPassedToVideoStage: false,
+        rawReferenceVisualInputsSentToStage2: false,
+        privateUrlsRedacted: true,
+      });
+
+      const result = await runFalKlingSceneAnchorImageToVideo({
+        prompt: promptForModel,
+        sceneAnchorUrl: providerReferenceImageUrl,
+        durationSent,
+      });
+
+      console.log('FINAL VIDEO URL:', result.videoUrl);
+
+      return sendJson(res, 200, {
+        success: true,
+        videoUrl: result.videoUrl,
+        provider: 'fal',
+        model: result.model,
+        displayEngine: 'Kling exact likeness',
+        generationMode: 'kling-exact-likeness-reference',
+        generationModeUsed: 'kling-exact-likeness-reference',
+        hasReferenceImage: true,
+        modelUsed: result.model,
+        durationSent: result.durationSent,
+        identityId: textValue(body.identityId) || null,
+        keyframeUrl: null,
+        exactLikenessRoute: 'kling_reference',
+        exactLikenessAvailable: true,
+        exactLikenessReason: 'Kling exact likeness route is canary-proven.',
+        referenceImageUrl: responseReferenceImageUrl,
+        additionalReferenceImageUrls: responseAdditionalReferenceImageUrls,
+        referenceStrategy: klingReferencePlan.plannedStrategy,
+        referenceRolesUsed: klingReferencePlan.references.map((reference) => reference.role),
+        referenceCount: klingReferencePlan.references.length,
+        sceneAnchorStrategy: klingReferencePlan.sceneAnchorStrategy,
+        sceneAnchorEnabled: sceneAnchorProviderStatus().sceneAnchorEnabled,
+        sceneAnchorModel: sceneAnchorProviderStatus().model,
+        sceneAnchorGenerated: true,
+        sceneAnchorPersisted: true,
+        sceneAnchorProvider: klingReferencePlan.sceneAnchorProvider,
+        sceneAnchorReason: klingReferencePlan.sceneAnchorReason,
+        sceneAnchorFailureCategory: null,
+        sceneAnchorValidation: klingReferencePlan.sceneAnchorValidation,
+        primaryInputType: klingReferencePlan.primaryInputType,
+        primaryVideoInputType: 'scene_anchor',
+        primaryVideoInputSource: 'scene_anchor',
+        identityReferencesPassedToVideoStage: false,
+        identityReferenceCount: klingReferencePlan.identityReferenceCount,
+        identityReferenceMode: 'stage1_only',
+        startFrameSource: 'scene_anchor',
+        posterFrameSource: 'video_frame',
+        firstFrameSource: 'scene_anchor',
+        stage2ProviderModel: result.model,
+        stage2ProviderRouteType: 'image_to_video',
+        rawReferenceVisualInputsSentToStage2: false,
+        sceneIntent: klingReferencePlan.sceneIntent,
+        framingIntent: klingReferencePlan.framingIntent,
+        primaryReferenceRole: klingReferencePlan.primaryReferenceRole,
+        supportingReferenceRoles: klingReferencePlan.supportingReferenceRoles,
+        usedMultiReferencePlan: klingReferencePlan.references.length > 1,
+        fellBackToFrontOnly: false,
+        compositionNeutralized: Boolean(klingReferencePlan.compositionNeutralized),
+        userSpecifiedOutfit: Boolean(klingReferencePlan.userSpecifiedOutfit),
+        outfitTermsDetected: klingReferencePlan.outfitTermsDetected,
+        environmentTermsDetected: klingReferencePlan.environmentTermsDetected,
+        referenceOutfitCarryoverSuppressed: Boolean(klingReferencePlan.referenceOutfitCarryoverSuppressed),
+        compositionCarryoverSuppressed: Boolean(klingReferencePlan.compositionCarryoverSuppressed),
+        frontOnlyFallback: false,
+        audioConfigured: false,
+        viralPresetUsed,
+        promptPolished,
+        klingReferenceDiagnostics: klingReferenceDiagnostics({
+          plan: klingReferencePlan,
+          referenceStrategy: klingReferencePlan.plannedStrategy,
+          exactLikenessRoute: 'kling_reference',
+          providerRoute: 'fal_kling_scene_anchor_image_to_video',
+          viralPresetUsed,
+          promptPolished,
+        }),
+        finalPrompt: promptForModel,
+        warnings: [],
+        rawOutput: {
+          provider: safeJsonValue(result.rawOutput),
+          attempts: result.attempts,
+        },
+      });
+    }
+
     if (SINGLE_PROVIDER_MODE) {
       console.log('SINGLE PROVIDER MODE ACTIVE', {
         requestedEngine: engine,
@@ -3152,6 +3635,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         privateUrlsRedacted: true,
       });
 
+      if (!token) {
+        return sendJson(res, 500, { error: 'Missing REPLICATE_API_TOKEN' });
+      }
       const { default: Replicate } = await import('replicate');
       const replicate = new Replicate({ auth: token }) as ReplicateClient;
 
@@ -3211,6 +3697,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           startFrameSource: klingReferencePlan?.startFrameSource ?? null,
           posterFrameSource: klingReferencePlan?.posterFrameSource ?? null,
           firstFrameSource: klingReferencePlan?.firstFrameSource ?? null,
+          stage2ProviderModel: klingReferencePlan?.stage2ProviderModel ?? result.model,
+          stage2ProviderRouteType: klingReferencePlan?.stage2ProviderRouteType ?? 'reference_to_video',
+          rawReferenceVisualInputsSentToStage2: Boolean(klingReferencePlan?.rawReferenceVisualInputsSentToStage2),
           sceneIntent: klingReferencePlan?.sceneIntent ?? [],
           framingIntent: klingReferencePlan?.framingIntent ?? null,
           primaryReferenceRole: klingReferencePlan?.primaryReferenceRole ?? null,
@@ -3318,6 +3807,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         privateUrlsRedacted: true,
       });
 
+      if (!token) {
+        return sendJson(res, 500, { error: 'Missing REPLICATE_API_TOKEN' });
+      }
       const { default: Replicate } = await import('replicate');
       const replicate = new Replicate({ auth: token }) as ReplicateClient;
 
@@ -3467,6 +3959,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       privateUrlsRedacted: true,
     });
 
+    if (!token) {
+      return sendJson(res, 500, { error: 'Missing REPLICATE_API_TOKEN' });
+    }
     const { default: Replicate } = await import('replicate');
     const replicate = new Replicate({ auth: token }) as ReplicateClient;
 
@@ -3530,6 +4025,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       startFrameSource: klingReferencePlan?.startFrameSource ?? null,
       posterFrameSource: klingReferencePlan?.posterFrameSource ?? null,
       firstFrameSource: klingReferencePlan?.firstFrameSource ?? null,
+      stage2ProviderModel: klingReferencePlan?.stage2ProviderModel ?? result.model,
+      stage2ProviderRouteType: klingReferencePlan?.stage2ProviderRouteType ?? 'reference_to_video',
+      rawReferenceVisualInputsSentToStage2: Boolean(klingReferencePlan?.rawReferenceVisualInputsSentToStage2),
       userSpecifiedOutfit: Boolean(klingReferencePlan?.userSpecifiedOutfit),
       outfitTermsDetected: klingReferencePlan?.outfitTermsDetected ?? [],
       environmentTermsDetected: klingReferencePlan?.environmentTermsDetected ?? [],

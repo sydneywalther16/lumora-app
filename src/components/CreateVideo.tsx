@@ -309,6 +309,9 @@ type GenerateVideoApiResponse = {
   startFrameSource?: string | null;
   posterFrameSource?: string | null;
   firstFrameSource?: string | null;
+  stage2ProviderModel?: string | null;
+  stage2ProviderRouteType?: string | null;
+  rawReferenceVisualInputsSentToStage2?: boolean | null;
   sceneIntent?: unknown;
   framingIntent?: string | null;
   primaryReferenceRole?: string | null;
@@ -1792,6 +1795,9 @@ export default function CreateVideo({
             startFrameSource: job.startFrameSource ?? null,
             posterFrameSource: job.posterFrameSource ?? null,
             firstFrameSource: job.firstFrameSource ?? null,
+            stage2ProviderModel: job.stage2ProviderModel ?? null,
+            stage2ProviderRouteType: job.stage2ProviderRouteType ?? null,
+            rawReferenceVisualInputsSentToStage2: job.rawReferenceVisualInputsSentToStage2 ?? null,
             sceneIntent: job.sceneIntent ?? null,
             framingIntent: job.framingIntent ?? null,
             primaryReferenceRole: job.primaryReferenceRole ?? null,
@@ -3122,6 +3128,11 @@ export default function CreateVideo({
       const nextStartFrameSource = data.startFrameSource ?? stringFromRecord(nextKlingDiagnosticsRecord, 'startFrameSource');
       const nextPosterFrameSource = data.posterFrameSource ?? stringFromRecord(nextKlingDiagnosticsRecord, 'posterFrameSource');
       const nextFirstFrameSource = data.firstFrameSource ?? stringFromRecord(nextKlingDiagnosticsRecord, 'firstFrameSource');
+      const nextStage2ProviderModel = data.stage2ProviderModel ?? stringFromRecord(nextKlingDiagnosticsRecord, 'stage2ProviderModel');
+      const nextStage2ProviderRouteType = data.stage2ProviderRouteType ?? stringFromRecord(nextKlingDiagnosticsRecord, 'stage2ProviderRouteType');
+      const nextRawReferenceVisualInputsSentToStage2 = typeof data.rawReferenceVisualInputsSentToStage2 === 'boolean'
+        ? data.rawReferenceVisualInputsSentToStage2
+        : booleanFromRecord(nextKlingDiagnosticsRecord, 'rawReferenceVisualInputsSentToStage2');
       const nextSceneIntent = formatStringList(data.sceneIntent).length
         ? formatStringList(data.sceneIntent)
         : formatStringList(nextKlingDiagnosticsRecord.sceneIntent);
@@ -3288,6 +3299,9 @@ export default function CreateVideo({
         startFrameSource: nextStartFrameSource,
         posterFrameSource: nextPosterFrameSource,
         firstFrameSource: nextFirstFrameSource,
+        stage2ProviderModel: nextStage2ProviderModel,
+        stage2ProviderRouteType: nextStage2ProviderRouteType,
+        rawReferenceVisualInputsSentToStage2: nextRawReferenceVisualInputsSentToStage2,
         sceneIntent: nextSceneIntent.length ? nextSceneIntent : null,
         framingIntent: nextFramingIntent,
         primaryReferenceRole: nextPrimaryReferenceRole,
@@ -3365,6 +3379,9 @@ export default function CreateVideo({
           startFrameSource: nextStartFrameSource,
           posterFrameSource: nextPosterFrameSource,
           firstFrameSource: nextFirstFrameSource,
+          stage2ProviderModel: nextStage2ProviderModel,
+          stage2ProviderRouteType: nextStage2ProviderRouteType,
+          rawReferenceVisualInputsSentToStage2: nextRawReferenceVisualInputsSentToStage2,
           sceneIntent: nextSceneIntent.length ? nextSceneIntent : null,
           framingIntent: nextFramingIntent,
           primaryReferenceRole: nextPrimaryReferenceRole,
@@ -3386,6 +3403,9 @@ export default function CreateVideo({
             startFrameSource: nextStartFrameSource,
             posterFrameSource: nextPosterFrameSource,
             firstFrameSource: nextFirstFrameSource,
+            stage2ProviderModel: nextStage2ProviderModel,
+            stage2ProviderRouteType: nextStage2ProviderRouteType,
+            rawReferenceVisualInputsSentToStage2: nextRawReferenceVisualInputsSentToStage2,
             audioConfigured: nextAudioConfigured,
             viralPresetUsed: nextViralPresetUsed,
             promptPolished: nextPromptPolished,

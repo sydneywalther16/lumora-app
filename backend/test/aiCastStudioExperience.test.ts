@@ -69,6 +69,7 @@ const klingDraftLabels = buildDraftAiCastLabels({
   primaryInputType: 'scene_anchor_still',
   startFrameSource: 'scene_anchor',
   identityReferencesPassedToVideoStage: false,
+  stage2ProviderRouteType: 'image_to_video',
   audioConfigured: false,
 });
 assert.deepEqual(klingDraftLabels, [
@@ -76,6 +77,7 @@ assert.deepEqual(klingDraftLabels, [
   'Scene-anchor-first',
   'Starts from scene anchor',
   'Identity references baked into anchor',
+  'Image-to-video stage',
   'Continue Story ready',
   'No audio',
 ]);
@@ -122,6 +124,9 @@ try {
     exactLikenessRoute: 'kling_reference',
     generationMode: 'kling-exact-likeness-reference',
     sceneAnchorStrategy: 'scene_anchor_still',
+    stage2ProviderModel: 'fal-ai/kling-video/v2.1/master/image-to-video',
+    stage2ProviderRouteType: 'image_to_video',
+    rawReferenceVisualInputsSentToStage2: false,
     outfitTermsDetected: ['flowing ivory dress'],
     environmentTermsDetected: ['flower garden'],
     framingIntent: 'walking_full_body',
@@ -132,6 +137,8 @@ try {
   const payload = JSON.parse(storage.get('lumora_remix_project') ?? '{}') as Record<string, unknown>;
   assert.equal(payload.exactLikenessRoute, 'kling_reference');
   assert.equal(payload.sceneAnchorStrategy, 'scene_anchor_still');
+  assert.equal(payload.stage2ProviderRouteType, 'image_to_video');
+  assert.equal(payload.rawReferenceVisualInputsSentToStage2, false);
   assert.equal(payload.audioConfigured, false);
   assert.equal(payload.viralPresetUsed, 'golden-hour-garden-walk');
   assert.equal(payload.promptPolished, true);

@@ -49,6 +49,7 @@ type DraftLabelInput = {
   startFrameSource?: string | null;
   identityReferencesPassedToVideoStage?: boolean | null;
   identityReferenceMode?: string | null;
+  stage2ProviderRouteType?: string | null;
   referenceStrategy?: string | null;
   sceneAnchorGenerated?: boolean | null;
   audioConfigured?: boolean | null;
@@ -62,6 +63,9 @@ type ContinueStoryInput = {
   startFrameSource?: string | null;
   identityReferencesPassedToVideoStage?: boolean | null;
   identityReferenceMode?: string | null;
+  stage2ProviderModel?: string | null;
+  stage2ProviderRouteType?: string | null;
+  rawReferenceVisualInputsSentToStage2?: boolean | null;
   klingReferenceDiagnostics?: Record<string, unknown> | null;
   outfitTermsDetected?: string[] | null;
   environmentTermsDetected?: string[] | null;
@@ -263,6 +267,7 @@ export function buildDraftAiCastLabels(job: DraftLabelInput): string[] {
       if (job.identityReferencesPassedToVideoStage === false || job.identityReferenceMode === 'stage1_only') {
         labels.push('Identity references baked into anchor');
       }
+      if (job.stage2ProviderRouteType === 'image_to_video') labels.push('Image-to-video stage');
     } else if (
       job.referenceStrategy === 'direct_identity_references' ||
       job.sceneAnchorStrategy === 'direct_identity_references'
@@ -296,7 +301,7 @@ export function buildContinueStoryScaffold(item: ContinueStoryInput) {
     ? diagnostics.sceneAnchorStrategy
     : null;
   const anchor = (item.sceneAnchorStrategy ?? diagnosticSceneAnchorStrategy) === 'scene_anchor_still'
-    ? ' Continue with scene-anchor-first exact-likeness planning, using the previous scene context or a new scene anchor as the start frame rather than a raw front portrait.'
+    ? ' Continue with scene-anchor-first exact-likeness planning, using the previous scene context or a new scene anchor as the image-to-video start frame rather than a raw front portrait.'
     : ' Continue with Kling exact-likeness identity planning.';
   const framing = item.framingIntent
     ? ` Keep the framing language aligned with ${item.framingIntent.replace(/_/g, ' ')}.`

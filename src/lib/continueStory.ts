@@ -39,6 +39,9 @@ type ContinueStoryItem = {
   startFrameSource?: string | null;
   posterFrameSource?: string | null;
   firstFrameSource?: string | null;
+  stage2ProviderModel?: string | null;
+  stage2ProviderRouteType?: string | null;
+  rawReferenceVisualInputsSentToStage2?: boolean | null;
   sceneIntent?: string[] | null;
   framingIntent?: string | null;
   primaryReferenceRole?: string | null;
@@ -126,6 +129,9 @@ export function prepareContinueStory(item: ContinueStoryItem, source: string) {
     startFrameSource: item.startFrameSource ?? null,
     posterFrameSource: item.posterFrameSource ?? null,
     firstFrameSource: item.firstFrameSource ?? null,
+    stage2ProviderModel: item.stage2ProviderModel ?? null,
+    stage2ProviderRouteType: item.stage2ProviderRouteType ?? null,
+    rawReferenceVisualInputsSentToStage2: item.rawReferenceVisualInputsSentToStage2 ?? null,
     sceneIntent: item.sceneIntent ?? null,
     framingIntent: item.framingIntent ?? null,
     primaryReferenceRole: item.primaryReferenceRole ?? null,

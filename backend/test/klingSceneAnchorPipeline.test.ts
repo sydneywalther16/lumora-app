@@ -3,6 +3,7 @@ import {
   analyzeKlingSceneIntent,
   buildFalSceneAnchorPayload,
   buildKlingCreateReferencePlan,
+  buildKlingSceneAnchorImageToVideoPayload,
   buildKlingVideoStageRequestInput,
   createFalSceneAnchorStill,
   detectKlingEnvironmentIntent,
@@ -19,6 +20,7 @@ const originalSceneAnchorEnv = {
   SCENE_ANCHOR_PROVIDER: process.env.SCENE_ANCHOR_PROVIDER,
   SCENE_ANCHOR_MODEL: process.env.SCENE_ANCHOR_MODEL,
   SCENE_ANCHOR_FALLBACK_MODE: process.env.SCENE_ANCHOR_FALLBACK_MODE,
+  KLING_SCENE_ANCHOR_VIDEO_MODEL: process.env.KLING_SCENE_ANCHOR_VIDEO_MODEL,
   FAL_KEY: process.env.FAL_KEY,
   KLING_API_KEY: process.env.KLING_API_KEY,
 };
@@ -27,6 +29,7 @@ delete process.env.SCENE_ANCHOR_ENABLED;
 delete process.env.SCENE_ANCHOR_PROVIDER;
 delete process.env.SCENE_ANCHOR_MODEL;
 delete process.env.SCENE_ANCHOR_FALLBACK_MODE;
+delete process.env.KLING_SCENE_ANCHOR_VIDEO_MODEL;
 delete process.env.FAL_KEY;
 delete process.env.KLING_API_KEY;
 
@@ -99,6 +102,8 @@ try {
   assert.match(plan.promptGuidance, /Build a new scene matching the requested environment, outfit, lighting, and cinematic mood/i);
   assert.match(plan.promptGuidance, /leaving source-photo furniture, seat-back shapes, studio framing, and seated posture out/i);
 
+  process.env.FAL_KEY = 'fal-test-key';
+  process.env.KLING_SCENE_ANCHOR_VIDEO_MODEL = 'fal-ai/kling-video/v2.1/master/image-to-video';
   const materializedPlan = await prepareKlingCreateReferencePlanForProvider({
     plan: buildKlingCreateReferencePlan({
       body: {
@@ -135,6 +140,9 @@ try {
   assert.equal(materializedPlan.startFrameSource, 'scene_anchor');
   assert.equal(materializedPlan.posterFrameSource, 'video_frame');
   assert.equal(materializedPlan.firstFrameSource, 'scene_anchor');
+  assert.equal(materializedPlan.stage2ProviderModel, 'fal-ai/kling-video/v2.1/master/image-to-video');
+  assert.equal(materializedPlan.stage2ProviderRouteType, 'image_to_video');
+  assert.equal(materializedPlan.rawReferenceVisualInputsSentToStage2, false);
   assert.equal(materializedPlan.sceneAnchorProvider, 'unit_scene_anchor');
   assert.equal(materializedPlan.sceneAnchorGenerated, true);
   assert.equal(materializedPlan.sceneAnchorPersisted, true);
@@ -158,6 +166,19 @@ try {
   });
   assert.equal(videoStageInput.start_image, 'https://assets.example/generated/garden-scene-anchor.png');
   assert.equal('reference_images' in videoStageInput, false);
+
+  const sceneAnchorI2vPayload = buildKlingSceneAnchorImageToVideoPayload({
+    model: materializedPlan.stage2ProviderModel ?? '',
+    prompt: materializedPlan.promptGuidance,
+    sceneAnchorUrl: materializedPlan.providerPrimaryReference.url,
+    duration: 5,
+  });
+  assert.deepEqual(Object.keys(sceneAnchorI2vPayload).sort(), ['duration', 'image_url', 'prompt']);
+  assert.equal(sceneAnchorI2vPayload.image_url, 'https://assets.example/generated/garden-scene-anchor.png');
+  assert.equal('reference_images' in sceneAnchorI2vPayload, false);
+  assert.equal('image_urls' in sceneAnchorI2vPayload, false);
+  assert.equal('elements' in sceneAnchorI2vPayload, false);
+  assert.equal('start_image_url' in sceneAnchorI2vPayload, false);
 
   const unavailablePlan = await prepareKlingCreateReferencePlanForProvider({
     plan: buildKlingCreateReferencePlan({
@@ -294,6 +315,9 @@ try {
   assert.equal(diagnostics.startFrameSource, 'scene_anchor');
   assert.equal(diagnostics.posterFrameSource, 'video_frame');
   assert.equal(diagnostics.firstFrameSource, 'scene_anchor');
+  assert.equal(diagnostics.stage2ProviderModel, 'fal-ai/kling-video/v2.1/master/image-to-video');
+  assert.equal(diagnostics.stage2ProviderRouteType, 'image_to_video');
+  assert.equal(diagnostics.rawReferenceVisualInputsSentToStage2, false);
   assert.equal((diagnostics.sceneAnchorValidation as Record<string, unknown>).passed, true);
   assert.equal(diagnostics.userSpecifiedOutfit, true);
   assert.deepEqual(diagnostics.outfitTermsDetected, ['flowing ivory dress']);
@@ -359,6 +383,9 @@ try {
       startFrameSource: materializedPlan.startFrameSource,
       posterFrameSource: materializedPlan.posterFrameSource,
       firstFrameSource: materializedPlan.firstFrameSource,
+      stage2ProviderModel: materializedPlan.stage2ProviderModel,
+      stage2ProviderRouteType: materializedPlan.stage2ProviderRouteType,
+      rawReferenceVisualInputsSentToStage2: materializedPlan.rawReferenceVisualInputsSentToStage2,
       sceneIntent: materializedPlan.sceneIntent,
       framingIntent: materializedPlan.framingIntent,
       primaryReferenceRole: materializedPlan.primaryReferenceRole,
@@ -381,6 +408,9 @@ try {
     assert.equal(payload.identityReferencesPassedToVideoStage, false);
     assert.equal(payload.identityReferenceMode, 'stage1_only');
     assert.equal(payload.startFrameSource, 'scene_anchor');
+    assert.equal(payload.stage2ProviderModel, 'fal-ai/kling-video/v2.1/master/image-to-video');
+    assert.equal(payload.stage2ProviderRouteType, 'image_to_video');
+    assert.equal(payload.rawReferenceVisualInputsSentToStage2, false);
     assert.equal((payload.sceneAnchorValidation as Record<string, unknown>).passed, true);
     assert.equal(payload.compositionCarryoverSuppressed, true);
     assert.deepEqual(payload.outfitTermsDetected, ['flowing ivory dress']);

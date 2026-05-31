@@ -100,6 +100,9 @@ assert.equal(walkingReferencePlan?.primaryVideoInputSource, 'scene_anchor');
 assert.equal(walkingReferencePlan?.identityReferencesPassedToVideoStage, false);
 assert.equal(walkingReferencePlan?.identityReferenceMode, 'stage1_only');
 assert.equal(walkingReferencePlan?.startFrameSource, 'scene_anchor');
+assert.equal(walkingReferencePlan?.stage2ProviderModel, null);
+assert.equal(walkingReferencePlan?.stage2ProviderRouteType, 'image_to_video');
+assert.equal(walkingReferencePlan?.rawReferenceVisualInputsSentToStage2, false);
 assert.equal(walkingReferencePlan?.framingIntent, 'walking_full_body');
 assert.equal(walkingReferencePlan?.compositionNeutralized, true);
 assert.deepEqual(walkingReferencePlan?.references.map((reference) => reference.role), [
@@ -148,6 +151,9 @@ assert.equal(walkingDiagnostics.identityReferenceMode, 'stage1_only');
 assert.equal(walkingDiagnostics.startFrameSource, 'scene_anchor');
 assert.equal(walkingDiagnostics.posterFrameSource, 'video_frame');
 assert.equal(walkingDiagnostics.firstFrameSource, 'scene_anchor');
+assert.equal(walkingDiagnostics.stage2ProviderModel, null);
+assert.equal(walkingDiagnostics.stage2ProviderRouteType, 'image_to_video');
+assert.equal(walkingDiagnostics.rawReferenceVisualInputsSentToStage2, false);
 assert.equal(walkingDiagnostics.privateUrlsRedacted, true);
 assert.equal(JSON.stringify(walkingDiagnostics).includes('assets.example'), false);
 
@@ -200,6 +206,17 @@ assert.match(createVideoSource, /Saving to Drafts/);
 assert.match(createVideoSource, /isClearlySafeKlingPrompt\(currentPrompt\)/);
 assert.match(createVideoSource, /isKlingComplexityError\(message\)/);
 assert.match(createVideoSource, /Kling exact-likeness scene created with scene-anchor identity planning\./);
+assert.match(createVideoSource, /stage2ProviderRouteType/);
+
+const aiCastExperienceSource = readFileSync(join(process.cwd(), 'src/lib/aiCastExperience.ts'), 'utf8');
+assert.match(aiCastExperienceSource, /Image-to-video stage/);
+
+const generateVideoSource = readFileSync(join(process.cwd(), 'api/lumora/generate-video.ts'), 'utf8');
+assert.match(generateVideoSource, /KLING_SCENE_ANCHOR_VIDEO_MODEL/);
+assert.match(generateVideoSource, /buildKlingSceneAnchorImageToVideoPayload/);
+assert.match(generateVideoSource, /fal_kling_scene_anchor_image_to_video/);
+assert.match(generateVideoSource, /Scene anchor video model is not configured\./);
+assert.match(generateVideoSource, /rawReferenceVisualInputsSentToStage2: false/);
 
 const studioListSource = readFileSync(join(process.cwd(), 'src/components/StudioList.tsx'), 'utf8');
 assert.match(studioListSource, /Kling exact likeness/);
@@ -253,6 +270,7 @@ try {
   assert.equal((payload.klingReferenceDiagnostics as Record<string, unknown>).primaryReferenceRole, 'full_body');
   assert.equal((payload.klingReferenceDiagnostics as Record<string, unknown>).startFrameSource, 'scene_anchor');
   assert.equal((payload.klingReferenceDiagnostics as Record<string, unknown>).identityReferencesPassedToVideoStage, false);
+  assert.equal((payload.klingReferenceDiagnostics as Record<string, unknown>).stage2ProviderRouteType, 'image_to_video');
   assert.match(String(payload.prompt), /medium-full or full-body cinematic staging/i);
   assert.match(String(payload.prompt), /rather than a raw front portrait/i);
   assert.equal(storage.get('lumora_remix_render_engine'), 'replicate');

@@ -58,6 +58,9 @@ export type StudioProject = {
   startFrameSource?: string | null;
   posterFrameSource?: string | null;
   firstFrameSource?: string | null;
+  stage2ProviderModel?: string | null;
+  stage2ProviderRouteType?: string | null;
+  rawReferenceVisualInputsSentToStage2?: boolean | null;
   sceneIntent?: string[] | null;
   framingIntent?: string | null;
   primaryReferenceRole?: string | null;
@@ -200,6 +203,10 @@ export function loadStudioProjects(): StudioProject[] {
           startFrameSource: typeof project.startFrameSource === 'string' ? project.startFrameSource : null,
           posterFrameSource: typeof project.posterFrameSource === 'string' ? project.posterFrameSource : null,
           firstFrameSource: typeof project.firstFrameSource === 'string' ? project.firstFrameSource : null,
+          stage2ProviderModel: typeof project.stage2ProviderModel === 'string' ? project.stage2ProviderModel : null,
+          stage2ProviderRouteType: typeof project.stage2ProviderRouteType === 'string' ? project.stage2ProviderRouteType : null,
+          rawReferenceVisualInputsSentToStage2:
+            typeof project.rawReferenceVisualInputsSentToStage2 === 'boolean' ? project.rawReferenceVisualInputsSentToStage2 : null,
           sceneIntent: Array.isArray(project.sceneIntent)
             ? project.sceneIntent.filter((item): item is string => typeof item === 'string')
             : null,

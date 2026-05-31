@@ -71,6 +71,9 @@ type RemixProjectPayload = {
   startFrameSource?: string | null;
   posterFrameSource?: string | null;
   firstFrameSource?: string | null;
+  stage2ProviderModel?: string | null;
+  stage2ProviderRouteType?: string | null;
+  rawReferenceVisualInputsSentToStage2?: boolean | null;
   sceneIntent?: string[] | null;
   framingIntent?: string | null;
   primaryReferenceRole?: string | null;
