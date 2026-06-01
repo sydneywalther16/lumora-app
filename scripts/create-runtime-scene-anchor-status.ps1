@@ -86,6 +86,9 @@ try {
 Write-Host "Create runtime scene-anchor status"
 if ($null -ne $httpStatus) { Write-Host "http status: $httpStatus" }
 if ($null -ne $status.ok) { Write-Host "ok: $($status.ok)" }
+Write-Host "endpoint loaded: $($status.endpointLoaded)"
+Write-Host "helper loaded: $($status.helperLoaded)"
+Write-Host "runtime status built: $($status.runtimeStatusBuilt)"
 if ($status.ok -eq $false) {
   Write-Host "error: $($status.error)"
   if ($status.message) { Write-Host "message: $(Redact-StatusText $status.message)" }

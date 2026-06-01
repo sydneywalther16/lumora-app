@@ -28,6 +28,9 @@ export type CreateRuntimeSceneAnchorStatus = {
     vercelUrlPresent: boolean;
   };
   recommendedNextAction: string;
+  endpointLoaded?: true;
+  helperLoaded?: boolean;
+  runtimeStatusBuilt?: boolean;
   secretsRedacted: true;
   privateUrlsRedacted: true;
 };
@@ -36,6 +39,9 @@ export type CreateRuntimeSceneAnchorFailureStatus = {
   ok: false;
   error: 'runtime_status_failed';
   message: string;
+  endpointLoaded?: true;
+  helperLoaded?: boolean;
+  runtimeStatusBuilt?: false;
   secretsRedacted: true;
   privateUrlsRedacted: true;
 };

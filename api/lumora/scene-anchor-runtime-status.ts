@@ -1,13 +1,17 @@
-import type { IncomingMessage, ServerResponse } from 'node:http';
-import { buildSceneAnchorRuntimeStatusResponse, runtimeStatusFailurePayload } from './runtimeSceneAnchorStatus';
-
-type VercelRequest = IncomingMessage & {
+type VercelRequest = {
   method?: string;
 };
 
-type VercelResponse = ServerResponse & {
-  status: (code: number) => VercelResponse;
-  json: (payload: unknown) => void;
+type VercelResponse = {
+  status?: (code: number) => VercelResponse;
+  json?: (payload: unknown) => void;
+  statusCode?: number;
+  setHeader?: (name: string, value: string) => void;
+  end?: (body?: string) => void;
+};
+
+type RuntimeStatusHelper = {
+  buildCreateRuntimeSceneAnchorStatus: () => Record<string, unknown>;
 };
 
 function safeJsonValue(value: unknown, seen = new WeakSet<object>()): unknown {
@@ -29,25 +33,80 @@ function safeJsonValue(value: unknown, seen = new WeakSet<object>()): unknown {
   );
 }
 
-function sendJson(res: ServerResponse, statusCode: number, payload: unknown) {
-  const vercelRes = res as Partial<VercelResponse>;
+function redactRuntimeStatusMessage(value: unknown) {
+  const message = value instanceof Error
+    ? value.message
+    : typeof value === 'string'
+      ? value
+      : 'Create runtime scene-anchor status failed.';
+  return message
+    .replace(/https?:\/\/\S+/gi, '[redacted-url]')
+    .replace(/(?:Key|Bearer)\s+[A-Za-z0-9._:-]{12,}/gi, '[redacted-auth]')
+    .replace(/[A-Za-z0-9_-]{16,}:[A-Za-z0-9._:-]{16,}/g, '[redacted-key]')
+    .slice(0, 700);
+}
+
+function runtimeStatusFailed(error: unknown, helperLoaded: boolean) {
+  return {
+    ok: false,
+    error: 'runtime_status_failed',
+    message: redactRuntimeStatusMessage(error),
+    endpointLoaded: true,
+    helperLoaded,
+    runtimeStatusBuilt: false,
+    secretsRedacted: true,
+    privateUrlsRedacted: true,
+  };
+}
+
+function sendJson(res: VercelResponse, statusCode: number, payload: unknown) {
   const safePayload = safeJsonValue(payload) ?? null;
-  if (typeof vercelRes.status === 'function' && typeof vercelRes.json === 'function') {
-    vercelRes.status(statusCode).json(safePayload);
+  if (typeof res.status === 'function' && typeof res.json === 'function') {
+    const next = res.status(statusCode);
+    if (typeof next.json === 'function') next.json(safePayload);
     return;
   }
   res.statusCode = statusCode;
-  res.setHeader('Content-Type', 'application/json');
-  res.end(JSON.stringify(safePayload));
+  res.setHeader?.('Content-Type', 'application/json');
+  res.end?.(JSON.stringify(safePayload));
+}
+
+export async function buildSceneAnchorRuntimeEndpointPayload(
+  loadHelper: () => Promise<RuntimeStatusHelper> = async () => import('./runtimeSceneAnchorStatus'),
+) {
+  let helperLoaded = false;
+  try {
+    const helper = await loadHelper();
+    helperLoaded = true;
+    const status = helper.buildCreateRuntimeSceneAnchorStatus();
+    return {
+      ...status,
+      endpointLoaded: true,
+      helperLoaded: true,
+      runtimeStatusBuilt: true,
+      secretsRedacted: true,
+      privateUrlsRedacted: true,
+    };
+  } catch (error) {
+    return runtimeStatusFailed(error, helperLoaded);
+  }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if ((req.method ?? 'GET').toUpperCase() !== 'GET') {
-      return sendJson(res, 405, { ok: false, error: 'method_not_allowed', secretsRedacted: true });
+      return sendJson(res, 405, {
+        ok: false,
+        error: 'method_not_allowed',
+        endpointLoaded: true,
+        helperLoaded: false,
+        runtimeStatusBuilt: false,
+        secretsRedacted: true,
+        privateUrlsRedacted: true,
+      });
     }
-    return sendJson(res, 200, buildSceneAnchorRuntimeStatusResponse());
+    return sendJson(res, 200, await buildSceneAnchorRuntimeEndpointPayload());
   } catch (error) {
-    return sendJson(res, 200, runtimeStatusFailurePayload(error));
+    return sendJson(res, 200, runtimeStatusFailed(error, false));
   }
 }
