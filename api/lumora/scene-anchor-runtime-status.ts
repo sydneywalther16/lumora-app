@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { buildCreateRuntimeSceneAnchorStatus } from './generate-video';
+import { buildSceneAnchorRuntimeStatusResponse, runtimeStatusFailurePayload } from './runtimeSceneAnchorStatus';
 
 type VercelRequest = IncomingMessage & {
   method?: string;
@@ -42,8 +42,12 @@ function sendJson(res: ServerResponse, statusCode: number, payload: unknown) {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if ((req.method ?? 'GET').toUpperCase() !== 'GET') {
-    return sendJson(res, 405, { ok: false, error: 'method_not_allowed' });
+  try {
+    if ((req.method ?? 'GET').toUpperCase() !== 'GET') {
+      return sendJson(res, 405, { ok: false, error: 'method_not_allowed', secretsRedacted: true });
+    }
+    return sendJson(res, 200, buildSceneAnchorRuntimeStatusResponse());
+  } catch (error) {
+    return sendJson(res, 200, runtimeStatusFailurePayload(error));
   }
-  return sendJson(res, 200, buildCreateRuntimeSceneAnchorStatus());
 }
