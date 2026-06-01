@@ -10,9 +10,61 @@ type VercelResponse = {
   end?: (body?: string) => void;
 };
 
-type RuntimeStatusHelper = {
-  buildCreateRuntimeSceneAnchorStatus: () => Record<string, unknown>;
+type RuntimeStatus = {
+  ok: true;
+  runtime: string;
+  endpointLoaded: true;
+  helperLoaded: true;
+  runtimeStatusBuilt: true;
+  sceneAnchorEnabled: boolean;
+  sceneAnchorProvider: string;
+  sceneAnchorModel: string | null;
+  sceneAnchorFallbackMode: string;
+  sceneAnchorConfigured: boolean;
+  sceneAnchorImplemented: boolean;
+  missingConfig: string[];
+  falKeyPresent: boolean;
+  klingApiKeyPresent: boolean;
+  sceneAnchorFalCredentialPresent: boolean;
+  klingEnabled: boolean;
+  klingProvider: string | null;
+  klingReferenceModel: string | null;
+  klingSceneAnchorVideoModel: string | null;
+  klingSceneAnchorVideoModelConfigured: boolean;
+  enableRenderProbe: boolean;
+  nodeEnv: string | null;
+  build: {
+    vercelEnv: string | null;
+    vercelGitCommitSha: string | null;
+    vercelGitCommitRef: string | null;
+    vercelUrlPresent: boolean;
+  };
+  recommendedNextAction: string;
+  secretsRedacted: true;
+  privateUrlsRedacted: true;
 };
+
+type RuntimeFailureStatus = {
+  ok: false;
+  error: 'runtime_status_failed';
+  endpointLoaded: true;
+  helperLoaded: false;
+  runtimeStatusBuilt: false;
+  message: string;
+  secretsRedacted: true;
+  privateUrlsRedacted: true;
+};
+
+function textValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function booleanValue(value: unknown): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const normalized = textValue(value).toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
 
 function safeJsonValue(value: unknown, seen = new WeakSet<object>()): unknown {
   if (value == null) return value;
@@ -46,17 +98,128 @@ function redactRuntimeStatusMessage(value: unknown) {
     .slice(0, 700);
 }
 
-function runtimeStatusFailed(error: unknown, helperLoaded: boolean) {
+function runtimeStatusFailed(error: unknown): RuntimeFailureStatus {
   return {
     ok: false,
     error: 'runtime_status_failed',
-    message: redactRuntimeStatusMessage(error),
     endpointLoaded: true,
-    helperLoaded,
+    helperLoaded: false,
     runtimeStatusBuilt: false,
+    message: redactRuntimeStatusMessage(error),
     secretsRedacted: true,
     privateUrlsRedacted: true,
   };
+}
+
+function sceneAnchorFallbackMode(envSource: NodeJS.ProcessEnv = process.env) {
+  const mode = textValue(envSource.SCENE_ANCHOR_FALLBACK_MODE || 'pause').toLowerCase();
+  return mode === 'identity_only' ? 'identity_only' : 'pause';
+}
+
+function detectCreateRuntime(envSource: NodeJS.ProcessEnv = process.env) {
+  if (booleanValue(envSource.VERCEL) || textValue(envSource.VERCEL_ENV) || textValue(envSource.VERCEL_URL)) return 'vercel';
+  if (textValue(envSource.RENDER) || textValue(envSource.RENDER_SERVICE_ID) || textValue(envSource.RENDER_EXTERNAL_URL)) return 'render';
+  if (textValue(envSource.AWS_LAMBDA_FUNCTION_NAME)) return 'serverless';
+  return 'local';
+}
+
+function sceneAnchorCredentialPresent(envSource: NodeJS.ProcessEnv = process.env) {
+  return Boolean(textValue(envSource.FAL_KEY) || textValue(envSource.KLING_API_KEY));
+}
+
+function sceneAnchorMissingConfig(envSource: NodeJS.ProcessEnv = process.env) {
+  const missing: string[] = [];
+  const enabled = booleanValue(envSource.SCENE_ANCHOR_ENABLED);
+  const provider = (textValue(envSource.SCENE_ANCHOR_PROVIDER) || 'fal').toLowerCase();
+  if (!enabled) missing.push('SCENE_ANCHOR_ENABLED');
+  if (enabled && provider !== 'none') {
+    if (!textValue(envSource.SCENE_ANCHOR_MODEL)) missing.push('SCENE_ANCHOR_MODEL');
+    if (provider === 'fal' && !sceneAnchorCredentialPresent(envSource)) missing.push('FAL_KEY or KLING_API_KEY');
+    if (provider === 'openai' && !textValue(envSource.OPENAI_API_KEY)) missing.push('OPENAI_API_KEY');
+  }
+  return Array.from(new Set(missing));
+}
+
+function implementedKlingSceneAnchorVideoModel(model: string) {
+  const normalized = model.toLowerCase();
+  return normalized === 'fal-ai/kling-video/v2.1/master/image-to-video' ||
+    normalized === 'fal-ai/kling-video/v2.1/standard/image-to-video' ||
+    normalized === 'fal-ai/kling-video/o1/image-to-video' ||
+    normalized === 'fal-ai/kling-video/o1/standard/image-to-video';
+}
+
+export function buildCreateRuntimeSceneAnchorStatus(
+  envSource: NodeJS.ProcessEnv = process.env,
+): RuntimeStatus {
+  const runtime = detectCreateRuntime(envSource);
+  const sceneAnchorEnabled = booleanValue(envSource.SCENE_ANCHOR_ENABLED);
+  const sceneAnchorProvider = (textValue(envSource.SCENE_ANCHOR_PROVIDER) || 'fal').toLowerCase();
+  const sceneAnchorModel = textValue(envSource.SCENE_ANCHOR_MODEL) || null;
+  const sceneAnchorFallback = sceneAnchorFallbackMode(envSource);
+  const missingConfig = sceneAnchorMissingConfig(envSource);
+  const falKeyPresent = Boolean(textValue(envSource.FAL_KEY));
+  const klingApiKeyPresent = Boolean(textValue(envSource.KLING_API_KEY));
+  const sceneAnchorFalCredentialPresent = sceneAnchorCredentialPresent(envSource);
+  const sceneAnchorImplemented = sceneAnchorProvider === 'fal';
+  const sceneAnchorConfigured = sceneAnchorEnabled &&
+    sceneAnchorImplemented &&
+    Boolean(sceneAnchorModel) &&
+    sceneAnchorFalCredentialPresent;
+  const klingSceneAnchorVideoModel = textValue(envSource.KLING_SCENE_ANCHOR_VIDEO_MODEL) || null;
+  const klingSceneAnchorVideoModelConfigured = Boolean(
+    klingSceneAnchorVideoModel &&
+    sceneAnchorFalCredentialPresent &&
+    implementedKlingSceneAnchorVideoModel(klingSceneAnchorVideoModel),
+  );
+  const recommendedNextAction = !sceneAnchorConfigured
+    ? `Set missing scene-anchor env vars on the Create runtime (${runtime === 'vercel' ? 'Vercel' : runtime}), then redeploy. Render diagnostics do not prove Create runtime config.`
+    : !klingSceneAnchorVideoModelConfigured
+      ? `Set KLING_SCENE_ANCHOR_VIDEO_MODEL on the Create runtime (${runtime === 'vercel' ? 'Vercel' : runtime}), then redeploy.`
+      : 'Create runtime scene-anchor config is ready. If Create still pauses, inspect the per-render sceneAnchorFailureCategory and redacted provider message.';
+
+  return {
+    ok: true,
+    runtime,
+    endpointLoaded: true,
+    helperLoaded: true,
+    runtimeStatusBuilt: true,
+    sceneAnchorEnabled,
+    sceneAnchorProvider,
+    sceneAnchorModel,
+    sceneAnchorFallbackMode: sceneAnchorFallback,
+    sceneAnchorConfigured,
+    sceneAnchorImplemented,
+    missingConfig,
+    falKeyPresent,
+    klingApiKeyPresent,
+    sceneAnchorFalCredentialPresent,
+    klingEnabled: booleanValue(envSource.KLING_ENABLED),
+    klingProvider: textValue(envSource.KLING_PROVIDER) || null,
+    klingReferenceModel: textValue(envSource.KLING_REFERENCE_MODEL) || null,
+    klingSceneAnchorVideoModel,
+    klingSceneAnchorVideoModelConfigured,
+    enableRenderProbe: booleanValue(envSource.ENABLE_RENDER_PROBE),
+    nodeEnv: textValue(envSource.NODE_ENV) || null,
+    build: {
+      vercelEnv: textValue(envSource.VERCEL_ENV) || null,
+      vercelGitCommitSha: textValue(envSource.VERCEL_GIT_COMMIT_SHA) || null,
+      vercelGitCommitRef: textValue(envSource.VERCEL_GIT_COMMIT_REF) || null,
+      vercelUrlPresent: Boolean(textValue(envSource.VERCEL_URL)),
+    },
+    recommendedNextAction,
+    secretsRedacted: true,
+    privateUrlsRedacted: true,
+  };
+}
+
+export function buildSceneAnchorRuntimeEndpointPayload(
+  statusBuilder: () => RuntimeStatus = () => buildCreateRuntimeSceneAnchorStatus(),
+) {
+  try {
+    return statusBuilder();
+  } catch (error) {
+    return runtimeStatusFailed(error);
+  }
 }
 
 function sendJson(res: VercelResponse, statusCode: number, payload: unknown) {
@@ -69,27 +232,6 @@ function sendJson(res: VercelResponse, statusCode: number, payload: unknown) {
   res.statusCode = statusCode;
   res.setHeader?.('Content-Type', 'application/json');
   res.end?.(JSON.stringify(safePayload));
-}
-
-export async function buildSceneAnchorRuntimeEndpointPayload(
-  loadHelper: () => Promise<RuntimeStatusHelper> = async () => import('./runtimeSceneAnchorStatus'),
-) {
-  let helperLoaded = false;
-  try {
-    const helper = await loadHelper();
-    helperLoaded = true;
-    const status = helper.buildCreateRuntimeSceneAnchorStatus();
-    return {
-      ...status,
-      endpointLoaded: true,
-      helperLoaded: true,
-      runtimeStatusBuilt: true,
-      secretsRedacted: true,
-      privateUrlsRedacted: true,
-    };
-  } catch (error) {
-    return runtimeStatusFailed(error, helperLoaded);
-  }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -105,8 +247,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         privateUrlsRedacted: true,
       });
     }
-    return sendJson(res, 200, await buildSceneAnchorRuntimeEndpointPayload());
+    return sendJson(res, 200, buildSceneAnchorRuntimeEndpointPayload());
   } catch (error) {
-    return sendJson(res, 200, runtimeStatusFailed(error, false));
+    return sendJson(res, 200, runtimeStatusFailed(error));
   }
 }

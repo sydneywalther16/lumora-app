@@ -3,9 +3,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   buildCreateRuntimeSceneAnchorStatus,
-  buildSceneAnchorRuntimeStatusResponse,
-} from '../../api/lumora/runtimeSceneAnchorStatus';
-import { buildSceneAnchorRuntimeEndpointPayload } from '../../api/lumora/scene-anchor-runtime-status';
+  buildSceneAnchorRuntimeEndpointPayload,
+} from '../../api/lumora/scene-anchor-runtime-status';
 
 const missingRuntime = buildCreateRuntimeSceneAnchorStatus({
   VERCEL: '1',
@@ -21,6 +20,9 @@ assert.ok(missingRuntime.missingConfig.includes('SCENE_ANCHOR_ENABLED'));
 assert.match(missingRuntime.recommendedNextAction, /Create runtime|Vercel/i);
 assert.equal(missingRuntime.privateUrlsRedacted, true);
 assert.equal(missingRuntime.secretsRedacted, true);
+assert.equal(missingRuntime.endpointLoaded, true);
+assert.equal(missingRuntime.helperLoaded, true);
+assert.equal(missingRuntime.runtimeStatusBuilt, true);
 
 const configuredRuntime = buildCreateRuntimeSceneAnchorStatus({
   VERCEL: '1',
@@ -42,6 +44,7 @@ const configuredRuntime = buildCreateRuntimeSceneAnchorStatus({
 
 assert.equal(configuredRuntime.sceneAnchorEnabled, true);
 assert.equal(configuredRuntime.sceneAnchorConfigured, true);
+assert.equal(configuredRuntime.sceneAnchorImplemented, true);
 assert.equal(configuredRuntime.sceneAnchorProvider, 'fal');
 assert.equal(configuredRuntime.sceneAnchorModel, 'fal-ai/vidu/q2/reference-to-image');
 assert.deepEqual(configuredRuntime.missingConfig, []);
@@ -61,66 +64,39 @@ assert.doesNotMatch(serialized, /kling-secret-value-should-not-leak/);
 assert.match(serialized, /"falKeyPresent":true/);
 assert.match(serialized, /"klingApiKeyPresent":true/);
 
-const failureStatus = buildSceneAnchorRuntimeStatusResponse(() => {
-  throw new Error('runtime failed with Key secret-value-should-not-leak and https://signed.example/private');
-});
-assert.equal(failureStatus.ok, false);
-assert.equal(failureStatus.error, 'runtime_status_failed');
-assert.equal(failureStatus.secretsRedacted, true);
-assert.doesNotMatch(failureStatus.message, /secret-value-should-not-leak/);
-assert.doesNotMatch(failureStatus.message, /https:\/\/signed\.example/);
-
-const endpointPayload = await buildSceneAnchorRuntimeEndpointPayload(async () => ({
-  buildCreateRuntimeSceneAnchorStatus: () => configuredRuntime,
-}));
+const endpointPayload = buildSceneAnchorRuntimeEndpointPayload(() => configuredRuntime);
 assert.equal(endpointPayload.ok, true);
 assert.equal(endpointPayload.endpointLoaded, true);
 assert.equal(endpointPayload.helperLoaded, true);
 assert.equal(endpointPayload.runtimeStatusBuilt, true);
 
-const endpointHelperLoadFailure = await buildSceneAnchorRuntimeEndpointPayload(async () => {
-  throw new Error('helper import failed with Bearer secret-value-should-not-leak');
+const endpointBuilderFailure = buildSceneAnchorRuntimeEndpointPayload(() => {
+  throw new Error('builder failed with Bearer secret-value-should-not-leak and https://signed.example/private');
 });
-assert.equal(endpointHelperLoadFailure.ok, false);
-assert.equal(endpointHelperLoadFailure.endpointLoaded, true);
-assert.equal(endpointHelperLoadFailure.helperLoaded, false);
-assert.equal(endpointHelperLoadFailure.runtimeStatusBuilt, false);
-assert.doesNotMatch(endpointHelperLoadFailure.message, /secret-value-should-not-leak/);
-
-const endpointBuilderFailure = await buildSceneAnchorRuntimeEndpointPayload(async () => ({
-  buildCreateRuntimeSceneAnchorStatus: () => {
-    throw new Error('builder failed with https://signed.example/private');
-  },
-}));
 assert.equal(endpointBuilderFailure.ok, false);
 assert.equal(endpointBuilderFailure.endpointLoaded, true);
-assert.equal(endpointBuilderFailure.helperLoaded, true);
+assert.equal(endpointBuilderFailure.helperLoaded, false);
 assert.equal(endpointBuilderFailure.runtimeStatusBuilt, false);
 assert.doesNotMatch(endpointBuilderFailure.message, /https:\/\/signed\.example/);
+assert.doesNotMatch(endpointBuilderFailure.message, /secret-value-should-not-leak/);
 
 const endpointSource = readFileSync(
   join(process.cwd(), 'api/lumora/scene-anchor-runtime-status.ts'),
   'utf8',
 );
+assert.match(endpointSource, /buildCreateRuntimeSceneAnchorStatus/);
 assert.match(endpointSource, /buildSceneAnchorRuntimeEndpointPayload/);
-assert.match(endpointSource, /runtimeSceneAnchorStatus/);
 assert.match(endpointSource, /endpointLoaded/);
 assert.match(endpointSource, /helperLoaded/);
 assert.match(endpointSource, /runtimeStatusBuilt/);
 assert.match(endpointSource, /try/);
 assert.match(endpointSource, /catch/);
+assert.doesNotMatch(endpointSource, /^import\s/m);
 assert.doesNotMatch(endpointSource, /generate-video/);
 assert.doesNotMatch(endpointSource, /node:http/);
-assert.doesNotMatch(endpointSource, /from ['"]\.\/runtimeSceneAnchorStatus/);
-assert.doesNotMatch(endpointSource, /FAL_KEY[^P]/);
-assert.doesNotMatch(endpointSource, /KLING_API_KEY[^P]/);
-
-const helperSource = readFileSync(
-  join(process.cwd(), 'api/lumora/runtimeSceneAnchorStatus.ts'),
-  'utf8',
-);
-assert.doesNotMatch(helperSource, /generate-video/);
-assert.doesNotMatch(helperSource, /Replicate|Supabase|storageService|falSceneAnchorJson|fetch\(/);
+assert.doesNotMatch(endpointSource, /import\(/);
+assert.doesNotMatch(endpointSource, /runtimeSceneAnchorStatus/);
+assert.doesNotMatch(endpointSource, /Replicate|Supabase|storageService|falSceneAnchorJson|OpenAI/);
 
 const scriptSource = readFileSync(
   join(process.cwd(), 'scripts/create-runtime-scene-anchor-status.ps1'),
