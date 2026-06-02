@@ -5,6 +5,8 @@ import {
   buildKlingCreateReferencePlan,
   buildKlingSceneAnchorImageToVideoPayload,
   buildKlingVideoStageRequestInput,
+  buildKlingStage2RenderFailure,
+  buildSceneAnchorRenderFailure,
   createFalSceneAnchorStill,
   detectKlingEnvironmentIntent,
   detectKlingOutfitIntent,
@@ -269,6 +271,52 @@ try {
   assert.deepEqual(failedSchemaPlan.sceneAnchorPayloadFieldNames, ['aspect_ratio', 'prompt', 'reference_image_urls']);
   assert.equal(failedSchemaPlan.sceneAnchorSubmittedReferenceCount, 3);
   assert.deepEqual(failedSchemaPlan.sceneAnchorDroppedReferenceRoles, ['side_angle_right']);
+  const schemaRenderFailure = buildSceneAnchorRenderFailure({
+    plan: failedSchemaPlan,
+    category: 'scene_anchor_input_schema',
+  });
+  assert.equal(schemaRenderFailure.route, 'kling_reference');
+  assert.equal(schemaRenderFailure.provider, 'kling');
+  assert.equal(schemaRenderFailure.stage, 'scene_anchor');
+  assert.equal(schemaRenderFailure.category, 'scene_anchor_input_schema');
+  assert.match(schemaRenderFailure.safeTitle, /payload shape/i);
+  assert.equal(schemaRenderFailure.sceneAnchorHttpStatus, 422);
+  assert.deepEqual(schemaRenderFailure.sceneAnchorPayloadFieldNames, ['aspect_ratio', 'prompt', 'reference_image_urls']);
+  assert.equal(schemaRenderFailure.sceneAnchorSubmittedReferenceCount, 3);
+  assert.deepEqual(schemaRenderFailure.sceneAnchorDroppedReferenceRoles, ['side_angle_right']);
+  assert.equal(schemaRenderFailure.privateUrlsRedacted, true);
+  assert.equal(schemaRenderFailure.secretsRedacted, true);
+
+  const outputParseFailurePlan = {
+    ...failedSchemaPlan,
+    sceneAnchorFailureCategory: 'scene_anchor_output_parse_failed' as const,
+    sceneAnchorErrorMessage: 'response contained image object but no readable URL',
+    sceneAnchorOutputParsed: false,
+  };
+  const outputParseRenderFailure = buildSceneAnchorRenderFailure({
+    plan: outputParseFailurePlan,
+    category: 'scene_anchor_output_parse_failed',
+  });
+  assert.equal(outputParseRenderFailure.stage, 'parse_output');
+  assert.equal(outputParseRenderFailure.category, 'scene_anchor_output_parse_failed');
+  assert.match(outputParseRenderFailure.safeMessage, /could not read the image output/i);
+  assert.equal(outputParseRenderFailure.sceneAnchorOutputParsed, false);
+
+  const stage2SchemaFailure = buildKlingStage2RenderFailure({
+    plan: materializedPlan,
+    error: Object.assign(new Error('invalid input: unknown field reference_images https://assets.example/private.png'), {
+      failureCategory: 'scene_anchor_input_schema',
+      falHttpStatus: 422,
+      falErrorType: 'validation_error',
+      falErrorMessage: 'invalid field reference_images https://assets.example/private.png',
+    }),
+  });
+  assert.equal(stage2SchemaFailure.stage, 'kling_image_to_video');
+  assert.equal(stage2SchemaFailure.category, 'kling_scene_anchor_video_input_schema');
+  assert.match(stage2SchemaFailure.safeTitle, /image-to-video rejected/i);
+  assert.equal(stage2SchemaFailure.stage2HttpStatus, 422);
+  assert.match(stage2SchemaFailure.stage2ErrorMessageRedacted ?? '', /\[redacted-url\]/);
+  assert.doesNotMatch(JSON.stringify(stage2SchemaFailure), /https:\/\/assets\.example\/private/);
 
   process.env.SCENE_ANCHOR_ENABLED = 'true';
   process.env.SCENE_ANCHOR_PROVIDER = 'fal';

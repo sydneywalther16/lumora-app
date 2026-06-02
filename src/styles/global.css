@@ -3164,6 +3164,47 @@ button {
   line-height: 1.45;
 }
 
+.render-failure-debug-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(255, 206, 115, 0.22);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.render-failure-debug-grid {
+  display: grid;
+  grid-template-columns: minmax(84px, 0.8fr) minmax(0, 1.2fr);
+  gap: 6px 10px;
+  align-items: start;
+  min-width: 0;
+}
+
+.render-failure-debug-grid span {
+  color: var(--muted-text);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.render-failure-debug-grid strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.render-failure-debug-card .quiet-btn {
+  width: fit-content;
+  min-height: 38px;
+  padding: 9px 12px;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+}
+
 .next-take-panel {
   display: grid;
   gap: 12px;

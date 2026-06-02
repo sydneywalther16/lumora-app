@@ -209,6 +209,11 @@ assert.match(createVideoSource, /Kling exact-likeness scene created with scene-a
 assert.match(createVideoSource, /stage2ProviderRouteType/);
 assert.match(createVideoSource, /image provider rejected the payload shape/);
 assert.match(createVideoSource, /could not read the image output/);
+assert.match(createVideoSource, /renderFailure/);
+assert.match(createVideoSource, /normalizeRenderFailure/);
+assert.match(createVideoSource, /Copy debug summary/);
+assert.match(createVideoSource, /stage2ErrorMessageRedacted/);
+assert.match(createVideoSource, /sceneAnchorErrorMessageRedacted/);
 
 const aiCastExperienceSource = readFileSync(join(process.cwd(), 'src/lib/aiCastExperience.ts'), 'utf8');
 assert.match(aiCastExperienceSource, /Image-to-video stage/);

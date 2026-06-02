@@ -372,6 +372,32 @@ type GenerateVideoApiResponse = {
   audioConfigured?: boolean | null;
   viralPresetUsed?: string | null;
   promptPolished?: boolean | null;
+  renderFailure?: RenderFailureEnvelope | null;
+};
+
+type RenderFailureEnvelope = {
+  route?: string | null;
+  provider?: string | null;
+  stage?: string | null;
+  category?: string | null;
+  safeTitle?: string | null;
+  safeMessage?: string | null;
+  recommendedNextAction?: string | null;
+  sceneAnchorProvider?: string | null;
+  sceneAnchorModel?: string | null;
+  sceneAnchorPayloadFieldNames?: string[] | null;
+  sceneAnchorSubmittedReferenceCount?: number | null;
+  sceneAnchorDroppedReferenceRoles?: string[] | null;
+  sceneAnchorHttpStatus?: number | null;
+  sceneAnchorErrorType?: string | null;
+  sceneAnchorErrorMessageRedacted?: string | null;
+  sceneAnchorOutputParsed?: boolean | null;
+  stage2ProviderModel?: string | null;
+  stage2ProviderRouteType?: string | null;
+  stage2HttpStatus?: number | null;
+  stage2ErrorMessageRedacted?: string | null;
+  privateUrlsRedacted?: boolean | null;
+  secretsRedacted?: boolean | null;
 };
 
 type GenerationStatusState = 'idle' | 'queued' | 'processing' | 'verifying_output' | 'rate_limited' | 'completed' | 'failed';
@@ -772,6 +798,131 @@ function klingProviderFailureMessage(category: string | null | undefined, fallba
     return `Kling exact-likeness render paused: ${category.replace(/_/g, ' ')}.`;
   }
   return fallback;
+}
+
+function renderFailureTitleForCategory(category: string | null | undefined) {
+  if (category === 'scene_anchor_input_schema' || category === 'scene_anchor_model_schema_unmapped') {
+    return 'Scene anchor provider rejected the payload shape.';
+  }
+  if (category === 'scene_anchor_output_parse_failed' || category === 'scene_anchor_output_missing') {
+    return 'Scene anchor output could not be read.';
+  }
+  if (category === 'scene_anchor_provider_moderation_block') {
+    return 'Scene anchor provider blocked this image request.';
+  }
+  if (
+    category === 'scene_anchor_provider_disabled' ||
+    category === 'scene_anchor_provider_not_configured' ||
+    category === 'scene_anchor_fal_key_missing'
+  ) {
+    return 'Create runtime is missing scene-anchor configuration.';
+  }
+  if (category === 'kling_scene_anchor_video_input_schema') {
+    return 'Kling image-to-video rejected the scene-anchor video payload.';
+  }
+  if (category === 'kling_scene_anchor_video_model_not_found') {
+    return 'Kling image-to-video model was not found.';
+  }
+  if (category === 'kling_scene_anchor_video_model_not_configured') {
+    return 'Scene anchor video model is not configured.';
+  }
+  if (category === 'kling_scene_anchor_video_billing_required') {
+    return 'Kling billing or account access is required.';
+  }
+  if (category === 'kling_scene_anchor_video_poll_failed') {
+    return 'Kling image-to-video polling failed.';
+  }
+  if (category === 'kling_scene_anchor_video_output_parse_failed') {
+    return 'Kling image-to-video output could not be read.';
+  }
+  if (category === 'kling_scene_anchor_video_provider_unavailable') {
+    return 'Kling image-to-video is temporarily unavailable.';
+  }
+  return 'Lumora paused this render.';
+}
+
+function renderFailureMessageForCategory(category: string | null | undefined, fallback = '') {
+  if (fallback.trim()) return sanitizeCreatorErrorMessage(fallback, 'Lumora paused this render.');
+  if (category === 'scene_anchor_input_schema' || category === 'scene_anchor_model_schema_unmapped') {
+    return 'Kling scene anchor failed because the image provider rejected the payload shape.';
+  }
+  if (category === 'scene_anchor_output_parse_failed' || category === 'scene_anchor_output_missing') {
+    return 'Scene anchor provider returned a response, but Lumora could not read the image output.';
+  }
+  if (category === 'scene_anchor_provider_moderation_block') {
+    return 'Scene anchor provider blocked this image request.';
+  }
+  if (category === 'kling_scene_anchor_video_input_schema') {
+    return 'Kling image-to-video rejected the scene-anchor video payload.';
+  }
+  return 'Lumora paused this render, but no specific provider category was returned.';
+}
+
+function redactDebugText(value: unknown) {
+  return String(value ?? '')
+    .replace(/https?:\/\/\S+/gi, '[redacted-url]')
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [redacted]')
+    .replace(/\b(?:fal|sk|rk)_[A-Za-z0-9._-]{12,}\b/g, '[redacted-key]')
+    .trim();
+}
+
+function normalizeRenderFailure(value: unknown): RenderFailureEnvelope | null {
+  const record = recordValue(value);
+  const category = stringFromRecord(record, 'category');
+  if (!category) return null;
+  return {
+    route: stringFromRecord(record, 'route'),
+    provider: stringFromRecord(record, 'provider'),
+    stage: stringFromRecord(record, 'stage'),
+    category,
+    safeTitle: stringFromRecord(record, 'safeTitle') || renderFailureTitleForCategory(category),
+    safeMessage: renderFailureMessageForCategory(category, stringFromRecord(record, 'safeMessage') || ''),
+    recommendedNextAction: stringFromRecord(record, 'recommendedNextAction'),
+    sceneAnchorProvider: stringFromRecord(record, 'sceneAnchorProvider'),
+    sceneAnchorModel: stringFromRecord(record, 'sceneAnchorModel'),
+    sceneAnchorPayloadFieldNames: formatStringList(record.sceneAnchorPayloadFieldNames),
+    sceneAnchorSubmittedReferenceCount: numberFromRecord(record, 'sceneAnchorSubmittedReferenceCount'),
+    sceneAnchorDroppedReferenceRoles: formatStringList(record.sceneAnchorDroppedReferenceRoles),
+    sceneAnchorHttpStatus: numberFromRecord(record, 'sceneAnchorHttpStatus'),
+    sceneAnchorErrorType: stringFromRecord(record, 'sceneAnchorErrorType'),
+    sceneAnchorErrorMessageRedacted: stringFromRecord(record, 'sceneAnchorErrorMessageRedacted'),
+    sceneAnchorOutputParsed: booleanFromRecord(record, 'sceneAnchorOutputParsed'),
+    stage2ProviderModel: stringFromRecord(record, 'stage2ProviderModel'),
+    stage2ProviderRouteType: stringFromRecord(record, 'stage2ProviderRouteType'),
+    stage2HttpStatus: numberFromRecord(record, 'stage2HttpStatus'),
+    stage2ErrorMessageRedacted: stringFromRecord(record, 'stage2ErrorMessageRedacted'),
+    privateUrlsRedacted: booleanFromRecord(record, 'privateUrlsRedacted') ?? true,
+    secretsRedacted: booleanFromRecord(record, 'secretsRedacted') ?? true,
+  };
+}
+
+function renderFailureDebugSummary(failure: RenderFailureEnvelope) {
+  const lines = [
+    ['stage', failure.stage],
+    ['category', failure.category],
+    ['route', failure.route],
+    ['provider', failure.provider],
+    ['sceneAnchorProvider', failure.sceneAnchorProvider],
+    ['sceneAnchorModel', failure.sceneAnchorModel],
+    ['sceneAnchorPayloadFieldNames', failure.sceneAnchorPayloadFieldNames?.join(', ')],
+    ['sceneAnchorSubmittedReferenceCount', failure.sceneAnchorSubmittedReferenceCount],
+    ['sceneAnchorDroppedReferenceRoles', failure.sceneAnchorDroppedReferenceRoles?.join(', ')],
+    ['sceneAnchorHttpStatus', failure.sceneAnchorHttpStatus],
+    ['sceneAnchorErrorType', failure.sceneAnchorErrorType],
+    ['sceneAnchorErrorMessageRedacted', failure.sceneAnchorErrorMessageRedacted],
+    ['sceneAnchorOutputParsed', failure.sceneAnchorOutputParsed],
+    ['stage2ProviderModel', failure.stage2ProviderModel],
+    ['stage2ProviderRouteType', failure.stage2ProviderRouteType],
+    ['stage2HttpStatus', failure.stage2HttpStatus],
+    ['stage2ErrorMessageRedacted', failure.stage2ErrorMessageRedacted],
+    ['recommendedNextAction', failure.recommendedNextAction],
+    ['privateUrlsRedacted', true],
+    ['secretsRedacted', true],
+  ].flatMap(([label, value]) => {
+    if (value === null || value === undefined || value === '') return [];
+    return [`${label}: ${redactDebugText(value)}`];
+  });
+  return lines.join('\n');
 }
 
 function isClearlySafeKlingPrompt(value: string) {
@@ -1239,6 +1390,7 @@ export default function CreateVideo({
   const [toast, setToast] = useState<ToastState>(null);
   const [generationLoading, setGenerationLoading] = useState(false);
   const [generationError, setGenerationError] = useState('');
+  const [activeRenderFailure, setActiveRenderFailure] = useState<RenderFailureEnvelope | null>(null);
   const [generationSafeRewrite, setGenerationSafeRewrite] = useState('');
   const [generationModerationDetail, setGenerationModerationDetail] = useState('');
   const [generationModerationStages, setGenerationModerationStages] = useState<string[]>([]);
@@ -1604,7 +1756,17 @@ export default function CreateVideo({
       ? status
       : renderStateBody(generationStatusState, renderCooldownSeconds),
   };
-  const pausedRenderCopy = selectedKlingExactReady && generationError
+  const activeRenderFailureCategory = activeRenderFailure?.category || null;
+  const pausedRenderCopy = activeRenderFailureCategory
+    ? {
+        ...creatorRenderStateCopy('paused'),
+        title: activeRenderFailure?.safeTitle || renderFailureTitleForCategory(activeRenderFailureCategory),
+        body: activeRenderFailure?.safeMessage || generationError || renderFailureMessageForCategory(activeRenderFailureCategory),
+        suggestedNextStep: activeRenderFailure?.recommendedNextAction
+          ? `Suggested next step: ${activeRenderFailure.recommendedNextAction}`
+          : 'Suggested next step: check the copied debug summary before retrying.',
+      }
+    : selectedKlingExactReady && generationError
     ? {
         ...creatorRenderStateCopy('paused'),
         title: 'Kling exact likeness render paused.',
@@ -1614,7 +1776,11 @@ export default function CreateVideo({
           : 'Suggested next step: retry Kling later, edit the scene, or switch to soft guidance.',
       }
     : creatorRenderStateCopy('paused');
-  const sceneAnchorPauseActive = selectedKlingExactReady && /scene[-\s]?anchor/i.test(generationError);
+  const sceneAnchorPauseActive = selectedKlingExactReady && (
+    /scene[-\s]?anchor/i.test(generationError) ||
+    Boolean(activeRenderFailure?.category?.startsWith('scene_anchor_')) ||
+    Boolean(activeRenderFailure?.category?.startsWith('kling_scene_anchor_video_'))
+  );
   const suggestedTakePrompt = buildSafeTakePrompt(
     generationSafeRewrite || activePrompt,
     { displayName: characterName },
@@ -2161,6 +2327,17 @@ export default function CreateVideo({
     }, 5200);
   }
 
+  async function handleCopyRenderFailureDebugSummary() {
+    if (!activeRenderFailure) return;
+    const summary = renderFailureDebugSummary(activeRenderFailure);
+    try {
+      await navigator.clipboard.writeText(summary);
+      showToast({ type: 'success', message: 'Copied safe render debug summary.' });
+    } catch {
+      showToast({ type: 'error', message: 'Could not copy debug summary automatically.' });
+    }
+  }
+
   function clearRenderCooldown() {
     setRenderCooldownUntil(null);
     setRenderCooldownSeconds(0);
@@ -2180,6 +2357,7 @@ export default function CreateVideo({
 
   function beginGenerationProgress() {
     clearRenderCooldown();
+    setActiveRenderFailure(null);
     setGenerationStatusState('queued');
     setStatus('Lumora is finding the cleanest render path...');
     if (progressTimerRef.current) window.clearTimeout(progressTimerRef.current);
@@ -3013,16 +3191,35 @@ export default function CreateVideo({
         const { data: parsedData, parseError } = parseGenerateResponse(responseText);
 
         if (!res.ok) {
+          const renderFailure = normalizeRenderFailure(parsedData.renderFailure);
+          if (renderFailure) {
+            setActiveRenderFailure(renderFailure);
+          }
           const detail = formatUnknownDetail(parsedData.details);
-          const failureCategory = typeof parsedData.errorCategory === 'string' ? parsedData.errorCategory : null;
-          const apiMessage = parsedData.error || parseError || 'Lumora paused this scene.';
+          const failureCategory = renderFailure?.category ?? (typeof parsedData.errorCategory === 'string' ? parsedData.errorCategory : null);
+          const apiMessage = renderFailure?.safeMessage || parsedData.error || parseError || 'Lumora paused this scene.';
           const rawFailure = [apiMessage, failureCategory || '', parsedData.suggestion || '', detail].join(' ');
           console.error('Video generation request paused', {
             status: res.status,
             error: apiMessage,
             failureCategory,
+            renderFailure: renderFailure
+              ? {
+                  stage: renderFailure.stage,
+                  category: renderFailure.category,
+                  sceneAnchorPayloadFieldNames: renderFailure.sceneAnchorPayloadFieldNames,
+                  sceneAnchorSubmittedReferenceCount: renderFailure.sceneAnchorSubmittedReferenceCount,
+                  sceneAnchorHttpStatus: renderFailure.sceneAnchorHttpStatus,
+                  stage2HttpStatus: renderFailure.stage2HttpStatus,
+                  privateUrlsRedacted: true,
+                  secretsRedacted: true,
+                }
+              : null,
             details: detail,
           });
+          if (selectedKlingExactReadyForRequest && renderFailure?.category) {
+            throw new Error(renderFailure.safeMessage || klingProviderFailureMessage(renderFailure.category, apiMessage));
+          }
           if (selectedKlingExactReadyForRequest && failureCategory) {
             throw new Error(klingProviderFailureMessage(failureCategory, apiMessage));
           }
@@ -3049,6 +3246,7 @@ export default function CreateVideo({
       }
 
       console.log('GENERATION RESPONSE:', data);
+      setActiveRenderFailure(null);
       if (selectedKlingExactReadyForRequest && data.sceneAnchorGenerated) {
         setStatus('Scene anchor approved. Animating with Kling exact likeness...');
       }
@@ -4718,6 +4916,46 @@ export default function CreateVideo({
                 {!activeReferenceRepair && pausedRenderCopy.suggestedNextStep ? (
                   <small>{pausedRenderCopy.suggestedNextStep}</small>
                 ) : null}
+                {!activeReferenceRepair && activeRenderFailure ? (
+                  <div className="render-failure-debug-card">
+                    <div className="render-failure-debug-grid">
+                      <span>Stage</span>
+                      <strong>{activeRenderFailure.stage || 'unknown'}</strong>
+                      <span>Category</span>
+                      <strong>{activeRenderFailure.category || 'unknown'}</strong>
+                      {activeRenderFailure.sceneAnchorModel ? (
+                        <>
+                          <span>Scene anchor model</span>
+                          <strong>{activeRenderFailure.sceneAnchorModel}</strong>
+                        </>
+                      ) : null}
+                      {activeRenderFailure.stage2ProviderModel ? (
+                        <>
+                          <span>Stage 2 model</span>
+                          <strong>{activeRenderFailure.stage2ProviderModel}</strong>
+                        </>
+                      ) : null}
+                      {activeRenderFailure.sceneAnchorHttpStatus || activeRenderFailure.stage2HttpStatus ? (
+                        <>
+                          <span>HTTP status</span>
+                          <strong>{activeRenderFailure.sceneAnchorHttpStatus ?? activeRenderFailure.stage2HttpStatus}</strong>
+                        </>
+                      ) : null}
+                    </div>
+                    {activeRenderFailure.sceneAnchorErrorMessageRedacted || activeRenderFailure.stage2ErrorMessageRedacted ? (
+                      <p className="muted">
+                        Provider message: {activeRenderFailure.sceneAnchorErrorMessageRedacted ?? activeRenderFailure.stage2ErrorMessageRedacted}
+                      </p>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="quiet-btn"
+                      onClick={() => void handleCopyRenderFailureDebugSummary()}
+                    >
+                      Copy debug summary
+                    </button>
+                  </div>
+                ) : null}
               </div>
               {!activeReferenceRepair ? (
                 <div className="focused-next-take">
@@ -4752,6 +4990,7 @@ export default function CreateVideo({
                       className="ghost-btn"
                       onClick={() => {
                         setGenerationError('');
+                        setActiveRenderFailure(null);
                         setGenerationModerationDetail('');
                         setGenerationModerationStages([]);
                         setStatus('Adjust the scene direction, then Lumora can try another take.');

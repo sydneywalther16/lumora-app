@@ -402,6 +402,7 @@ export type GenerationResponse = {
   duplicateOf?: string | null;
   errorMessage?: string | null;
   errorCategory?: string | null;
+  renderFailure?: Record<string, unknown> | null;
   referenceCount?: number | null;
   retryAfterSeconds?: number | null;
   retryAvailableAt?: string | null;
