@@ -10,9 +10,11 @@ import {
   createFalSceneAnchorStill,
   detectKlingEnvironmentIntent,
   detectKlingOutfitIntent,
+  FAL_VIDU_Q2_REFERENCE_TO_IMAGE_PROMPT_MAX,
   klingReferenceDiagnostics,
   parseSceneAnchorImageOutput,
   planFalSceneAnchorReferences,
+  prepareFalSceneAnchorRequest,
   prepareKlingCreateReferencePlanForProvider,
   sceneAnchorProviderStatus,
 } from '../../api/lumora/generate-video';
@@ -136,6 +138,13 @@ try {
             referenceImageUrlCount: 3,
             privateUrlsRedacted: true,
           },
+          promptDiagnostics: {
+            sceneAnchorPromptLength: asset.prompt.length,
+            sceneAnchorPromptLimit: 1200,
+            sceneAnchorPromptCompressed: false,
+            sceneAnchorPromptTruncated: false,
+            privateUrlsRedacted: true,
+          },
           referencePlan: {
             plannedReferenceCount: 4,
             submittedReferenceCount: 3,
@@ -170,6 +179,9 @@ try {
   assert.equal(materializedPlan.sceneAnchorPersisted, true);
   assert.equal(materializedPlan.sceneAnchorFailureCategory, null);
   assert.equal(materializedPlan.sceneAnchorReason, 'scene_anchor_generated_and_validated');
+  assert.equal(materializedPlan.sceneAnchorPromptLimit, 1200);
+  assert.equal(materializedPlan.sceneAnchorPromptCompressed, false);
+  assert.equal(materializedPlan.sceneAnchorPromptTruncated, false);
   assert.equal(materializedPlan.sceneAnchorValidation?.passed, true);
   assert.equal(materializedPlan.sceneAnchorValidation?.fullBodyVisible, true);
   assert.equal(materializedPlan.sceneAnchorValidation?.outfitMatch, true);
@@ -252,6 +264,13 @@ try {
           referenceImageUrlCount: 3,
           privateUrlsRedacted: true,
         },
+        sceneAnchorPromptDiagnostics: {
+          sceneAnchorPromptLength: 1510,
+          sceneAnchorPromptLimit: 1200,
+          sceneAnchorPromptCompressed: true,
+          sceneAnchorPromptTruncated: true,
+          privateUrlsRedacted: true,
+        },
         sceneAnchorReferencePlan: {
           plannedReferenceCount: 4,
           submittedReferenceCount: 3,
@@ -268,6 +287,10 @@ try {
   assert.equal(failedSchemaPlan.sceneAnchorHttpStatus, 422);
   assert.equal(failedSchemaPlan.sceneAnchorErrorType, 'validation_error');
   assert.match(failedSchemaPlan.sceneAnchorErrorMessage ?? '', /unknown field/);
+  assert.equal(failedSchemaPlan.sceneAnchorPromptLength, 1510);
+  assert.equal(failedSchemaPlan.sceneAnchorPromptLimit, 1200);
+  assert.equal(failedSchemaPlan.sceneAnchorPromptCompressed, true);
+  assert.equal(failedSchemaPlan.sceneAnchorPromptTruncated, true);
   assert.deepEqual(failedSchemaPlan.sceneAnchorPayloadFieldNames, ['aspect_ratio', 'prompt', 'reference_image_urls']);
   assert.equal(failedSchemaPlan.sceneAnchorSubmittedReferenceCount, 3);
   assert.deepEqual(failedSchemaPlan.sceneAnchorDroppedReferenceRoles, ['side_angle_right']);
@@ -281,11 +304,34 @@ try {
   assert.equal(schemaRenderFailure.category, 'scene_anchor_input_schema');
   assert.match(schemaRenderFailure.safeTitle, /payload shape/i);
   assert.equal(schemaRenderFailure.sceneAnchorHttpStatus, 422);
+  assert.equal(schemaRenderFailure.sceneAnchorPromptLength, 1510);
+  assert.equal(schemaRenderFailure.sceneAnchorPromptLimit, 1200);
+  assert.equal(schemaRenderFailure.sceneAnchorPromptCompressed, true);
+  assert.equal(schemaRenderFailure.sceneAnchorPromptTruncated, true);
   assert.deepEqual(schemaRenderFailure.sceneAnchorPayloadFieldNames, ['aspect_ratio', 'prompt', 'reference_image_urls']);
   assert.equal(schemaRenderFailure.sceneAnchorSubmittedReferenceCount, 3);
   assert.deepEqual(schemaRenderFailure.sceneAnchorDroppedReferenceRoles, ['side_angle_right']);
   assert.equal(schemaRenderFailure.privateUrlsRedacted, true);
   assert.equal(schemaRenderFailure.secretsRedacted, true);
+
+  const promptTooLongRenderFailure = buildSceneAnchorRenderFailure({
+    plan: {
+      ...failedSchemaPlan,
+      sceneAnchorErrorMessage: 'body.prompt string_too_long: prompt must be at most 1500 characters https://assets.example/private.png',
+      sceneAnchorPromptLength: 1510,
+      sceneAnchorPromptLimit: 1200,
+      sceneAnchorPromptCompressed: true,
+      sceneAnchorPromptTruncated: true,
+    },
+    category: 'scene_anchor_input_schema',
+  });
+  assert.match(promptTooLongRenderFailure.safeTitle, /prompt exceeded/i);
+  assert.match(promptTooLongRenderFailure.safeMessage, /prompt length/i);
+  assert.match(promptTooLongRenderFailure.recommendedNextAction, /prompt length/i);
+  assert.equal(promptTooLongRenderFailure.sceneAnchorPromptLength, 1510);
+  assert.equal(promptTooLongRenderFailure.sceneAnchorPromptLimit, 1200);
+  assert.match(promptTooLongRenderFailure.sceneAnchorErrorMessageRedacted ?? '', /\[redacted-url\]/);
+  assert.doesNotMatch(JSON.stringify(promptTooLongRenderFailure), /https:\/\/assets\.example\/private/);
 
   const outputParseFailurePlan = {
     ...failedSchemaPlan,
@@ -327,6 +373,34 @@ try {
   assert.equal(missingModel.configured, false);
   assert.equal(missingModel.reason, 'scene_anchor_provider_not_configured');
 
+  process.env.SCENE_ANCHOR_MODEL = 'fal-ai/vidu/q2/reference-to-image';
+  const longGardenPrompt = [
+    gardenDressPrompt,
+    Array.from({ length: 60 }, (_, index) =>
+      `Scene detail ${index + 1}: peaceful flower garden paths, open grass, warm light, drifting petals, relaxed natural walking posture, flowing ivory dress.`
+    ).join(' '),
+  ].join(' ');
+  const viduPlan = buildKlingCreateReferencePlan({
+    body: {
+      prompt: longGardenPrompt,
+      referenceImageUrls: {
+        frontFaceUrl: 'https://assets.example/front.jpg',
+        leftAngleUrl: 'https://assets.example/left.jpg',
+        rightAngleUrl: 'https://assets.example/right.jpg',
+        fullBodyUrl: 'https://assets.example/full-body-street-jeans.jpg',
+      },
+    },
+    primaryReference: 'https://assets.example/front.jpg',
+    exactLikenessReady: true,
+  });
+  assert.ok(viduPlan);
+  assert.ok(viduPlan.sceneAnchorPrompt.length < FAL_VIDU_Q2_REFERENCE_TO_IMAGE_PROMPT_MAX);
+  assert.match(viduPlan.sceneAnchorPrompt, /Use references for identity only/i);
+  assert.match(viduPlan.sceneAnchorPrompt, /flowing ivory dress/i);
+  assert.match(viduPlan.sceneAnchorPrompt, /flower garden/i);
+  assert.doesNotMatch(viduPlan.sceneAnchorPrompt, /Scene request:\s*Scene prompt/i);
+  assert.doesNotMatch(viduPlan.sceneAnchorPrompt, /Create a new scene anchor/i);
+
   const viduPayload = buildFalSceneAnchorPayload({
     model: 'fal-ai/vidu/q2/reference-to-image',
     prompt: 'Scene anchor prompt',
@@ -346,6 +420,30 @@ try {
   assert.deepEqual(viduReferencePlan.submittedReferenceRoles, ['front_angle', 'full_body', 'side_angle_left']);
   assert.deepEqual(viduReferencePlan.droppedReferenceRoles, ['side_angle_right']);
   assert.equal(viduReferencePlan.providerReferenceLimit, 3);
+
+  const overlongSceneAnchorPrompt = [
+    'Create a new scene anchor still for a Kling exact-likeness video render.',
+    `Scene request:${' '}Scene prompt: Peaceful flower garden at golden hour wearing a flowing ivory dress.`,
+    Array.from({ length: 120 }, (_, index) =>
+      `Long scene note ${index + 1}: visible flowers, open grass, warm sunset light, relaxed walking pose, clean unobstructed silhouette, identity references only.`
+    ).join(' '),
+    'Use the saved self-character references only for identity traits: face identity, hair color and style, skin tone, eye area, body proportions, and silhouette.',
+  ].join(' ');
+  const preparedLongViduRequest = prepareFalSceneAnchorRequest({
+    model: 'fal-ai/vidu/q2/reference-to-image',
+    prompt: overlongSceneAnchorPrompt,
+    identityReferences: materializedPlan.references,
+  });
+  const preparedLongViduPayload = preparedLongViduRequest.payload as Record<string, unknown>;
+  const preparedLongViduPrompt = String(preparedLongViduPayload.prompt ?? '');
+  assert.deepEqual(Object.keys(preparedLongViduPayload).sort(), ['aspect_ratio', 'prompt', 'reference_image_urls']);
+  assert.ok(preparedLongViduPrompt.length <= FAL_VIDU_Q2_REFERENCE_TO_IMAGE_PROMPT_MAX);
+  assert.ok(preparedLongViduPrompt.length <= (preparedLongViduRequest.promptDiagnostics.sceneAnchorPromptLimit ?? FAL_VIDU_Q2_REFERENCE_TO_IMAGE_PROMPT_MAX));
+  assert.equal(preparedLongViduRequest.promptDiagnostics.sceneAnchorPromptCompressed, true);
+  assert.equal(preparedLongViduRequest.promptDiagnostics.privateUrlsRedacted, true);
+  assert.equal(preparedLongViduRequest.referencePlan.submittedReferenceCount, 3);
+  assert.doesNotMatch(preparedLongViduPrompt, /Scene request:\s*Scene prompt/i);
+  assert.doesNotMatch(preparedLongViduPrompt, /Create a new scene anchor/i);
 
   const parsedTopLevelImage = parseSceneAnchorImageOutput({
     image: {
@@ -386,6 +484,8 @@ try {
         submitSeen = true;
         assert.equal(url, 'https://queue.fal.run/fal-ai/vidu/q2/reference-to-image');
         const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
+        assert.deepEqual(Object.keys(body).sort(), ['aspect_ratio', 'prompt', 'reference_image_urls']);
+        assert.ok(String(body.prompt ?? '').length <= FAL_VIDU_Q2_REFERENCE_TO_IMAGE_PROMPT_MAX);
         assert.ok(Array.isArray(body.reference_image_urls));
         assert.equal((body.reference_image_urls as unknown[]).length, 3);
         assert.equal('image_urls' in body, false);
@@ -432,6 +532,12 @@ try {
   assert.equal(falGenerated.provider, 'fal');
   assert.equal(falGenerated.persisted, true);
   const falRawOutput = falGenerated.rawOutput as Record<string, unknown>;
+  const falPromptDiagnostics = falRawOutput.promptDiagnostics as Record<string, unknown>;
+  assert.equal(falPromptDiagnostics.sceneAnchorPromptLength, 'Scene anchor prompt'.length);
+  assert.equal(falPromptDiagnostics.sceneAnchorPromptLimit, 1200);
+  assert.equal(falPromptDiagnostics.sceneAnchorPromptCompressed, false);
+  assert.equal(falPromptDiagnostics.sceneAnchorPromptTruncated, false);
+  assert.equal(falPromptDiagnostics.privateUrlsRedacted, true);
   const falReferencePlan = falRawOutput.referencePlan as Record<string, unknown>;
   assert.equal(falReferencePlan.submittedReferenceCount, 3);
   assert.deepEqual(falReferencePlan.droppedReferenceRoles, ['side_angle_right']);
@@ -448,6 +554,9 @@ try {
   assert.equal(diagnostics.sceneAnchorGenerated, true);
   assert.equal(diagnostics.sceneAnchorPersisted, true);
   assert.equal(diagnostics.sceneAnchorFailureCategory, null);
+  assert.equal(diagnostics.sceneAnchorPromptLimit, 1200);
+  assert.equal(diagnostics.sceneAnchorPromptCompressed, false);
+  assert.equal(diagnostics.sceneAnchorPromptTruncated, false);
   assert.deepEqual(diagnostics.sceneAnchorPayloadFieldNames, ['aspect_ratio', 'prompt', 'reference_image_urls']);
   assert.equal(diagnostics.sceneAnchorReferenceCount, 4);
   assert.equal(diagnostics.sceneAnchorSubmittedReferenceCount, 3);

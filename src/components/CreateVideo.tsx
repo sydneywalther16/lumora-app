@@ -305,6 +305,10 @@ type GenerateVideoApiResponse = {
   sceneAnchorErrorMessageRedacted?: string | null;
   sceneAnchorErrorBodyRedacted?: string | null;
   createRuntimeSceneAnchorConfigured?: boolean | null;
+  sceneAnchorPromptLength?: number | null;
+  sceneAnchorPromptLimit?: number | null;
+  sceneAnchorPromptCompressed?: boolean | null;
+  sceneAnchorPromptTruncated?: boolean | null;
   sceneAnchorPayloadFieldNames?: string[] | null;
   sceneAnchorReferenceCount?: number | null;
   sceneAnchorSubmittedReferenceCount?: number | null;
@@ -385,6 +389,10 @@ type RenderFailureEnvelope = {
   recommendedNextAction?: string | null;
   sceneAnchorProvider?: string | null;
   sceneAnchorModel?: string | null;
+  sceneAnchorPromptLength?: number | null;
+  sceneAnchorPromptLimit?: number | null;
+  sceneAnchorPromptCompressed?: boolean | null;
+  sceneAnchorPromptTruncated?: boolean | null;
   sceneAnchorPayloadFieldNames?: string[] | null;
   sceneAnchorSubmittedReferenceCount?: number | null;
   sceneAnchorDroppedReferenceRoles?: string[] | null;
@@ -772,9 +780,13 @@ function klingProviderFailureMessage(category: string | null | undefined, fallba
     return 'Scene anchor generation failed. Retry scene anchor, use identity-only fallback, or edit scene.';
   }
   if (category === 'scene_anchor_input_schema' || category === 'scene_anchor_model_schema_unmapped') {
+    const lower = fallback.toLowerCase();
+    if (lower.includes('string_too_long') || lower.includes('body.prompt') || lower.includes('prompt')) {
+      return 'Scene anchor prompt exceeded the provider limit. Check prompt length, prompt limit, payload fields, and submitted reference count before retrying.';
+    }
     return fallback && fallback !== category
-      ? `Kling scene anchor failed because the image provider rejected the payload shape. ${fallback}`
-      : 'Kling scene anchor failed because the image provider rejected the payload shape.';
+      ? `Kling scene anchor failed because the image provider rejected the payload shape. Check prompt length, prompt limit, payload fields, and submitted reference count before retrying. ${fallback}`
+      : 'Kling scene anchor failed because the image provider rejected the payload shape. Check prompt length, prompt limit, payload fields, and submitted reference count before retrying.';
   }
   if (category === 'scene_anchor_output_parse_failed') {
     return 'Kling scene anchor generated a response, but Lumora could not read the image output.';
@@ -802,7 +814,7 @@ function klingProviderFailureMessage(category: string | null | undefined, fallba
 
 function renderFailureTitleForCategory(category: string | null | undefined) {
   if (category === 'scene_anchor_input_schema' || category === 'scene_anchor_model_schema_unmapped') {
-    return 'Scene anchor provider rejected the payload shape.';
+    return 'Scene anchor provider rejected the prompt or payload.';
   }
   if (category === 'scene_anchor_output_parse_failed' || category === 'scene_anchor_output_missing') {
     return 'Scene anchor output could not be read.';
@@ -844,7 +856,7 @@ function renderFailureTitleForCategory(category: string | null | undefined) {
 function renderFailureMessageForCategory(category: string | null | undefined, fallback = '') {
   if (fallback.trim()) return sanitizeCreatorErrorMessage(fallback, 'Lumora paused this render.');
   if (category === 'scene_anchor_input_schema' || category === 'scene_anchor_model_schema_unmapped') {
-    return 'Kling scene anchor failed because the image provider rejected the payload shape.';
+    return 'Kling scene anchor failed because the image provider rejected the prompt or payload. Check prompt length, prompt limit, payload fields, and submitted reference count before retrying.';
   }
   if (category === 'scene_anchor_output_parse_failed' || category === 'scene_anchor_output_missing') {
     return 'Scene anchor provider returned a response, but Lumora could not read the image output.';
@@ -880,6 +892,10 @@ function normalizeRenderFailure(value: unknown): RenderFailureEnvelope | null {
     recommendedNextAction: stringFromRecord(record, 'recommendedNextAction'),
     sceneAnchorProvider: stringFromRecord(record, 'sceneAnchorProvider'),
     sceneAnchorModel: stringFromRecord(record, 'sceneAnchorModel'),
+    sceneAnchorPromptLength: numberFromRecord(record, 'sceneAnchorPromptLength'),
+    sceneAnchorPromptLimit: numberFromRecord(record, 'sceneAnchorPromptLimit'),
+    sceneAnchorPromptCompressed: booleanFromRecord(record, 'sceneAnchorPromptCompressed'),
+    sceneAnchorPromptTruncated: booleanFromRecord(record, 'sceneAnchorPromptTruncated'),
     sceneAnchorPayloadFieldNames: formatStringList(record.sceneAnchorPayloadFieldNames),
     sceneAnchorSubmittedReferenceCount: numberFromRecord(record, 'sceneAnchorSubmittedReferenceCount'),
     sceneAnchorDroppedReferenceRoles: formatStringList(record.sceneAnchorDroppedReferenceRoles),
@@ -904,6 +920,10 @@ function renderFailureDebugSummary(failure: RenderFailureEnvelope) {
     ['provider', failure.provider],
     ['sceneAnchorProvider', failure.sceneAnchorProvider],
     ['sceneAnchorModel', failure.sceneAnchorModel],
+    ['sceneAnchorPromptLength', failure.sceneAnchorPromptLength],
+    ['sceneAnchorPromptLimit', failure.sceneAnchorPromptLimit],
+    ['sceneAnchorPromptCompressed', failure.sceneAnchorPromptCompressed],
+    ['sceneAnchorPromptTruncated', failure.sceneAnchorPromptTruncated],
     ['sceneAnchorPayloadFieldNames', failure.sceneAnchorPayloadFieldNames?.join(', ')],
     ['sceneAnchorSubmittedReferenceCount', failure.sceneAnchorSubmittedReferenceCount],
     ['sceneAnchorDroppedReferenceRoles', failure.sceneAnchorDroppedReferenceRoles?.join(', ')],
@@ -3207,6 +3227,10 @@ export default function CreateVideo({
               ? {
                   stage: renderFailure.stage,
                   category: renderFailure.category,
+                  sceneAnchorPromptLength: renderFailure.sceneAnchorPromptLength,
+                  sceneAnchorPromptLimit: renderFailure.sceneAnchorPromptLimit,
+                  sceneAnchorPromptCompressed: renderFailure.sceneAnchorPromptCompressed,
+                  sceneAnchorPromptTruncated: renderFailure.sceneAnchorPromptTruncated,
                   sceneAnchorPayloadFieldNames: renderFailure.sceneAnchorPayloadFieldNames,
                   sceneAnchorSubmittedReferenceCount: renderFailure.sceneAnchorSubmittedReferenceCount,
                   sceneAnchorHttpStatus: renderFailure.sceneAnchorHttpStatus,
@@ -3357,6 +3381,18 @@ export default function CreateVideo({
       const nextSceneAnchorErrorMessage = data.sceneAnchorErrorMessageRedacted ??
         data.sceneAnchorErrorMessage ??
         stringFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorErrorMessage');
+      const nextSceneAnchorPromptLength = typeof data.sceneAnchorPromptLength === 'number'
+        ? data.sceneAnchorPromptLength
+        : numberFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorPromptLength');
+      const nextSceneAnchorPromptLimit = typeof data.sceneAnchorPromptLimit === 'number'
+        ? data.sceneAnchorPromptLimit
+        : numberFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorPromptLimit');
+      const nextSceneAnchorPromptCompressed = typeof data.sceneAnchorPromptCompressed === 'boolean'
+        ? data.sceneAnchorPromptCompressed
+        : booleanFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorPromptCompressed');
+      const nextSceneAnchorPromptTruncated = typeof data.sceneAnchorPromptTruncated === 'boolean'
+        ? data.sceneAnchorPromptTruncated
+        : booleanFromRecord(nextKlingDiagnosticsRecord, 'sceneAnchorPromptTruncated');
       const nextSceneAnchorPayloadFieldNames = formatStringList(data.sceneAnchorPayloadFieldNames).length
         ? formatStringList(data.sceneAnchorPayloadFieldNames)
         : formatStringList(nextKlingDiagnosticsRecord.sceneAnchorPayloadFieldNames);
@@ -3559,6 +3595,10 @@ export default function CreateVideo({
         sceneAnchorHttpStatus: nextSceneAnchorHttpStatus,
         sceneAnchorErrorType: nextSceneAnchorErrorType,
         sceneAnchorErrorMessage: nextSceneAnchorErrorMessage,
+        sceneAnchorPromptLength: nextSceneAnchorPromptLength,
+        sceneAnchorPromptLimit: nextSceneAnchorPromptLimit,
+        sceneAnchorPromptCompressed: nextSceneAnchorPromptCompressed,
+        sceneAnchorPromptTruncated: nextSceneAnchorPromptTruncated,
         sceneAnchorPayloadFieldNames: nextSceneAnchorPayloadFieldNames.length ? nextSceneAnchorPayloadFieldNames : null,
         sceneAnchorReferenceCount: nextSceneAnchorReferenceCount,
         sceneAnchorSubmittedReferenceCount: nextSceneAnchorSubmittedReferenceCount,
@@ -3649,6 +3689,10 @@ export default function CreateVideo({
           sceneAnchorHttpStatus: nextSceneAnchorHttpStatus,
           sceneAnchorErrorType: nextSceneAnchorErrorType,
           sceneAnchorErrorMessage: nextSceneAnchorErrorMessage,
+          sceneAnchorPromptLength: nextSceneAnchorPromptLength,
+          sceneAnchorPromptLimit: nextSceneAnchorPromptLimit,
+          sceneAnchorPromptCompressed: nextSceneAnchorPromptCompressed,
+          sceneAnchorPromptTruncated: nextSceneAnchorPromptTruncated,
           sceneAnchorPayloadFieldNames: nextSceneAnchorPayloadFieldNames.length ? nextSceneAnchorPayloadFieldNames : null,
           sceneAnchorReferenceCount: nextSceneAnchorReferenceCount,
           sceneAnchorSubmittedReferenceCount: nextSceneAnchorSubmittedReferenceCount,
@@ -3696,6 +3740,10 @@ export default function CreateVideo({
             sceneAnchorHttpStatus: nextSceneAnchorHttpStatus,
             sceneAnchorErrorType: nextSceneAnchorErrorType,
             sceneAnchorErrorMessage: nextSceneAnchorErrorMessage,
+            sceneAnchorPromptLength: nextSceneAnchorPromptLength,
+            sceneAnchorPromptLimit: nextSceneAnchorPromptLimit,
+            sceneAnchorPromptCompressed: nextSceneAnchorPromptCompressed,
+            sceneAnchorPromptTruncated: nextSceneAnchorPromptTruncated,
             sceneAnchorPayloadFieldNames: nextSceneAnchorPayloadFieldNames.length ? nextSceneAnchorPayloadFieldNames : null,
             sceneAnchorReferenceCount: nextSceneAnchorReferenceCount,
             sceneAnchorSubmittedReferenceCount: nextSceneAnchorSubmittedReferenceCount,
@@ -4939,6 +4987,38 @@ export default function CreateVideo({
                         <>
                           <span>HTTP status</span>
                           <strong>{activeRenderFailure.sceneAnchorHttpStatus ?? activeRenderFailure.stage2HttpStatus}</strong>
+                        </>
+                      ) : null}
+                      {activeRenderFailure.sceneAnchorPromptLength !== null && activeRenderFailure.sceneAnchorPromptLength !== undefined ? (
+                        <>
+                          <span>Prompt length</span>
+                          <strong>
+                            {activeRenderFailure.sceneAnchorPromptLength}
+                            {activeRenderFailure.sceneAnchorPromptLimit ? ` / ${activeRenderFailure.sceneAnchorPromptLimit}` : ''}
+                          </strong>
+                        </>
+                      ) : null}
+                      {activeRenderFailure.sceneAnchorPayloadFieldNames?.length ? (
+                        <>
+                          <span>Payload fields</span>
+                          <strong>{activeRenderFailure.sceneAnchorPayloadFieldNames.join(', ')}</strong>
+                        </>
+                      ) : null}
+                      {activeRenderFailure.sceneAnchorSubmittedReferenceCount !== null && activeRenderFailure.sceneAnchorSubmittedReferenceCount !== undefined ? (
+                        <>
+                          <span>References sent</span>
+                          <strong>{activeRenderFailure.sceneAnchorSubmittedReferenceCount}</strong>
+                        </>
+                      ) : null}
+                      {activeRenderFailure.sceneAnchorPromptCompressed || activeRenderFailure.sceneAnchorPromptTruncated ? (
+                        <>
+                          <span>Prompt safety</span>
+                          <strong>
+                            {[
+                              activeRenderFailure.sceneAnchorPromptCompressed ? 'compressed' : '',
+                              activeRenderFailure.sceneAnchorPromptTruncated ? 'truncated' : '',
+                            ].filter(Boolean).join(', ')}
+                          </strong>
                         </>
                       ) : null}
                     </div>

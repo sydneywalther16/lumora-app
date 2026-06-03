@@ -125,6 +125,7 @@ assert.match(walkingReferencePlan?.promptGuidance ?? '', /clean unobstructed sil
 assert.match(walkingReferencePlan?.promptGuidance ?? '', /source-photo furniture, seat-back shapes, studio framing, and seated posture/i);
 assert.match(walkingReferencePlan?.sceneAnchorPrompt ?? '', /Create a new scene anchor still/i);
 assert.match(walkingReferencePlan?.sceneAnchorPrompt ?? '', /free of chair backs, furniture, studio backdrop, seated pose, tight portrait crop/i);
+assert.doesNotMatch(walkingReferencePlan?.sceneAnchorPrompt ?? '', /Scene request:\s*Scene prompt/i);
 assert.doesNotMatch(walkingReferencePlan?.promptGuidance ?? '', /\bno nudity\b/i);
 
 const walkingDiagnostics = klingReferenceDiagnostics({

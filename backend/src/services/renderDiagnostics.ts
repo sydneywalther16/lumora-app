@@ -161,9 +161,23 @@ function sceneAnchorHealthFromRow(row: LatestRenderRow | null) {
     (row?.errorCategory?.startsWith('scene_anchor_') ? row.errorCategory : null);
   const lastPayloadShapeSummary = stringArray('sceneAnchorPayloadFieldNames').length ||
     number('sceneAnchorSubmittedReferenceCount') !== null ||
-    number('sceneAnchorProviderReferenceLimit') !== null
+    number('sceneAnchorProviderReferenceLimit') !== null ||
+    number('sceneAnchorPromptLength') !== null ||
+    number('sceneAnchorPromptLimit') !== null
     ? {
         fieldNames: stringArray('sceneAnchorPayloadFieldNames'),
+        promptLength: number('sceneAnchorPromptLength'),
+        promptLimit: number('sceneAnchorPromptLimit'),
+        promptCompressed: typeof metadata.sceneAnchorPromptCompressed === 'boolean'
+          ? metadata.sceneAnchorPromptCompressed
+          : typeof klingDiagnostics.sceneAnchorPromptCompressed === 'boolean'
+            ? klingDiagnostics.sceneAnchorPromptCompressed
+            : null,
+        promptTruncated: typeof metadata.sceneAnchorPromptTruncated === 'boolean'
+          ? metadata.sceneAnchorPromptTruncated
+          : typeof klingDiagnostics.sceneAnchorPromptTruncated === 'boolean'
+            ? klingDiagnostics.sceneAnchorPromptTruncated
+            : null,
         plannedReferenceCount: number('sceneAnchorReferenceCount'),
         submittedReferenceCount: number('sceneAnchorSubmittedReferenceCount'),
         submittedReferenceRoles: stringArray('sceneAnchorReferenceRolesUsed'),
@@ -190,7 +204,7 @@ function sceneAnchorHealthFromRow(row: LatestRenderRow | null) {
         : null,
     recommendedNextAction: lastFailureCategory === 'scene_anchor_input_schema' ||
       lastFailureCategory === 'scene_anchor_model_schema_unmapped'
-      ? 'Fix the scene-anchor provider payload shape before retrying.'
+      ? 'Check scene-anchor prompt length, prompt limit, payload fields, and submitted reference count before retrying.'
       : lastFailureCategory === 'scene_anchor_output_parse_failed'
         ? 'Inspect the redacted output shape and update scene-anchor output parsing.'
         : lastFailureCategory === 'scene_anchor_provider_moderation_block'

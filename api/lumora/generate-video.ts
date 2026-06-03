@@ -201,6 +201,10 @@ export type CreateRenderFailureEnvelope = {
   recommendedNextAction: string;
   sceneAnchorProvider?: string | null;
   sceneAnchorModel?: string | null;
+  sceneAnchorPromptLength?: number | null;
+  sceneAnchorPromptLimit?: number | null;
+  sceneAnchorPromptCompressed?: boolean | null;
+  sceneAnchorPromptTruncated?: boolean | null;
   sceneAnchorPayloadFieldNames?: string[] | null;
   sceneAnchorSubmittedReferenceCount?: number | null;
   sceneAnchorDroppedReferenceRoles?: string[] | null;
@@ -263,6 +267,10 @@ type KlingCreateReferencePlan = {
   sceneAnchorErrorType: string | null;
   sceneAnchorErrorMessage: string | null;
   sceneAnchorErrorBodyRedacted: string | null;
+  sceneAnchorPromptLength: number | null;
+  sceneAnchorPromptLimit: number | null;
+  sceneAnchorPromptCompressed: boolean | null;
+  sceneAnchorPromptTruncated: boolean | null;
   sceneAnchorPayloadFieldNames: string[] | null;
   sceneAnchorReferenceCount: number | null;
   sceneAnchorSubmittedReferenceCount: number | null;
@@ -310,6 +318,10 @@ const KLING_EXACT_LIKENESS_CONSISTENCY_PROMPT =
   'Use the saved self-character references as the identity guide for face shape, hairstyle, hair color, skin tone, eye area, proportions, and overall likeness. Generate a new scene rather than copying the source image.';
 const KLING_EXACT_LIKENESS_IDENTITY_GUIDANCE =
   'Use the referenced self character\'s facial identity, hair color, face shape, eye color, and body proportions. Preserve identity across motion. Adapt clothing to the scene prompt when the user specifies clothing.';
+const FAL_VIDU_REFERENCE_TO_IMAGE_MODEL = 'fal-ai/vidu/reference-to-image';
+const FAL_VIDU_Q2_REFERENCE_TO_IMAGE_MODEL = 'fal-ai/vidu/q2/reference-to-image';
+export const FAL_VIDU_Q2_REFERENCE_TO_IMAGE_PROMPT_MAX = 1500;
+const FAL_VIDU_Q2_SCENE_ANCHOR_PROMPT_SAFE_LIMIT = 1200;
 const SAFE_PROMPT_REPLACEMENT = 'stylish, cinematic, confident, editorial, fashion-inspired';
 const SENSITIVE_FILTER_ERROR = 'Generation blocked by provider safety filter';
 const SENSITIVE_FILTER_SUGGESTION =
@@ -709,11 +721,24 @@ function rawFalQueueUrl(value: unknown) {
   return /^https:\/\/queue\.fal\.run\//i.test(url) ? url : null;
 }
 
+function normalizedSceneAnchorModel(model: string | null | undefined) {
+  return textValue(model).toLowerCase();
+}
+
+function isFalViduReferenceToImageModel(model: string | null | undefined) {
+  const normalized = normalizedSceneAnchorModel(model);
+  return normalized === FAL_VIDU_REFERENCE_TO_IMAGE_MODEL ||
+    normalized === FAL_VIDU_Q2_REFERENCE_TO_IMAGE_MODEL;
+}
+
+function isFalViduQ2ReferenceToImageModel(model: string | null | undefined) {
+  return normalizedSceneAnchorModel(model) === FAL_VIDU_Q2_REFERENCE_TO_IMAGE_MODEL;
+}
+
 function modelSupportsFalSceneAnchorReferences(model: string) {
-  const normalized = model.toLowerCase();
+  const normalized = normalizedSceneAnchorModel(model);
   return (
-    normalized === 'fal-ai/vidu/reference-to-image' ||
-    normalized === 'fal-ai/vidu/q2/reference-to-image' ||
+    isFalViduReferenceToImageModel(normalized) ||
     normalized === 'fal-ai/minimax/image-01/subject-reference' ||
     normalized.includes('/kontext/max/multi') ||
     normalized.includes('flux-pro/kontext/max/multi')
@@ -721,10 +746,165 @@ function modelSupportsFalSceneAnchorReferences(model: string) {
 }
 
 function sceneAnchorReferenceLimitForModel(model: string) {
-  const normalized = model.toLowerCase();
-  if (normalized === 'fal-ai/vidu/reference-to-image' || normalized === 'fal-ai/vidu/q2/reference-to-image') return 3;
+  const normalized = normalizedSceneAnchorModel(model);
+  if (isFalViduReferenceToImageModel(normalized)) return 3;
   if (normalized.includes('/kontext/max/multi') || normalized.includes('flux-pro/kontext/max/multi')) return 4;
   return null;
+}
+
+function sceneAnchorProviderPromptMaxForModel(model: string | null | undefined) {
+  return isFalViduQ2ReferenceToImageModel(model) ? FAL_VIDU_Q2_REFERENCE_TO_IMAGE_PROMPT_MAX : null;
+}
+
+function sceneAnchorPromptSubmissionLimitForModel(model: string | null | undefined) {
+  return isFalViduQ2ReferenceToImageModel(model) ? FAL_VIDU_Q2_SCENE_ANCHOR_PROMPT_SAFE_LIMIT : null;
+}
+
+type SceneAnchorPromptDiagnostics = {
+  sceneAnchorPromptLength: number;
+  sceneAnchorPromptLimit: number | null;
+  sceneAnchorPromptCompressed: boolean;
+  sceneAnchorPromptTruncated: boolean;
+  sceneAnchorPromptPreviewRedacted: string | null;
+  sceneAnchorProviderPromptMax: number | null;
+  privateUrlsRedacted: true;
+};
+
+function stripSceneAnchorPromptScaffolding(value: string) {
+  let text = sanitizePromptText(value)
+    .replace(/\bScene request:\s*Scene prompt:\s*/gi, '')
+    .replace(/\bScene prompt:\s*/gi, '')
+    .replace(/\bScene request:\s*/gi, '')
+    .replace(/\bCreate a new scene anchor still for a Kling exact-likeness video render\.?\s*/gi, '')
+    .replace(/\bUse the saved self-character references only for identity traits:\s*/gi, 'Use references for identity traits: ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  for (let index = 0; index < 3; index += 1) {
+    text = text
+      .replace(/^(?:Scene request|Scene prompt):\s*/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+  return text;
+}
+
+function truncateSceneAnchorSentenceBoundary(value: string, limit: number) {
+  const text = sanitizePromptText(value);
+  if (text.length <= limit) return { text, truncated: false };
+
+  const clipped = text.slice(0, Math.max(0, limit)).trimEnd();
+  const sentenceBoundary = Math.max(
+    clipped.lastIndexOf('. '),
+    clipped.lastIndexOf('! '),
+    clipped.lastIndexOf('? '),
+  );
+  if (sentenceBoundary >= Math.floor(limit * 0.55)) {
+    return { text: clipped.slice(0, sentenceBoundary + 1).trim(), truncated: true };
+  }
+
+  const softBoundary = Math.max(
+    clipped.lastIndexOf(', '),
+    clipped.lastIndexOf('; '),
+    clipped.lastIndexOf(': '),
+  );
+  if (softBoundary >= Math.floor(limit * 0.65)) {
+    return { text: `${clipped.slice(0, softBoundary).replace(/[,\s;:]+$/g, '').trim()}.`, truncated: true };
+  }
+
+  const wordBoundary = clipped.lastIndexOf(' ');
+  const end = wordBoundary > Math.floor(limit * 0.5) ? wordBoundary : limit;
+  return { text: `${clipped.slice(0, end).replace(/[,\s;:]+$/g, '').trim()}.`, truncated: true };
+}
+
+function sceneAnchorSentences(value: string) {
+  return stripSceneAnchorPromptScaffolding(value)
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+}
+
+function compactSceneAnchorPromptText(value: string, limit: number) {
+  const sentences = sceneAnchorSentences(value);
+  const priority = [
+    /garden|forest|beach|city|street|room|environment|scene|background|light|golden hour|sunset/i,
+    /outfit|wear|dress|wardrobe|clothing|clothes/i,
+    /full-body|three-quarter|medium-wide|portrait|framing|visible ground|silhouette/i,
+    /walk|walking|stand|standing|pose|posture|motion|action/i,
+    /identity|face|hair|eye|skin|proportion|likeness|reference/i,
+    /freshly staged|free of chair|free of .*furniture|unobstructed/i,
+  ];
+  const chosen: string[] = [];
+
+  for (const pattern of priority) {
+    const sentence = sentences.find((candidate) =>
+      pattern.test(candidate) && !chosen.includes(candidate)
+    );
+    if (sentence) chosen.push(truncateSceneAnchorSentenceBoundary(sentence, 260).text);
+  }
+
+  if (!chosen.length) {
+    chosen.push(truncateSceneAnchorSentenceBoundary(stripSceneAnchorPromptScaffolding(value), 360).text);
+  }
+
+  const closing = [
+    'Preserve face identity, hair color and style, eye area, skin tone, body proportions, and silhouette from references.',
+    'Use references for identity only; create a new scene, outfit, lighting, and background.',
+  ];
+
+  const output: string[] = [];
+  for (const sentence of [...chosen, ...closing]) {
+    const candidate = [...output, sentence].join(' ');
+    if (candidate.length <= limit) output.push(sentence);
+  }
+  return output.join(' ');
+}
+
+function prepareSceneAnchorPromptForProvider(input: {
+  model: string;
+  prompt: string;
+}) {
+  const submissionLimit = sceneAnchorPromptSubmissionLimitForModel(input.model);
+  const providerMax = sceneAnchorProviderPromptMaxForModel(input.model);
+  const promptLimit = submissionLimit ?? providerMax;
+  let prompt = sanitizePromptText(input.prompt);
+  let compressed = false;
+  let truncated = false;
+
+  if (isFalViduQ2ReferenceToImageModel(input.model)) {
+    const stripped = stripSceneAnchorPromptScaffolding(prompt);
+    if (stripped && stripped !== prompt) {
+      prompt = stripped;
+    }
+  }
+
+  if (typeof promptLimit === 'number' && prompt.length > promptLimit) {
+    compressed = true;
+    prompt = compactSceneAnchorPromptText(prompt, promptLimit);
+  }
+
+  if (typeof promptLimit === 'number' && prompt.length > promptLimit) {
+    const result = truncateSceneAnchorSentenceBoundary(prompt, promptLimit);
+    prompt = result.text;
+    truncated = result.truncated;
+  }
+
+  if (typeof providerMax === 'number' && prompt.length > providerMax) {
+    const result = truncateSceneAnchorSentenceBoundary(prompt, providerMax);
+    prompt = result.text;
+    truncated = truncated || result.truncated;
+  }
+
+  const diagnostics: SceneAnchorPromptDiagnostics = {
+    sceneAnchorPromptLength: prompt.length,
+    sceneAnchorPromptLimit: promptLimit,
+    sceneAnchorPromptCompressed: compressed,
+    sceneAnchorPromptTruncated: truncated,
+    sceneAnchorPromptPreviewRedacted: prompt ? redactSceneAnchorProviderText(prompt, 180) : null,
+    sceneAnchorProviderPromptMax: providerMax,
+    privateUrlsRedacted: true,
+  };
+  return { prompt, diagnostics };
 }
 
 function preferredSceneAnchorReferenceScore(reference: KlingCreateReferenceEntry) {
@@ -764,21 +944,15 @@ export function planFalSceneAnchorReferences(input: {
   };
 }
 
-export function buildFalSceneAnchorPayload(input: {
+function buildFalSceneAnchorPayloadForModel(input: {
   model: string;
   prompt: string;
-  identityReferences: KlingCreateReferenceEntry[];
+  urls: string[];
 }) {
-  const referencePlan = planFalSceneAnchorReferences(input);
-  const urls = referencePlan.submittedReferences.map((reference) => reference.url);
+  const urls = input.urls;
   const primaryUrl = urls[0] ?? '';
-  const model = input.model.toLowerCase();
-  if (!urls.length) {
-    throw Object.assign(new Error('No provider-accessible identity references are available for scene-anchor generation.'), {
-      failureCategory: 'scene_anchor_provider_not_configured',
-    });
-  }
-  if (model === 'fal-ai/vidu/reference-to-image' || model === 'fal-ai/vidu/q2/reference-to-image') {
+  const model = normalizedSceneAnchorModel(input.model);
+  if (isFalViduReferenceToImageModel(model)) {
     return {
       prompt: input.prompt,
       reference_image_urls: urls,
@@ -806,6 +980,41 @@ export function buildFalSceneAnchorPayload(input: {
   throw Object.assign(new Error(`Scene-anchor fal model schema is not mapped for ${input.model}.`), {
     failureCategory: 'scene_anchor_model_schema_unmapped',
   });
+}
+
+export function prepareFalSceneAnchorRequest(input: {
+  model: string;
+  prompt: string;
+  identityReferences: KlingCreateReferenceEntry[];
+}) {
+  const referencePlan = planFalSceneAnchorReferences(input);
+  const urls = referencePlan.submittedReferences.map((reference) => reference.url);
+  if (!urls.length) {
+    throw Object.assign(new Error('No provider-accessible identity references are available for scene-anchor generation.'), {
+      failureCategory: 'scene_anchor_provider_not_configured',
+    });
+  }
+  const promptPlan = prepareSceneAnchorPromptForProvider({
+    model: input.model,
+    prompt: input.prompt,
+  });
+  return {
+    payload: buildFalSceneAnchorPayloadForModel({
+      model: input.model,
+      prompt: promptPlan.prompt,
+      urls,
+    }),
+    referencePlan,
+    promptDiagnostics: promptPlan.diagnostics,
+  };
+}
+
+export function buildFalSceneAnchorPayload(input: {
+  model: string;
+  prompt: string;
+  identityReferences: KlingCreateReferenceEntry[];
+}) {
+  return prepareFalSceneAnchorRequest(input).payload;
 }
 
 function sceneAnchorPayloadShapeSummary(payload: unknown) {
@@ -1228,15 +1437,12 @@ export async function createFalSceneAnchorStill(input: {
       providerStatus: status,
     });
   }
-  const payload = buildFalSceneAnchorPayload({
+  const preparedRequest = prepareFalSceneAnchorRequest({
     model: status.model,
     prompt: input.prompt,
     identityReferences: input.identityReferences,
   });
-  const referencePlan = planFalSceneAnchorReferences({
-    model: status.model,
-    identityReferences: input.identityReferences,
-  });
+  const { payload, referencePlan, promptDiagnostics } = preparedRequest;
   const payloadShape = sceneAnchorPayloadShapeSummary(payload);
   console.info('CREATE_RUNTIME_SCENE_ANCHOR_PAYLOAD_SHAPE', {
     provider: 'fal',
@@ -1244,7 +1450,10 @@ export async function createFalSceneAnchorStill(input: {
     payloadFieldNames: payloadShape.fieldNames,
     referenceCount: referencePlan.submittedReferenceCount,
     aspectRatio: textValue(objectRecord(payload).aspect_ratio) || null,
-    promptLength: input.prompt.length,
+    promptLength: promptDiagnostics.sceneAnchorPromptLength,
+    promptLimit: promptDiagnostics.sceneAnchorPromptLimit,
+    promptCompressed: promptDiagnostics.sceneAnchorPromptCompressed,
+    promptTruncated: promptDiagnostics.sceneAnchorPromptTruncated,
     privateUrlsRedacted: true,
   });
   const submitted = await falSceneAnchorJson<unknown>({
@@ -1258,6 +1467,7 @@ export async function createFalSceneAnchorStill(input: {
       ...objectRecord(error),
       failureCategory: objectRecord(error).failureCategory ?? 'scene_anchor_fal_submit_failed',
       sceneAnchorPayloadShapeSummary: payloadShape,
+      sceneAnchorPromptDiagnostics: promptDiagnostics,
       sceneAnchorReferencePlan: {
         plannedReferenceCount: referencePlan.plannedReferenceCount,
         submittedReferenceCount: referencePlan.submittedReferenceCount,
@@ -1279,6 +1489,7 @@ export async function createFalSceneAnchorStill(input: {
       ...objectRecord(error),
       failureCategory: objectRecord(error).failureCategory ?? 'scene_anchor_fal_poll_failed',
       sceneAnchorPayloadShapeSummary: payloadShape,
+      sceneAnchorPromptDiagnostics: promptDiagnostics,
       sceneAnchorReferencePlan: {
         plannedReferenceCount: referencePlan.plannedReferenceCount,
         submittedReferenceCount: referencePlan.submittedReferenceCount,
@@ -1306,6 +1517,7 @@ export async function createFalSceneAnchorStill(input: {
       providerStatus: result.status,
       outputShape: outputShapeLabel(result.output),
       payloadShape,
+      promptDiagnostics,
       referencePlan: {
         plannedReferenceCount: referencePlan.plannedReferenceCount,
         submittedReferenceCount: referencePlan.submittedReferenceCount,
@@ -1653,13 +1865,63 @@ function buildCompositeIdentitySheetDataUrl(references: KlingCreateReferenceEntr
   return dataUrlFromSvg(svg);
 }
 
-function buildKlingSceneAnchorPrompt(input: {
+function buildCompactViduSceneAnchorPrompt(input: {
   userPrompt: string;
   sceneIntent: KlingSceneIntentAnalysis;
   outfitTerms: string[];
   environmentTerms: string[];
   retryIndex?: number;
 }) {
+  const fullBodyScene = input.sceneIntent.prefersFullBodyPrimary || input.sceneIntent.compositionNeutralized;
+  const sceneRequest = stripSceneAnchorPromptScaffolding(input.userPrompt);
+  const sceneDetail = sceneRequest
+    ? truncateSceneAnchorSentenceBoundary(sceneRequest, 360).text
+    : 'the requested cinematic environment';
+  const environment = input.environmentTerms.length
+    ? input.environmentTerms.join(', ')
+    : sceneDetail;
+  const framing = fullBodyScene
+    ? 'Full-body cinematic still of the saved self character'
+    : input.sceneIntent.framingIntent === 'portrait_closeup'
+      ? 'Cinematic portrait still of the saved self character'
+      : 'Medium-full cinematic still of the saved self character';
+  const outfit = input.outfitTerms.length
+    ? `She wears ${input.outfitTerms.join(', ')}.`
+    : 'Wardrobe follows the scene request, not the reference photos.';
+  const pose = fullBodyScene
+    ? 'She stands or walks naturally through open space with relaxed posture, gentle hair movement, visible ground, and a clean unobstructed silhouette.'
+    : 'Pose and framing match the scene request with relaxed natural posture and a clean unobstructed silhouette.';
+  const retryGuidance = input.retryIndex && input.retryIndex > 0
+    ? 'Regenerate with clearer full-body staging, stronger outfit adherence, and more visible environment.'
+    : '';
+
+  return [
+    `${framing} in ${environment}.`,
+    sceneDetail && sceneDetail !== environment ? `Scene detail: ${sceneDetail}.` : '',
+    outfit,
+    pose,
+    'Freshly staged scene with warm coherent lighting; avoid source-photo background, chair backs, furniture, seated pose, bags, and tight portrait crop unless requested.',
+    'Preserve face identity, hair color and style, eye area, skin tone, body proportions, and silhouette from references.',
+    'Use references for identity only; create a new scene, outfit, lighting, and background.',
+    retryGuidance,
+  ].filter(Boolean).join(' ');
+}
+
+function buildKlingSceneAnchorPrompt(input: {
+  userPrompt: string;
+  sceneIntent: KlingSceneIntentAnalysis;
+  outfitTerms: string[];
+  environmentTerms: string[];
+  retryIndex?: number;
+  model?: string | null;
+}) {
+  if (isFalViduQ2ReferenceToImageModel(input.model)) {
+    return prepareSceneAnchorPromptForProvider({
+      model: FAL_VIDU_Q2_REFERENCE_TO_IMAGE_MODEL,
+      prompt: buildCompactViduSceneAnchorPrompt(input),
+    }).prompt;
+  }
+
   const fullBodyScene = input.sceneIntent.prefersFullBodyPrimary || input.sceneIntent.compositionNeutralized;
   const framing = fullBodyScene
     ? 'full-body or three-quarter full-body cinematic scene anchor, medium-wide opening frame, visible ground and environment'
@@ -1675,11 +1937,12 @@ function buildKlingSceneAnchorPrompt(input: {
   const retryGuidance = input.retryIndex && input.retryIndex > 0
     ? 'Regenerate with stronger full-body staging, clearer environment visibility, and stronger outfit adherence.'
     : '';
+  const sceneRequest = stripSceneAnchorPromptScaffolding(input.userPrompt);
 
   return [
     'Create a new scene anchor still for a Kling exact-likeness video render.',
     'Use the saved self-character references only for identity traits: face identity, hair color and style, skin tone, eye area, body proportions, and silhouette.',
-    `Scene request: ${sanitizePromptText(input.userPrompt)}.`,
+    `Scene request: ${sceneRequest}.`,
     framing,
     environment,
     outfit,
@@ -1801,6 +2064,16 @@ function numberOrNull(value: unknown) {
   return Number.isFinite(number) ? number : null;
 }
 
+function booleanOrNull(value: unknown) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes'].includes(normalized)) return true;
+    if (['false', '0', 'no'].includes(normalized)) return false;
+  }
+  return null;
+}
+
 function stringArrayOrNull(value: unknown) {
   if (!Array.isArray(value)) return null;
   const strings = value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
@@ -1812,6 +2085,14 @@ function objectRecordWithKeys(value: unknown) {
   return Object.keys(record).length ? record : null;
 }
 
+function applySceneAnchorPromptDiagnostics(plan: KlingCreateReferencePlan, value: unknown) {
+  const diagnostics = objectRecord(value);
+  plan.sceneAnchorPromptLength = numberOrNull(diagnostics.sceneAnchorPromptLength);
+  plan.sceneAnchorPromptLimit = numberOrNull(diagnostics.sceneAnchorPromptLimit);
+  plan.sceneAnchorPromptCompressed = booleanOrNull(diagnostics.sceneAnchorPromptCompressed);
+  plan.sceneAnchorPromptTruncated = booleanOrNull(diagnostics.sceneAnchorPromptTruncated);
+}
+
 function applySceneAnchorFailureDiagnostics(plan: KlingCreateReferencePlan, error: unknown) {
   const record = objectRecord(error);
   const payloadShape =
@@ -1820,6 +2101,7 @@ function applySceneAnchorFailureDiagnostics(plan: KlingCreateReferencePlan, erro
     objectRecordWithKeys(objectRecord(record.details).payloadShape) ??
     {};
   const referencePlan = objectRecord(record.sceneAnchorReferencePlan);
+  applySceneAnchorPromptDiagnostics(plan, record.sceneAnchorPromptDiagnostics);
   plan.sceneAnchorHttpStatus = numberOrNull(record.falHttpStatus ?? record.statusCode ?? record.status);
   plan.sceneAnchorErrorType =
     textValue(record.falErrorType) ||
@@ -2010,6 +2292,7 @@ export async function prepareKlingCreateReferencePlanForProvider(input: {
               outfitTerms: plan.outfitTermsDetected,
               environmentTerms: plan.environmentTermsDetected,
               retryIndex: attempt - 1,
+              model: sceneAnchorProvider.model,
             });
         const generated = await generator({
           prompt,
@@ -2057,10 +2340,12 @@ export async function prepareKlingCreateReferencePlanForProvider(input: {
         const rawOutput = objectRecord(generated.rawOutput);
         const rawReferencePlan = objectRecord(rawOutput.referencePlan);
         const rawPayloadShape = objectRecord(rawOutput.payloadShape);
+        const rawPromptDiagnostics = objectRecord(rawOutput.promptDiagnostics);
         plan.sceneAnchorHttpStatus = null;
         plan.sceneAnchorErrorType = null;
         plan.sceneAnchorErrorMessage = null;
         plan.sceneAnchorErrorBodyRedacted = null;
+        applySceneAnchorPromptDiagnostics(plan, rawPromptDiagnostics);
         plan.sceneAnchorPayloadFieldNames = stringArrayOrNull(rawPayloadShape.fieldNames);
         plan.sceneAnchorReferenceCount =
           numberOrNull(rawReferencePlan.plannedReferenceCount) ?? plan.references.length;
@@ -2549,6 +2834,7 @@ export function buildKlingCreateReferencePlan(input: {
         sceneIntent,
         outfitTerms: outfitIntent.outfitTermsDetected,
         environmentTerms: environmentIntent.environmentTermsDetected,
+        model: sceneAnchorProvider.model,
       })
     : '';
   const promptGuidance = input.exactLikenessReady
@@ -2610,6 +2896,10 @@ export function buildKlingCreateReferencePlan(input: {
     sceneAnchorErrorType: null,
     sceneAnchorErrorMessage: null,
     sceneAnchorErrorBodyRedacted: null,
+    sceneAnchorPromptLength: null,
+    sceneAnchorPromptLimit: null,
+    sceneAnchorPromptCompressed: null,
+    sceneAnchorPromptTruncated: null,
     sceneAnchorPayloadFieldNames: null,
     sceneAnchorReferenceCount: null,
     sceneAnchorSubmittedReferenceCount: null,
@@ -2758,6 +3048,10 @@ export function klingReferenceDiagnostics(input: {
     sceneAnchorErrorType: input.plan?.sceneAnchorErrorType ?? null,
     sceneAnchorErrorMessage: input.plan?.sceneAnchorErrorMessage ?? null,
     sceneAnchorErrorBodyRedacted: input.plan?.sceneAnchorErrorBodyRedacted ?? null,
+    sceneAnchorPromptLength: input.plan?.sceneAnchorPromptLength ?? null,
+    sceneAnchorPromptLimit: input.plan?.sceneAnchorPromptLimit ?? null,
+    sceneAnchorPromptCompressed: input.plan?.sceneAnchorPromptCompressed ?? null,
+    sceneAnchorPromptTruncated: input.plan?.sceneAnchorPromptTruncated ?? null,
     sceneAnchorPayloadFieldNames: input.plan?.sceneAnchorPayloadFieldNames ?? null,
     sceneAnchorReferenceCount: input.plan?.sceneAnchorReferenceCount ?? null,
     sceneAnchorSubmittedReferenceCount: input.plan?.sceneAnchorSubmittedReferenceCount ?? null,
@@ -3164,7 +3458,7 @@ function renderFailureStageForCategory(category: string): CreateRenderFailureSta
 
 function sceneAnchorRecommendedNextAction(category: string): string {
   if (category === 'scene_anchor_input_schema' || category === 'scene_anchor_model_schema_unmapped') {
-    return 'Fix the scene-anchor provider payload shape before retrying.';
+    return 'Check scene-anchor prompt length, prompt limit, payload fields, and submitted reference count before retrying.';
   }
   if (category === 'scene_anchor_output_parse_failed' || category === 'scene_anchor_output_missing') {
     return 'Update output parsing or inspect the redacted provider response shape before retrying.';
@@ -3209,9 +3503,16 @@ function klingStage2RecommendedNextAction(category: string): string {
 
 function renderFailureCopyForCategory(category: string, fallbackMessage = '') {
   if (category === 'scene_anchor_input_schema' || category === 'scene_anchor_model_schema_unmapped') {
+    const lower = fallbackMessage.toLowerCase();
+    if (lower.includes('string_too_long') || lower.includes('body.prompt') || lower.includes('prompt')) {
+      return {
+        safeTitle: 'Scene anchor prompt exceeded the provider limit.',
+        safeMessage: 'Vidu rejected the scene-anchor prompt length. Check prompt length, prompt limit, payload fields, and submitted reference count before retrying.',
+      };
+    }
     return {
       safeTitle: 'Scene anchor provider rejected the payload shape.',
-      safeMessage: 'Kling scene anchor failed because the image provider rejected the payload shape.',
+      safeMessage: 'Kling scene anchor failed because the image provider rejected the payload shape. Check prompt length, prompt limit, payload fields, and submitted reference count before retrying.',
     };
   }
   if (category === 'scene_anchor_output_parse_failed' || category === 'scene_anchor_output_missing') {
@@ -3371,6 +3672,10 @@ export function buildSceneAnchorRenderFailure(input: {
     recommendedNextAction: input.recommendedNextAction || sceneAnchorRecommendedNextAction(category),
     sceneAnchorProvider: input.plan.sceneAnchorProvider,
     sceneAnchorModel: sceneAnchorProviderStatus().model,
+    sceneAnchorPromptLength: input.plan.sceneAnchorPromptLength,
+    sceneAnchorPromptLimit: input.plan.sceneAnchorPromptLimit,
+    sceneAnchorPromptCompressed: input.plan.sceneAnchorPromptCompressed,
+    sceneAnchorPromptTruncated: input.plan.sceneAnchorPromptTruncated,
     sceneAnchorPayloadFieldNames: input.plan.sceneAnchorPayloadFieldNames,
     sceneAnchorSubmittedReferenceCount: input.plan.sceneAnchorSubmittedReferenceCount,
     sceneAnchorDroppedReferenceRoles: input.plan.sceneAnchorDroppedReferenceRoles,
@@ -3413,6 +3718,10 @@ export function buildKlingStage2RenderFailure(input: {
     recommendedNextAction: input.recommendedNextAction || klingStage2RecommendedNextAction(category),
     sceneAnchorProvider: input.plan?.sceneAnchorProvider ?? sceneAnchorProviderStatus().provider,
     sceneAnchorModel: sceneAnchorProviderStatus().model,
+    sceneAnchorPromptLength: input.plan?.sceneAnchorPromptLength ?? null,
+    sceneAnchorPromptLimit: input.plan?.sceneAnchorPromptLimit ?? null,
+    sceneAnchorPromptCompressed: input.plan?.sceneAnchorPromptCompressed ?? null,
+    sceneAnchorPromptTruncated: input.plan?.sceneAnchorPromptTruncated ?? null,
     sceneAnchorPayloadFieldNames: input.plan?.sceneAnchorPayloadFieldNames ?? null,
     sceneAnchorSubmittedReferenceCount: input.plan?.sceneAnchorSubmittedReferenceCount ?? null,
     sceneAnchorDroppedReferenceRoles: input.plan?.sceneAnchorDroppedReferenceRoles ?? null,
@@ -3992,7 +4301,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const errorCategory = sceneAnchorFailureCategory;
       const recommendedNextAction = sceneAnchorFailureCategory === 'scene_anchor_input_schema' ||
         sceneAnchorFailureCategory === 'scene_anchor_model_schema_unmapped'
-        ? 'Fix the scene-anchor provider payload shape before retrying.'
+        ? 'Check scene-anchor prompt length, prompt limit, payload fields, and submitted reference count before retrying.'
         : sceneAnchorFailureCategory === 'scene_anchor_output_parse_failed'
           ? 'Update output parsing or inspect the redacted provider response shape before retrying.'
           : sceneAnchorFailureCategory === 'scene_anchor_provider_moderation_block'
@@ -4027,6 +4336,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sceneAnchorErrorMessageRedacted: klingReferencePlan.sceneAnchorErrorMessage,
         createRuntimeSceneAnchorConfigured: sceneAnchorProviderStatus().configured,
         sceneAnchorErrorBodyRedacted: klingReferencePlan.sceneAnchorErrorBodyRedacted,
+        sceneAnchorPromptLength: klingReferencePlan.sceneAnchorPromptLength,
+        sceneAnchorPromptLimit: klingReferencePlan.sceneAnchorPromptLimit,
+        sceneAnchorPromptCompressed: klingReferencePlan.sceneAnchorPromptCompressed,
+        sceneAnchorPromptTruncated: klingReferencePlan.sceneAnchorPromptTruncated,
         sceneAnchorPayloadFieldNames: klingReferencePlan.sceneAnchorPayloadFieldNames,
         sceneAnchorReferenceCount: klingReferencePlan.sceneAnchorReferenceCount,
         sceneAnchorSubmittedReferenceCount: klingReferencePlan.sceneAnchorSubmittedReferenceCount,
@@ -4138,6 +4451,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           sceneAnchorErrorType: klingReferencePlan.sceneAnchorErrorType,
           sceneAnchorErrorMessage: klingReferencePlan.sceneAnchorErrorMessage,
           sceneAnchorErrorMessageRedacted: klingReferencePlan.sceneAnchorErrorMessage,
+          sceneAnchorPromptLength: klingReferencePlan.sceneAnchorPromptLength,
+          sceneAnchorPromptLimit: klingReferencePlan.sceneAnchorPromptLimit,
+          sceneAnchorPromptCompressed: klingReferencePlan.sceneAnchorPromptCompressed,
+          sceneAnchorPromptTruncated: klingReferencePlan.sceneAnchorPromptTruncated,
           sceneAnchorPayloadFieldNames: klingReferencePlan.sceneAnchorPayloadFieldNames,
           sceneAnchorReferenceCount: klingReferencePlan.sceneAnchorReferenceCount,
           sceneAnchorSubmittedReferenceCount: klingReferencePlan.sceneAnchorSubmittedReferenceCount,
@@ -4225,6 +4542,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sceneAnchorErrorType: klingReferencePlan.sceneAnchorErrorType,
         sceneAnchorErrorMessage: klingReferencePlan.sceneAnchorErrorMessage,
         sceneAnchorErrorBodyRedacted: klingReferencePlan.sceneAnchorErrorBodyRedacted,
+        sceneAnchorPromptLength: klingReferencePlan.sceneAnchorPromptLength,
+        sceneAnchorPromptLimit: klingReferencePlan.sceneAnchorPromptLimit,
+        sceneAnchorPromptCompressed: klingReferencePlan.sceneAnchorPromptCompressed,
+        sceneAnchorPromptTruncated: klingReferencePlan.sceneAnchorPromptTruncated,
         sceneAnchorPayloadFieldNames: klingReferencePlan.sceneAnchorPayloadFieldNames,
         sceneAnchorReferenceCount: klingReferencePlan.sceneAnchorReferenceCount,
         sceneAnchorSubmittedReferenceCount: klingReferencePlan.sceneAnchorSubmittedReferenceCount,

@@ -32,6 +32,10 @@ type ContinueStoryItem = {
   sceneAnchorHttpStatus?: number | null;
   sceneAnchorErrorType?: string | null;
   sceneAnchorErrorMessage?: string | null;
+  sceneAnchorPromptLength?: number | null;
+  sceneAnchorPromptLimit?: number | null;
+  sceneAnchorPromptCompressed?: boolean | null;
+  sceneAnchorPromptTruncated?: boolean | null;
   sceneAnchorPayloadFieldNames?: string[] | null;
   sceneAnchorReferenceCount?: number | null;
   sceneAnchorSubmittedReferenceCount?: number | null;
@@ -132,6 +136,10 @@ export function prepareContinueStory(item: ContinueStoryItem, source: string) {
     sceneAnchorHttpStatus: item.sceneAnchorHttpStatus ?? null,
     sceneAnchorErrorType: item.sceneAnchorErrorType ?? null,
     sceneAnchorErrorMessage: item.sceneAnchorErrorMessage ?? null,
+    sceneAnchorPromptLength: item.sceneAnchorPromptLength ?? null,
+    sceneAnchorPromptLimit: item.sceneAnchorPromptLimit ?? null,
+    sceneAnchorPromptCompressed: item.sceneAnchorPromptCompressed ?? null,
+    sceneAnchorPromptTruncated: item.sceneAnchorPromptTruncated ?? null,
     sceneAnchorPayloadFieldNames: item.sceneAnchorPayloadFieldNames ?? null,
     sceneAnchorReferenceCount: item.sceneAnchorReferenceCount ?? null,
     sceneAnchorSubmittedReferenceCount: item.sceneAnchorSubmittedReferenceCount ?? null,

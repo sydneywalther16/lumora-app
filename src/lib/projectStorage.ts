@@ -51,6 +51,10 @@ export type StudioProject = {
   sceneAnchorHttpStatus?: number | null;
   sceneAnchorErrorType?: string | null;
   sceneAnchorErrorMessage?: string | null;
+  sceneAnchorPromptLength?: number | null;
+  sceneAnchorPromptLimit?: number | null;
+  sceneAnchorPromptCompressed?: boolean | null;
+  sceneAnchorPromptTruncated?: boolean | null;
   sceneAnchorPayloadFieldNames?: string[] | null;
   sceneAnchorReferenceCount?: number | null;
   sceneAnchorSubmittedReferenceCount?: number | null;
@@ -202,6 +206,10 @@ export function loadStudioProjects(): StudioProject[] {
           sceneAnchorHttpStatus: typeof project.sceneAnchorHttpStatus === 'number' ? project.sceneAnchorHttpStatus : null,
           sceneAnchorErrorType: typeof project.sceneAnchorErrorType === 'string' ? project.sceneAnchorErrorType : null,
           sceneAnchorErrorMessage: typeof project.sceneAnchorErrorMessage === 'string' ? project.sceneAnchorErrorMessage : null,
+          sceneAnchorPromptLength: typeof project.sceneAnchorPromptLength === 'number' ? project.sceneAnchorPromptLength : null,
+          sceneAnchorPromptLimit: typeof project.sceneAnchorPromptLimit === 'number' ? project.sceneAnchorPromptLimit : null,
+          sceneAnchorPromptCompressed: typeof project.sceneAnchorPromptCompressed === 'boolean' ? project.sceneAnchorPromptCompressed : null,
+          sceneAnchorPromptTruncated: typeof project.sceneAnchorPromptTruncated === 'boolean' ? project.sceneAnchorPromptTruncated : null,
           sceneAnchorPayloadFieldNames: Array.isArray(project.sceneAnchorPayloadFieldNames)
             ? project.sceneAnchorPayloadFieldNames.filter((item): item is string => typeof item === 'string')
             : null,

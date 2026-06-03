@@ -1657,6 +1657,10 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
       sceneAnchorHttpStatus: project.sceneAnchorHttpStatus ?? null,
       sceneAnchorErrorType: project.sceneAnchorErrorType ?? null,
       sceneAnchorErrorMessage: project.sceneAnchorErrorMessage ?? null,
+      sceneAnchorPromptLength: project.sceneAnchorPromptLength ?? null,
+      sceneAnchorPromptLimit: project.sceneAnchorPromptLimit ?? null,
+      sceneAnchorPromptCompressed: project.sceneAnchorPromptCompressed ?? null,
+      sceneAnchorPromptTruncated: project.sceneAnchorPromptTruncated ?? null,
       sceneAnchorPayloadFieldNames: project.sceneAnchorPayloadFieldNames ?? null,
       sceneAnchorReferenceCount: project.sceneAnchorReferenceCount ?? null,
       sceneAnchorSubmittedReferenceCount: project.sceneAnchorSubmittedReferenceCount ?? null,
@@ -1953,6 +1957,14 @@ function mapProjectRow(row: DbRow): StudioProject {
       : null,
     sceneAnchorErrorType: diagnosticString('sceneAnchorErrorType'),
     sceneAnchorErrorMessage: diagnosticString('sceneAnchorErrorMessage'),
+    sceneAnchorPromptLength: Number.isFinite(Number(klingReferenceDiagnostics?.sceneAnchorPromptLength))
+      ? Number(klingReferenceDiagnostics?.sceneAnchorPromptLength)
+      : null,
+    sceneAnchorPromptLimit: Number.isFinite(Number(klingReferenceDiagnostics?.sceneAnchorPromptLimit))
+      ? Number(klingReferenceDiagnostics?.sceneAnchorPromptLimit)
+      : null,
+    sceneAnchorPromptCompressed: diagnosticBoolean('sceneAnchorPromptCompressed'),
+    sceneAnchorPromptTruncated: diagnosticBoolean('sceneAnchorPromptTruncated'),
     sceneAnchorPayloadFieldNames: diagnosticStringList('sceneAnchorPayloadFieldNames'),
     sceneAnchorReferenceCount: Number.isFinite(Number(klingReferenceDiagnostics?.sceneAnchorReferenceCount))
       ? Number(klingReferenceDiagnostics?.sceneAnchorReferenceCount)

@@ -64,6 +64,10 @@ type RemixProjectPayload = {
   sceneAnchorHttpStatus?: number | null;
   sceneAnchorErrorType?: string | null;
   sceneAnchorErrorMessage?: string | null;
+  sceneAnchorPromptLength?: number | null;
+  sceneAnchorPromptLimit?: number | null;
+  sceneAnchorPromptCompressed?: boolean | null;
+  sceneAnchorPromptTruncated?: boolean | null;
   sceneAnchorPayloadFieldNames?: string[] | null;
   sceneAnchorReferenceCount?: number | null;
   sceneAnchorSubmittedReferenceCount?: number | null;
