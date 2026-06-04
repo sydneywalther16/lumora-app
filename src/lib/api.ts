@@ -356,6 +356,8 @@ export type GenerationResponse = {
   sceneAnchorErrorMessage?: string | null;
   sceneAnchorErrorMessageRedacted?: string | null;
   sceneAnchorErrorBodyRedacted?: string | null;
+  assetPersistErrorType?: string | null;
+  assetPersistErrorMessageRedacted?: string | null;
   createRuntimeSceneAnchorConfigured?: boolean | null;
   sceneAnchorPromptLength?: number | null;
   sceneAnchorPromptLimit?: number | null;
@@ -475,6 +477,8 @@ export type GenerationJob = {
   sceneAnchorErrorMessage?: string | null;
   sceneAnchorErrorMessageRedacted?: string | null;
   sceneAnchorErrorBodyRedacted?: string | null;
+  assetPersistErrorType?: string | null;
+  assetPersistErrorMessageRedacted?: string | null;
   createRuntimeSceneAnchorConfigured?: boolean | null;
   sceneAnchorPromptLength?: number | null;
   sceneAnchorPromptLimit?: number | null;

@@ -1,4 +1,10 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import {
+  persistSceneAnchorProviderImage,
+  sceneAnchorAssetStorageMissingConfig,
+  uploadSceneAnchorAsset,
+} from '../../api/lumora/sceneAnchorAssetStorage';
 import {
   analyzeKlingSceneIntent,
   buildFalSceneAnchorPayload,
@@ -28,6 +34,8 @@ const originalSceneAnchorEnv = {
   KLING_SCENE_ANCHOR_VIDEO_MODEL: process.env.KLING_SCENE_ANCHOR_VIDEO_MODEL,
   FAL_KEY: process.env.FAL_KEY,
   KLING_API_KEY: process.env.KLING_API_KEY,
+  SUPABASE_URL: process.env.SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
 };
 
 delete process.env.SCENE_ANCHOR_ENABLED;
@@ -37,6 +45,8 @@ delete process.env.SCENE_ANCHOR_FALLBACK_MODE;
 delete process.env.KLING_SCENE_ANCHOR_VIDEO_MODEL;
 delete process.env.FAL_KEY;
 delete process.env.KLING_API_KEY;
+delete process.env.SUPABASE_URL;
+delete process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 try {
   const gardenDressPrompt =
@@ -333,6 +343,36 @@ try {
   assert.match(promptTooLongRenderFailure.sceneAnchorErrorMessageRedacted ?? '', /\[redacted-url\]/);
   assert.doesNotMatch(JSON.stringify(promptTooLongRenderFailure), /https:\/\/assets\.example\/private/);
 
+  process.env.SCENE_ANCHOR_ENABLED = 'true';
+  process.env.SCENE_ANCHOR_PROVIDER = 'fal';
+  process.env.SCENE_ANCHOR_MODEL = 'fal-ai/vidu/q2/reference-to-image';
+  const assetPersistRenderFailure = buildSceneAnchorRenderFailure({
+    plan: {
+      ...materializedPlan,
+      sceneAnchorGenerated: false,
+      sceneAnchorFailureCategory: 'scene_anchor_asset_persist',
+      sceneAnchorPersisted: false,
+      sceneAnchorOutputParsed: true,
+      sceneAnchorErrorMessage: 'Scene anchor was generated, but Lumora could not persist it for Kling. Missing config: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY. https://provider.example/private.png?token=secret',
+      assetPersistErrorType: 'scene_anchor_storage_config_missing',
+      assetPersistErrorMessageRedacted: 'Scene anchor was generated, but Lumora could not persist it for Kling. Missing config: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY. [redacted-url]',
+    },
+    category: 'scene_anchor_asset_persist',
+  });
+  assert.equal(assetPersistRenderFailure.stage, 'persist_asset');
+  assert.equal(assetPersistRenderFailure.category, 'scene_anchor_asset_persist');
+  assert.match(assetPersistRenderFailure.safeMessage, /could not persist it for Kling/i);
+  assert.match(assetPersistRenderFailure.recommendedNextAction, /Vercel-safe asset persistence/i);
+  assert.equal(assetPersistRenderFailure.sceneAnchorProvider, materializedPlan.sceneAnchorProvider);
+  assert.equal(assetPersistRenderFailure.sceneAnchorModel, 'fal-ai/vidu/q2/reference-to-image');
+  assert.equal(assetPersistRenderFailure.sceneAnchorOutputParsed, true);
+  assert.equal(assetPersistRenderFailure.sceneAnchorPersisted, false);
+  assert.equal(assetPersistRenderFailure.assetPersistErrorType, 'scene_anchor_storage_config_missing');
+  assert.match(assetPersistRenderFailure.assetPersistErrorMessageRedacted ?? '', /SUPABASE_URL/);
+  assert.equal(assetPersistRenderFailure.privateUrlsRedacted, true);
+  assert.equal(assetPersistRenderFailure.secretsRedacted, true);
+  assert.doesNotMatch(JSON.stringify(assetPersistRenderFailure), /provider\.example\/private|token=secret/);
+
   const outputParseFailurePlan = {
     ...failedSchemaPlan,
     sceneAnchorFailureCategory: 'scene_anchor_output_parse_failed' as const,
@@ -372,6 +412,108 @@ try {
   assert.equal(missingModel.sceneAnchorEnabled, true);
   assert.equal(missingModel.configured, false);
   assert.equal(missingModel.reason, 'scene_anchor_provider_not_configured');
+
+  const generateSource = readFileSync('api/lumora/generate-video.ts', 'utf8');
+  assert.match(generateSource, /sceneAnchorAssetStorage/);
+  assert.doesNotMatch(generateSource, /backend\/src\/services\/storageService|backend\\\\src\\\\services\\\\storageService/);
+  assert.doesNotMatch(generateSource, /import\(['"]\.\.\/\.\.\/backend\/src\/services\/storageService['"]\)/);
+
+  assert.deepEqual(sceneAnchorAssetStorageMissingConfig({} as NodeJS.ProcessEnv), [
+    'SUPABASE_URL',
+    'SUPABASE_SERVICE_ROLE_KEY',
+  ]);
+  await assert.rejects(
+    () => uploadSceneAnchorAsset({
+      userId: 'unit-test-user',
+      fileName: 'missing-env.png',
+      contentType: 'image/png',
+      buffer: Buffer.from([1, 2, 3]),
+      envSource: {} as NodeJS.ProcessEnv,
+    }),
+    (error) => {
+      const record = error as Record<string, unknown>;
+      assert.equal(record.failureCategory, 'scene_anchor_asset_persist');
+      assert.equal(record.assetPersistErrorType, 'scene_anchor_storage_config_missing');
+      assert.deepEqual(record.missingConfig, ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']);
+      assert.match(String(record.assetPersistErrorMessageRedacted), /SUPABASE_URL/);
+      assert.doesNotMatch(JSON.stringify(record), /service-role-secret|provider\.example\/private/);
+      return true;
+    },
+  );
+
+  const uploadCalls: Array<{
+    bucket: string;
+    objectPath: string;
+    size: number;
+    contentType: string;
+  }> = [];
+  const mockedStorageClient = {
+    storage: {
+      from(bucket: string) {
+        return {
+          upload: async (objectPath: string, body: unknown, options: { contentType?: string }) => {
+            uploadCalls.push({
+              bucket,
+              objectPath,
+              size: Buffer.isBuffer(body) ? body.length : 0,
+              contentType: options.contentType ?? '',
+            });
+            return { error: null };
+          },
+          getPublicUrl: (objectPath: string) => ({
+            data: {
+              publicUrl: `https://demo.supabase.co/storage/v1/object/public/${bucket}/${objectPath}`,
+            },
+          }),
+          createSignedUrl: async (objectPath: string) => ({
+            data: {
+              signedUrl: `https://demo.supabase.co/storage/v1/object/sign/${bucket}/${objectPath}?token=secret`,
+            },
+            error: null,
+          }),
+        };
+      },
+    },
+  };
+  const persistedSceneAnchor = await persistSceneAnchorProviderImage({
+    userId: 'unit-test-user',
+    imageUrl: 'https://provider.example/private-scene-anchor.png?token=secret',
+    storageClient: mockedStorageClient as never,
+    fetchImpl: async (input) => {
+      assert.equal(String(input), 'https://provider.example/private-scene-anchor.png?token=secret');
+      return new Response(new Uint8Array([137, 80, 78, 71]), {
+        status: 200,
+        headers: { 'content-type': 'image/png' },
+      });
+    },
+  });
+  assert.equal(uploadCalls.length, 1);
+  assert.equal(uploadCalls[0].bucket, 'lumora-assets');
+  assert.equal(uploadCalls[0].contentType, 'image/png');
+  assert.equal(uploadCalls[0].size, 4);
+  assert.match(uploadCalls[0].objectPath, /unit-test-user\/kling-scene-anchors\/.+kling-scene-anchor\.png/);
+  assert.match(persistedSceneAnchor.url, /^https:\/\/demo\.supabase\.co\/storage\/v1\/object\/public\/lumora-assets\//);
+  assert.equal(persistedSceneAnchor.privateUrlsRedacted, true);
+  assert.doesNotMatch(JSON.stringify(persistedSceneAnchor), /provider\.example\/private-scene-anchor|token=secret/);
+
+  await assert.rejects(
+    () => persistSceneAnchorProviderImage({
+      userId: 'unit-test-user',
+      imageUrl: 'https://provider.example/private-fail.png?token=secret',
+      storageClient: mockedStorageClient as never,
+      fetchImpl: async () => {
+        throw new Error('download failed for https://provider.example/private-fail.png?token=secret with Bearer service-role-secret');
+      },
+    }),
+    (error) => {
+      const serialized = JSON.stringify(error);
+      assert.equal((error as Record<string, unknown>).failureCategory, 'scene_anchor_asset_download_failed');
+      assert.doesNotMatch(serialized, /provider\.example\/private-fail|token=secret|service-role-secret/);
+      assert.match(serialized, /\[redacted-url\]/);
+      assert.match(serialized, /\[redacted-auth\]/);
+      return true;
+    },
+  );
 
   process.env.SCENE_ANCHOR_MODEL = 'fal-ai/vidu/q2/reference-to-image';
   const longGardenPrompt = [

@@ -304,6 +304,8 @@ type GenerateVideoApiResponse = {
   sceneAnchorErrorMessage?: string | null;
   sceneAnchorErrorMessageRedacted?: string | null;
   sceneAnchorErrorBodyRedacted?: string | null;
+  assetPersistErrorType?: string | null;
+  assetPersistErrorMessageRedacted?: string | null;
   createRuntimeSceneAnchorConfigured?: boolean | null;
   sceneAnchorPromptLength?: number | null;
   sceneAnchorPromptLimit?: number | null;
@@ -400,6 +402,9 @@ type RenderFailureEnvelope = {
   sceneAnchorErrorType?: string | null;
   sceneAnchorErrorMessageRedacted?: string | null;
   sceneAnchorOutputParsed?: boolean | null;
+  sceneAnchorPersisted?: boolean | null;
+  assetPersistErrorType?: string | null;
+  assetPersistErrorMessageRedacted?: string | null;
   stage2ProviderModel?: string | null;
   stage2ProviderRouteType?: string | null;
   stage2HttpStatus?: number | null;
@@ -797,6 +802,9 @@ function klingProviderFailureMessage(category: string | null | undefined, fallba
   if (category === 'scene_anchor_provider_disabled' || category === 'scene_anchor_provider_not_configured' || category === 'scene_anchor_fal_key_missing') {
     return 'Create runtime is missing scene-anchor configuration. Configure the Vercel Create runtime, or use identity-only fallback.';
   }
+  if (category === 'scene_anchor_asset_persist' || category === 'scene_anchor_asset_persist_failed') {
+    return 'Scene anchor was generated, but Lumora could not save it for animation. Fix the Vercel-safe asset persistence path before retrying.';
+  }
   if (category && category.startsWith('scene_anchor_')) {
     return 'Scene anchor generation failed. Check diagnostics before retrying.';
   }
@@ -821,6 +829,12 @@ function renderFailureTitleForCategory(category: string | null | undefined) {
   }
   if (category === 'scene_anchor_provider_moderation_block') {
     return 'Scene anchor provider blocked this image request.';
+  }
+  if (category === 'scene_anchor_asset_persist' || category === 'scene_anchor_asset_persist_failed') {
+    return 'Scene anchor was generated, but Lumora could not save it for animation.';
+  }
+  if (category === 'scene_anchor_asset_download_failed') {
+    return 'Scene anchor image could not be downloaded.';
   }
   if (
     category === 'scene_anchor_provider_disabled' ||
@@ -864,6 +878,12 @@ function renderFailureMessageForCategory(category: string | null | undefined, fa
   if (category === 'scene_anchor_provider_moderation_block') {
     return 'Scene anchor provider blocked this image request.';
   }
+  if (category === 'scene_anchor_asset_persist' || category === 'scene_anchor_asset_persist_failed') {
+    return 'Scene anchor was generated, but Lumora could not save it for animation. Fix the Vercel-safe asset persistence path before retrying.';
+  }
+  if (category === 'scene_anchor_asset_download_failed') {
+    return 'Scene anchor was generated, but Lumora could not download it for persistence.';
+  }
   if (category === 'kling_scene_anchor_video_input_schema') {
     return 'Kling image-to-video rejected the scene-anchor video payload.';
   }
@@ -903,6 +923,9 @@ function normalizeRenderFailure(value: unknown): RenderFailureEnvelope | null {
     sceneAnchorErrorType: stringFromRecord(record, 'sceneAnchorErrorType'),
     sceneAnchorErrorMessageRedacted: stringFromRecord(record, 'sceneAnchorErrorMessageRedacted'),
     sceneAnchorOutputParsed: booleanFromRecord(record, 'sceneAnchorOutputParsed'),
+    sceneAnchorPersisted: booleanFromRecord(record, 'sceneAnchorPersisted'),
+    assetPersistErrorType: stringFromRecord(record, 'assetPersistErrorType'),
+    assetPersistErrorMessageRedacted: stringFromRecord(record, 'assetPersistErrorMessageRedacted'),
     stage2ProviderModel: stringFromRecord(record, 'stage2ProviderModel'),
     stage2ProviderRouteType: stringFromRecord(record, 'stage2ProviderRouteType'),
     stage2HttpStatus: numberFromRecord(record, 'stage2HttpStatus'),
@@ -931,6 +954,9 @@ function renderFailureDebugSummary(failure: RenderFailureEnvelope) {
     ['sceneAnchorErrorType', failure.sceneAnchorErrorType],
     ['sceneAnchorErrorMessageRedacted', failure.sceneAnchorErrorMessageRedacted],
     ['sceneAnchorOutputParsed', failure.sceneAnchorOutputParsed],
+    ['sceneAnchorPersisted', failure.sceneAnchorPersisted],
+    ['assetPersistErrorType', failure.assetPersistErrorType],
+    ['assetPersistErrorMessageRedacted', failure.assetPersistErrorMessageRedacted],
     ['stage2ProviderModel', failure.stage2ProviderModel],
     ['stage2ProviderRouteType', failure.stage2ProviderRouteType],
     ['stage2HttpStatus', failure.stage2HttpStatus],
@@ -3234,6 +3260,8 @@ export default function CreateVideo({
                   sceneAnchorPayloadFieldNames: renderFailure.sceneAnchorPayloadFieldNames,
                   sceneAnchorSubmittedReferenceCount: renderFailure.sceneAnchorSubmittedReferenceCount,
                   sceneAnchorHttpStatus: renderFailure.sceneAnchorHttpStatus,
+                  sceneAnchorPersisted: renderFailure.sceneAnchorPersisted,
+                  assetPersistErrorType: renderFailure.assetPersistErrorType,
                   stage2HttpStatus: renderFailure.stage2HttpStatus,
                   privateUrlsRedacted: true,
                   secretsRedacted: true,
@@ -5021,10 +5049,26 @@ export default function CreateVideo({
                           </strong>
                         </>
                       ) : null}
+                      {activeRenderFailure.sceneAnchorPersisted !== null && activeRenderFailure.sceneAnchorPersisted !== undefined ? (
+                        <>
+                          <span>Scene anchor saved</span>
+                          <strong>{activeRenderFailure.sceneAnchorPersisted ? 'yes' : 'no'}</strong>
+                        </>
+                      ) : null}
+                      {activeRenderFailure.assetPersistErrorType ? (
+                        <>
+                          <span>Asset save error</span>
+                          <strong>{activeRenderFailure.assetPersistErrorType}</strong>
+                        </>
+                      ) : null}
                     </div>
-                    {activeRenderFailure.sceneAnchorErrorMessageRedacted || activeRenderFailure.stage2ErrorMessageRedacted ? (
+                    {activeRenderFailure.assetPersistErrorMessageRedacted ||
+                    activeRenderFailure.sceneAnchorErrorMessageRedacted ||
+                    activeRenderFailure.stage2ErrorMessageRedacted ? (
                       <p className="muted">
-                        Provider message: {activeRenderFailure.sceneAnchorErrorMessageRedacted ?? activeRenderFailure.stage2ErrorMessageRedacted}
+                        Provider message: {activeRenderFailure.assetPersistErrorMessageRedacted ??
+                          activeRenderFailure.sceneAnchorErrorMessageRedacted ??
+                          activeRenderFailure.stage2ErrorMessageRedacted}
                       </p>
                     ) : null}
                     <button

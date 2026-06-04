@@ -113,6 +113,8 @@ const generateSource = readFileSync(join(process.cwd(), 'api/lumora/generate-vid
 assert.match(generateSource, /sceneAnchorErrorMessageRedacted/);
 assert.match(generateSource, /createRuntimeSceneAnchorConfigured/);
 assert.match(generateSource, /CREATE_RUNTIME_SCENE_ANCHOR_PAYLOAD_SHAPE/);
+assert.match(generateSource, /sceneAnchorAssetStorage/);
+assert.doesNotMatch(generateSource, /backend\/src\/services\/storageService|backend\\\\src\\\\services\\\\storageService|storageService/);
 assert.doesNotMatch(generateSource, /buildCreateRuntimeSceneAnchorStatus/);
 
 console.log('createRuntimeSceneAnchorStatus unit tests passed');

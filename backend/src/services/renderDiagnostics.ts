@@ -209,9 +209,12 @@ function sceneAnchorHealthFromRow(row: LatestRenderRow | null) {
         ? 'Inspect the redacted output shape and update scene-anchor output parsing.'
         : lastFailureCategory === 'scene_anchor_provider_moderation_block'
           ? 'Edit the scene-anchor prompt and retry with provider-safe staging.'
-          : base.configured
-            ? 'Retry the scene-anchor render or inspect the last provider summary.'
-            : 'Configure the missing scene-anchor environment values.',
+          : lastFailureCategory === 'scene_anchor_asset_persist' ||
+            lastFailureCategory === 'scene_anchor_asset_persist_failed'
+            ? 'Fix the Vercel-safe asset persistence path before retrying.'
+            : base.configured
+              ? 'Retry the scene-anchor render or inspect the last provider summary.'
+              : 'Configure the missing scene-anchor environment values.',
     privateUrlsRedacted: true,
   };
 }

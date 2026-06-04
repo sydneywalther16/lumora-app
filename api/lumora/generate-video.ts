@@ -1,4 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import {
+  persistSceneAnchorProviderImage,
+  redactSceneAnchorAssetText,
+  uploadSceneAnchorAsset,
+} from './sceneAnchorAssetStorage';
 
 type VercelRequest = IncomingMessage & {
   body?: unknown;
@@ -178,6 +183,7 @@ type SceneAnchorFailureCategory =
   | 'scene_anchor_output_missing'
   | 'scene_anchor_output_parse_failed'
   | 'scene_anchor_asset_download_failed'
+  | 'scene_anchor_asset_persist'
   | 'scene_anchor_asset_persist_failed'
   | 'scene_anchor_provider_moderation_block'
   | 'scene_anchor_generation_failed'
@@ -212,6 +218,9 @@ export type CreateRenderFailureEnvelope = {
   sceneAnchorErrorType?: string | null;
   sceneAnchorErrorMessageRedacted?: string | null;
   sceneAnchorOutputParsed?: boolean | null;
+  sceneAnchorPersisted?: boolean | null;
+  assetPersistErrorType?: string | null;
+  assetPersistErrorMessageRedacted?: string | null;
   stage2ProviderModel?: string | null;
   stage2ProviderRouteType?: string | null;
   stage2HttpStatus?: number | null;
@@ -267,6 +276,8 @@ type KlingCreateReferencePlan = {
   sceneAnchorErrorType: string | null;
   sceneAnchorErrorMessage: string | null;
   sceneAnchorErrorBodyRedacted: string | null;
+  assetPersistErrorType: string | null;
+  assetPersistErrorMessageRedacted: string | null;
   sceneAnchorPromptLength: number | null;
   sceneAnchorPromptLimit: number | null;
   sceneAnchorPromptCompressed: boolean | null;
@@ -1352,6 +1363,14 @@ async function downloadAndPersistSceneAnchorImage(input: {
   }) => Promise<{ publicUrl: string }>;
 }) {
   const fetcher = input.fetchImpl ?? fetch;
+  if (!input.uploader) {
+    return persistSceneAnchorProviderImage({
+      userId: input.userId,
+      imageUrl: input.imageUrl,
+      fetchImpl: fetcher,
+    });
+  }
+
   const response = await fetcher(input.imageUrl, { method: 'GET' });
   const contentType = response.headers.get('content-type') ?? '';
   if (!response.ok || !contentType.toLowerCase().startsWith('image/')) {
@@ -1370,17 +1389,7 @@ async function downloadAndPersistSceneAnchorImage(input: {
     });
   }
   try {
-    const uploader = input.uploader ?? (async (asset: {
-      userId: string;
-      fileName: string;
-      contentType: string;
-      buffer: Buffer;
-      folder: string;
-    }) => {
-      const { uploadGeneratedAsset } = await import('../../backend/src/services/storageService');
-      return uploadGeneratedAsset(asset);
-    });
-    const persisted = await uploader({
+    const persisted = await input.uploader({
       userId: input.userId,
       fileName: `kling-scene-anchor.${imageExtensionForContentType(contentType)}`,
       contentType,
@@ -1397,7 +1406,13 @@ async function downloadAndPersistSceneAnchorImage(input: {
     };
   } catch (error) {
     throw Object.assign(new Error(errorMessage(error)), {
-      failureCategory: 'scene_anchor_asset_persist_failed',
+      failureCategory: 'scene_anchor_asset_persist',
+      assetPersistErrorType: textValue(objectRecord(error).assetPersistErrorType) ||
+        textValue(objectRecord(error).name) ||
+        'scene_anchor_asset_persist',
+      assetPersistErrorMessageRedacted: redactSceneAnchorAssetText(errorMessage(error)),
+      privateUrlsRedacted: true,
+      secretsRedacted: true,
     });
   }
 }
@@ -1505,6 +1520,22 @@ export async function createFalSceneAnchorStill(input: {
     imageUrl: result.image.url,
     fetchImpl: input.fetchImpl,
     uploader: input.uploader,
+  }).catch((error) => {
+    throw Object.assign(new Error(errorMessage(error)), {
+      ...objectRecord(error),
+      failureCategory: objectRecord(error).failureCategory ?? 'scene_anchor_asset_persist',
+      sceneAnchorPayloadShapeSummary: payloadShape,
+      sceneAnchorPromptDiagnostics: promptDiagnostics,
+      sceneAnchorOutputParsed: true,
+      sceneAnchorReferencePlan: {
+        plannedReferenceCount: referencePlan.plannedReferenceCount,
+        submittedReferenceCount: referencePlan.submittedReferenceCount,
+        droppedReferenceRoles: referencePlan.droppedReferenceRoles,
+        providerReferenceLimit: referencePlan.providerReferenceLimit,
+        submittedReferenceRoles: referencePlan.submittedReferenceRoles,
+        privateUrlsRedacted: true,
+      },
+    });
   });
   return {
     url: persisted.url,
@@ -2118,6 +2149,32 @@ function applySceneAnchorFailureDiagnostics(plan: KlingCreateReferencePlan, erro
     record.falErrorBodyRedacted ?? record.errorBody ?? record.body ?? null,
     1200,
   ) || null;
+  const failureCategory = textValue(record.failureCategory);
+  if (failureCategory === 'scene_anchor_asset_persist' || failureCategory === 'scene_anchor_asset_persist_failed') {
+    plan.assetPersistErrorType =
+      textValue(record.assetPersistErrorType) ||
+      textValue(record.errorType) ||
+      textValue(record.name) ||
+      'scene_anchor_asset_persist';
+    plan.assetPersistErrorMessageRedacted = redactSceneAnchorProviderText(
+      record.assetPersistErrorMessageRedacted ||
+      record.providerErrorSummary ||
+      errorMessage(error),
+      700,
+    );
+  } else if (failureCategory === 'scene_anchor_asset_download_failed') {
+    plan.assetPersistErrorType =
+      textValue(record.assetPersistErrorType) ||
+      textValue(record.errorType) ||
+      textValue(record.name) ||
+      'scene_anchor_asset_download_failed';
+    plan.assetPersistErrorMessageRedacted = redactSceneAnchorProviderText(
+      record.assetPersistErrorMessageRedacted ||
+      record.providerErrorSummary ||
+      errorMessage(error),
+      700,
+    );
+  }
   plan.sceneAnchorPayloadFieldNames = stringArrayOrNull(payloadShape.fieldNames);
   plan.sceneAnchorReferenceCount =
     numberOrNull(referencePlan.plannedReferenceCount) ??
@@ -2345,6 +2402,8 @@ export async function prepareKlingCreateReferencePlanForProvider(input: {
         plan.sceneAnchorErrorType = null;
         plan.sceneAnchorErrorMessage = null;
         plan.sceneAnchorErrorBodyRedacted = null;
+        plan.assetPersistErrorType = null;
+        plan.assetPersistErrorMessageRedacted = null;
         applySceneAnchorPromptDiagnostics(plan, rawPromptDiagnostics);
         plan.sceneAnchorPayloadFieldNames = stringArrayOrNull(rawPayloadShape.fieldNames);
         plan.sceneAnchorReferenceCount =
@@ -2368,6 +2427,10 @@ export async function prepareKlingCreateReferencePlanForProvider(input: {
         return plan;
       } catch (error) {
         lastError = error;
+        const category = textValue(objectRecord(error).failureCategory);
+        if (category === 'scene_anchor_asset_persist' || category === 'scene_anchor_asset_persist_failed') {
+          break;
+        }
       }
     }
 
@@ -2425,14 +2488,14 @@ export async function prepareKlingCreateReferencePlanForProvider(input: {
           folder: 'kling-scene-anchors',
         })
       : await (async () => {
-          const { uploadGeneratedAsset } = await import('../../backend/src/services/storageService');
-          return uploadGeneratedAsset({
+          const uploaded = await uploadSceneAnchorAsset({
             userId: input.userId,
             fileName: 'kling-composite-identity-sheet.svg',
             contentType: parsed.contentType,
             buffer: parsed.buffer,
             folder: 'kling-scene-anchors',
           });
+          return { publicUrl: uploaded.publicUrl };
         })();
 
     if (!isValidHttpUrl(upload.publicUrl)) {
@@ -2456,7 +2519,7 @@ export async function prepareKlingCreateReferencePlanForProvider(input: {
     return syncKlingVideoStageMetadata(plan);
   } catch (error) {
     console.warn('Kling composite identity sheet materialization failed; falling back to direct identity references.', {
-      error: errorMessage(error),
+      error: redactSceneAnchorAssetText(errorMessage(error)),
       privateUrlsRedacted: true,
     });
     const directReferences = directIdentityProviderReferences(plan);
@@ -2468,8 +2531,12 @@ export async function prepareKlingCreateReferencePlanForProvider(input: {
     plan.sceneAnchorGenerated = false;
     plan.sceneAnchorProvider = null;
     plan.sceneAnchorReason = 'composite_identity_sheet_upload_failed_direct_identity_fallback';
-    plan.sceneAnchorFailureCategory = 'scene_anchor_asset_persist_failed';
+    plan.sceneAnchorFailureCategory = 'scene_anchor_asset_persist';
     plan.sceneAnchorPersisted = false;
+    plan.assetPersistErrorType = textValue(objectRecord(error).assetPersistErrorType) ||
+      textValue(objectRecord(error).name) ||
+      'scene_anchor_asset_persist';
+    plan.assetPersistErrorMessageRedacted = redactSceneAnchorAssetText(errorMessage(error));
     plan.fallbackAllowed = directReferences.length <= 1;
     plan.supportingReferenceRoles = directReferences.slice(1).map((reference) => reference.role);
     plan.referenceOutfitCarryoverSuppressed = false;
@@ -2896,6 +2963,8 @@ export function buildKlingCreateReferencePlan(input: {
     sceneAnchorErrorType: null,
     sceneAnchorErrorMessage: null,
     sceneAnchorErrorBodyRedacted: null,
+    assetPersistErrorType: null,
+    assetPersistErrorMessageRedacted: null,
     sceneAnchorPromptLength: null,
     sceneAnchorPromptLimit: null,
     sceneAnchorPromptCompressed: null,
@@ -3450,7 +3519,11 @@ function klingGenerationErrorCategory(error: unknown): string {
 function renderFailureStageForCategory(category: string): CreateRenderFailureStage {
   if (category.includes('_poll_') || category.endsWith('_poll_failed')) return 'poll';
   if (category.includes('_output_parse_') || category.endsWith('_output_missing')) return 'parse_output';
-  if (category.includes('_asset_download_') || category.includes('_asset_persist_')) return 'persist_asset';
+  if (
+    category.includes('_asset_download_') ||
+    category.includes('_asset_persist_') ||
+    category.endsWith('_asset_persist')
+  ) return 'persist_asset';
   if (category.startsWith('kling_scene_anchor_video_')) return 'kling_image_to_video';
   if (category.startsWith('scene_anchor_')) return 'scene_anchor';
   return 'unknown';
@@ -3473,8 +3546,12 @@ function sceneAnchorRecommendedNextAction(category: string): string {
   ) {
     return 'Configure the Vercel Create runtime scene-anchor provider, or explicitly choose identity-only fallback.';
   }
-  if (category === 'scene_anchor_asset_download_failed' || category === 'scene_anchor_asset_persist_failed') {
-    return 'Check generated asset access and storage persistence before retrying.';
+  if (
+    category === 'scene_anchor_asset_download_failed' ||
+    category === 'scene_anchor_asset_persist' ||
+    category === 'scene_anchor_asset_persist_failed'
+  ) {
+    return 'Fix the Vercel-safe asset persistence path before retrying.';
   }
   return 'Check scene-anchor diagnostics before retrying, or explicitly choose identity-only fallback.';
 }
@@ -3525,6 +3602,18 @@ function renderFailureCopyForCategory(category: string, fallbackMessage = '') {
     return {
       safeTitle: 'Scene anchor provider blocked this image request.',
       safeMessage: 'Scene anchor provider blocked this image request.',
+    };
+  }
+  if (category === 'scene_anchor_asset_persist' || category === 'scene_anchor_asset_persist_failed') {
+    return {
+      safeTitle: 'Scene anchor was generated, but Lumora could not save it for animation.',
+      safeMessage: 'Scene anchor was generated, but Lumora could not persist it for Kling.',
+    };
+  }
+  if (category === 'scene_anchor_asset_download_failed') {
+    return {
+      safeTitle: 'Scene anchor image could not be downloaded.',
+      safeMessage: 'Scene anchor was generated, but Lumora could not download it for persistence.',
     };
   }
   if (
@@ -3683,6 +3772,9 @@ export function buildSceneAnchorRenderFailure(input: {
     sceneAnchorErrorType: input.plan.sceneAnchorErrorType,
     sceneAnchorErrorMessageRedacted: providerMessage,
     sceneAnchorOutputParsed: input.plan.sceneAnchorOutputParsed,
+    sceneAnchorPersisted: input.plan.sceneAnchorPersisted,
+    assetPersistErrorType: input.plan.assetPersistErrorType,
+    assetPersistErrorMessageRedacted: input.plan.assetPersistErrorMessageRedacted,
     stage2ProviderModel: input.plan.stage2ProviderModel,
     stage2ProviderRouteType: input.plan.stage2ProviderRouteType,
     stage2HttpStatus: null,
@@ -3729,6 +3821,9 @@ export function buildKlingStage2RenderFailure(input: {
     sceneAnchorErrorType: input.plan?.sceneAnchorErrorType ?? null,
     sceneAnchorErrorMessageRedacted: input.plan?.sceneAnchorErrorMessage ?? null,
     sceneAnchorOutputParsed: input.plan?.sceneAnchorOutputParsed ?? null,
+    sceneAnchorPersisted: input.plan?.sceneAnchorPersisted ?? null,
+    assetPersistErrorType: input.plan?.assetPersistErrorType ?? null,
+    assetPersistErrorMessageRedacted: input.plan?.assetPersistErrorMessageRedacted ?? null,
     stage2ProviderModel: input.stage2ProviderModel ?? input.plan?.stage2ProviderModel ?? textValue(objectValue(input.error, 'model')) ?? null,
     stage2ProviderRouteType: input.stage2ProviderRouteType ?? input.plan?.stage2ProviderRouteType ?? 'image_to_video',
     stage2HttpStatus: input.error ? stage2HttpStatusFromError(input.error) : null,
@@ -4336,6 +4431,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sceneAnchorErrorMessageRedacted: klingReferencePlan.sceneAnchorErrorMessage,
         createRuntimeSceneAnchorConfigured: sceneAnchorProviderStatus().configured,
         sceneAnchorErrorBodyRedacted: klingReferencePlan.sceneAnchorErrorBodyRedacted,
+        assetPersistErrorType: klingReferencePlan.assetPersistErrorType,
+        assetPersistErrorMessageRedacted: klingReferencePlan.assetPersistErrorMessageRedacted,
         sceneAnchorPromptLength: klingReferencePlan.sceneAnchorPromptLength,
         sceneAnchorPromptLimit: klingReferencePlan.sceneAnchorPromptLimit,
         sceneAnchorPromptCompressed: klingReferencePlan.sceneAnchorPromptCompressed,
