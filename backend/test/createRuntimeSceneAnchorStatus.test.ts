@@ -5,6 +5,7 @@ import {
   buildCreateRuntimeSceneAnchorStatus,
   buildSceneAnchorRuntimeEndpointPayload,
 } from '../../api/lumora/scene-anchor-runtime-status';
+import { buildSceneAnchorStorageRuntimeEndpointPayload } from '../../api/lumora/scene-anchor-storage-runtime-status';
 
 const missingRuntime = buildCreateRuntimeSceneAnchorStatus({
   VERCEL: '1',
@@ -80,6 +81,57 @@ assert.equal(endpointBuilderFailure.runtimeStatusBuilt, false);
 assert.doesNotMatch(endpointBuilderFailure.message, /https:\/\/signed\.example/);
 assert.doesNotMatch(endpointBuilderFailure.message, /secret-value-should-not-leak/);
 
+const storageEndpointMissingEnv = await buildSceneAnchorStorageRuntimeEndpointPayload(
+  {} as NodeJS.ProcessEnv,
+  async () => ({
+    buildSceneAnchorStorageRuntimeStatus: async ({ envSource = {} as NodeJS.ProcessEnv } = {}) => ({
+      ok: false,
+      endpointLoaded: true,
+      storageAdapterModuleLoaded: true,
+      supabaseModuleLoadable: true,
+      supabaseUrlPresent: Boolean(envSource.SUPABASE_URL),
+      supabaseServiceRoleKeyPresent: Boolean(envSource.SUPABASE_SERVICE_ROLE_KEY),
+      bucketName: 'lumora-assets',
+      configured: false,
+      missingConfig: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
+      message: null,
+      secretsRedacted: true,
+      privateUrlsRedacted: true,
+    }),
+  }),
+);
+assert.equal(storageEndpointMissingEnv.ok, false);
+assert.equal(storageEndpointMissingEnv.endpointLoaded, true);
+assert.equal(storageEndpointMissingEnv.storageAdapterModuleLoaded, true);
+assert.equal(storageEndpointMissingEnv.supabaseModuleLoadable, true);
+assert.equal(storageEndpointMissingEnv.configured, false);
+assert.deepEqual(storageEndpointMissingEnv.missingConfig, ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']);
+assert.equal(storageEndpointMissingEnv.secretsRedacted, true);
+assert.equal(storageEndpointMissingEnv.privateUrlsRedacted, true);
+
+const storageEndpointAdapterLoadFailure = await buildSceneAnchorStorageRuntimeEndpointPayload(
+  {
+    SUPABASE_URL: 'https://demo.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role-secret-value-should-not-leak',
+  } as NodeJS.ProcessEnv,
+  async () => {
+    throw new Error('Cannot find module @supabase/supabase-js with Bearer service-role-secret-value-should-not-leak and https://signed.example/private');
+  },
+);
+assert.equal(storageEndpointAdapterLoadFailure.ok, false);
+assert.equal(storageEndpointAdapterLoadFailure.endpointLoaded, true);
+assert.equal(storageEndpointAdapterLoadFailure.storageAdapterModuleLoaded, false);
+assert.equal(storageEndpointAdapterLoadFailure.supabaseModuleLoadable, false);
+assert.equal(storageEndpointAdapterLoadFailure.supabaseUrlPresent, true);
+assert.equal(storageEndpointAdapterLoadFailure.supabaseServiceRoleKeyPresent, true);
+assert.equal(storageEndpointAdapterLoadFailure.configured, false);
+assert.equal(storageEndpointAdapterLoadFailure.secretsRedacted, true);
+assert.equal(storageEndpointAdapterLoadFailure.privateUrlsRedacted, true);
+assert.doesNotMatch(String(storageEndpointAdapterLoadFailure.message), /https:\/\/signed\.example/);
+assert.doesNotMatch(String(storageEndpointAdapterLoadFailure.message), /service-role-secret-value-should-not-leak/);
+assert.match(String(storageEndpointAdapterLoadFailure.message), /\[redacted-url\]/);
+assert.match(String(storageEndpointAdapterLoadFailure.message), /\[redacted-auth\]/);
+
 const endpointSource = readFileSync(
   join(process.cwd(), 'api/lumora/scene-anchor-runtime-status.ts'),
   'utf8',
@@ -108,6 +160,41 @@ assert.match(scriptSource, /runtime_status_http_error/);
 assert.match(scriptSource, /endpoint loaded/);
 assert.match(scriptSource, /helper loaded/);
 assert.match(scriptSource, /runtime status built/);
+
+const storageEndpointSource = readFileSync(
+  join(process.cwd(), 'api/lumora/scene-anchor-storage-runtime-status.ts'),
+  'utf8',
+);
+assert.match(storageEndpointSource, /buildSceneAnchorStorageRuntimeEndpointPayload/);
+assert.match(storageEndpointSource, /sceneAnchorAssetStorage/);
+assert.match(storageEndpointSource, /endpointLoaded/);
+assert.match(storageEndpointSource, /storageAdapterModuleLoaded/);
+assert.match(storageEndpointSource, /supabaseModuleLoadable/);
+assert.match(storageEndpointSource, /try/);
+assert.match(storageEndpointSource, /catch/);
+assert.doesNotMatch(storageEndpointSource, /^import\s/m);
+assert.doesNotMatch(storageEndpointSource, /backend\/src\/services\/storageService|backend\\\\src\\\\services\\\\storageService|storageService/);
+
+const storageAdapterSource = readFileSync(
+  join(process.cwd(), 'api/lumora/sceneAnchorAssetStorage.ts'),
+  'utf8',
+);
+assert.match(storageAdapterSource, /import type/);
+assert.match(storageAdapterSource, /import\('@supabase\/supabase-js'\)/);
+assert.doesNotMatch(storageAdapterSource, /^import\s+(?!type\b)/m);
+assert.doesNotMatch(storageAdapterSource, /backend\/src\/services\/storageService|backend\\\\src\\\\services\\\\storageService/);
+
+const storageScriptSource = readFileSync(
+  join(process.cwd(), 'scripts/scene-anchor-storage-runtime-status.ps1'),
+  'utf8',
+);
+assert.match(storageScriptSource, /scene-anchor-storage-runtime-status/);
+assert.match(storageScriptSource, /Invoke-WebRequest/);
+assert.match(storageScriptSource, /\$status\.ok -eq \$false/);
+assert.match(storageScriptSource, /storage adapter module loaded/);
+assert.match(storageScriptSource, /supabase module loadable/);
+assert.match(storageScriptSource, /supabase service role key present/);
+assert.match(storageScriptSource, /private URLs redacted/);
 
 const generateSource = readFileSync(join(process.cwd(), 'api/lumora/generate-video.ts'), 'utf8');
 assert.match(generateSource, /sceneAnchorErrorMessageRedacted/);

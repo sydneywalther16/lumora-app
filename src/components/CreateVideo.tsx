@@ -405,6 +405,7 @@ type RenderFailureEnvelope = {
   sceneAnchorPersisted?: boolean | null;
   assetPersistErrorType?: string | null;
   assetPersistErrorMessageRedacted?: string | null;
+  missingConfig?: string[] | null;
   stage2ProviderModel?: string | null;
   stage2ProviderRouteType?: string | null;
   stage2HttpStatus?: number | null;
@@ -831,7 +832,7 @@ function renderFailureTitleForCategory(category: string | null | undefined) {
     return 'Scene anchor provider blocked this image request.';
   }
   if (category === 'scene_anchor_asset_persist' || category === 'scene_anchor_asset_persist_failed') {
-    return 'Scene anchor was generated, but Lumora could not save it for animation.';
+    return 'Scene anchor could not be saved for animation.';
   }
   if (category === 'scene_anchor_asset_download_failed') {
     return 'Scene anchor image could not be downloaded.';
@@ -868,6 +869,9 @@ function renderFailureTitleForCategory(category: string | null | undefined) {
 }
 
 function renderFailureMessageForCategory(category: string | null | undefined, fallback = '') {
+  if (category === 'scene_anchor_asset_persist' || category === 'scene_anchor_asset_persist_failed') {
+    return 'Scene anchor was generated, but Lumora could not save it for animation. Fix the Vercel-safe asset persistence path before retrying.';
+  }
   if (fallback.trim()) return sanitizeCreatorErrorMessage(fallback, 'Lumora paused this render.');
   if (category === 'scene_anchor_input_schema' || category === 'scene_anchor_model_schema_unmapped') {
     return 'Kling scene anchor failed because the image provider rejected the prompt or payload. Check prompt length, prompt limit, payload fields, and submitted reference count before retrying.';
@@ -877,9 +881,6 @@ function renderFailureMessageForCategory(category: string | null | undefined, fa
   }
   if (category === 'scene_anchor_provider_moderation_block') {
     return 'Scene anchor provider blocked this image request.';
-  }
-  if (category === 'scene_anchor_asset_persist' || category === 'scene_anchor_asset_persist_failed') {
-    return 'Scene anchor was generated, but Lumora could not save it for animation. Fix the Vercel-safe asset persistence path before retrying.';
   }
   if (category === 'scene_anchor_asset_download_failed') {
     return 'Scene anchor was generated, but Lumora could not download it for persistence.';
@@ -926,6 +927,7 @@ function normalizeRenderFailure(value: unknown): RenderFailureEnvelope | null {
     sceneAnchorPersisted: booleanFromRecord(record, 'sceneAnchorPersisted'),
     assetPersistErrorType: stringFromRecord(record, 'assetPersistErrorType'),
     assetPersistErrorMessageRedacted: stringFromRecord(record, 'assetPersistErrorMessageRedacted'),
+    missingConfig: formatStringList(record.missingConfig),
     stage2ProviderModel: stringFromRecord(record, 'stage2ProviderModel'),
     stage2ProviderRouteType: stringFromRecord(record, 'stage2ProviderRouteType'),
     stage2HttpStatus: numberFromRecord(record, 'stage2HttpStatus'),
@@ -957,6 +959,7 @@ function renderFailureDebugSummary(failure: RenderFailureEnvelope) {
     ['sceneAnchorPersisted', failure.sceneAnchorPersisted],
     ['assetPersistErrorType', failure.assetPersistErrorType],
     ['assetPersistErrorMessageRedacted', failure.assetPersistErrorMessageRedacted],
+    ['missingConfig', failure.missingConfig?.join(', ')],
     ['stage2ProviderModel', failure.stage2ProviderModel],
     ['stage2ProviderRouteType', failure.stage2ProviderRouteType],
     ['stage2HttpStatus', failure.stage2HttpStatus],
@@ -5059,6 +5062,12 @@ export default function CreateVideo({
                         <>
                           <span>Asset save error</span>
                           <strong>{activeRenderFailure.assetPersistErrorType}</strong>
+                        </>
+                      ) : null}
+                      {activeRenderFailure.missingConfig?.length ? (
+                        <>
+                          <span>Missing config</span>
+                          <strong>{activeRenderFailure.missingConfig.join(', ')}</strong>
                         </>
                       ) : null}
                     </div>

@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 export const SCENE_ANCHOR_ASSET_BUCKET = 'lumora-assets';
 const SCENE_ANCHOR_ASSET_MAX_BYTES = 25 * 1024 * 1024;
@@ -14,6 +14,7 @@ type SceneAnchorAssetUploadInput = {
   bucket?: string;
   envSource?: NodeJS.ProcessEnv;
   storageClient?: SceneAnchorStorageClient | null;
+  supabaseModuleLoader?: () => Promise<{ createClient: typeof import('@supabase/supabase-js').createClient }>;
 };
 
 type SceneAnchorProviderImageInput = {
@@ -22,6 +23,7 @@ type SceneAnchorProviderImageInput = {
   fetchImpl?: typeof fetch;
   envSource?: NodeJS.ProcessEnv;
   storageClient?: SceneAnchorStorageClient | null;
+  supabaseModuleLoader?: () => Promise<{ createClient: typeof import('@supabase/supabase-js').createClient }>;
 };
 
 function textValue(value: unknown) {
@@ -116,9 +118,55 @@ export function sceneAnchorAssetStorageMissingConfig(envSource: NodeJS.ProcessEn
   ].filter((item): item is string => Boolean(item));
 }
 
-function sceneAnchorStorageClient(input: {
+export async function buildSceneAnchorStorageRuntimeStatus(input: {
+  envSource?: NodeJS.ProcessEnv;
+  supabaseModuleLoader?: () => Promise<{ createClient: typeof import('@supabase/supabase-js').createClient }>;
+} = {}) {
+  const envSource = input.envSource ?? process.env;
+  let supabaseModuleLoadable = false;
+  let message: string | null = null;
+  try {
+    await loadSupabaseModule(input.supabaseModuleLoader);
+    supabaseModuleLoadable = true;
+  } catch (error) {
+    message = redactSceneAnchorAssetText(error, 700);
+  }
+  const missingConfig = sceneAnchorAssetStorageMissingConfig(envSource);
+  const configured = supabaseModuleLoadable && missingConfig.length === 0;
+  return {
+    ok: configured,
+    endpointLoaded: true,
+    storageAdapterModuleLoaded: true,
+    supabaseModuleLoadable,
+    supabaseUrlPresent: Boolean(textValue(envSource.SUPABASE_URL)),
+    supabaseServiceRoleKeyPresent: Boolean(textValue(envSource.SUPABASE_SERVICE_ROLE_KEY)),
+    bucketName: SCENE_ANCHOR_ASSET_BUCKET,
+    configured,
+    missingConfig,
+    message,
+    secretsRedacted: true,
+    privateUrlsRedacted: true,
+  };
+}
+
+async function loadSupabaseModule(
+  loader: (() => Promise<{ createClient: typeof import('@supabase/supabase-js').createClient }>) | undefined,
+) {
+  try {
+    return await (loader ?? (async () => import('@supabase/supabase-js')))();
+  } catch (error) {
+    throw sceneAnchorAssetPersistError({
+      type: 'scene_anchor_supabase_module_load_failed',
+      cause: error,
+      message: `Scene anchor was generated, but Lumora could not persist it for Kling. Supabase storage module could not be loaded. ${redactSceneAnchorAssetText(error)}.`,
+    });
+  }
+}
+
+async function sceneAnchorStorageClient(input: {
   envSource?: NodeJS.ProcessEnv;
   storageClient?: SceneAnchorStorageClient | null;
+  supabaseModuleLoader?: () => Promise<{ createClient: typeof import('@supabase/supabase-js').createClient }>;
 }) {
   if (input.storageClient) return input.storageClient;
   const envSource = input.envSource ?? process.env;
@@ -131,16 +179,25 @@ function sceneAnchorStorageClient(input: {
     });
   }
 
-  return createClient(
-    textValue(envSource.SUPABASE_URL),
-    textValue(envSource.SUPABASE_SERVICE_ROLE_KEY),
-    {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
+  const { createClient } = await loadSupabaseModule(input.supabaseModuleLoader);
+  try {
+    return createClient(
+      textValue(envSource.SUPABASE_URL),
+      textValue(envSource.SUPABASE_SERVICE_ROLE_KEY),
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
       },
-    },
-  );
+    );
+  } catch (error) {
+    throw sceneAnchorAssetPersistError({
+      type: 'scene_anchor_storage_client_create_failed',
+      cause: error,
+      message: `Scene anchor was generated, but Lumora could not persist it for Kling. Supabase storage client could not be created. ${redactSceneAnchorAssetText(error)}.`,
+    });
+  }
 }
 
 function isValidHttpUrl(value: string) {
@@ -192,9 +249,10 @@ function extensionForContentType(contentType: string) {
 
 export async function uploadSceneAnchorAsset(input: SceneAnchorAssetUploadInput) {
   const bucket = textValue(input.bucket) || SCENE_ANCHOR_ASSET_BUCKET;
-  const storageClient = sceneAnchorStorageClient({
+  const storageClient = await sceneAnchorStorageClient({
     envSource: input.envSource,
     storageClient: input.storageClient,
+    supabaseModuleLoader: input.supabaseModuleLoader,
   });
   const objectPath = sceneAnchorObjectPath(input);
 
@@ -274,6 +332,7 @@ export async function persistSceneAnchorProviderImage(input: SceneAnchorProvider
     folder: 'kling-scene-anchors',
     envSource: input.envSource,
     storageClient: input.storageClient,
+    supabaseModuleLoader: input.supabaseModuleLoader,
   });
   return {
     url: persisted.publicUrl,

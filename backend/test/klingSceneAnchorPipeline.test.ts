@@ -373,6 +373,80 @@ try {
   assert.equal(assetPersistRenderFailure.secretsRedacted, true);
   assert.doesNotMatch(JSON.stringify(assetPersistRenderFailure), /provider\.example\/private|token=secret/);
 
+  const preparedAssetPersistFailurePlan = await prepareKlingCreateReferencePlanForProvider({
+    plan: buildKlingCreateReferencePlan({
+      body: {
+        prompt: gardenDressPrompt,
+        referenceImageUrls: {
+          frontFaceUrl: 'https://assets.example/front.jpg',
+          leftAngleUrl: 'https://assets.example/left.jpg',
+          rightAngleUrl: 'https://assets.example/right.jpg',
+          fullBodyUrl: 'https://assets.example/full-body-street-jeans.jpg',
+        },
+      },
+      primaryReference: 'https://assets.example/front.jpg',
+      exactLikenessReady: true,
+    }),
+    userId: 'unit-test-user',
+    sceneAnchorGenerator: async () => {
+      throw Object.assign(
+        new Error('Scene anchor was generated, but Lumora could not persist it for Kling. https://provider.example/private.png?token=secret Bearer service-role-secret-value-should-not-leak'),
+        {
+          failureCategory: 'scene_anchor_asset_persist',
+          sceneAnchorOutputParsed: true,
+          assetPersistErrorType: 'scene_anchor_storage_upload_failed',
+          assetPersistErrorMessageRedacted: 'Scene anchor was generated, but Lumora could not persist it for Kling. [redacted-url] [redacted-auth]',
+          missingConfig: ['SUPABASE_URL'],
+          sceneAnchorPayloadShapeSummary: {
+            fieldNames: ['aspect_ratio', 'prompt', 'reference_image_urls'],
+            referenceImageUrlCount: 3,
+            privateUrlsRedacted: true,
+          },
+          sceneAnchorPromptDiagnostics: {
+            sceneAnchorPromptLength: 900,
+            sceneAnchorPromptLimit: 1200,
+            sceneAnchorPromptCompressed: false,
+            sceneAnchorPromptTruncated: false,
+            privateUrlsRedacted: true,
+          },
+          sceneAnchorReferencePlan: {
+            plannedReferenceCount: 4,
+            submittedReferenceCount: 3,
+            submittedReferenceRoles: ['front_angle', 'full_body', 'side_angle_left'],
+            droppedReferenceRoles: ['side_angle_right'],
+            providerReferenceLimit: 3,
+            privateUrlsRedacted: true,
+          },
+          privateUrlsRedacted: true,
+          secretsRedacted: true,
+        },
+      );
+    },
+  });
+  assert.ok(preparedAssetPersistFailurePlan);
+  assert.equal(preparedAssetPersistFailurePlan.sceneAnchorGenerated, false);
+  assert.equal(preparedAssetPersistFailurePlan.sceneAnchorFailureCategory, 'scene_anchor_asset_persist');
+  assert.equal(preparedAssetPersistFailurePlan.sceneAnchorReason, 'scene_anchor_asset_persist');
+  assert.equal(preparedAssetPersistFailurePlan.sceneAnchorOutputParsed, true);
+  assert.equal(preparedAssetPersistFailurePlan.sceneAnchorPersisted, false);
+  assert.equal(preparedAssetPersistFailurePlan.assetPersistErrorType, 'scene_anchor_storage_upload_failed');
+  assert.deepEqual(preparedAssetPersistFailurePlan.assetPersistMissingConfig, ['SUPABASE_URL']);
+  assert.doesNotMatch(JSON.stringify(preparedAssetPersistFailurePlan), /provider\.example\/private|token=secret|service-role-secret-value-should-not-leak/);
+  const preparedAssetPersistFailure = buildSceneAnchorRenderFailure({
+    plan: preparedAssetPersistFailurePlan,
+    category: 'scene_anchor_asset_persist',
+  });
+  assert.equal(preparedAssetPersistFailure.stage, 'persist_asset');
+  assert.equal(preparedAssetPersistFailure.category, 'scene_anchor_asset_persist');
+  assert.equal(preparedAssetPersistFailure.safeTitle, 'Scene anchor could not be saved for animation.');
+  assert.equal(preparedAssetPersistFailure.safeMessage, 'The scene anchor was generated, but Lumora could not persist it for Kling.');
+  assert.equal(preparedAssetPersistFailure.sceneAnchorOutputParsed, true);
+  assert.equal(preparedAssetPersistFailure.sceneAnchorPersisted, false);
+  assert.equal(preparedAssetPersistFailure.assetPersistErrorType, 'scene_anchor_storage_upload_failed');
+  assert.deepEqual(preparedAssetPersistFailure.missingConfig, ['SUPABASE_URL']);
+  assert.match(preparedAssetPersistFailure.recommendedNextAction, /Vercel-safe asset persistence/i);
+  assert.doesNotMatch(JSON.stringify(preparedAssetPersistFailure), /provider\.example\/private|token=secret|service-role-secret-value-should-not-leak/);
+
   const outputParseFailurePlan = {
     ...failedSchemaPlan,
     sceneAnchorFailureCategory: 'scene_anchor_output_parse_failed' as const,
@@ -441,6 +515,33 @@ try {
     },
   );
 
+  await assert.rejects(
+    () => uploadSceneAnchorAsset({
+      userId: 'unit-test-user',
+      fileName: 'module-load.png',
+      contentType: 'image/png',
+      buffer: Buffer.from([1, 2, 3]),
+      envSource: {
+        SUPABASE_URL: 'https://demo.supabase.co',
+        SUPABASE_SERVICE_ROLE_KEY: 'service-role-secret-value-should-not-leak',
+      } as NodeJS.ProcessEnv,
+      supabaseModuleLoader: async () => {
+        throw new Error('Cannot find module @supabase/supabase-js for https://provider.example/private.png?token=secret with Bearer service-role-secret-value-should-not-leak');
+      },
+    }),
+    (error) => {
+      const record = error as Record<string, unknown>;
+      const serialized = JSON.stringify(record);
+      assert.equal(record.failureCategory, 'scene_anchor_asset_persist');
+      assert.equal(record.assetPersistErrorType, 'scene_anchor_supabase_module_load_failed');
+      assert.deepEqual(record.missingConfig, []);
+      assert.match(String(record.assetPersistErrorMessageRedacted), /\[redacted-url\]/);
+      assert.match(String(record.assetPersistErrorMessageRedacted), /\[redacted-auth\]/);
+      assert.doesNotMatch(serialized, /provider\.example\/private|token=secret|service-role-secret-value-should-not-leak/);
+      return true;
+    },
+  );
+
   const uploadCalls: Array<{
     bucket: string;
     objectPath: string;
@@ -495,6 +596,52 @@ try {
   assert.match(persistedSceneAnchor.url, /^https:\/\/demo\.supabase\.co\/storage\/v1\/object\/public\/lumora-assets\//);
   assert.equal(persistedSceneAnchor.privateUrlsRedacted, true);
   assert.doesNotMatch(JSON.stringify(persistedSceneAnchor), /provider\.example\/private-scene-anchor|token=secret/);
+
+  const failedUploadStorageClient = {
+    storage: {
+      from(bucket: string) {
+        return {
+          upload: async () => ({
+            error: Object.assign(
+              new Error('upload failed for https://provider.example/private-upload.png?token=secret with Bearer service-role-secret-value-should-not-leak'),
+              { name: 'StorageApiError' },
+            ),
+          }),
+          getPublicUrl: () => ({
+            data: {
+              publicUrl: `https://demo.supabase.co/storage/v1/object/public/${bucket}/unused.png`,
+            },
+          }),
+          createSignedUrl: async () => ({
+            data: null,
+            error: null,
+          }),
+        };
+      },
+    },
+  };
+  await assert.rejects(
+    () => persistSceneAnchorProviderImage({
+      userId: 'unit-test-user',
+      imageUrl: 'https://provider.example/private-upload.png?token=secret',
+      storageClient: failedUploadStorageClient as never,
+      fetchImpl: async () => new Response(new Uint8Array([137, 80, 78, 71]), {
+        status: 200,
+        headers: { 'content-type': 'image/png' },
+      }),
+    }),
+    (error) => {
+      const record = error as Record<string, unknown>;
+      const serialized = JSON.stringify(record);
+      assert.equal(record.failureCategory, 'scene_anchor_asset_persist');
+      assert.equal(record.assetPersistErrorType, 'StorageApiError');
+      assert.match(String(record.assetPersistErrorMessageRedacted), /upload failed/i);
+      assert.match(String(record.assetPersistErrorMessageRedacted), /\[redacted-url\]/);
+      assert.match(String(record.assetPersistErrorMessageRedacted), /\[redacted-auth\]/);
+      assert.doesNotMatch(serialized, /provider\.example\/private-upload|token=secret|service-role-secret-value-should-not-leak/);
+      return true;
+    },
+  );
 
   await assert.rejects(
     () => persistSceneAnchorProviderImage({
