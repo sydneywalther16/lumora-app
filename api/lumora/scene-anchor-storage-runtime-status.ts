@@ -13,7 +13,6 @@ type VercelResponse = {
 type StorageRuntimeStatus = {
   ok: boolean;
   endpointLoaded: boolean;
-  storageAdapterModuleLoaded: boolean;
   supabaseModuleLoadable: boolean;
   supabaseUrlPresent: boolean;
   supabaseServiceRoleKeyPresent: boolean;
@@ -21,9 +20,13 @@ type StorageRuntimeStatus = {
   configured: boolean;
   missingConfig?: string[];
   message?: string | null;
+  recommendedNextAction?: string;
   secretsRedacted: boolean;
   privateUrlsRedacted: boolean;
 };
+
+const SCENE_ANCHOR_STORAGE_BUCKET = 'lumora-assets';
+const SUPABASE_STORAGE_CONFIG_KEYS = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'] as const;
 
 function textValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -71,19 +74,41 @@ function missingStorageConfig(envSource: NodeJS.ProcessEnv = process.env) {
   ].filter((item): item is string => Boolean(item));
 }
 
-function failedStorageRuntimeStatus(error: unknown, envSource: NodeJS.ProcessEnv = process.env): StorageRuntimeStatus {
+function storageRuntimeRecommendedNextAction(input: {
+  missingConfig: string[];
+  supabaseModuleLoadable: boolean;
+}) {
+  if (input.missingConfig.length) {
+    return `Add ${SUPABASE_STORAGE_CONFIG_KEYS.join(' and ')} to Vercel, redeploy, then retry.`;
+  }
+  if (!input.supabaseModuleLoadable) {
+    return 'Ensure @supabase/supabase-js is installed and bundled for the Vercel Create runtime, redeploy, then retry.';
+  }
+  return 'Scene-anchor storage is configured.';
+}
+
+function storageRuntimeStatus(input: {
+  envSource?: NodeJS.ProcessEnv;
+  supabaseModuleLoadable: boolean;
+  message?: string | null;
+}): StorageRuntimeStatus {
+  const envSource = input.envSource ?? process.env;
   const missingConfig = missingStorageConfig(envSource);
+  const configured = input.supabaseModuleLoadable && missingConfig.length === 0;
   return {
-    ok: false,
+    ok: configured,
     endpointLoaded: true,
-    storageAdapterModuleLoaded: false,
-    supabaseModuleLoadable: false,
+    supabaseModuleLoadable: input.supabaseModuleLoadable,
     supabaseUrlPresent: Boolean(textValue(envSource.SUPABASE_URL)),
     supabaseServiceRoleKeyPresent: Boolean(textValue(envSource.SUPABASE_SERVICE_ROLE_KEY)),
-    bucketName: 'lumora-assets',
-    configured: false,
+    bucketName: SCENE_ANCHOR_STORAGE_BUCKET,
+    configured,
     missingConfig,
-    message: redactStorageRuntimeMessage(error),
+    message: input.message ?? null,
+    recommendedNextAction: storageRuntimeRecommendedNextAction({
+      missingConfig,
+      supabaseModuleLoadable: input.supabaseModuleLoadable,
+    }),
     secretsRedacted: true,
     privateUrlsRedacted: true,
   };
@@ -91,17 +116,20 @@ function failedStorageRuntimeStatus(error: unknown, envSource: NodeJS.ProcessEnv
 
 export async function buildSceneAnchorStorageRuntimeEndpointPayload(
   envSource: NodeJS.ProcessEnv = process.env,
-  adapterLoader: () => Promise<{
-    buildSceneAnchorStorageRuntimeStatus: (input?: {
-      envSource?: NodeJS.ProcessEnv;
-    }) => Promise<StorageRuntimeStatus>;
-  }> = async () => import('./sceneAnchorAssetStorage'),
+  supabaseModuleLoader: () => Promise<unknown> = async () => import('@supabase/supabase-js'),
 ) {
   try {
-    const adapter = await adapterLoader();
-    return await adapter.buildSceneAnchorStorageRuntimeStatus({ envSource });
+    await supabaseModuleLoader();
+    return storageRuntimeStatus({
+      envSource,
+      supabaseModuleLoadable: true,
+    });
   } catch (error) {
-    return failedStorageRuntimeStatus(error, envSource);
+    return storageRuntimeStatus({
+      envSource,
+      supabaseModuleLoadable: false,
+      message: redactStorageRuntimeMessage(error),
+    });
   }
 }
 
@@ -122,13 +150,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return sendJson(res, 405, {
       ok: false,
       endpointLoaded: true,
-      storageAdapterModuleLoaded: false,
       supabaseModuleLoadable: false,
       supabaseUrlPresent: Boolean(textValue(process.env.SUPABASE_URL)),
       supabaseServiceRoleKeyPresent: Boolean(textValue(process.env.SUPABASE_SERVICE_ROLE_KEY)),
-      bucketName: 'lumora-assets',
+      bucketName: SCENE_ANCHOR_STORAGE_BUCKET,
       configured: false,
       error: 'method_not_allowed',
+      recommendedNextAction: 'Use GET for the scene-anchor storage runtime status endpoint.',
       secretsRedacted: true,
       privateUrlsRedacted: true,
     });

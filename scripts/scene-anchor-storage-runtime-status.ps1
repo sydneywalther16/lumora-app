@@ -90,7 +90,6 @@ Write-Host "Create runtime scene-anchor storage status"
 if ($null -ne $httpStatus) { Write-Host "http status: $httpStatus" }
 if ($null -ne $status.ok) { Write-Host "ok: $($status.ok)" }
 Write-Host "endpoint loaded: $($status.endpointLoaded)"
-Write-Host "storage adapter module loaded: $($status.storageAdapterModuleLoaded)"
 Write-Host "supabase module loadable: $($status.supabaseModuleLoadable)"
 Write-Host "supabase url present: $($status.supabaseUrlPresent)"
 Write-Host "supabase service role key present: $($status.supabaseServiceRoleKeyPresent)"
@@ -100,6 +99,9 @@ Print-List -Label "missing config" -Values $status.missingConfig
 Write-Host "secrets redacted: $($status.secretsRedacted)"
 Write-Host "private URLs redacted: $($status.privateUrlsRedacted)"
 if ($status.message) { Write-Host "message: $(Redact-StatusText $status.message)" }
+if ($status.recommendedNextAction) {
+  Write-Host "recommended next action: $($status.recommendedNextAction)"
+}
 
 if ($status.ok -eq $false) {
   if ($httpStatus -ge 500) {

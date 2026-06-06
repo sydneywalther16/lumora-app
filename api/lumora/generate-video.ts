@@ -656,12 +656,35 @@ function sceneAnchorAssetPersistError(input: {
   });
 }
 
+const SCENE_ANCHOR_STORAGE_CONFIG_KEYS = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'] as const;
+
+function sceneAnchorStorageMissingConfig(envSource: NodeJS.ProcessEnv = process.env) {
+  return SCENE_ANCHOR_STORAGE_CONFIG_KEYS
+    .filter((key) => !textValue(envSource[key]))
+    .map((key) => String(key));
+}
+
+function sceneAnchorStorageMissingConfigMessage() {
+  return 'The scene anchor was generated, but the Create runtime is missing Supabase storage configuration.';
+}
+
+function sceneAnchorStorageMissingConfigAction() {
+  return 'Add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to Vercel, redeploy, then retry.';
+}
+
+function isSceneAnchorStorageConfigMissingPlan(plan: KlingCreateReferencePlan | null | undefined) {
+  if (!plan) return false;
+  const missingConfig = plan.assetPersistMissingConfig ?? [];
+  return plan.assetPersistErrorType === 'scene_anchor_storage_config_missing' ||
+    SCENE_ANCHOR_STORAGE_CONFIG_KEYS.some((key) => missingConfig.includes(key));
+}
+
 async function loadSceneAnchorAssetStorage() {
   try {
     return await import('./sceneAnchorAssetStorage');
   } catch (error) {
     throw sceneAnchorAssetPersistError({
-      type: 'scene_anchor_asset_storage_module_load_failed',
+      type: 'scene_anchor_storage_adapter_load_failed',
       cause: error,
       message: `Scene anchor was generated, but Lumora could not persist it for Kling. Asset storage adapter could not be loaded. ${redactSceneAnchorProviderText(error)}`,
     });
@@ -1392,6 +1415,14 @@ async function downloadAndPersistSceneAnchorImage(input: {
   const fetcher = input.fetchImpl ?? fetch;
   if (!input.uploader) {
     try {
+      const missingConfig = sceneAnchorStorageMissingConfig();
+      if (missingConfig.length) {
+        throw sceneAnchorAssetPersistError({
+          type: 'scene_anchor_storage_config_missing',
+          missingConfig,
+          message: `${sceneAnchorStorageMissingConfigMessage()} Missing config: ${missingConfig.join(', ')}.`,
+        });
+      }
       const { persistSceneAnchorProviderImage } = await loadSceneAnchorAssetStorage();
       return await persistSceneAnchorProviderImage({
         userId: input.userId,
@@ -3806,7 +3837,13 @@ export function buildSceneAnchorRenderFailure(input: {
     input.plan.sceneAnchorReason ||
     null,
   );
-  const copy = renderFailureCopyForCategory(category, providerMessage || '');
+  const storageConfigMissing = isSceneAnchorStorageConfigMissingPlan(input.plan);
+  const copy = storageConfigMissing
+    ? {
+        safeTitle: 'Scene anchor could not be saved for animation.',
+        safeMessage: sceneAnchorStorageMissingConfigMessage(),
+      }
+    : renderFailureCopyForCategory(category, providerMessage || '');
   return {
     route: 'kling_reference',
     provider: 'kling',
@@ -3814,7 +3851,8 @@ export function buildSceneAnchorRenderFailure(input: {
     category,
     safeTitle: copy.safeTitle,
     safeMessage: copy.safeMessage,
-    recommendedNextAction: input.recommendedNextAction || sceneAnchorRecommendedNextAction(category),
+    recommendedNextAction: input.recommendedNextAction ||
+      (storageConfigMissing ? sceneAnchorStorageMissingConfigAction() : sceneAnchorRecommendedNextAction(category)),
     sceneAnchorProvider: input.plan.sceneAnchorProvider,
     sceneAnchorModel: sceneAnchorProviderStatus().model,
     sceneAnchorPromptLength: input.plan.sceneAnchorPromptLength,
@@ -4475,12 +4513,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ? 'scene_anchor_generation_failed'
           : 'scene_anchor_provider_not_configured');
       const errorCategory = sceneAnchorFailureCategory;
-      const recommendedNextAction = sceneAnchorRecommendedNextAction(sceneAnchorFailureCategory);
       const renderFailure = buildSceneAnchorRenderFailure({
         plan: klingReferencePlan,
         category: sceneAnchorFailureCategory,
-        recommendedNextAction,
       });
+      const recommendedNextAction = renderFailure.recommendedNextAction;
       return sendJson(res, 424, {
         success: false,
         error: renderFailure.safeMessage,

@@ -297,6 +297,16 @@ export async function uploadSceneAnchorAsset(input: SceneAnchorAssetUploadInput)
 }
 
 export async function persistSceneAnchorProviderImage(input: SceneAnchorProviderImageInput) {
+  if (!input.storageClient) {
+    const missingConfig = sceneAnchorAssetStorageMissingConfig(input.envSource ?? process.env);
+    if (missingConfig.length) {
+      throw sceneAnchorAssetPersistError({
+        type: 'scene_anchor_storage_config_missing',
+        missingConfig,
+        message: `The scene anchor was generated, but the Create runtime is missing Supabase storage configuration. Missing config: ${missingConfig.join(', ')}.`,
+      });
+    }
+  }
   const fetcher = input.fetchImpl ?? fetch;
   const response = await fetcher(input.imageUrl, { method: 'GET' }).catch((error) => {
     throw sceneAnchorAssetDownloadError({

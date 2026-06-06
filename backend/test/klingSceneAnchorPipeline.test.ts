@@ -356,18 +356,21 @@ try {
       sceneAnchorErrorMessage: 'Scene anchor was generated, but Lumora could not persist it for Kling. Missing config: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY. https://provider.example/private.png?token=secret',
       assetPersistErrorType: 'scene_anchor_storage_config_missing',
       assetPersistErrorMessageRedacted: 'Scene anchor was generated, but Lumora could not persist it for Kling. Missing config: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY. [redacted-url]',
+      assetPersistMissingConfig: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'],
     },
     category: 'scene_anchor_asset_persist',
   });
   assert.equal(assetPersistRenderFailure.stage, 'persist_asset');
   assert.equal(assetPersistRenderFailure.category, 'scene_anchor_asset_persist');
-  assert.match(assetPersistRenderFailure.safeMessage, /could not persist it for Kling/i);
-  assert.match(assetPersistRenderFailure.recommendedNextAction, /Vercel-safe asset persistence/i);
+  assert.equal(assetPersistRenderFailure.safeTitle, 'Scene anchor could not be saved for animation.');
+  assert.equal(assetPersistRenderFailure.safeMessage, 'The scene anchor was generated, but the Create runtime is missing Supabase storage configuration.');
+  assert.equal(assetPersistRenderFailure.recommendedNextAction, 'Add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to Vercel, redeploy, then retry.');
   assert.equal(assetPersistRenderFailure.sceneAnchorProvider, materializedPlan.sceneAnchorProvider);
   assert.equal(assetPersistRenderFailure.sceneAnchorModel, 'fal-ai/vidu/q2/reference-to-image');
   assert.equal(assetPersistRenderFailure.sceneAnchorOutputParsed, true);
   assert.equal(assetPersistRenderFailure.sceneAnchorPersisted, false);
   assert.equal(assetPersistRenderFailure.assetPersistErrorType, 'scene_anchor_storage_config_missing');
+  assert.deepEqual(assetPersistRenderFailure.missingConfig, ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']);
   assert.match(assetPersistRenderFailure.assetPersistErrorMessageRedacted ?? '', /SUPABASE_URL/);
   assert.equal(assetPersistRenderFailure.privateUrlsRedacted, true);
   assert.equal(assetPersistRenderFailure.secretsRedacted, true);
@@ -396,7 +399,7 @@ try {
           sceneAnchorOutputParsed: true,
           assetPersistErrorType: 'scene_anchor_storage_upload_failed',
           assetPersistErrorMessageRedacted: 'Scene anchor was generated, but Lumora could not persist it for Kling. [redacted-url] [redacted-auth]',
-          missingConfig: ['SUPABASE_URL'],
+          missingConfig: [],
           sceneAnchorPayloadShapeSummary: {
             fieldNames: ['aspect_ratio', 'prompt', 'reference_image_urls'],
             referenceImageUrlCount: 3,
@@ -430,7 +433,7 @@ try {
   assert.equal(preparedAssetPersistFailurePlan.sceneAnchorOutputParsed, true);
   assert.equal(preparedAssetPersistFailurePlan.sceneAnchorPersisted, false);
   assert.equal(preparedAssetPersistFailurePlan.assetPersistErrorType, 'scene_anchor_storage_upload_failed');
-  assert.deepEqual(preparedAssetPersistFailurePlan.assetPersistMissingConfig, ['SUPABASE_URL']);
+  assert.equal(preparedAssetPersistFailurePlan.assetPersistMissingConfig, null);
   assert.doesNotMatch(JSON.stringify(preparedAssetPersistFailurePlan), /provider\.example\/private|token=secret|service-role-secret-value-should-not-leak/);
   const preparedAssetPersistFailure = buildSceneAnchorRenderFailure({
     plan: preparedAssetPersistFailurePlan,
@@ -443,9 +446,54 @@ try {
   assert.equal(preparedAssetPersistFailure.sceneAnchorOutputParsed, true);
   assert.equal(preparedAssetPersistFailure.sceneAnchorPersisted, false);
   assert.equal(preparedAssetPersistFailure.assetPersistErrorType, 'scene_anchor_storage_upload_failed');
-  assert.deepEqual(preparedAssetPersistFailure.missingConfig, ['SUPABASE_URL']);
+  assert.equal(preparedAssetPersistFailure.missingConfig, null);
   assert.match(preparedAssetPersistFailure.recommendedNextAction, /Vercel-safe asset persistence/i);
   assert.doesNotMatch(JSON.stringify(preparedAssetPersistFailure), /provider\.example\/private|token=secret|service-role-secret-value-should-not-leak/);
+
+  const preparedAdapterLoadFailurePlan = await prepareKlingCreateReferencePlanForProvider({
+    plan: buildKlingCreateReferencePlan({
+      body: {
+        prompt: gardenDressPrompt,
+        referenceImageUrls: {
+          frontFaceUrl: 'https://assets.example/front.jpg',
+          leftAngleUrl: 'https://assets.example/left.jpg',
+          rightAngleUrl: 'https://assets.example/right.jpg',
+          fullBodyUrl: 'https://assets.example/full-body-street-jeans.jpg',
+        },
+      },
+      primaryReference: 'https://assets.example/front.jpg',
+      exactLikenessReady: true,
+    }),
+    userId: 'unit-test-user',
+    sceneAnchorGenerator: async () => {
+      throw Object.assign(
+        new Error('Asset storage adapter could not be loaded from https://provider.example/private.png?token=secret with Bearer service-role-secret-value-should-not-leak'),
+        {
+          failureCategory: 'scene_anchor_asset_persist',
+          sceneAnchorOutputParsed: true,
+          assetPersistErrorType: 'scene_anchor_storage_adapter_load_failed',
+          assetPersistErrorMessageRedacted: 'Asset storage adapter could not be loaded from [redacted-url] with [redacted-auth]',
+          missingConfig: [],
+          privateUrlsRedacted: true,
+          secretsRedacted: true,
+        },
+      );
+    },
+  });
+  assert.ok(preparedAdapterLoadFailurePlan);
+  assert.equal(preparedAdapterLoadFailurePlan.sceneAnchorFailureCategory, 'scene_anchor_asset_persist');
+  assert.equal(preparedAdapterLoadFailurePlan.sceneAnchorPersisted, false);
+  assert.equal(preparedAdapterLoadFailurePlan.sceneAnchorOutputParsed, true);
+  assert.equal(preparedAdapterLoadFailurePlan.assetPersistErrorType, 'scene_anchor_storage_adapter_load_failed');
+  const preparedAdapterLoadFailure = buildSceneAnchorRenderFailure({
+    plan: preparedAdapterLoadFailurePlan,
+    category: 'scene_anchor_asset_persist',
+  });
+  assert.equal(preparedAdapterLoadFailure.stage, 'persist_asset');
+  assert.equal(preparedAdapterLoadFailure.category, 'scene_anchor_asset_persist');
+  assert.equal(preparedAdapterLoadFailure.assetPersistErrorType, 'scene_anchor_storage_adapter_load_failed');
+  assert.match(preparedAdapterLoadFailure.recommendedNextAction, /Vercel-safe asset persistence/i);
+  assert.doesNotMatch(JSON.stringify(preparedAdapterLoadFailure), /provider\.example\/private|token=secret|service-role-secret-value-should-not-leak/);
 
   const outputParseFailurePlan = {
     ...failedSchemaPlan,
@@ -514,6 +562,33 @@ try {
       return true;
     },
   );
+
+  let missingEnvProviderDownloadAttempted = false;
+  await assert.rejects(
+    () => persistSceneAnchorProviderImage({
+      userId: 'unit-test-user',
+      imageUrl: 'https://provider.example/private-missing-env.png?token=secret',
+      envSource: {} as NodeJS.ProcessEnv,
+      fetchImpl: async () => {
+        missingEnvProviderDownloadAttempted = true;
+        return new Response(new Uint8Array([137, 80, 78, 71]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        });
+      },
+    }),
+    (error) => {
+      const record = error as Record<string, unknown>;
+      const serialized = JSON.stringify(record);
+      assert.equal(record.failureCategory, 'scene_anchor_asset_persist');
+      assert.equal(record.assetPersistErrorType, 'scene_anchor_storage_config_missing');
+      assert.deepEqual(record.missingConfig, ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']);
+      assert.match(String(record.assetPersistErrorMessageRedacted), /Create runtime is missing Supabase storage configuration/i);
+      assert.doesNotMatch(serialized, /provider\.example\/private-missing-env|token=secret/);
+      return true;
+    },
+  );
+  assert.equal(missingEnvProviderDownloadAttempted, false);
 
   await assert.rejects(
     () => uploadSceneAnchorAsset({
@@ -830,6 +905,72 @@ try {
   const falReferencePlan = falRawOutput.referencePlan as Record<string, unknown>;
   assert.equal(falReferencePlan.submittedReferenceCount, 3);
   assert.deepEqual(falReferencePlan.droppedReferenceRoles, ['side_angle_right']);
+
+  delete process.env.SUPABASE_URL;
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  let missingStorageSubmitSeen = false;
+  let missingStorageImageDownloadSeen = false;
+  await assert.rejects(
+    () => createFalSceneAnchorStill({
+      prompt: 'Scene anchor prompt',
+      identityReferences: materializedPlan.references,
+      attempt: 1,
+      userId: 'unit-test-user',
+      sleepFn: async () => undefined,
+      fetchImpl: async (input, init) => {
+        const url = String(input);
+        if (init?.method === 'POST') {
+          missingStorageSubmitSeen = true;
+          return new Response(JSON.stringify({
+            request_id: 'scene-anchor-request-missing-storage',
+            status_url: 'https://queue.fal.run/fal-ai/vidu/q2/reference-to-image/requests/scene-anchor-request-missing-storage/status',
+            response_url: 'https://queue.fal.run/fal-ai/vidu/q2/reference-to-image/requests/scene-anchor-request-missing-storage/response',
+          }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.endsWith('/status')) {
+          return new Response(JSON.stringify({ status: 'COMPLETED' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.endsWith('/response')) {
+          return new Response(JSON.stringify({
+            image: {
+              content_type: 'image/png',
+              url: 'https://fal.example/missing-storage-scene-anchor.png?token=secret',
+            },
+          }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.startsWith('https://fal.example/missing-storage-scene-anchor.png')) {
+          missingStorageImageDownloadSeen = true;
+          return new Response(new Uint8Array([137, 80, 78, 71]), {
+            status: 200,
+            headers: { 'content-type': 'image/png' },
+          });
+        }
+        throw new Error(`Unexpected fetch ${url}`);
+      },
+    }),
+    (error) => {
+      const record = error as Record<string, unknown>;
+      const serialized = JSON.stringify(record);
+      assert.equal(record.failureCategory, 'scene_anchor_asset_persist');
+      assert.equal(record.sceneAnchorOutputParsed, true);
+      assert.equal(record.assetPersistErrorType, 'scene_anchor_storage_config_missing');
+      assert.deepEqual(record.missingConfig, ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']);
+      assert.match(String(record.assetPersistErrorMessageRedacted), /Create runtime is missing Supabase storage configuration/i);
+      assert.doesNotMatch(serialized, /missing-storage-scene-anchor\.png\?token=secret|service-role-secret-value-should-not-leak/);
+      return true;
+    },
+  );
+  assert.equal(missingStorageSubmitSeen, true);
+  assert.equal(missingStorageImageDownloadSeen, false);
 
   const diagnostics = klingReferenceDiagnostics({
     plan: materializedPlan,

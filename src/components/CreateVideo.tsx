@@ -870,6 +870,10 @@ function renderFailureTitleForCategory(category: string | null | undefined) {
 
 function renderFailureMessageForCategory(category: string | null | undefined, fallback = '') {
   if (category === 'scene_anchor_asset_persist' || category === 'scene_anchor_asset_persist_failed') {
+    const lowerFallback = fallback.toLowerCase();
+    if (lowerFallback.includes('supabase') || lowerFallback.includes('create runtime is missing')) {
+      return sanitizeCreatorErrorMessage(fallback, 'Lumora paused this render.');
+    }
     return 'Scene anchor was generated, but Lumora could not save it for animation. Fix the Vercel-safe asset persistence path before retrying.';
   }
   if (fallback.trim()) return sanitizeCreatorErrorMessage(fallback, 'Lumora paused this render.');
