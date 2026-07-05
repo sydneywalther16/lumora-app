@@ -1527,6 +1527,20 @@ export default function CreateVideo({
   const requiresReferenceImage = engine === 'replicate';
   const selectedProviderOption = providerOptions.find((option) => option.engine === engine) ?? providerOptions[0];
   const hasPrompt = activePrompt.trim().length > 0;
+  const selectedEngineRequiresBackend = engine !== 'mock';
+  const providerReadinessMessage = selectedEngineRequiresBackend && (
+    !healthDiagnostics ||
+    !healthDiagnostics.ok ||
+    Boolean(healthDiagnostics.missingRequired?.length) ||
+    (
+      Array.isArray(healthDiagnostics.generationProviders) &&
+      healthDiagnostics.generationProviders.length > 0 &&
+      !healthDiagnostics.generationProviders.some((provider) => provider.ready)
+    )
+  )
+    ? 'Video engine is not connected yet. Start the API server with npm run dev:api or connect VITE_API_BASE_URL to the deployed backend.'
+    : null;
+  const backendReadyForGeneration = !selectedEngineRequiresBackend || !providerReadinessMessage;
   const allSeedanceReferenceImages = buildSeedanceReferenceImages({
     referenceImageUrl,
     referenceImageUrls,
@@ -1715,11 +1729,12 @@ export default function CreateVideo({
     isHydrated &&
     !referenceLoading &&
     hasPrompt &&
+    backendReadyForGeneration &&
     !(activeReferenceRepair && !activeReferenceRepair.canContinueWithoutReference) &&
     (!requiresReferenceImage || hasGenerationReference || mockRateLimitUi);
   const renderCooldownActive = renderCooldownSeconds > 0;
   const activeRenderBlocksGenerate = Boolean(activeRenderJobId) && generationStatusState !== 'rate_limited';
-  const generateBusy = !canGenerate || busy || generationLoading || referenceLoading || renderCooldownActive || activeRenderBlocksGenerate;
+  const generateBusy = busy || generationLoading || referenceLoading || renderCooldownActive || activeRenderBlocksGenerate;
   const saveBusy = busy || generationLoading;
   const sceneExecuteDisabledReason = !creativePlan
     ? 'Shape cinematic beats first'
@@ -1847,6 +1862,8 @@ export default function CreateVideo({
     ? `Cooling down ${renderCooldownSeconds}s`
     : generationStatusState === 'rate_limited'
       ? 'Resume render'
+    : providerReadinessMessage
+      ? 'Start API server to generate'
     : generationError && !activeReferenceRepair
       ? 'Try ultra-safe scene'
     : activeRenderBlocksGenerate
@@ -2962,6 +2979,14 @@ export default function CreateVideo({
       } finally {
         releaseGenerateLock();
       }
+      return;
+    }
+
+    if (providerReadinessMessage) {
+      setGenerationError(providerReadinessMessage);
+      setGenerationStatusState('failed');
+      setStatus(providerReadinessMessage);
+      showToast({ type: 'error', message: providerReadinessMessage });
       return;
     }
 
@@ -4146,6 +4171,12 @@ export default function CreateVideo({
         {schemaWarning ? (
           <div className="generation-warning-list schema-warning-card" role="status">
             <p>{schemaWarning}</p>
+          </div>
+        ) : null}
+
+        {providerReadinessMessage ? (
+          <div className="generation-warning-list schema-warning-card" role="status">
+            <p>{providerReadinessMessage}</p>
           </div>
         ) : null}
 

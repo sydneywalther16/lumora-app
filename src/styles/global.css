@@ -199,6 +199,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: hidden;
   background: var(--body-background);
   color: var(--text-primary);
 }
@@ -208,6 +209,7 @@ input,
 textarea,
 select {
   font: inherit;
+  max-width: 100%;
 }
 
 button {
@@ -221,11 +223,13 @@ button {
   display: grid;
   place-items: center;
   padding: 24px;
+  overflow-x: hidden;
   background: var(--app-shell-background);
 }
 
 .phone-frame {
   width: min(100%, 430px);
+  max-width: 100%;
   height: min(100vh - 24px, 920px);
   background: var(--phone-background);
   border: 1px solid var(--phone-border);
@@ -274,19 +278,24 @@ button {
 
 .screen-scroll {
   flex: 1;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
   padding: 0 14px calc(var(--bottom-nav-space) + env(safe-area-inset-bottom, 0px));
   scroll-padding-bottom: calc(var(--bottom-nav-space) + 24px + env(safe-area-inset-bottom, 0px));
 }
 
-.page {
+.page,
+.lumora-page {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   display: grid;
   gap: 14px;
   padding-bottom: 18px;
 }
 
 .lumora-page {
-  display: grid;
   gap: var(--lumora-space-4);
   padding-bottom: var(--lumora-space-6);
 }
@@ -295,6 +304,7 @@ button {
   display: grid;
   gap: var(--lumora-space-3);
   min-width: 0;
+  max-width: 100%;
 }
 
 .lumora-card,
@@ -304,6 +314,9 @@ button {
 .lumora-status-card,
 .lumora-empty-state {
   min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   border: 1px solid var(--lumora-surface-border);
   color: var(--text-primary);
 }
@@ -651,6 +664,19 @@ button {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+.button-row > * {
+  flex: 1 1 180px;
+  min-width: 0;
+  width: 100%;
 }
 
 .tag {
@@ -1156,6 +1182,7 @@ button {
 .provider-grid {
   display: grid;
   gap: 10px;
+  max-width: 100%;
 }
 
 .continuity-memory-panel {
@@ -1567,12 +1594,15 @@ button {
   display: grid;
   gap: 10px;
   width: 100%;
+  max-width: 100%;
   padding: 12px;
   text-align: left;
   border: 1px solid var(--control-border);
   border-radius: 18px;
   background: var(--control-background);
   color: var(--control-text);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .provider-option.active {
@@ -3623,6 +3653,23 @@ button {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: stretch;
   gap: 10px;
+}
+
+@media (max-width: 430px) {
+  .button-row,
+  .luxury-action-row,
+  .next-take-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .reference-mode-card {
+    grid-template-columns: 1fr;
+  }
+
+  .luxury-action-row .quiet-btn,
+  .luxury-action-row .cinematic-generate-btn {
+    min-width: 0;
+  }
 }
 
 .luxury-action-row .cinematic-generate-btn {
