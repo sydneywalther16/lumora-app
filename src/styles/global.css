@@ -989,6 +989,28 @@ button {
   min-height: 38px;
 }
 
+.viral-polish-panel .row-between {
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.viral-polish-heading {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.viral-polish-heading .eyebrow,
+.viral-polish-heading strong {
+  display: block;
+  line-height: 1.18;
+}
+
+.viral-polish-heading strong {
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
 .caption-helper-details {
   width: 100%;
 }

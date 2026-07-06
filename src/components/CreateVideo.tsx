@@ -207,6 +207,8 @@ const apiOfflineVideoEngineMessage =
   'Video engine is not connected yet. Start the API server with npm run dev:api or connect VITE_API_BASE_URL to the deployed backend.';
 const providerConfigVideoEngineMessage =
   'Video engine is connected, but real render providers are not configured yet. Add provider keys or use Demo Mode for UI testing.';
+const storyMemoryLocalPreviewMessage =
+  'Story Memory sync is not connected in this local preview. You can still draft scenes.';
 const referenceImageLabels: Partial<Record<keyof ReferenceImageUrls, string>> = {
   manualReferenceImageUrl: 'Manual reference override',
   frontFace: 'Front face',
@@ -1339,6 +1341,21 @@ function hasReadyRealGenerationProvider(diagnostics: ApiHealthDiagnostics | null
   return providers.some((provider) => provider.ready && provider.id !== 'demo-mode');
 }
 
+function creatorStoryMemoryErrorMessage(error: unknown, fallback = 'Story Memory could not sync. You can still draft scenes.') {
+  const raw = error instanceof Error ? error.message : String(error ?? '');
+  const lower = raw.toLowerCase();
+
+  if (
+    lower.includes('database is not configured') ||
+    lower.includes('database_url') ||
+    lower.includes('database-backed routes')
+  ) {
+    return storyMemoryLocalPreviewMessage;
+  }
+
+  return sanitizeCreatorErrorMessage(raw, fallback);
+}
+
 function friendlyCharacterProfileError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   const lower = message.toLowerCase();
@@ -2375,7 +2392,7 @@ export default function CreateVideo({
       setContinuityMemory(null);
       setContinuityMemoryDraft(emptyContinuityMemoryState);
       setContinuityMemoryLocks({});
-      setContinuityMemoryError(error instanceof Error ? error.message : 'Story Memory could not load.');
+      setContinuityMemoryError(creatorStoryMemoryErrorMessage(error));
       setContinuityMemoryStatus('');
     }).finally(() => {
       if (active) setContinuityMemoryLoading(false);
@@ -2506,7 +2523,7 @@ export default function CreateVideo({
       }
       return memory;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Story Memory could not save.';
+      const message = creatorStoryMemoryErrorMessage(error, 'Story Memory could not save. You can still draft scenes.');
       setContinuityMemoryError(message);
       if (!options.silent) showToast({ type: 'error', message });
       return null;
@@ -4281,7 +4298,7 @@ export default function CreateVideo({
 
         <section className="viral-polish-panel" aria-label="Viral AI cast scene tools">
           <div className="row-between">
-            <div>
+            <div className="viral-polish-heading">
               <span className="eyebrow">Viral Scene Presets</span>
               <strong>Tap a safe AI-cast setup</strong>
             </div>
