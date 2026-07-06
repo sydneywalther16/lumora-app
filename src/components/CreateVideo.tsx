@@ -203,6 +203,10 @@ const engineLabels: Record<VideoEngine, string> = {
   mock: 'Mock',
   openai: 'OpenAI',
 };
+const apiOfflineVideoEngineMessage =
+  'Video engine is not connected yet. Start the API server with npm run dev:api or connect VITE_API_BASE_URL to the deployed backend.';
+const providerConfigVideoEngineMessage =
+  'Video engine is connected, but real render providers are not configured yet. Add provider keys or use Demo Mode for UI testing.';
 const referenceImageLabels: Partial<Record<keyof ReferenceImageUrls, string>> = {
   manualReferenceImageUrl: 'Manual reference override',
   frontFace: 'Front face',
@@ -1328,6 +1332,13 @@ function characterProfileSchemaWarning(diagnostics: ApiHealthDiagnostics) {
   return missingCharacterId ? characterProfilesMigrationWarning : '';
 }
 
+function hasReadyRealGenerationProvider(diagnostics: ApiHealthDiagnostics | null) {
+  const providers = diagnostics?.generationProviders;
+  if (!Array.isArray(providers)) return false;
+
+  return providers.some((provider) => provider.ready && provider.id !== 'demo-mode');
+}
+
 function friendlyCharacterProfileError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   const lower = message.toLowerCase();
@@ -1471,6 +1482,7 @@ export default function CreateVideo({
   const [skippedReferenceUrls, setSkippedReferenceUrls] = useState<string[]>([]);
   const [schemaWarning, setSchemaWarning] = useState('');
   const [healthDiagnostics, setHealthDiagnostics] = useState<ApiHealthDiagnostics | null>(null);
+  const [healthDiagnosticsStatus, setHealthDiagnosticsStatus] = useState<'checking' | 'connected' | 'offline'>('checking');
   const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
   const [finalGeneratedPrompt, setFinalGeneratedPrompt] = useState('');
   const [generatedModel, setGeneratedModel] = useState('');
@@ -1528,19 +1540,18 @@ export default function CreateVideo({
   const selectedProviderOption = providerOptions.find((option) => option.engine === engine) ?? providerOptions[0];
   const hasPrompt = activePrompt.trim().length > 0;
   const selectedEngineRequiresBackend = engine !== 'mock';
-  const providerReadinessMessage = selectedEngineRequiresBackend && (
-    !healthDiagnostics ||
-    !healthDiagnostics.ok ||
-    Boolean(healthDiagnostics.missingRequired?.length) ||
-    (
-      Array.isArray(healthDiagnostics.generationProviders) &&
-      healthDiagnostics.generationProviders.length > 0 &&
-      !healthDiagnostics.generationProviders.some((provider) => provider.ready)
-    )
-  )
-    ? 'Video engine is not connected yet. Start the API server with npm run dev:api or connect VITE_API_BASE_URL to the deployed backend.'
-    : null;
-  const backendReadyForGeneration = !selectedEngineRequiresBackend || !providerReadinessMessage;
+  const realProviderReady = hasReadyRealGenerationProvider(healthDiagnostics);
+  const providerReadinessMessage = !selectedEngineRequiresBackend
+    ? null
+    : healthDiagnosticsStatus === 'offline'
+      ? apiOfflineVideoEngineMessage
+      : healthDiagnosticsStatus === 'connected' && !realProviderReady
+        ? providerConfigVideoEngineMessage
+        : null;
+  const backendReadyForGeneration = !selectedEngineRequiresBackend || (
+    healthDiagnosticsStatus === 'connected' &&
+    realProviderReady
+  );
   const allSeedanceReferenceImages = buildSeedanceReferenceImages({
     referenceImageUrl,
     referenceImageUrls,
@@ -1858,29 +1869,20 @@ export default function CreateVideo({
     { displayName: characterName },
   );
   const tryTakeBusy = busy || generationLoading || referenceLoading || renderCooldownActive || activeRenderBlocksGenerate;
+  const baseGenerateCtaLabel = engine === 'mock' ? 'Demo preview' : 'Generate';
   const generateCtaLabel = renderCooldownActive
-    ? `Cooling down ${renderCooldownSeconds}s`
+    ? `${renderCooldownSeconds}s`
     : generationStatusState === 'rate_limited'
-      ? 'Resume render'
-    : providerReadinessMessage
-      ? 'Start API server to generate'
+      ? 'Resume'
     : generationError && !activeReferenceRepair
-      ? 'Try ultra-safe scene'
+      ? 'Try again'
     : activeRenderBlocksGenerate
-      ? 'Rendering in Drafts'
+      ? 'Rendering'
     : generationLoading
-      ? renderPreference === 'success_first'
-        ? 'Finding cleanest path...'
-        : 'Shaping cinematic beats...'
+      ? 'Generating'
     : referenceLoading
-      ? 'Preparing your cast...'
-    : !hasPrompt
-      ? 'Add a scene idea'
-    : !canGenerate
-      ? 'Add reference before generating'
-    : providerSelfCharacterReady && !selectedKlingExactReady
-      ? 'Generate with My Self Character'
-    : 'Generate AI Cast Video';
+      ? 'Preparing'
+    : baseGenerateCtaLabel;
   const showCinematicStructure = Boolean(
     !activeSuccessFirstWithoutOutput && (
       creativePlanLoading ||
@@ -1960,16 +1962,19 @@ export default function CreateVideo({
   useEffect(() => {
     let active = true;
 
+    setHealthDiagnosticsStatus('checking');
     api.healthDiagnostics()
       .then((diagnostics) => {
         if (active) {
           setHealthDiagnostics(diagnostics);
+          setHealthDiagnosticsStatus('connected');
           setSchemaWarning(characterProfileSchemaWarning(diagnostics));
         }
       })
       .catch(() => {
         if (active) {
           setHealthDiagnostics(null);
+          setHealthDiagnosticsStatus('offline');
           setSchemaWarning('');
         }
       });
@@ -2959,6 +2964,11 @@ export default function CreateVideo({
       setGenerationLoading(false);
     };
 
+    if (selectedEngineRequiresBackend && healthDiagnosticsStatus === 'checking') {
+      setStatus('Checking video engine. Try again in a moment.');
+      return;
+    }
+
     if (activeRenderJobId && generationStatusState === 'rate_limited') {
       generationInFlightRef.current = true;
       setGenerationLoading(true);
@@ -3103,6 +3113,41 @@ export default function CreateVideo({
         type: 'error',
         message: 'Render queue is cooling down. Lumora will resume automatically.',
       });
+      releaseGenerateLock();
+      return;
+    }
+
+    if (selectedEngine === 'mock') {
+      const now = new Date().toISOString();
+      const demoPreviewId = `demo-preview-${Date.now()}`;
+      const demoVideoUrl = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
+      finishGenerationProgress('completed');
+      setGeneratedVideoUrl(demoVideoUrl);
+      setFinalGeneratedPrompt(currentPrompt);
+      setGeneratedDisplayEngine('Demo Mode');
+      setGeneratedMode('text-to-video-fallback');
+      setGenerationResult({
+        id: demoPreviewId,
+        jobId: demoPreviewId,
+        status: 'completed',
+        engine: 'mock',
+        provider: 'mock',
+        characterId,
+        characterName,
+        characterAvatar,
+        isDefaultSelfCharacter,
+        prompt: currentPrompt,
+        outputUrl: demoVideoUrl,
+        videoUrl: demoVideoUrl,
+        generationMode: 'text-to-video-fallback',
+        finalPrompt: currentPrompt,
+        model: 'demo-preview',
+        displayEngine: 'Demo Mode',
+        createdAt: now,
+        message: 'Demo preview only. No real render was created.',
+      });
+      setGenerationWarnings(['Demo preview only. No real render was created.']);
+      setStatus('Demo preview ready. No real render was created.');
       releaseGenerateLock();
       return;
     }
