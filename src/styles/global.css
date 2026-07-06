@@ -1003,11 +1003,12 @@ button {
 .viral-polish-heading .eyebrow,
 .viral-polish-heading strong {
   display: block;
-  line-height: 1.18;
+  min-width: 0;
 }
 
 .viral-polish-heading strong {
   color: var(--text-primary);
+  line-height: 1.2;
   overflow-wrap: anywhere;
 }
 
@@ -3726,6 +3727,14 @@ button {
 }
 
 @media (max-width: 430px) {
+  .viral-polish-panel .row-between {
+    align-items: stretch;
+  }
+
+  .viral-polish-panel .compact-action {
+    width: 100%;
+  }
+
   .button-row,
   .next-take-actions {
     grid-template-columns: 1fr;

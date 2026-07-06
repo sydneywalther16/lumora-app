@@ -4299,7 +4299,7 @@ export default function CreateVideo({
         <section className="viral-polish-panel" aria-label="Viral AI cast scene tools">
           <div className="row-between">
             <div className="viral-polish-heading">
-              <span className="eyebrow">Viral Scene Presets</span>
+              <span className="eyebrow">VIRAL SCENE PRESETS</span>
               <strong>Tap a safe AI-cast setup</strong>
             </div>
             <button type="button" className="ghost-btn compact-action" onClick={handlePolishPrompt} disabled={!hasPrompt}>

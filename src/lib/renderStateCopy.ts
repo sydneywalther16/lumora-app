@@ -94,6 +94,13 @@ export function sanitizeCreatorErrorMessage(value: unknown, fallback = 'Lumora p
   const lower = raw.toLowerCase();
 
   if (!raw.trim()) return fallback;
+  if (
+    lower.includes('database is not configured') ||
+    lower.includes('database_url') ||
+    lower.includes('database-backed routes')
+  ) {
+    return 'Story Memory sync is not connected in this local preview. You can still draft scenes.';
+  }
   if (lower.includes('rate limit') || lower.includes('too many requests') || lower.includes('429')) {
     return 'Render queue is cooling down.';
   }
