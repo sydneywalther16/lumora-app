@@ -4,7 +4,7 @@ import {
   generateVideoFromBody,
   ProviderError,
   safeJsonValue as generationSafeJsonValue,
-} from './_lib/videoGeneration';
+} from '../serverless/_lib/videoGeneration';
 
 type GenerateRequest = IncomingMessage & {
   body?: unknown;

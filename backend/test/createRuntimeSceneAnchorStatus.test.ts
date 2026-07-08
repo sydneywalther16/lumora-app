@@ -186,7 +186,7 @@ assert.doesNotMatch(storageEndpointSource, /sceneAnchorAssetStorage/);
 assert.doesNotMatch(storageEndpointSource, /backend\/src\/services\/storageService|backend\\\\src\\\\services\\\\storageService|storageService/);
 
 const storageAdapterSource = readFileSync(
-  join(process.cwd(), 'api/lumora/sceneAnchorAssetStorage.ts'),
+  join(process.cwd(), 'serverless/lumora/sceneAnchorAssetStorage.ts'),
   'utf8',
 );
 assert.match(storageAdapterSource, /import type/);

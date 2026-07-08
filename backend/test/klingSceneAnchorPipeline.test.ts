@@ -4,7 +4,7 @@ import {
   persistSceneAnchorProviderImage,
   sceneAnchorAssetStorageMissingConfig,
   uploadSceneAnchorAsset,
-} from '../../api/lumora/sceneAnchorAssetStorage';
+} from '../../serverless/lumora/sceneAnchorAssetStorage';
 import {
   analyzeKlingSceneIntent,
   buildFalSceneAnchorPayload,

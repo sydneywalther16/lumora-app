@@ -681,7 +681,7 @@ function isSceneAnchorStorageConfigMissingPlan(plan: KlingCreateReferencePlan | 
 
 async function loadSceneAnchorAssetStorage() {
   try {
-    return await import('./sceneAnchorAssetStorage');
+    return await import('../../serverless/lumora/sceneAnchorAssetStorage');
   } catch (error) {
     throw sceneAnchorAssetPersistError({
       type: 'scene_anchor_storage_adapter_load_failed',

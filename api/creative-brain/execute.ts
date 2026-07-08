@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { z } from 'zod';
 import { creativeBrainScenePlanSchema } from '../../backend/src/services/creativeBrain';
 import { executeScenePlan } from '../../backend/src/services/sceneExecutor';
-import { checkRateLimit, sendRateLimitHeaders } from '../_lib/rateLimit';
+import { checkRateLimit, sendRateLimitHeaders } from '../../serverless/_lib/rateLimit';
 
 type SceneExecutorRequest = IncomingMessage & {
   body?: unknown;

@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { checkRateLimit, sendRateLimitHeaders } from '../_lib/rateLimit';
+import { checkRateLimit, sendRateLimitHeaders } from '../../serverless/_lib/rateLimit';
 import { persistCompletedGeneration } from '../../backend/src/services/generationPersistence';
 import { createSeedanceGeneration } from '../../backend/src/services/generationService';
 import { isSeedanceModerationError } from '../../backend/src/services/providers/seedanceProvider';

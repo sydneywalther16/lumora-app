@@ -7,7 +7,7 @@ import {
   getCinematicCharacterProfileForUser,
   publicCharacterProfile,
 } from '../../backend/src/services/characterProfiles';
-import { checkRateLimit, sendRateLimitHeaders } from '../_lib/rateLimit';
+import { checkRateLimit, sendRateLimitHeaders } from '../../serverless/_lib/rateLimit';
 
 type CreativeBrainRequest = IncomingMessage & {
   body?: unknown;

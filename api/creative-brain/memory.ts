@@ -5,7 +5,7 @@ import {
   getContinuityMemory,
   saveContinuityMemoryPatch,
 } from '../../backend/src/services/memoryEngine';
-import { checkRateLimit, sendRateLimitHeaders } from '../_lib/rateLimit';
+import { checkRateLimit, sendRateLimitHeaders } from '../../serverless/_lib/rateLimit';
 
 type ContinuityMemoryRequest = IncomingMessage & {
   body?: unknown;
