@@ -1601,6 +1601,12 @@ export default function CreateVideo({
   const savedSeedanceReferenceCount = seedanceReferenceImages.filter((reference) => (
     referenceStatus(reference.url, true).kind === 'saved'
   )).length;
+  const readySeedanceReferenceCount = savedSeedanceReferenceCount || seedanceReferenceCount;
+  const showReferenceSetupGuidance =
+    isHydrated &&
+    isSeedanceEngine &&
+    !referenceLoading &&
+    readySeedanceReferenceCount === 0;
   const sceneExecutorUserId = authUser?.id ?? identityProfile?.userId ?? null;
   const seedanceMultimodalActive = isSeedanceEngine && seedanceReferenceCount > 1;
   const seedanceSingleReferenceWarning = isSeedanceEngine && seedanceReferenceCount === 1;
@@ -4247,7 +4253,7 @@ export default function CreateVideo({
             <strong>{characterName ? (isDefaultSelfCharacter ? 'Soft self guidance selected' : characterName) : 'Soft self guidance selected'}</strong>
             <p className="muted">
               {isSeedanceEngine
-                ? `${savedSeedanceReferenceCount || seedanceReferenceCount} reference${(savedSeedanceReferenceCount || seedanceReferenceCount) === 1 ? '' : 's'} ready`
+                ? `${readySeedanceReferenceCount} reference${readySeedanceReferenceCount === 1 ? '' : 's'} ready`
                 : hasGenerationReference
                   ? 'Reference ready'
                   : 'Choose a cast reference'}
@@ -4754,11 +4760,27 @@ export default function CreateVideo({
               {referenceLoading
                 ? 'Preparing your cast...'
                 : isSeedanceEngine
-                  ? `${savedSeedanceReferenceCount || seedanceReferenceCount} reference${(savedSeedanceReferenceCount || seedanceReferenceCount) === 1 ? '' : 's'} ready`
+                  ? `${readySeedanceReferenceCount} reference${readySeedanceReferenceCount === 1 ? '' : 's'} ready`
                   : hasGenerationReference
                     ? 'Cast reference ready'
                     : 'Save a reference before rendering'}
             </strong>
+            {showReferenceSetupGuidance ? (
+              <>
+                <span className="muted reference-setup-prompt">
+                  Open Your AI Cast to add front, side, or full-body reference media before a real render.
+                </span>
+                {onResaveReferencePhoto ? (
+                  <button
+                    type="button"
+                    className="ghost-btn reference-setup-btn"
+                    onClick={onResaveReferencePhoto}
+                  >
+                    Open Your AI Cast
+                  </button>
+                ) : null}
+              </>
+            ) : null}
             {seedanceMultimodalActive ? (
               <span className="tiny-pill multimodal-reference-badge">Cast reference mode</span>
             ) : null}
@@ -4799,7 +4821,7 @@ export default function CreateVideo({
             {isSeedanceEngine && seedanceReferenceCount > 0 ? (
               <details className="compact-reference-details">
                 <summary>
-                  {savedSeedanceReferenceCount || seedanceReferenceCount} cast reference{(savedSeedanceReferenceCount || seedanceReferenceCount) === 1 ? '' : 's'} saved to Lumora
+                  {readySeedanceReferenceCount} cast reference{readySeedanceReferenceCount === 1 ? '' : 's'} saved to Lumora
                 </summary>
                 <div className="seedance-reference-list" aria-label="Cast references">
                   {seedanceReferenceImages.map((reference) => {
@@ -4847,7 +4869,7 @@ export default function CreateVideo({
           {primaryReferenceImage.label || selfReferenceMode || isSeedanceEngine ? (
             <span className="tiny-pill reference-mode-pill">
               {isSeedanceEngine
-                ? `${seedanceReferenceCount} cast reference${seedanceReferenceCount === 1 ? '' : 's'}`
+                ? `${readySeedanceReferenceCount} cast reference${readySeedanceReferenceCount === 1 ? '' : 's'}`
                 : referenceLabel || primaryReferenceImage.label || 'Saved self character'}
             </span>
           ) : null}
