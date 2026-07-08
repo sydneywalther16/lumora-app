@@ -116,15 +116,15 @@ export function createSelfCharacterStatusCopy(input: {
     character?.videoReferenceRouteStatus === 'reference_moderation_block' ||
     character?.videoReferenceRouteStatus === 'video_reference_moderation_block'
   ) {
-    return 'Using soft self guidance. Exact likeness provider not ready.';
+    return 'Using soft self guidance. Exact-likeness rendering still needs setup.';
   }
 
   if (character?.videoReferenceRouteStatus === 'input_needs_repair') {
-    return 'Verification video needs a provider-safe format or schema variant.';
+    return 'Verification video needs a cleaner upload before exact-likeness setup can run.';
   }
 
   if (hasEffectiveSelfVerificationVideo(character)) {
-    return 'Self Verification Video saved. Exact likeness route still needs a canary.';
+    return 'Self Verification Video saved. Exact-likeness rendering still needs setup.';
   }
 
   return 'Soft self guidance is active. Add a self verification video in Your AI Cast to test stronger likeness later.';

@@ -1652,6 +1652,7 @@ export default function CreateVideo({
   );
   const klingReferenceSelected = engine === 'replicate';
   const selectedKlingExactReady = klingReferenceSelected && klingExactLikenessReady;
+  const klingExactReadyOnOtherRenderer = klingExactLikenessReady && !klingReferenceSelected;
   const sceneAnchorConfigured = Boolean(healthDiagnostics?.sceneAnchorConfigured);
   const sceneAnchorGuidance = buildSceneAnchorCreateGuidance({
     klingReferenceSelected,
@@ -1669,6 +1670,8 @@ export default function CreateVideo({
     );
   const selfCharacterProviderStatusLabel = selectedKlingExactReady
     ? 'Kling exact likeness ready'
+    : klingExactReadyOnOtherRenderer
+      ? 'Soft guidance renderer'
     : providerSelfCharacterReady
     ? 'Verified self character ready'
     : providerSelfCharacterSetupStarted
@@ -1676,7 +1679,7 @@ export default function CreateVideo({
         characterProfile?.videoReferenceRouteStatus === 'failed_blocked' ||
         characterProfile?.videoReferenceRouteStatus === 'reference_moderation_block' ||
         characterProfile?.videoReferenceRouteStatus === 'video_reference_moderation_block'
-        ? 'Video likeness route blocked'
+        ? 'Soft guidance active'
         : !effectiveVerificationVideoPresent
           ? 'Record self verification video'
           : characterProfile?.providerCharacterStatus === 'failed'
@@ -1691,6 +1694,8 @@ export default function CreateVideo({
     ? sceneAnchorConfigured
       ? 'Scene-anchor-first exact likeness. Lumora will stage the scene first, then animate with Kling.'
       : 'Scene anchor provider not configured yet. Identity-only fallback may copy reference outfit/background.'
+    : klingExactReadyOnOtherRenderer
+      ? 'Using soft self guidance with this renderer. Choose Kling Reference for exact-likeness rendering.'
     : providerSelfCharacterReady
     ? 'Verified self character ready.'
     : characterProfile?.providerCharacterStatus === 'ready' && characterProfile.likenessProviderStatus === 'character_created_usage_unmapped'
@@ -1783,21 +1788,31 @@ export default function CreateVideo({
   const engineRoutingMessage =
     isSeedanceEngine
       ? renderPreference === 'success_first'
-        ? 'Success First uses your saved look as text guidance first, then adds photo likeness only after a route works.'
-        : `${selectedProviderOption.label} uses ${seedanceReferenceCount} cast reference${seedanceReferenceCount === 1 ? '' : 's'} while keeping the scene fresh.`
+        ? klingExactReadyOnOtherRenderer
+          ? 'Success First uses soft self guidance with this renderer. Choose Kling Reference for exact-likeness rendering.'
+          : 'Success First uses soft self guidance first, then adds photo likeness when the scene is ready.'
+        : klingExactReadyOnOtherRenderer
+          ? `${selectedProviderOption.label} uses soft self guidance with ${readySeedanceReferenceCount} cast reference${readySeedanceReferenceCount === 1 ? '' : 's'}. Choose Kling Reference for exact-likeness rendering.`
+          : `${selectedProviderOption.label} uses soft self guidance with ${readySeedanceReferenceCount} cast reference${readySeedanceReferenceCount === 1 ? '' : 's'} while keeping the scene fresh.`
     : engine === 'veo'
-      ? 'Veo Experimental is ready for the next cinematic video route.'
+      ? klingExactReadyOnOtherRenderer
+        ? 'Using soft self guidance with this renderer. Choose Kling Reference for exact-likeness rendering.'
+        : 'Veo Experimental is ready for the next cinematic video route.'
     : engine === 'mock'
-      ? 'Demo Mode returns an instant preview and never spends render credits.'
+      ? 'Demo Mode previews the flow without using real render credits.'
     : isSoraEngine
-      ? (providerSelfCharacterReady ? 'Exact self character route is ready.' : 'Verified self character route unavailable. Using soft self guidance.')
+      ? (providerSelfCharacterReady
+          ? 'Exact self character route is ready.'
+          : klingExactReadyOnOtherRenderer
+            ? 'Using soft self guidance with this renderer. Choose Kling Reference for exact-likeness rendering.'
+            : 'Using soft self guidance. Exact-likeness rendering still needs setup.')
     : klingReferenceSelected
       ? selectedKlingExactReady
         ? sceneAnchorConfigured
           ? 'Scene-anchor-first exact likeness. Lumora will stage the scene first, then animate with Kling.'
-          : 'Scene anchor provider not configured yet. Configure scene anchor image provider for Sora-level staging.'
-        : 'Kling uses your self-character reference image first.'
-      : 'Kling uses your self-character reference image first.';
+          : 'Scene anchor provider not configured yet. Exact-likeness rendering will use identity-only fallback.'
+        : 'Using soft self guidance. Exact-likeness rendering still needs setup.'
+      : 'Using soft self guidance. Exact-likeness rendering still needs setup.';
   const aiCastReadiness = buildAiCastReadiness({
     selfCharacterSaved: Boolean(hasSelfCharacter && (characterName || characterProfile || identityProfile)),
     verificationVideoSaved: effectiveVerificationVideoPresent,
@@ -4743,7 +4758,7 @@ export default function CreateVideo({
                     {optionKlingReady ? (
                       <>
                         <span>Exact likeness ready</span>
-                        <span>Kling canary succeeded</span>
+                        <span>Exact route tested</span>
                       </>
                     ) : null}
                   </span>
