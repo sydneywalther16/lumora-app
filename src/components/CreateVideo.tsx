@@ -4261,9 +4261,9 @@ export default function CreateVideo({
         </div>
 
         <section className="ai-cast-readiness-card" aria-label="Sora-worthy readiness checklist">
-          <div className="row-between">
-            <div>
-              <span className="eyebrow">Sora-worthy readiness</span>
+          <div className="row-between create-section-header">
+            <div className="ai-cast-readiness-heading create-section-heading">
+              <span className="eyebrow">SORA-WORTHY READINESS</span>
               <strong>AI Cast Studio checklist</strong>
             </div>
             <span className="tiny-pill">Studio mode</span>
@@ -4297,8 +4297,8 @@ export default function CreateVideo({
         </label>
 
         <section className="viral-polish-panel" aria-label="Viral AI cast scene tools">
-          <div className="row-between">
-            <div className="viral-polish-heading">
+          <div className="row-between create-section-header">
+            <div className="viral-polish-heading create-section-heading">
               <span className="eyebrow">VIRAL SCENE PRESETS</span>
               <strong>Tap a safe AI-cast setup</strong>
             </div>
