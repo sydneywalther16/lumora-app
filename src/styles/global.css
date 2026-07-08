@@ -277,7 +277,8 @@ button {
 }
 
 .screen-scroll {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior-x: none;
@@ -829,10 +830,9 @@ button {
 }
 
 .bottom-nav {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  position: relative;
+  flex: 0 0 auto;
+  width: 100%;
   z-index: 20;
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
