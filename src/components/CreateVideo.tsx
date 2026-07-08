@@ -31,7 +31,6 @@ import { saveStudioProject, type StudioProject } from '../lib/projectStorage';
 import { loadLumoraProfile } from '../lib/profileStorage';
 import {
   loadSupabaseProfile,
-  saveSupabaseDraft,
   saveSupabaseProject,
   updateSupabaseCharacterReferenceImageUrls,
   updateSupabaseCharacterProfile,
@@ -571,20 +570,6 @@ function createLocalGenerationId() {
       (Math.random() * 16) >> (Number(character) / 4)
     ).toString(16),
   );
-}
-
-function saveLocalDraft(title: string, prompt: string) {
-  const draft = {
-    id: createLocalGenerationId(),
-    title,
-    prompt,
-    createdAt: new Date().toISOString(),
-  };
-  const raw = localStorage.getItem('lumora_drafts');
-  const parsed = raw ? JSON.parse(raw) : [];
-  const existing = Array.isArray(parsed) ? parsed : [];
-  localStorage.setItem('lumora_drafts', JSON.stringify([draft, ...existing]));
-  return draft;
 }
 
 function buildCharacterDescription(input: {
@@ -4160,48 +4145,133 @@ export default function CreateVideo({
       return;
     }
 
+    const scenePrompt = activePrompt.trim();
+    if (!scenePrompt) {
+      setStatus('Add a scene idea before saving.');
+      return;
+    }
+
     setBusy(true);
     setStatus('Saving draft...');
 
     try {
+      const now = new Date().toISOString();
+      const profile = loadLumoraProfile();
+      const displayEngine = engine === SEEDANCE_ENGINE_ID
+        ? 'Seedance Fast'
+        : engine === SEEDANCE_QUALITY_ENGINE_ID
+          ? 'Seedance Quality'
+          : engine === 'replicate'
+            ? 'Kling Reference'
+            : engineLabels[engine] ?? engine;
+      const studioDraft: StudioProject = {
+        id: createLocalGenerationId(),
+        title: draftTitle.trim() || 'Untitled scene',
+        caption: scenePrompt,
+        prompt: scenePrompt,
+        finalPrompt: scenePrompt,
+        videoUrl: '',
+        thumbnailUrl: null,
+        posterUrl: null,
+        thumbnailSource: null,
+        status: 'draft',
+        provider: engine,
+        engine,
+        aspectRatio,
+        model: null,
+        displayEngine,
+        generationMode: selectedGenerationMode,
+        identityId: identityProfile?.identityId ?? null,
+        identityPrompt: identityProfile?.identityPrompt ?? null,
+        consistencyPrompt: identityProfile?.generationConsistencyPrompt ?? null,
+        canonicalReferenceSet: identityProfile?.canonicalReferenceSet ?? null,
+        keyframeUrl: null,
+        referenceImageUrl: selectedSelfReferenceImageUrl,
+        referenceImageUrls: referencePayload,
+        additionalReferenceImageUrls,
+        exactLikenessRoute: null,
+        exactLikenessProvider: null,
+        exactLikenessCanaryStatus: null,
+        referenceStrategy: null,
+        referenceRolesUsed: null,
+        referenceCount: readySeedanceReferenceCount,
+        sceneAnchorStrategy: null,
+        sceneAnchorGenerated: null,
+        sceneAnchorPersisted: null,
+        sceneAnchorProvider: null,
+        sceneAnchorReason: null,
+        sceneAnchorFailureCategory: null,
+        sceneAnchorHttpStatus: null,
+        sceneAnchorErrorType: null,
+        sceneAnchorErrorMessage: null,
+        sceneAnchorPromptLength: null,
+        sceneAnchorPromptLimit: null,
+        sceneAnchorPromptCompressed: null,
+        sceneAnchorPromptTruncated: null,
+        sceneAnchorPayloadFieldNames: null,
+        sceneAnchorReferenceCount: null,
+        sceneAnchorSubmittedReferenceCount: null,
+        sceneAnchorReferenceRolesUsed: null,
+        sceneAnchorDroppedReferenceRoles: null,
+        sceneAnchorProviderReferenceLimit: null,
+        sceneAnchorOutputParsed: null,
+        sceneAnchorValidation: null,
+        primaryInputType: null,
+        primaryVideoInputType: null,
+        primaryVideoInputSource: null,
+        identityReferencesPassedToVideoStage: null,
+        identityReferenceCount: null,
+        identityReferenceMode: null,
+        startFrameSource: null,
+        posterFrameSource: null,
+        firstFrameSource: null,
+        stage2ProviderModel: null,
+        stage2ProviderRouteType: null,
+        rawReferenceVisualInputsSentToStage2: null,
+        sceneIntent: null,
+        framingIntent: null,
+        primaryReferenceRole: null,
+        supportingReferenceRoles: null,
+        userSpecifiedOutfit: null,
+        outfitTermsDetected: null,
+        environmentTermsDetected: null,
+        referenceOutfitCarryoverSuppressed: null,
+        compositionCarryoverSuppressed: null,
+        frontOnlyFallback: null,
+        renderProvider: null,
+        klingReferenceDiagnostics: null,
+        audioConfigured: null,
+        viralPresetUsed,
+        promptPolished,
+        characterId,
+        characterName,
+        characterAvatar,
+        isDefaultSelfCharacter,
+        creatorName: profile.displayName || 'Lumora Creator',
+        creatorUsername: profile.username || 'lumora.creator',
+        creatorAvatar: profile.avatar || null,
+        createdAt: now,
+        updatedAt: now,
+      };
+
       if (authUser) {
-        await saveSupabaseDraft({
-          userId: authUser.id,
-          title: draftTitle,
-          prompt: activePrompt,
-          payload: {
-            selectedStyles,
-            duration,
-            aspectRatio,
-            engine,
-            displayEngine: engine === SEEDANCE_ENGINE_ID
-              ? 'Seedance Fast'
-              : engine === SEEDANCE_QUALITY_ENGINE_ID
-                ? 'Seedance Quality'
-                : engine === 'replicate'
-                  ? 'kling'
-                  : engineLabels[engine] ?? engine,
-            characterId,
-            characterName,
-            characterAvatar,
-            isDefaultSelfCharacter,
-            generationMode: selectedGenerationMode,
-            referenceImageUrl: selectedSelfReferenceImageUrl,
-            referenceImageUrls: referencePayload,
-            referenceImages: isSeedanceEngine ? seedanceReferenceImages : undefined,
-            renderPreference,
-            viralPresetUsed,
-            promptPolished,
-          },
-        });
-        setStatus('Draft saved to your account.');
+        try {
+          await saveSupabaseProject(authUser.id, studioDraft);
+          setStatus('Draft saved to your account.');
+        } catch (saveError) {
+          console.error('Account draft save failed; saving local draft backup.', saveError);
+          saveStudioProject(studioDraft);
+          setStatus('Account save is unavailable, so a local Drafts backup was saved.');
+        }
+        void trackCreatorEvent('first_draft_created', { source: 'manual-save' }, authUser.id);
       } else {
-        saveLocalDraft(draftTitle, activePrompt);
+        saveStudioProject(studioDraft);
         setStatus('Draft saved locally.');
         void trackCreatorEvent('first_draft_created', { source: 'manual-save' }, null);
       }
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Unable to save draft.');
+      console.error('Unable to save draft.', error);
+      setStatus('Unable to save draft.');
     } finally {
       setBusy(false);
     }

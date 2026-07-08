@@ -45,6 +45,9 @@ function formatStatus(status: string) {
 
 function draftStateCopy(job: GenerationJob) {
   const status = (job.status || '').toLowerCase();
+  if (status === 'draft' && !hasVerifiedVideoOutput(job as unknown as Record<string, unknown>)) {
+    return 'Saved scene draft. No video yet.';
+  }
   if (status === 'rate_limited') return 'Render queue is cooling down. Lumora will resume automatically.';
   if (status === 'queued') return 'Queued for rendering. Lumora will keep checking.';
   if (status === 'rendering' || status === 'processing') return 'Rendering your cinematic moment.';
@@ -57,6 +60,7 @@ function draftStateCopy(job: GenerationJob) {
 function primaryDraftAction(job: GenerationJob) {
   const status = (job.status || '').toLowerCase();
   if (hasVerifiedVideoOutput(job as unknown as Record<string, unknown>)) return 'Continue Story';
+  if (status === 'draft') return 'Continue in Create';
   if (status === 'rate_limited') return 'Resume render';
   if (status === 'queued' || status === 'rendering' || status === 'processing') return 'Continue checking';
   if (status === 'paused' || status === 'failed') return creatorRenderStateCopy('paused').primaryActionLabel ?? 'Try this take';
@@ -514,8 +518,10 @@ export default function StudioList({ jobs, onPublished }: Props) {
         {visibleJobs.map((job) => {
           const verifiedVideoUrl = verifiedJobVideoUrl(job);
           const effectiveStatus = job.status === 'completed' && !verifiedVideoUrl ? 'verifying_output' : job.status;
-          const statusLabel = formatStatus(effectiveStatus);
           const statusValue = (job.status || '').toLowerCase();
+          const isTextOnlyDraft = statusValue === 'draft' && !verifiedVideoUrl;
+          const statusLabel = isTextOnlyDraft ? 'Scene draft' : formatStatus(effectiveStatus);
+          const mediaStatusLabel = isTextOnlyDraft ? 'No video yet' : statusLabel;
           const showProviderDetail = false;
           const previewItem = verifiedVideoUrl ? { ...job, videoUrl: verifiedVideoUrl, outputUrl: verifiedVideoUrl } : job;
           const draftLabels = buildDraftAiCastLabels(job);
@@ -562,7 +568,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
                   item={previewItem}
                   title={job.title}
                   controls={Boolean(verifiedVideoUrl)}
-                  placeholderLabel={statusLabel}
+                  placeholderLabel={mediaStatusLabel}
                   style={{
                     width: '100%',
                     height: '260px',
@@ -570,7 +576,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
                   }}
                 />
                 <span className="draft-media-overlay">
-                  <span>{statusLabel}</span>
+                  <span>{mediaStatusLabel}</span>
                 </span>
               </button>
 
