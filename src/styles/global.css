@@ -3739,6 +3739,11 @@ button {
   min-height: 38px;
 }
 
+.focused-reference-summary .kling-reference-switch-btn {
+  min-height: 38px;
+  width: fit-content;
+}
+
 .focused-reference-summary .reference-mode-thumb {
   width: 56px;
   height: 56px;
@@ -3816,6 +3821,10 @@ button {
   }
 
   .focused-reference-summary .reference-setup-btn {
+    width: 100%;
+  }
+
+  .focused-reference-summary .kling-reference-switch-btn {
     width: 100%;
   }
 }

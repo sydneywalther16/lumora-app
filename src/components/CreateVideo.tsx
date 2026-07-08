@@ -1653,6 +1653,7 @@ export default function CreateVideo({
   const klingReferenceSelected = engine === 'replicate';
   const selectedKlingExactReady = klingReferenceSelected && klingExactLikenessReady;
   const klingExactReadyOnOtherRenderer = klingExactLikenessReady && !klingReferenceSelected;
+  const showKlingReferenceSwitch = klingExactReadyOnOtherRenderer && hasGenerationReference;
   const sceneAnchorConfigured = Boolean(healthDiagnostics?.sceneAnchorConfigured);
   const sceneAnchorGuidance = buildSceneAnchorCreateGuidance({
     klingReferenceSelected,
@@ -4804,7 +4805,7 @@ export default function CreateVideo({
                 Only one image uploaded. Add side, full-body, expression, or outfit references for stronger cast consistency.
               </span>
             ) : null}
-            {successFirstLighterReferencePath ? (
+            {successFirstLighterReferencePath && !klingExactReadyOnOtherRenderer ? (
               <>
                 <span className="muted">Lumora will use your saved look as text guidance first.</span>
                 <span className="muted">Photo likeness is saved, but this renderer needs a lighter identity path.</span>
@@ -4814,6 +4815,15 @@ export default function CreateVideo({
               <div style={{ display: 'grid', gap: '6px', marginTop: '10px' }}>
                 <span className="tiny-pill" style={{ width: 'fit-content' }}>{selfCharacterProviderStatusLabel}</span>
                 <span className="muted">{selfCharacterProviderStatusCopy}</span>
+                {showKlingReferenceSwitch ? (
+                  <button
+                    type="button"
+                    className="ghost-btn kling-reference-switch-btn"
+                    onClick={() => setEngine('replicate')}
+                  >
+                    Switch to Kling Reference
+                  </button>
+                ) : null}
                 {sceneAnchorGuidance ? (
                   <div className={`scene-anchor-guidance-card ${sceneAnchorConfigured ? 'ready' : 'pending'}`}>
                     <strong>{sceneAnchorGuidance.title}</strong>
