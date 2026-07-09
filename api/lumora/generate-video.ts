@@ -681,7 +681,7 @@ function isSceneAnchorStorageConfigMissingPlan(plan: KlingCreateReferencePlan | 
 
 async function loadSceneAnchorAssetStorage() {
   try {
-    return await import('../../serverless/lumora/sceneAnchorAssetStorage');
+    return await import('../../serverless/lumora/sceneAnchorAssetStorage.js');
   } catch (error) {
     throw sceneAnchorAssetPersistError({
       type: 'scene_anchor_storage_adapter_load_failed',
@@ -3694,7 +3694,7 @@ function renderFailureCopyForCategory(category: string, fallbackMessage = '') {
   if (category === 'scene_anchor_asset_persist' || category === 'scene_anchor_asset_persist_failed') {
     return {
       safeTitle: 'Scene anchor could not be saved for animation.',
-      safeMessage: 'The scene anchor was generated, but Lumora could not persist it for Kling.',
+      safeMessage: 'Lumora could not save the scene anchor for Kling. Save this draft or try the identity-only fallback.',
     };
   }
   if (category === 'scene_anchor_asset_download_failed') {

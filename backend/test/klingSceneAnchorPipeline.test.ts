@@ -442,7 +442,7 @@ try {
   assert.equal(preparedAssetPersistFailure.stage, 'persist_asset');
   assert.equal(preparedAssetPersistFailure.category, 'scene_anchor_asset_persist');
   assert.equal(preparedAssetPersistFailure.safeTitle, 'Scene anchor could not be saved for animation.');
-  assert.equal(preparedAssetPersistFailure.safeMessage, 'The scene anchor was generated, but Lumora could not persist it for Kling.');
+  assert.equal(preparedAssetPersistFailure.safeMessage, 'Lumora could not save the scene anchor for Kling. Save this draft or try the identity-only fallback.');
   assert.equal(preparedAssetPersistFailure.sceneAnchorOutputParsed, true);
   assert.equal(preparedAssetPersistFailure.sceneAnchorPersisted, false);
   assert.equal(preparedAssetPersistFailure.assetPersistErrorType, 'scene_anchor_storage_upload_failed');

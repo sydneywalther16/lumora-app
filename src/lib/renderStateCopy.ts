@@ -52,6 +52,11 @@ const rawProviderPatterns = [
   /flagged as sensitive/gi,
   /stack trace/gi,
   /traceback/gi,
+  /cannot find module/gi,
+  /module_not_found/gi,
+  /\/var\/task/gi,
+  /serverless\/lumora/gi,
+  /sceneAnchorAssetStorage/gi,
   /prediction_id/gi,
   /provider_prediction/gi,
 ];
@@ -100,6 +105,12 @@ export function sanitizeCreatorErrorMessage(value: unknown, fallback = 'Lumora p
     lower.includes('database-backed routes')
   ) {
     return 'Story Memory sync is not connected in this local preview. You can still draft scenes.';
+  }
+  if (
+    lower.includes('cannot find module') &&
+    (lower.includes('sceneanchorassetstorage') || lower.includes('serverless/lumora'))
+  ) {
+    return 'Lumora could not save the scene anchor for Kling. Save this draft or try the identity-only fallback.';
   }
   if (lower.includes('rate limit') || lower.includes('too many requests') || lower.includes('429')) {
     return 'Render queue is cooling down.';

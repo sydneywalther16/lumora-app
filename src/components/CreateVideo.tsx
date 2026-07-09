@@ -795,7 +795,7 @@ function klingProviderFailureMessage(category: string | null | undefined, fallba
     return 'Create runtime is missing scene-anchor configuration. Configure the Vercel Create runtime, or use identity-only fallback.';
   }
   if (category === 'scene_anchor_asset_persist' || category === 'scene_anchor_asset_persist_failed') {
-    return 'Scene anchor was generated, but Lumora could not save it for animation. Fix the Vercel-safe asset persistence path before retrying.';
+    return 'Lumora could not save the scene anchor for Kling. Save this draft or try the identity-only fallback.';
   }
   if (category && category.startsWith('scene_anchor_')) {
     return 'Scene anchor generation failed. Check diagnostics before retrying.';
@@ -865,7 +865,7 @@ function renderFailureMessageForCategory(category: string | null | undefined, fa
     if (lowerFallback.includes('supabase') || lowerFallback.includes('create runtime is missing')) {
       return sanitizeCreatorErrorMessage(fallback, 'Lumora paused this render.');
     }
-    return 'Scene anchor was generated, but Lumora could not save it for animation. Fix the Vercel-safe asset persistence path before retrying.';
+    return 'Lumora could not save the scene anchor for Kling. Save this draft or try the identity-only fallback.';
   }
   if (fallback.trim()) return sanitizeCreatorErrorMessage(fallback, 'Lumora paused this render.');
   if (category === 'scene_anchor_input_schema' || category === 'scene_anchor_model_schema_unmapped') {
@@ -1865,9 +1865,12 @@ export default function CreateVideo({
         ...creatorRenderStateCopy('paused'),
         title: activeRenderFailure?.safeTitle || renderFailureTitleForCategory(activeRenderFailureCategory),
         body: activeRenderFailure?.safeMessage || generationError || renderFailureMessageForCategory(activeRenderFailureCategory),
-        suggestedNextStep: activeRenderFailure?.recommendedNextAction
-          ? `Suggested next step: ${activeRenderFailure.recommendedNextAction}`
-          : 'Suggested next step: check the copied debug summary before retrying.',
+        suggestedNextStep: activeRenderFailure?.category === 'scene_anchor_asset_persist' ||
+          activeRenderFailure?.category === 'scene_anchor_asset_persist_failed'
+          ? 'Suggested next step: save this draft or try the identity-only fallback.'
+          : activeRenderFailure?.recommendedNextAction
+            ? `Suggested next step: ${activeRenderFailure.recommendedNextAction}`
+            : 'Suggested next step: save this draft before retrying.',
       }
     : selectedKlingExactReady && generationError
     ? {
@@ -5210,7 +5213,8 @@ export default function CreateVideo({
                   <small>{pausedRenderCopy.suggestedNextStep}</small>
                 ) : null}
                 {!activeReferenceRepair && activeRenderFailure ? (
-                  <div className="render-failure-debug-card">
+                  <details className="render-failure-debug-card technical-details">
+                    <summary>Diagnostics</summary>
                     <div className="render-failure-debug-grid">
                       <span>Stage</span>
                       <strong>{activeRenderFailure.stage || 'unknown'}</strong>
@@ -5301,7 +5305,7 @@ export default function CreateVideo({
                     >
                       Copy debug summary
                     </button>
-                  </div>
+                  </details>
                 ) : null}
               </div>
               {!activeReferenceRepair ? (

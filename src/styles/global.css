@@ -3290,6 +3290,34 @@ button {
   background: rgba(255, 255, 255, 0.045);
 }
 
+.render-failure-debug-card summary {
+  cursor: pointer;
+  color: var(--soft-text);
+  font-size: 0.82rem;
+  font-weight: 900;
+  list-style: none;
+}
+
+.render-failure-debug-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.render-failure-debug-card summary::after {
+  content: '+';
+  float: right;
+  color: var(--muted-text);
+}
+
+.render-failure-debug-card[open] summary::after {
+  content: '-';
+}
+
+.render-failure-debug-card p {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .render-failure-debug-grid {
   display: grid;
   grid-template-columns: minmax(84px, 0.8fr) minmax(0, 1.2fr);
@@ -3315,10 +3343,13 @@ button {
 
 .render-failure-debug-card .quiet-btn {
   width: fit-content;
+  max-width: 100%;
+  justify-self: start;
   min-height: 38px;
   padding: 9px 12px;
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.04);
+  white-space: normal;
 }
 
 .next-take-panel {
