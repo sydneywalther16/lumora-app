@@ -1907,19 +1907,33 @@ export default function CreateVideo({
   );
   const tryTakeBusy = busy || generationLoading || referenceLoading || renderCooldownActive || activeRenderBlocksGenerate;
   const baseGenerateCtaLabel = engine === 'mock' ? 'Demo preview' : 'Generate';
-  const generateCtaLabel = renderCooldownActive
-    ? `${renderCooldownSeconds}s`
-    : generationStatusState === 'rate_limited'
-      ? 'Resume'
-    : generationError && !activeReferenceRepair
-      ? 'Try again'
-    : activeRenderBlocksGenerate
-      ? 'Rendering'
-    : generationLoading
-      ? 'Generating'
-    : referenceLoading
-      ? 'Preparing'
-    : baseGenerateCtaLabel;
+  const isCreateFlowPreparing = !isHydrated || sessionLoading || healthDiagnosticsStatus === 'checking' || referenceLoading;
+  const generateCtaLabel = !hasPrompt
+    ? 'Add a scene idea'
+    : renderCooldownActive
+      ? `${renderCooldownSeconds}s`
+      : generationStatusState === 'rate_limited'
+        ? 'Resume'
+        : generationError && !activeReferenceRepair
+          ? 'Try again'
+          : activeRenderBlocksGenerate
+            ? 'Rendering'
+            : generationLoading
+              ? 'Generating'
+              : isCreateFlowPreparing
+                ? 'Preparing'
+                : !canGenerate
+                  ? engine === 'mock'
+                    ? 'Demo preview'
+                    : requiresReferenceImage && !hasGenerationReference && !mockRateLimitUi
+                      ? 'Add a cast reference'
+                      : !backendReadyForGeneration
+                        ? 'Setup needed'
+                        : baseGenerateCtaLabel
+                  : baseGenerateCtaLabel;
+  const generateButtonDisabled = generationError && !activeReferenceRepair
+    ? tryTakeBusy
+    : generateBusy || !hasPrompt || !canGenerate;
   const showCinematicStructure = Boolean(
     !activeSuccessFirstWithoutOutput && (
       creativePlanLoading ||
@@ -5057,7 +5071,7 @@ export default function CreateVideo({
             onClick={() => {
               void (generationError && !activeReferenceRepair ? handleTryUltraSafeScene() : handleGenerate());
             }}
-            disabled={generationError && !activeReferenceRepair ? tryTakeBusy : generateBusy}
+            disabled={generationError && !activeReferenceRepair ? tryTakeBusy : generateButtonDisabled}
             aria-busy={generateBusy}
           >
             {generateCtaLabel}
