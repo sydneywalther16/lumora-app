@@ -206,6 +206,22 @@ export function buildSceneAnchorCreateGuidance(input: {
   };
 }
 
+export function isDemoModeEngine(engine: string | null | undefined): boolean {
+  return engine === 'mock';
+}
+
+export function shouldShowCreatePreparingState(input: {
+  engine: string;
+  isHydrated: boolean;
+  sessionLoading: boolean;
+  healthDiagnosticsStatus: 'checking' | 'connected' | 'offline';
+  referenceLoading: boolean;
+}): boolean {
+  if (!input.isHydrated || input.sessionLoading || input.referenceLoading) return true;
+  if (isDemoModeEngine(input.engine)) return false;
+  return input.healthDiagnosticsStatus === 'checking';
+}
+
 export function buildAiCastReadiness(input: AiCastReadinessInput): AiCastReadinessItem[] {
   return [
     {

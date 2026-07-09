@@ -77,7 +77,9 @@ import {
   buildAiCastReadiness,
   buildSceneAnchorCreateGuidance,
   buildViralCaptionSuggestions,
+  isDemoModeEngine,
   polishKlingCinematicPrompt,
+  shouldShowCreatePreparingState,
   viralScenePresets,
   type ViralScenePreset,
 } from '../lib/aiCastExperience';
@@ -1907,7 +1909,13 @@ export default function CreateVideo({
   );
   const tryTakeBusy = busy || generationLoading || referenceLoading || renderCooldownActive || activeRenderBlocksGenerate;
   const baseGenerateCtaLabel = engine === 'mock' ? 'Demo preview' : 'Generate';
-  const isCreateFlowPreparing = !isHydrated || sessionLoading || healthDiagnosticsStatus === 'checking' || referenceLoading;
+  const isCreateFlowPreparing = shouldShowCreatePreparingState({
+    engine,
+    isHydrated,
+    sessionLoading,
+    healthDiagnosticsStatus,
+    referenceLoading,
+  });
   const generateCtaLabel = !hasPrompt
     ? 'Add a scene idea'
     : renderCooldownActive
@@ -3015,6 +3023,55 @@ export default function CreateVideo({
       setGenerationLoading(false);
     };
 
+    const currentPrompt = options.promptOverride ?? activePrompt;
+    const selectedEngine = engine;
+    const selectedEngineRequiresBackend = !isDemoModeEngine(selectedEngine);
+    const isDemoModeSelection = isDemoModeEngine(selectedEngine);
+
+    if (!currentPrompt.trim()) {
+      setGenerationError('Add a prompt before generating.');
+      setGenerationStatusState('failed');
+      releaseGenerateLock();
+      return;
+    }
+
+    if (isDemoModeSelection) {
+      generationInFlightRef.current = true;
+      setGenerationLoading(true);
+      const now = new Date().toISOString();
+      const demoPreviewId = `demo-preview-${Date.now()}`;
+      const demoVideoUrl = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
+      finishGenerationProgress('completed');
+      setGeneratedVideoUrl(demoVideoUrl);
+      setFinalGeneratedPrompt(currentPrompt);
+      setGeneratedDisplayEngine('Demo Mode');
+      setGeneratedMode('text-to-video-fallback');
+      setGenerationResult({
+        id: demoPreviewId,
+        jobId: demoPreviewId,
+        status: 'completed',
+        engine: 'mock',
+        provider: 'mock',
+        characterId,
+        characterName,
+        characterAvatar,
+        isDefaultSelfCharacter,
+        prompt: currentPrompt,
+        outputUrl: demoVideoUrl,
+        videoUrl: demoVideoUrl,
+        generationMode: 'text-to-video-fallback',
+        finalPrompt: currentPrompt,
+        model: 'demo-preview',
+        displayEngine: 'Demo Mode',
+        createdAt: now,
+        message: 'Demo preview only. No real render was created.',
+      });
+      setGenerationWarnings(['Demo preview only. No real render was created.']);
+      setStatus('Demo preview ready. No real render was created.');
+      releaseGenerateLock();
+      return;
+    }
+
     if (selectedEngineRequiresBackend && healthDiagnosticsStatus === 'checking') {
       setStatus('Checking video engine. Try again in a moment.');
       return;
@@ -3066,9 +3123,7 @@ export default function CreateVideo({
       return;
     }
 
-    const currentPrompt = options.promptOverride ?? activePrompt;
     const selectedAspectRatio = aspectRatio;
-    const selectedEngine = engine;
     const selectedDuration = options.durationOverride ?? duration;
     const selectedRenderPreference = options.renderPreferenceOverride ?? renderPreference;
     const selectedSelfLikenessIntensity = selfLikenessIntensity;
@@ -3079,13 +3134,6 @@ export default function CreateVideo({
       selectedKlingExactReadyForRequest,
     );
     setIdentityOnlyKlingFallbackActive(identityOnlyKlingFallbackRequest);
-
-    if (!currentPrompt.trim()) {
-      setGenerationError('Add a prompt before generating.');
-      setGenerationStatusState('failed');
-      releaseGenerateLock();
-      return;
-    }
 
     if (selectedEngine === 'replicate' && !selectedReferenceImageUrl && !mockRateLimitUi) {
       setGenerationError('Add or re-save a public reference photo before generating.');
@@ -3171,41 +3219,6 @@ export default function CreateVideo({
         type: 'error',
         message: 'Render queue is cooling down. Lumora will resume automatically.',
       });
-      releaseGenerateLock();
-      return;
-    }
-
-    if (selectedEngine === 'mock') {
-      const now = new Date().toISOString();
-      const demoPreviewId = `demo-preview-${Date.now()}`;
-      const demoVideoUrl = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
-      finishGenerationProgress('completed');
-      setGeneratedVideoUrl(demoVideoUrl);
-      setFinalGeneratedPrompt(currentPrompt);
-      setGeneratedDisplayEngine('Demo Mode');
-      setGeneratedMode('text-to-video-fallback');
-      setGenerationResult({
-        id: demoPreviewId,
-        jobId: demoPreviewId,
-        status: 'completed',
-        engine: 'mock',
-        provider: 'mock',
-        characterId,
-        characterName,
-        characterAvatar,
-        isDefaultSelfCharacter,
-        prompt: currentPrompt,
-        outputUrl: demoVideoUrl,
-        videoUrl: demoVideoUrl,
-        generationMode: 'text-to-video-fallback',
-        finalPrompt: currentPrompt,
-        model: 'demo-preview',
-        displayEngine: 'Demo Mode',
-        createdAt: now,
-        message: 'Demo preview only. No real render was created.',
-      });
-      setGenerationWarnings(['Demo preview only. No real render was created.']);
-      setStatus('Demo preview ready. No real render was created.');
       releaseGenerateLock();
       return;
     }
