@@ -94,11 +94,11 @@ function getPostedProjectIds(): string[] {
 
 function getJobCharacterLabel(job: GenerationJob) {
   if (job.exactLikenessRoute === 'kling_reference' || job.generationMode === 'kling-exact-likeness-reference') {
-    return 'Kling exact likeness';
+    return 'Kling Reference Beta';
   }
 
   if (job.displayEngine?.toLowerCase().includes('kling exact likeness')) {
-    return 'Kling exact likeness';
+    return 'Kling Reference Beta';
   }
 
   // Always prioritize isDefaultSelfCharacter flag

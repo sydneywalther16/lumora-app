@@ -41,16 +41,16 @@ const configuredGuidance = buildSceneAnchorCreateGuidance({
   klingExactReady: true,
   sceneAnchorConfigured: true,
 });
-assert.equal(configuredGuidance?.title, 'Scene-anchor-first exact likeness');
-assert.match(configuredGuidance?.body ?? '', /stage the scene first/i);
+assert.equal(configuredGuidance?.title, 'Kling Reference Beta');
+assert.match(configuredGuidance?.body ?? '', /Seedance Fast/i);
 
 const missingProviderGuidance = buildSceneAnchorCreateGuidance({
   klingReferenceSelected: true,
   klingExactReady: true,
   sceneAnchorConfigured: false,
 });
-assert.equal(missingProviderGuidance?.title, 'Scene anchor provider not configured yet.');
-assert.match(missingProviderGuidance?.helper ?? '', /Sora-level staging/i);
+assert.equal(missingProviderGuidance?.title, 'Kling Reference Beta needs setup');
+assert.match(missingProviderGuidance?.helper ?? '', /Identity-only fallback/i);
 
 const readiness = buildAiCastReadiness({
   selfCharacterSaved: true,
@@ -73,8 +73,8 @@ const klingDraftLabels = buildDraftAiCastLabels({
   audioConfigured: false,
 });
 assert.deepEqual(klingDraftLabels, [
-  'Kling exact likeness',
-  'Scene-anchor-first',
+  'Kling Reference Beta',
+  'Scene-anchor Beta',
   'Starts from scene anchor',
   'Identity references baked into anchor',
   'Image-to-video stage',
@@ -96,7 +96,7 @@ const scaffold = buildContinueStoryScaffold({
   environmentTermsDetected: ['flower garden'],
   framingIntent: 'walking_full_body',
 });
-assert.match(scaffold, /scene-anchor-first exact-likeness planning/i);
+assert.match(scaffold, /Kling Reference Beta scene-anchor planning/i);
 assert.match(scaffold, /flowing ivory dress/i);
 assert.match(scaffold, /flower garden/i);
 assert.match(scaffold, /without resetting into a generic portrait/i);
@@ -142,7 +142,7 @@ try {
   assert.equal(payload.audioConfigured, false);
   assert.equal(payload.viralPresetUsed, 'golden-hour-garden-walk');
   assert.equal(payload.promptPolished, true);
-  assert.match(String(payload.prompt), /scene-anchor-first exact-likeness planning/i);
+  assert.match(String(payload.prompt), /Kling Reference Beta scene-anchor planning/i);
   assert.equal(storage.get('lumora_remix_render_engine'), 'replicate');
 } finally {
   Object.defineProperty(globalThis, 'window', {
@@ -162,8 +162,8 @@ assert.match(captions.dramatic, /golden hour garden walk/i);
 assert.doesNotMatch(aiCastHelperSource, /\bfetch\s*\(/);
 assert.doesNotMatch(aiCastHelperSource, /FAL_KEY|KLING_API_KEY|OPENAI_API_KEY|SUPABASE_SERVICE_ROLE/i);
 assert.match(createVideoSource, /Sora-worthy readiness/);
-assert.match(createVideoSource, /Viral Scene Presets/);
-assert.match(createVideoSource, /Scene anchor provider not configured yet\./);
+assert.match(createVideoSource, /VIRAL SCENE PRESETS/i);
+assert.match(createVideoSource, /Kling Reference is experimental/);
 assert.match(createVideoSource, /Prompt polish/);
 assert.match(studioListSource, /buildDraftAiCastLabels/);
 assert.match(studioListSource, /Viral caption helper/);

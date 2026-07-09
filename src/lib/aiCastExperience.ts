@@ -194,15 +194,15 @@ export function buildSceneAnchorCreateGuidance(input: {
   if (!input.klingReferenceSelected || !input.klingExactReady) return null;
   if (input.sceneAnchorConfigured) {
     return {
-      title: 'Scene-anchor-first exact likeness',
-      body: 'Lumora will stage the scene first, then animate with Kling.',
-      helper: 'Using identity references without copying reference backgrounds.',
+      title: 'Kling Reference Beta',
+      body: 'Experimental exact-likeness testing. Seedance Fast is the safer first render path.',
+      helper: 'Scene-anchor mode stages a start frame before Kling animation when you intentionally test likeness.',
     };
   }
   return {
-    title: 'Scene anchor provider not configured yet.',
-    body: 'Identity-only fallback may copy reference outfit/background.',
-    helper: 'Configure scene anchor image provider for Sora-level staging.',
+    title: 'Kling Reference Beta needs setup',
+    body: 'Use Seedance Fast or Demo Mode for the MVP flow.',
+    helper: 'Identity-only fallback remains available for testing without a scene anchor.',
   };
 }
 
@@ -222,7 +222,7 @@ export function buildAiCastReadiness(input: AiCastReadinessInput): AiCastReadine
     },
     {
       key: 'kling-exact',
-      label: 'Kling exact likeness ready',
+      label: 'Kling Reference Beta',
       ready: input.klingExactLikenessReady,
       status: input.klingExactLikenessReady ? 'Ready' : 'Unavailable',
     },
@@ -260,9 +260,9 @@ export function buildDraftAiCastLabels(job: DraftLabelInput): string[] {
     job.generationMode === 'kling-exact-likeness-reference';
 
   if (isKlingExact) {
-    labels.push('Kling exact likeness');
+    labels.push('Kling Reference Beta');
     if (job.sceneAnchorStrategy === 'scene_anchor_still' || job.primaryInputType === 'scene_anchor_still') {
-      labels.push('Scene-anchor-first');
+      labels.push('Scene-anchor Beta');
       if (job.startFrameSource === 'scene_anchor') labels.push('Starts from scene anchor');
       if (job.identityReferencesPassedToVideoStage === false || job.identityReferenceMode === 'stage1_only') {
         labels.push('Identity references baked into anchor');
@@ -301,8 +301,8 @@ export function buildContinueStoryScaffold(item: ContinueStoryInput) {
     ? diagnostics.sceneAnchorStrategy
     : null;
   const anchor = (item.sceneAnchorStrategy ?? diagnosticSceneAnchorStrategy) === 'scene_anchor_still'
-    ? ' Continue with scene-anchor-first exact-likeness planning, using the previous scene context or a new scene anchor as the image-to-video start frame rather than a raw front portrait.'
-    : ' Continue with Kling exact-likeness identity planning.';
+    ? ' Continue with Kling Reference Beta scene-anchor planning, using the previous scene context or a new scene anchor as the image-to-video start frame rather than a raw front portrait.'
+    : ' Continue with Kling Reference Beta identity planning.';
   const framing = item.framingIntent
     ? ` Keep the framing language aligned with ${item.framingIntent.replace(/_/g, ' ')}.`
     : '';

@@ -160,14 +160,14 @@ const providerOptions: Array<{
     label: 'Seedance Fast',
     speed: '~1-3 min',
     quality: 'High',
-    description: 'Quick cinematic renders with cast references.',
+    description: 'Safest first real render for creator testing.',
   },
   {
     engine: SEEDANCE_QUALITY_ENGINE_ID,
     label: 'Seedance Quality',
     speed: '~3-6 min',
     quality: 'Higher',
-    description: 'Slower pass for stronger identity and motion detail.',
+    description: 'Slower polished pass after a draft works.',
   },
   {
     engine: 'veo',
@@ -181,14 +181,14 @@ const providerOptions: Array<{
     label: 'Demo Mode',
     speed: 'Instant',
     quality: 'Demo',
-    description: 'Instant preview without spending render credits.',
+    description: 'Use Demo Mode to preview without credits.',
   },
   {
     engine: 'replicate',
     label: 'Kling Reference',
     speed: '~1-3 min',
-    quality: 'Reference',
-    description: 'Reference-led motion for your self character.',
+    quality: 'Beta',
+    description: 'Experimental exact-likeness testing for your AI Cast.',
   },
 ];
 const engineLabels: Record<VideoEngine, string> = {
@@ -528,7 +528,7 @@ function creatorRenderModeLabel(mode: string) {
     case 'text-to-video-fallback':
       return 'Cinematic text scene';
     case 'kling-exact-likeness-reference':
-      return 'Kling exact likeness scene';
+      return 'Kling Reference Beta scene';
     default:
       return mode.replace(/-/g, ' ');
   }
@@ -769,34 +769,32 @@ function isProviderSafetyFilterError(value: string): boolean {
 
 function klingProviderFailureMessage(category: string | null | undefined, fallback: string) {
   if (category === 'kling_provider_safety_filter') {
-    return 'Kling provider safety filter paused this render. The provider returned a moderation failure for this exact-likeness attempt.';
+    return 'Kling Reference Beta paused this render for safety. Save this draft, try Seedance Fast, or test identity-only fallback.';
   }
   if (category === 'kling_input_schema') {
-    return 'Kling rejected the render payload shape. Check provider diagnostics before retrying this exact-likeness route.';
+    return 'Kling Reference Beta could not start this render. Save this draft or try Seedance Fast.';
   }
   if (category === 'kling_scene_anchor_unavailable') {
-    return 'Scene-anchor provider is not configured. Configure a scene-anchor image provider, or use identity-only fallback.';
+    return 'Kling Reference Beta scene-anchor setup is not connected. Use Seedance Fast, Demo Mode, or identity-only fallback.';
   }
   if (category === 'kling_scene_anchor_generation_failed') {
-    return 'Scene anchor generation failed. Retry scene anchor, use identity-only fallback, or edit scene.';
+    return 'Scene-anchor mode could not start this render. Try identity-only fallback or save this draft.';
   }
   if (category === 'scene_anchor_input_schema' || category === 'scene_anchor_model_schema_unmapped') {
     const lower = fallback.toLowerCase();
     if (lower.includes('string_too_long') || lower.includes('body.prompt') || lower.includes('prompt')) {
-      return 'Scene anchor prompt exceeded the provider limit. Check prompt length, prompt limit, payload fields, and submitted reference count before retrying.';
+      return 'Scene-anchor mode could not start from this prompt. Save this draft, simplify the scene, or use Seedance Fast.';
     }
-    return fallback && fallback !== category
-      ? `Kling scene anchor failed because the image provider rejected the payload shape. Check prompt length, prompt limit, payload fields, and submitted reference count before retrying. ${fallback}`
-      : 'Kling scene anchor failed because the image provider rejected the payload shape. Check prompt length, prompt limit, payload fields, and submitted reference count before retrying.';
+    return 'Scene-anchor mode could not start this render. Try identity-only fallback or save this draft.';
   }
   if (category === 'scene_anchor_output_parse_failed') {
-    return 'Kling scene anchor generated a response, but Lumora could not read the image output.';
+    return 'Scene-anchor mode returned an unreadable result. Save this draft or try identity-only fallback.';
   }
   if (category === 'scene_anchor_provider_moderation_block') {
-    return 'Scene anchor provider blocked this image request.';
+    return 'Scene-anchor mode paused this image request for safety. Save this draft or try Seedance Fast.';
   }
   if (category === 'scene_anchor_provider_disabled' || category === 'scene_anchor_provider_not_configured' || category === 'scene_anchor_fal_key_missing') {
-    return 'Create runtime is missing scene-anchor configuration. Configure the Vercel Create runtime, or use identity-only fallback.';
+    return 'Kling Reference Beta scene-anchor setup is not connected. Use Seedance Fast, Demo Mode, or identity-only fallback.';
   }
   if (category === 'scene_anchor_asset_persist' || category === 'scene_anchor_asset_persist_failed') {
     return 'Lumora could not save the scene anchor for Kling. Save this draft or try the identity-only fallback.';
@@ -808,23 +806,23 @@ function klingProviderFailureMessage(category: string | null | undefined, fallba
     return 'Kling is temporarily unavailable. Your scene is safe to retry later.';
   }
   if (category === 'kling_billing_required') {
-    return 'Kling billing or account access needs attention before this exact-likeness route can render.';
+    return 'Kling account access needs attention before Beta renders can run.';
   }
   if (category && category.startsWith('kling_')) {
-    return `Kling exact-likeness render paused: ${category.replace(/_/g, ' ')}.`;
+    return `Kling Reference Beta render paused: ${category.replace(/_/g, ' ')}.`;
   }
   return fallback;
 }
 
 function renderFailureTitleForCategory(category: string | null | undefined) {
   if (category === 'scene_anchor_input_schema' || category === 'scene_anchor_model_schema_unmapped') {
-    return 'Scene anchor provider rejected the prompt or payload.';
+    return 'Scene-anchor mode could not start this render.';
   }
   if (category === 'scene_anchor_output_parse_failed' || category === 'scene_anchor_output_missing') {
-    return 'Scene anchor output could not be read.';
+    return 'Scene-anchor mode returned an unreadable result.';
   }
   if (category === 'scene_anchor_provider_moderation_block') {
-    return 'Scene anchor provider blocked this image request.';
+    return 'Scene-anchor mode paused this image request.';
   }
   if (category === 'scene_anchor_asset_persist' || category === 'scene_anchor_asset_persist_failed') {
     return 'Scene anchor could not be saved for animation.';
@@ -837,28 +835,28 @@ function renderFailureTitleForCategory(category: string | null | undefined) {
     category === 'scene_anchor_provider_not_configured' ||
     category === 'scene_anchor_fal_key_missing'
   ) {
-    return 'Create runtime is missing scene-anchor configuration.';
+    return 'Kling Reference Beta setup is not connected.';
   }
   if (category === 'kling_scene_anchor_video_input_schema') {
     return 'Scene-anchor mode could not start this render.';
   }
   if (category === 'kling_scene_anchor_video_model_not_found') {
-    return 'Kling image-to-video model was not found.';
+    return 'Kling Reference Beta video route is unavailable.';
   }
   if (category === 'kling_scene_anchor_video_model_not_configured') {
-    return 'Scene anchor video model is not configured.';
+    return 'Kling Reference Beta video setup is not connected.';
   }
   if (category === 'kling_scene_anchor_video_billing_required') {
-    return 'Kling billing or account access is required.';
+    return 'Kling account access needs attention.';
   }
   if (category === 'kling_scene_anchor_video_poll_failed') {
-    return 'Kling image-to-video polling failed.';
+    return 'Kling Reference Beta could not finish this render.';
   }
   if (category === 'kling_scene_anchor_video_output_parse_failed') {
-    return 'Kling image-to-video output could not be read.';
+    return 'Kling Reference Beta returned an unreadable result.';
   }
   if (category === 'kling_scene_anchor_video_provider_unavailable') {
-    return 'Kling image-to-video is temporarily unavailable.';
+    return 'Kling Reference Beta is temporarily unavailable.';
   }
   return 'Lumora paused this render.';
 }
@@ -873,16 +871,16 @@ function renderFailureMessageForCategory(category: string | null | undefined, fa
   }
   if (fallback.trim()) return sanitizeCreatorErrorMessage(fallback, 'Lumora paused this render.');
   if (category === 'scene_anchor_input_schema' || category === 'scene_anchor_model_schema_unmapped') {
-    return 'Kling scene anchor failed because the image provider rejected the prompt or payload. Check prompt length, prompt limit, payload fields, and submitted reference count before retrying.';
+    return 'Scene-anchor mode could not start this render. Try identity-only fallback, save this draft, or use Seedance Fast.';
   }
   if (category === 'scene_anchor_output_parse_failed' || category === 'scene_anchor_output_missing') {
-    return 'Scene anchor provider returned a response, but Lumora could not read the image output.';
+    return 'Scene-anchor mode returned an unreadable result. Save this draft or try identity-only fallback.';
   }
   if (category === 'scene_anchor_provider_moderation_block') {
-    return 'Scene anchor provider blocked this image request.';
+    return 'Scene-anchor mode paused this image request for safety. Save this draft or try Seedance Fast.';
   }
   if (category === 'scene_anchor_asset_download_failed') {
-    return 'Scene anchor was generated, but Lumora could not download it for persistence.';
+    return 'Scene-anchor mode created a draft image but could not prepare it for animation. Save this draft or try identity-only fallback.';
   }
   if (category === 'kling_scene_anchor_video_input_schema') {
     return sceneAnchorStartFailureMessage;
@@ -1544,7 +1542,6 @@ export default function CreateVideo({
   const isSeedanceEngine = engine === SEEDANCE_ENGINE_ID || engine === SEEDANCE_QUALITY_ENGINE_ID;
   const isBackendProviderEngine = isSeedanceEngine || engine === 'veo' || engine === 'mock';
   const requiresReferenceImage = engine === 'replicate';
-  const selectedProviderOption = providerOptions.find((option) => option.engine === engine) ?? providerOptions[0];
   const hasPrompt = activePrompt.trim().length > 0;
   const selectedEngineRequiresBackend = engine !== 'mock';
   const realProviderReady = hasReadyRealGenerationProvider(healthDiagnostics);
@@ -1660,7 +1657,7 @@ export default function CreateVideo({
       characterProfile?.videoReferenceRouteStatus,
     );
   const selfCharacterProviderStatusLabel = selectedKlingExactReady
-    ? 'Kling exact likeness ready'
+    ? 'Kling Reference Beta'
     : klingExactReadyOnOtherRenderer
       ? 'Soft guidance renderer'
     : providerSelfCharacterReady
@@ -1683,10 +1680,10 @@ export default function CreateVideo({
         : '';
   const selfCharacterProviderStatusCopy = selectedKlingExactReady
     ? sceneAnchorConfigured
-      ? 'Scene-anchor-first exact likeness. Lumora will stage the scene first, then animate with Kling.'
-      : 'Scene anchor provider not configured yet. Identity-only fallback may copy reference outfit/background.'
+      ? 'Kling Reference is experimental for exact-likeness testing. Use Seedance Fast for the safest first render.'
+      : 'Kling Reference is experimental. Identity-only fallback is available if you want to test exact likeness.'
     : klingExactReadyOnOtherRenderer
-      ? 'Using soft self guidance with this renderer. Choose Kling Reference for exact-likeness rendering.'
+      ? 'Use Seedance Fast for the safest first render. Kling Reference stays available as an experimental exact-likeness test.'
     : providerSelfCharacterReady
     ? 'Verified self character ready.'
     : characterProfile?.providerCharacterStatus === 'ready' && characterProfile.likenessProviderStatus === 'character_created_usage_unmapped'
@@ -1778,31 +1775,29 @@ export default function CreateVideo({
   const sceneExecuteBusy = Boolean(sceneExecuteDisabledReason) || generationLoading || busy;
   const engineRoutingMessage =
     isSeedanceEngine
-      ? renderPreference === 'success_first'
-        ? klingExactReadyOnOtherRenderer
-          ? 'Success First uses soft self guidance with this renderer. Choose Kling Reference for exact-likeness rendering.'
-          : 'Success First uses soft self guidance first, then adds photo likeness when the scene is ready.'
-        : klingExactReadyOnOtherRenderer
-          ? `${selectedProviderOption.label} uses soft self guidance with ${readySeedanceReferenceCount} cast reference${readySeedanceReferenceCount === 1 ? '' : 's'}. Choose Kling Reference for exact-likeness rendering.`
-          : `${selectedProviderOption.label} uses soft self guidance with ${readySeedanceReferenceCount} cast reference${readySeedanceReferenceCount === 1 ? '' : 's'} while keeping the scene fresh.`
+      ? engine === SEEDANCE_ENGINE_ID
+        ? renderPreference === 'success_first'
+          ? 'Use Seedance Fast for the safest first render. Save a draft first, then preview when ready.'
+          : `Use Seedance Fast for the safest first render with ${readySeedanceReferenceCount} cast reference${readySeedanceReferenceCount === 1 ? '' : 's'}.`
+        : 'Seedance Quality is the slower real render path after Seedance Fast or a saved draft feels right.'
     : engine === 'veo'
       ? klingExactReadyOnOtherRenderer
-        ? 'Using soft self guidance with this renderer. Choose Kling Reference for exact-likeness rendering.'
-        : 'Veo Experimental is ready for the next cinematic video route.'
+        ? 'Veo Experimental uses soft self guidance. Seedance Fast is the safest first render.'
+        : 'Veo Experimental is available for cinematic route testing.'
     : engine === 'mock'
-      ? 'Demo Mode previews the flow without using real render credits.'
+      ? 'Use Demo Mode to preview without credits.'
     : isSoraEngine
       ? (providerSelfCharacterReady
           ? 'Exact self character route is ready.'
           : klingExactReadyOnOtherRenderer
-            ? 'Using soft self guidance with this renderer. Choose Kling Reference for exact-likeness rendering.'
+            ? 'Using soft self guidance with this renderer. Seedance Fast remains the safest first render.'
             : 'Using soft self guidance. Exact-likeness rendering still needs setup.')
     : klingReferenceSelected
       ? selectedKlingExactReady
         ? sceneAnchorConfigured
-          ? 'Scene-anchor-first exact likeness. Lumora will stage the scene first, then animate with Kling.'
-          : 'Scene anchor provider not configured yet. Exact-likeness rendering will use identity-only fallback.'
-        : 'Using soft self guidance. Exact-likeness rendering still needs setup.'
+          ? 'Kling Reference is experimental for exact-likeness testing. Use Seedance Fast for the safest first render.'
+          : 'Kling Reference is experimental. Identity-only fallback is available for testing.'
+        : 'Kling Reference is experimental. Exact-likeness rendering still needs setup.'
       : 'Using soft self guidance. Exact-likeness rendering still needs setup.';
   const aiCastReadiness = buildAiCastReadiness({
     selfCharacterSaved: Boolean(hasSelfCharacter && (characterName || characterProfile || identityProfile)),
@@ -1869,7 +1864,7 @@ export default function CreateVideo({
       : sceneAnchorKlingRenderStateActive
       ? generationStatusState === 'verifying_output'
         ? 'Lumora is verifying the Kling video before marking the draft ready.'
-        : 'Scene-anchor-first exact likeness is staging the requested outfit, environment, framing, and motion before Kling animation.'
+        : 'Kling Reference Beta is staging the scene before Kling animation.'
       : status && !isProviderTechnicalText(status)
       ? status
       : renderStateBody(generationStatusState, renderCooldownSeconds),
@@ -1890,10 +1885,10 @@ export default function CreateVideo({
     : selectedKlingExactReady && generationError
     ? {
         ...creatorRenderStateCopy('paused'),
-        title: 'Kling exact likeness render paused.',
+        title: 'Kling Reference Beta render paused.',
         body: generationError,
         suggestedNextStep: /scene[-\s]?anchor/i.test(generationError)
-          ? 'Suggested next step: retry scene anchor, use identity-only fallback, or edit scene.'
+          ? 'Suggested next step: use identity-only fallback, save this draft, or return to Seedance Fast.'
           : 'Suggested next step: retry Kling later, edit the scene, or switch to soft guidance.',
       }
     : creatorRenderStateCopy('paused');
@@ -2134,7 +2129,7 @@ export default function CreateVideo({
             frontOnlyFallback: job.frontOnlyFallback ?? null,
             klingReferenceDiagnostics: job.klingReferenceDiagnostics ?? null,
             message: job.message ?? (job.exactLikenessRoute === 'kling_reference'
-              ? 'Kling exact-likeness scene created with scene-anchor identity planning.'
+              ? 'Kling Reference Beta scene created with scene-anchor identity planning.'
               : job.textSelfGuidanceAvailable ? 'Rendered with soft self guidance.' : 'Your cinematic draft is saved.'),
             selfLikenessIntensity: job.selfLikenessIntensity ?? selfLikenessIntensity,
             textSelfGuidanceAvailable: job.textSelfGuidanceAvailable ?? null,
@@ -3128,7 +3123,7 @@ export default function CreateVideo({
     setGenerationSafeRewrite('');
     setGenerationModerationDetail(identityOnlyKlingFallbackRequest ? identityOnlyKlingFallbackMessage : '');
     setGenerationModerationStages(identityOnlyKlingFallbackRequest
-      ? ['Using identity-only Kling fallback', 'Animating with Kling exact likeness']
+      ? ['Using identity-only Kling fallback', 'Animating with Kling Reference Beta']
       : []);
     setGeneratedVideoUrl(null);
     setFinalGeneratedPrompt('');
@@ -3428,7 +3423,7 @@ export default function CreateVideo({
       console.log('GENERATION RESPONSE:', data);
       setActiveRenderFailure(null);
       if (selectedKlingExactReadyForRequest && data.sceneAnchorGenerated) {
-        setStatus('Scene anchor approved. Animating with Kling exact likeness...');
+        setStatus('Scene anchor approved. Animating with Kling Reference Beta...');
       }
 
       if (isAsyncRenderResponse(data)) {
@@ -3741,7 +3736,7 @@ export default function CreateVideo({
         textSelfGuidanceAvailable: data.textSelfGuidanceAvailable ?? null,
         exactLikenessRoute: nextExactLikenessRoute,
         exactLikenessAvailable: nextExactLikenessRoute === 'kling_reference',
-        exactLikenessReason: nextExactLikenessRoute === 'kling_reference' ? 'Kling exact likeness route is canary-proven.' : data.exactLikenessReason ?? null,
+        exactLikenessReason: nextExactLikenessRoute === 'kling_reference' ? 'Kling Reference Beta route is canary-proven.' : data.exactLikenessReason ?? null,
         exactLikenessProvider: nextExactLikenessProvider,
         exactLikenessCanaryStatus: nextExactLikenessCanaryStatus,
         referenceStrategy: nextReferenceStrategy,
@@ -3801,7 +3796,7 @@ export default function CreateVideo({
           : renderedWithLighterCastGuidance || renderedWithSoftSelfGuidance
           ? 'Rendered with soft self guidance.'
           : nextExactLikenessRoute === 'kling_reference'
-          ? 'Kling exact-likeness scene created with scene-anchor identity planning.'
+          ? 'Kling Reference Beta scene created with scene-anchor identity planning.'
           : nextGenerationMode === 'seedance-multimodal-reference'
           ? 'Cast reference render created.'
           : nextGenerationMode === 'seedance-text-to-video'
@@ -4028,10 +4023,10 @@ export default function CreateVideo({
         setRenderPreference(overrides.renderPreference);
         setDuration(overrides.duration);
         setGenerationSafeRewrite(ULTRA_SAFE_SCENE_PROMPT);
-        setGenerationModerationDetail('Lumora simplified the safe garden prompt and kept the Kling exact-likeness route selected.');
-        setGenerationModerationStages(['Trying Kling exact likeness render', 'Saving to Drafts']);
+        setGenerationModerationDetail('Lumora simplified the safe garden prompt and kept Kling Reference Beta selected.');
+        setGenerationModerationStages(['Trying Kling Reference Beta render', 'Saving to Drafts']);
         setGenerationError('');
-        setStatus('Trying Kling exact likeness render...');
+        setStatus('Trying Kling Reference Beta render...');
         releaseGenerateLock();
         await handleGenerate({
           promptOverride: ULTRA_SAFE_SCENE_PROMPT,
@@ -4167,7 +4162,7 @@ export default function CreateVideo({
     setGenerationSafeRewrite('');
     setIdentityOnlyKlingFallbackActive(true);
     setGenerationModerationDetail(identityOnlyKlingFallbackMessage);
-    setGenerationModerationStages(['Using identity-only Kling fallback', 'Animating with Kling exact likeness']);
+    setGenerationModerationStages(['Using identity-only Kling fallback', 'Animating with Kling Reference Beta']);
     setGenerationError('');
     setStatus('Using identity-only Kling fallback...');
     await handleGenerate({
@@ -4842,7 +4837,10 @@ export default function CreateVideo({
           <div className="provider-grid" role="radiogroup" aria-label="AI cast renderer">
             {providerOptions.map((option) => {
               const optionActive = engine === option.engine;
-              const optionKlingReady = option.engine === 'replicate' && klingExactLikenessReady;
+              const optionKling = option.engine === 'replicate';
+              const optionKlingReady = optionKling && klingExactLikenessReady;
+              const optionSeedanceFast = option.engine === SEEDANCE_ENGINE_ID;
+              const optionDemoMode = option.engine === 'mock';
               return (
                 <button
                   key={option.engine}
@@ -4854,19 +4852,17 @@ export default function CreateVideo({
                 >
                   <span>
                     <strong>{option.label}</strong>
-                    <small>
-                      {optionKlingReady
-                        ? 'Uses identity references for scene generation without copying reference backgrounds.'
-                        : option.description}
-                    </small>
+                    <small>{option.description}</small>
                   </span>
                   <span className="provider-meta">
                     <span>Speed {option.speed}</span>
                     <span>Quality {option.quality}</span>
-                    {optionKlingReady ? (
+                    {optionSeedanceFast ? <span>Safest first render</span> : null}
+                    {optionDemoMode ? <span>No credits</span> : null}
+                    {optionKling ? (
                       <>
-                        <span>Exact likeness ready</span>
-                        <span>Exact route tested</span>
+                        <span>Beta</span>
+                        <span>{optionKlingReady ? 'Exact-likeness ready' : 'Needs AI Cast setup'}</span>
                       </>
                     ) : null}
                   </span>
@@ -4928,7 +4924,7 @@ export default function CreateVideo({
                     className="ghost-btn kling-reference-switch-btn"
                     onClick={() => setEngine('replicate')}
                   >
-                    Switch to Kling Reference
+                    Try Kling Reference Beta
                   </button>
                 ) : null}
                 {sceneAnchorGuidance ? (
@@ -5101,7 +5097,7 @@ export default function CreateVideo({
                   selectedKlingExactReady
                     ? 'Scene anchor approved'
                     : successFirstLighterReferencePath ? 'Creating soft self-guided draft' : 'Trying storybook cinematic take',
-                  selectedKlingExactReady ? 'Animating with Kling exact likeness' : 'Saving to Drafts',
+                  selectedKlingExactReady ? 'Animating with Kling Reference Beta' : 'Saving to Drafts',
                   ...(selectedKlingExactReady ? ['Saving to Drafts'] : []),
                 ].map((step, index) => (
                   <li key={step} className={index === 0 || generationStatusState === 'processing' ? 'active' : ''}>
@@ -5347,7 +5343,7 @@ export default function CreateVideo({
                   <strong>Ultra-safe scene</strong>
                   <p>
                     {sceneAnchorPauseActive
-                      ? 'Scene-anchor mode protects the composition. Identity-only fallback is available, but it can copy source pose, outfit, or background more strongly.'
+                      ? 'Kling Reference is experimental. Use identity-only fallback for exact-likeness testing, or save this draft and continue with Seedance Fast.'
                       : 'This scene uses the simplest render path before adding complexity.'}
                   </p>
                   <blockquote className="next-take-preview">{ULTRA_SAFE_SCENE_PROMPT}</blockquote>
@@ -5472,7 +5468,7 @@ export default function CreateVideo({
             <span className="tiny-pill">Draft saved</span>
           </div>
           {isDefaultSelfCharacter && generationResult.exactLikenessRoute === 'kling_reference' ? (
-            <p><strong>Kling exact likeness</strong></p>
+            <p><strong>Kling Reference Beta</strong></p>
           ) : isDefaultSelfCharacter ? (
             <p><strong>Soft self guidance</strong></p>
           ) : generationResult.characterName ? (

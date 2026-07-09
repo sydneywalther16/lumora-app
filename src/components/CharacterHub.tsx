@@ -1298,10 +1298,10 @@ export default function CharacterHub({
           ? 'Provider temporarily unavailable. Try this canary again later.'
           : 'Video-reference canary is not available for this provider route yet.';
     const likenessLabPrimaryCopy = klingExactReady
-      ? 'Using Kling exact likeness.'
+      ? 'Kling Reference Beta is available for exact-likeness testing.'
       : likenessDiagnostics?.exactLikenessRouter?.reason || 'Lumora will use soft self guidance until an exact provider canary succeeds.';
     const likenessLabStatusCopy = klingExactReady
-      ? 'Kling exact likeness is ready for generated scenes.'
+      ? 'Use Seedance Fast for the first render; Kling Reference Beta remains available for testing.'
       : exactCanaryUnavailableCopy;
     const openAISoraProvider = likenessDiagnostics?.openaiSoraProvider;
     const openAIProviderConfigured = Boolean(

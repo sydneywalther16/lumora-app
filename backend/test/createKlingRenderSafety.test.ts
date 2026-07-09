@@ -202,17 +202,17 @@ const regularPrompt = buildFinalPrompt({
 assert.match(regularPrompt, /No nudity, no sexual content, no minors, no suggestive posing\./);
 
 const createVideoSource = readFileSync(join(process.cwd(), 'src/components/CreateVideo.tsx'), 'utf8');
-assert.match(createVideoSource, /Trying Kling exact likeness render\.\.\./);
+assert.match(createVideoSource, /Trying Kling Reference Beta render\.\.\./);
 assert.match(createVideoSource, /Saving to Drafts/);
 assert.match(createVideoSource, /isClearlySafeKlingPrompt\(currentPrompt\)/);
 assert.match(createVideoSource, /isKlingComplexityError\(message\)/);
 assert.match(createVideoSource, /identityOnlyKlingFallbackActive/);
 assert.match(createVideoSource, /allowIdentityOnlyKlingFallback: Boolean\(options\.allowIdentityOnlyKlingFallback\)/);
 assert.match(createVideoSource, /Using identity-only Kling fallback\. This uses your saved identity references without staging a scene anchor\./);
-assert.match(createVideoSource, /Kling exact-likeness scene created with scene-anchor identity planning\./);
+assert.match(createVideoSource, /Kling Reference Beta scene created with scene-anchor identity planning\./);
 assert.match(createVideoSource, /stage2ProviderRouteType/);
-assert.match(createVideoSource, /image provider rejected the payload shape/);
-assert.match(createVideoSource, /could not read the image output/);
+assert.match(createVideoSource, /Scene-anchor mode could not start this render/);
+assert.match(createVideoSource, /Scene-anchor mode returned an unreadable result/);
 assert.match(createVideoSource, /renderFailure/);
 assert.match(createVideoSource, /normalizeRenderFailure/);
 assert.match(createVideoSource, /Copy debug summary/);
@@ -234,7 +234,7 @@ assert.match(generateVideoSource, /Scene anchor video model is not configured\./
 assert.match(generateVideoSource, /rawReferenceVisualInputsSentToStage2: false/);
 
 const studioListSource = readFileSync(join(process.cwd(), 'src/components/StudioList.tsx'), 'utf8');
-assert.match(studioListSource, /Kling exact likeness/);
+assert.match(studioListSource, /Kling Reference Beta/);
 
 const continueStorySource = readFileSync(join(process.cwd(), 'src/lib/continueStory.ts'), 'utf8');
 assert.match(continueStorySource, /exactLikenessRoute/);

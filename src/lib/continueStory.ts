@@ -88,10 +88,10 @@ function exactKlingStagingHint(item: ContinueStoryItem) {
     primaryRole === 'full_body';
 
   if (!needsSceneStaging) {
-    return ' Keep the Kling exact-likeness route and scene-anchor-first identity planning active for identity continuity.';
+    return ' Keep Kling Reference Beta identity planning active for identity continuity.';
   }
 
-  return ' Keep the Kling exact-likeness route active with scene-anchor-first planning, medium-full or full-body cinematic staging, a clean unobstructed silhouette, and the saved self-character references used as identity guidance rather than portrait composition.';
+  return ' Keep Kling Reference Beta active with scene-anchor planning, medium-full or full-body cinematic staging, a clean unobstructed silhouette, and the saved self-character references used as identity guidance rather than portrait composition.';
 }
 
 function nextScenePrompt(item: ContinueStoryItem) {

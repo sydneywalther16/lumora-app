@@ -152,7 +152,7 @@ export default function StudioPage() {
         title:
           project.title ||
           (project.exactLikenessRoute === 'kling_reference' && project.sceneAnchorStrategy === 'scene_anchor_still'
-            ? 'Kling scene-anchor exact likeness'
+            ? 'Kling Reference Beta scene'
             : project.isDefaultSelfCharacter
             ? 'Soft self guidance'
             : project.characterName
