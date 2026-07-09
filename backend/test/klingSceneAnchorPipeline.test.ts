@@ -530,14 +530,83 @@ try {
   });
   assert.equal(stage2SchemaFailure.stage, 'kling_image_to_video');
   assert.equal(stage2SchemaFailure.category, 'kling_scene_anchor_video_input_schema');
-  assert.equal(stage2SchemaFailure.safeTitle, 'Kling could not start from the scene anchor.');
+  assert.equal(stage2SchemaFailure.safeTitle, 'Scene-anchor mode could not start this render.');
   assert.equal(
     stage2SchemaFailure.safeMessage,
-    'Kling could not start from the scene anchor. Save this draft or try the identity-only fallback.',
+    'Scene-anchor mode could not start this render. Try identity-only Kling fallback or save this draft.',
   );
+  assert.equal(stage2SchemaFailure.recommendedNextAction, 'Try identity-only Kling fallback or save this draft.');
   assert.equal(stage2SchemaFailure.stage2HttpStatus, 422);
   assert.match(stage2SchemaFailure.stage2ErrorMessageRedacted ?? '', /\[redacted-url\]/);
   assert.doesNotMatch(JSON.stringify(stage2SchemaFailure), /https:\/\/assets\.example\/private/);
+
+  const identityOnlyFallbackSourcePlan = buildKlingCreateReferencePlan({
+    body: {
+      prompt: gardenDressPrompt,
+      referenceImageUrls: {
+        frontFaceUrl: 'https://assets.example/front.jpg',
+        leftAngleUrl: 'https://assets.example/left.jpg',
+        rightAngleUrl: 'https://assets.example/right.jpg',
+        fullBodyUrl: 'https://assets.example/full-body-street-jeans.jpg',
+      },
+    },
+    primaryReference: 'https://assets.example/front.jpg',
+    exactLikenessReady: true,
+  });
+  assert.equal(identityOnlyFallbackSourcePlan?.sceneAnchorRequired, true);
+  let identityOnlyFallbackSceneAnchorCalled = false;
+  let identityOnlyFallbackUploaderCalled = false;
+  const identityOnlyFallbackPlan = await prepareKlingCreateReferencePlanForProvider({
+    plan: identityOnlyFallbackSourcePlan,
+    userId: 'unit-test-user',
+    allowIdentityOnlyFallback: true,
+    sceneAnchorGenerator: async () => {
+      identityOnlyFallbackSceneAnchorCalled = true;
+      throw new Error('Scene-anchor generator should not run for identity-only fallback.');
+    },
+    uploader: async () => {
+      identityOnlyFallbackUploaderCalled = true;
+      throw new Error('Scene-anchor storage should not run for identity-only fallback.');
+    },
+  });
+  assert.equal(identityOnlyFallbackSceneAnchorCalled, false);
+  assert.equal(identityOnlyFallbackUploaderCalled, false);
+  assert.equal(identityOnlyFallbackPlan?.sceneAnchorRequired, false);
+  assert.equal(identityOnlyFallbackPlan?.sceneAnchorGenerated, false);
+  assert.equal(identityOnlyFallbackPlan?.sceneAnchorPersisted, false);
+  assert.equal(identityOnlyFallbackPlan?.sceneAnchorReason, 'identity_only_fallback_explicitly_selected');
+  assert.equal(identityOnlyFallbackPlan?.sceneAnchorFailureCategory, null);
+  assert.equal(identityOnlyFallbackPlan?.plannedStrategy, 'direct_identity_references');
+  assert.equal(identityOnlyFallbackPlan?.sceneAnchorStrategy, 'direct_identity_references');
+  assert.equal(identityOnlyFallbackPlan?.primaryVideoInputType, 'identity_reference');
+  assert.equal(identityOnlyFallbackPlan?.primaryVideoInputSource, 'full_body_identity_reference');
+  assert.equal(identityOnlyFallbackPlan?.stage2ProviderRouteType, 'reference_to_video');
+  assert.equal(identityOnlyFallbackPlan?.identityReferencesPassedToVideoStage, true);
+  assert.equal(identityOnlyFallbackPlan?.rawReferenceVisualInputsSentToStage2, true);
+  assert.match(identityOnlyFallbackPlan?.promptGuidance ?? '', /Identity-only Kling fallback/i);
+  assert.match(identityOnlyFallbackPlan?.promptGuidance ?? '', /flower garden/i);
+  assert.deepEqual(identityOnlyFallbackPlan?.references.map((reference) => reference.role), [
+    'full_body',
+    'front_angle',
+    'side_angle_left',
+    'side_angle_right',
+  ]);
+  const identityOnlyFallbackStageInput = buildKlingVideoStageRequestInput({
+    prompt: identityOnlyFallbackPlan?.promptGuidance ?? '',
+    startImageUrl: identityOnlyFallbackPlan?.providerPrimaryReference.url ?? '',
+    additionalReferences: identityOnlyFallbackPlan?.providerAdditionalReferences.map((reference) => reference.url) ?? [],
+    identityReferencesPassedToVideoStage: identityOnlyFallbackPlan?.identityReferencesPassedToVideoStage,
+  });
+  assert.deepEqual(Object.keys(identityOnlyFallbackStageInput).sort(), ['prompt', 'reference_images', 'start_image']);
+  assert.equal(identityOnlyFallbackStageInput.start_image, 'https://assets.example/full-body-street-jeans.jpg');
+  assert.deepEqual(identityOnlyFallbackStageInput.reference_images, [
+    'https://assets.example/front.jpg',
+    'https://assets.example/left.jpg',
+    'https://assets.example/right.jpg',
+  ]);
+  assert.equal('image_url' in identityOnlyFallbackStageInput, false);
+  assert.equal('start_image_url' in identityOnlyFallbackStageInput, false);
+  assert.equal('duration' in identityOnlyFallbackStageInput, false);
 
   process.env.SCENE_ANCHOR_ENABLED = 'true';
   process.env.SCENE_ANCHOR_PROVIDER = 'fal';

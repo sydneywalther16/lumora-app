@@ -206,6 +206,10 @@ const apiOfflineVideoEngineMessage =
   'Video engine is not connected yet. Start the API server with npm run dev:api or connect VITE_API_BASE_URL to the deployed backend.';
 const providerConfigVideoEngineMessage =
   'Video engine is connected, but real render providers are not configured yet. Add provider keys or use Demo Mode for UI testing.';
+const identityOnlyKlingFallbackMessage =
+  'Using identity-only Kling fallback. This uses your saved identity references without staging a scene anchor.';
+const sceneAnchorStartFailureMessage =
+  'Scene-anchor mode could not start this render. Try identity-only Kling fallback or save this draft.';
 const storyMemoryLocalPreviewMessage =
   'Story Memory sync is not connected in this local preview. You can still draft scenes.';
 const referenceImageLabels: Partial<Record<keyof ReferenceImageUrls, string>> = {
@@ -836,7 +840,7 @@ function renderFailureTitleForCategory(category: string | null | undefined) {
     return 'Create runtime is missing scene-anchor configuration.';
   }
   if (category === 'kling_scene_anchor_video_input_schema') {
-    return 'Kling could not start from the scene anchor.';
+    return 'Scene-anchor mode could not start this render.';
   }
   if (category === 'kling_scene_anchor_video_model_not_found') {
     return 'Kling image-to-video model was not found.';
@@ -881,7 +885,7 @@ function renderFailureMessageForCategory(category: string | null | undefined, fa
     return 'Scene anchor was generated, but Lumora could not download it for persistence.';
   }
   if (category === 'kling_scene_anchor_video_input_schema') {
-    return 'Kling could not start from the scene anchor. Save this draft or try the identity-only fallback.';
+    return sceneAnchorStartFailureMessage;
   }
   return 'Lumora paused this render, but no specific provider category was returned.';
 }
@@ -1460,6 +1464,7 @@ export default function CreateVideo({
   const [generationSafeRewrite, setGenerationSafeRewrite] = useState('');
   const [generationModerationDetail, setGenerationModerationDetail] = useState('');
   const [generationModerationStages, setGenerationModerationStages] = useState<string[]>([]);
+  const [identityOnlyKlingFallbackActive, setIdentityOnlyKlingFallbackActive] = useState(false);
   const [creativePlanLoading, setCreativePlanLoading] = useState(false);
   const [creativePlanError, setCreativePlanError] = useState('');
   const [creativePlanStatus, setCreativePlanStatus] = useState('');
@@ -1843,15 +1848,25 @@ export default function CreateVideo({
     generationStatusState === 'processing' ||
     generationStatusState === 'verifying_output'
   );
+  const identityOnlyKlingFallbackRenderActive = identityOnlyKlingFallbackActive && klingExactRenderStateActive;
+  const sceneAnchorKlingRenderStateActive = klingExactRenderStateActive && !identityOnlyKlingFallbackRenderActive;
   const visibleRenderState = generationStatusState === 'idle' || hasVerifiedGenerationOutput ? null : {
     label: generationStatusLabels[generationStatusState],
     tone: renderStateTone(generationStatusState),
-    headline: klingExactRenderStateActive
+    headline: identityOnlyKlingFallbackRenderActive
+      ? generationStatusState === 'verifying_output'
+        ? 'Saving to Drafts'
+        : 'Using identity-only Kling fallback'
+      : sceneAnchorKlingRenderStateActive
       ? generationStatusState === 'verifying_output'
         ? 'Saving to Drafts'
         : 'Generating scene anchor...'
       : renderStateHeadline(generationStatusState),
-    body: klingExactRenderStateActive
+    body: identityOnlyKlingFallbackRenderActive
+      ? generationStatusState === 'verifying_output'
+        ? 'Lumora is verifying the Kling video before marking the draft ready.'
+        : 'This uses your saved identity references without staging a scene anchor.'
+      : sceneAnchorKlingRenderStateActive
       ? generationStatusState === 'verifying_output'
         ? 'Lumora is verifying the Kling video before marking the draft ready.'
         : 'Scene-anchor-first exact likeness is staging the requested outfit, environment, framing, and motion before Kling animation.'
@@ -3050,6 +3065,11 @@ export default function CreateVideo({
     const selectedSelfLikenessIntensity = selfLikenessIntensity;
     const selectedReferenceImageUrl = resolveRenderableReferenceUrl(referenceImageUrl) || selectedSelfReferenceImageUrl;
     const selectedKlingExactReadyForRequest = selectedEngine === 'replicate' && klingExactLikenessReady;
+    const identityOnlyKlingFallbackRequest = Boolean(
+      options.allowIdentityOnlyKlingFallback &&
+      selectedKlingExactReadyForRequest,
+    );
+    setIdentityOnlyKlingFallbackActive(identityOnlyKlingFallbackRequest);
 
     if (!currentPrompt.trim()) {
       setGenerationError('Add a prompt before generating.');
@@ -3106,8 +3126,10 @@ export default function CreateVideo({
 
     setGenerationError('');
     setGenerationSafeRewrite('');
-    setGenerationModerationDetail('');
-    setGenerationModerationStages([]);
+    setGenerationModerationDetail(identityOnlyKlingFallbackRequest ? identityOnlyKlingFallbackMessage : '');
+    setGenerationModerationStages(identityOnlyKlingFallbackRequest
+      ? ['Using identity-only Kling fallback', 'Animating with Kling exact likeness']
+      : []);
     setGeneratedVideoUrl(null);
     setFinalGeneratedPrompt('');
     setGeneratedModel('');
@@ -3191,7 +3213,9 @@ export default function CreateVideo({
         setStatus('Shaping cinematic beats...');
         invisiblePlan = await buildCinematicStructureForPrompt({ source: 'generate', promptOverride: currentPrompt });
       }
-      if (selectedKlingExactReadyForRequest) {
+      if (identityOnlyKlingFallbackRequest) {
+        setStatus('Using identity-only Kling fallback...');
+      } else if (selectedKlingExactReadyForRequest) {
         setStatus('Generating scene anchor...');
       } else if (invisiblePlan && selectedRenderPreference !== 'success_first') {
         setStatus('Preparing your cast for the render...');
@@ -3644,6 +3668,11 @@ export default function CreateVideo({
       }
 
       const nextFinalPrompt = creatorVisibleFinalPrompt(data, currentPrompt);
+      const renderedWithIdentityOnlyKlingFallback = Boolean(
+        nextExactLikenessRoute === 'kling_reference' &&
+        nextSceneAnchorReason === 'identity_only_fallback_explicitly_selected' &&
+        nextStage2ProviderRouteType === 'reference_to_video',
+      );
       let studioSaveStatus = 'Video generated and saved to Drafts.';
       setGeneratedVideoUrl(nextVideoUrl);
       setFinalGeneratedPrompt(nextFinalPrompt);
@@ -3765,7 +3794,11 @@ export default function CreateVideo({
         audioConfigured: nextAudioConfigured,
         viralPresetUsed: nextViralPresetUsed,
         promptPolished: nextPromptPolished,
-        message: renderedWithLighterCastGuidance || renderedWithSoftSelfGuidance
+        message: data.message && !isProviderTechnicalText(data.message)
+          ? data.message
+          : renderedWithIdentityOnlyKlingFallback
+          ? identityOnlyKlingFallbackMessage
+          : renderedWithLighterCastGuidance || renderedWithSoftSelfGuidance
           ? 'Rendered with soft self guidance.'
           : nextExactLikenessRoute === 'kling_reference'
           ? 'Kling exact-likeness scene created with scene-anchor identity planning.'
@@ -4132,7 +4165,8 @@ export default function CreateVideo({
 
   async function handleUseIdentityOnlyKlingFallback() {
     setGenerationSafeRewrite('');
-    setGenerationModerationDetail('Identity-only fallback may copy the saved reference pose, outfit, or background more strongly than scene-anchor mode.');
+    setIdentityOnlyKlingFallbackActive(true);
+    setGenerationModerationDetail(identityOnlyKlingFallbackMessage);
     setGenerationModerationStages(['Using identity-only Kling fallback', 'Animating with Kling exact likeness']);
     setGenerationError('');
     setStatus('Using identity-only Kling fallback...');

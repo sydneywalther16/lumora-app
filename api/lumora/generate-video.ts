@@ -339,6 +339,10 @@ const SINGLE_PROVIDER_MODE = true;
 const REPLICATE_THROTTLED_ERROR = 'Replicate is temporarily throttling this account';
 const REPLICATE_THROTTLED_SUGGESTION =
   'Wait a minute and try again. No fallback providers were attempted.';
+const IDENTITY_ONLY_KLING_FALLBACK_MESSAGE =
+  'Using identity-only Kling fallback. This uses your saved identity references without staging a scene anchor.';
+const SCENE_ANCHOR_START_FAILURE_MESSAGE =
+  'Scene-anchor mode could not start this render. Try identity-only Kling fallback or save this draft.';
 const KLING_FALLBACK_DELAY_MS = 5_000;
 const KLING_SECONDARY_FALLBACK_DELAY_MS = 8_000;
 const DEFAULT_REPLICATE_RETRY_AFTER_MS = 6_000;
@@ -2309,10 +2313,10 @@ function buildKlingStageTwoPromptGuidance(plan: KlingCreateReferencePlan) {
 }
 
 function directIdentityProviderReferences(plan: KlingCreateReferencePlan) {
-  const frontReference = plan.references.find((reference) => reference.role === 'front_angle') ?? plan.primaryReference;
+  const primaryReference = plan.primaryReference;
   return uniqueReferenceEntries([
-    frontReference,
-    ...plan.references.filter((reference) => reference.url !== frontReference.url),
+    primaryReference,
+    ...plan.references.filter((reference) => reference.url !== primaryReference.url),
   ]).slice(0, 4);
 }
 
@@ -2344,6 +2348,15 @@ function applyExplicitKlingIdentityOnlyFallback(plan: KlingCreateReferencePlan):
     'Identity-only Kling fallback: use saved references only for identity while building the requested scene. This fallback may copy reference-photo pose, outfit, or background more strongly than scene-anchor mode.',
   ].filter(Boolean).join(' ');
   return syncKlingVideoStageMetadata(plan);
+}
+
+function isExplicitKlingIdentityOnlyFallback(plan: KlingCreateReferencePlan | null | undefined) {
+  return Boolean(
+    plan &&
+    plan.sceneAnchorReason === 'identity_only_fallback_explicitly_selected' &&
+    plan.stage2ProviderRouteType === 'reference_to_video' &&
+    plan.sceneAnchorRequired === false,
+  );
 }
 
 export async function prepareKlingCreateReferencePlanForProvider(input: {
@@ -3645,7 +3658,7 @@ function sceneAnchorRecommendedNextAction(category: string): string {
 
 function klingStage2RecommendedNextAction(category: string): string {
   if (category === 'kling_scene_anchor_video_input_schema') {
-    return 'Save this draft or try the identity-only Kling fallback.';
+    return 'Try identity-only Kling fallback or save this draft.';
   }
   if (category === 'kling_scene_anchor_video_model_not_found' || category === 'kling_scene_anchor_video_model_not_configured') {
     return 'Configure KLING_SCENE_ANCHOR_VIDEO_MODEL with a mapped Kling image-to-video model.';
@@ -3715,8 +3728,8 @@ function renderFailureCopyForCategory(category: string, fallbackMessage = '') {
   }
   if (category === 'kling_scene_anchor_video_input_schema') {
     return {
-      safeTitle: 'Kling could not start from the scene anchor.',
-      safeMessage: 'Kling could not start from the scene anchor. Save this draft or try the identity-only fallback.',
+      safeTitle: 'Scene-anchor mode could not start this render.',
+      safeMessage: SCENE_ANCHOR_START_FAILURE_MESSAGE,
     };
   }
   if (category === 'kling_scene_anchor_video_model_not_found') {
@@ -4446,6 +4459,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       klingReferencePlan.primaryVideoInputType === 'scene_anchor' &&
       klingReferencePlan.stage2ProviderRouteType === 'image_to_video',
     );
+    const identityOnlyKlingFallbackUsed = isExplicitKlingIdentityOnlyFallback(klingReferencePlan);
     const aspectRatio = normalizeAspectRatio(body.aspectRatio);
     const durationSent = normalizeDuration(body.duration);
     const finalPrompt = buildFinalPrompt({
@@ -4802,9 +4816,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         finalPrompt: promptForModel,
         warnings: [],
         rawOutput: {
-          provider: safeJsonValue(result.rawOutput),
-          attempts: result.attempts,
-        },
+	          provider: safeJsonValue(result.rawOutput),
+	          attempts: result.attempts,
+	        },
       });
     }
 
@@ -4956,6 +4970,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }),
           finalPrompt: promptForModel,
           warnings: [],
+          message: identityOnlyKlingFallbackUsed ? IDENTITY_ONLY_KLING_FALLBACK_MESSAGE : undefined,
           rawOutput: {
             provider: safeJsonValue(result.rawOutput),
             attempts: result.attempts,
@@ -5280,6 +5295,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }),
       finalPrompt: promptForModel,
       warnings: [],
+      message: identityOnlyKlingFallbackUsed ? IDENTITY_ONLY_KLING_FALLBACK_MESSAGE : undefined,
       rawOutput: {
         provider: safeJsonValue(result.rawOutput),
         attempts: result.attempts,
