@@ -257,7 +257,8 @@ export async function uploadSceneAnchorAsset(input: SceneAnchorAssetUploadInput)
   const objectPath = sceneAnchorObjectPath(input);
 
   try {
-    const { error } = await storageClient.storage.from(bucket).upload(objectPath, input.buffer, {
+    const bucketClient = storageClient.storage.from(bucket);
+    const { error } = await bucketClient.upload(objectPath, input.buffer, {
       contentType: input.contentType,
       upsert: false,
     });
@@ -265,7 +266,18 @@ export async function uploadSceneAnchorAsset(input: SceneAnchorAssetUploadInput)
       throw error;
     }
 
-    const { data } = storageClient.storage.from(bucket).getPublicUrl(objectPath);
+    const { data: signedData, error: signedUrlError } =
+      await bucketClient.createSignedUrl(objectPath, 60 * 60 * 24 * 7);
+    if (signedData?.signedUrl && isValidHttpUrl(signedData.signedUrl)) {
+      return {
+        objectPath,
+        publicUrl: signedData.signedUrl,
+        bucket,
+        privateUrlsRedacted: true,
+      };
+    }
+
+    const { data } = bucketClient.getPublicUrl(objectPath);
     if (data?.publicUrl && isValidHttpUrl(data.publicUrl)) {
       return {
         objectPath,
@@ -275,17 +287,7 @@ export async function uploadSceneAnchorAsset(input: SceneAnchorAssetUploadInput)
       };
     }
 
-    const { data: signedData, error: signedUrlError } =
-      await storageClient.storage.from(bucket).createSignedUrl(objectPath, 60 * 60 * 24 * 7);
-    if (signedUrlError || !signedData?.signedUrl || !isValidHttpUrl(signedData.signedUrl)) {
-      throw signedUrlError ?? new Error('Scene-anchor upload did not return a provider-accessible HTTPS URL.');
-    }
-    return {
-      objectPath,
-      publicUrl: signedData.signedUrl,
-      bucket,
-      privateUrlsRedacted: true,
-    };
+    throw signedUrlError ?? new Error('Scene-anchor upload did not return a provider-accessible HTTPS URL.');
   } catch (error) {
     const type = textValue((error as { name?: unknown }).name) || 'scene_anchor_storage_upload_failed';
     throw sceneAnchorAssetPersistError({

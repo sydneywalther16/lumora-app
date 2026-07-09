@@ -219,10 +219,19 @@ try {
   });
   assert.deepEqual(Object.keys(sceneAnchorI2vPayload).sort(), ['duration', 'image_url', 'prompt']);
   assert.equal(sceneAnchorI2vPayload.image_url, 'https://assets.example/generated/garden-scene-anchor.png');
+  assert.equal(sceneAnchorI2vPayload.duration, '5');
   assert.equal('reference_images' in sceneAnchorI2vPayload, false);
   assert.equal('image_urls' in sceneAnchorI2vPayload, false);
   assert.equal('elements' in sceneAnchorI2vPayload, false);
   assert.equal('start_image_url' in sceneAnchorI2vPayload, false);
+
+  const sceneAnchorI2vLongPayload = buildKlingSceneAnchorImageToVideoPayload({
+    model: materializedPlan.stage2ProviderModel ?? '',
+    prompt: materializedPlan.promptGuidance,
+    sceneAnchorUrl: materializedPlan.providerPrimaryReference.url,
+    duration: 8,
+  });
+  assert.equal(sceneAnchorI2vLongPayload.duration, '10');
 
   const unavailablePlan = await prepareKlingCreateReferencePlanForProvider({
     plan: buildKlingCreateReferencePlan({
@@ -521,7 +530,11 @@ try {
   });
   assert.equal(stage2SchemaFailure.stage, 'kling_image_to_video');
   assert.equal(stage2SchemaFailure.category, 'kling_scene_anchor_video_input_schema');
-  assert.match(stage2SchemaFailure.safeTitle, /image-to-video rejected/i);
+  assert.equal(stage2SchemaFailure.safeTitle, 'Kling could not start from the scene anchor.');
+  assert.equal(
+    stage2SchemaFailure.safeMessage,
+    'Kling could not start from the scene anchor. Save this draft or try the identity-only fallback.',
+  );
   assert.equal(stage2SchemaFailure.stage2HttpStatus, 422);
   assert.match(stage2SchemaFailure.stage2ErrorMessageRedacted ?? '', /\[redacted-url\]/);
   assert.doesNotMatch(JSON.stringify(stage2SchemaFailure), /https:\/\/assets\.example\/private/);
@@ -537,6 +550,7 @@ try {
 
   const generateSource = readFileSync('api/lumora/generate-video.ts', 'utf8');
   assert.match(generateSource, /sceneAnchorAssetStorage/);
+  assert.match(generateSource, /import\(['"]\.\.\/\.\.\/serverless\/lumora\/sceneAnchorAssetStorage\.js['"]\)/);
   assert.doesNotMatch(generateSource, /backend\/src\/services\/storageService|backend\\\\src\\\\services\\\\storageService/);
   assert.doesNotMatch(generateSource, /import\(['"]\.\.\/\.\.\/backend\/src\/services\/storageService['"]\)/);
 
@@ -623,6 +637,8 @@ try {
     size: number;
     contentType: string;
   }> = [];
+  const signedUrlCalls: string[] = [];
+  const publicUrlCalls: string[] = [];
   const mockedStorageClient = {
     storage: {
       from(bucket: string) {
@@ -636,17 +652,23 @@ try {
             });
             return { error: null };
           },
-          getPublicUrl: (objectPath: string) => ({
-            data: {
-              publicUrl: `https://demo.supabase.co/storage/v1/object/public/${bucket}/${objectPath}`,
-            },
-          }),
-          createSignedUrl: async (objectPath: string) => ({
-            data: {
-              signedUrl: `https://demo.supabase.co/storage/v1/object/sign/${bucket}/${objectPath}?token=secret`,
-            },
-            error: null,
-          }),
+          getPublicUrl: (objectPath: string) => {
+            publicUrlCalls.push(objectPath);
+            return {
+              data: {
+                publicUrl: `https://demo.supabase.co/storage/v1/object/public/${bucket}/${objectPath}`,
+              },
+            };
+          },
+          createSignedUrl: async (objectPath: string) => {
+            signedUrlCalls.push(objectPath);
+            return {
+              data: {
+                signedUrl: `https://demo.supabase.co/storage/v1/object/sign/${bucket}/${objectPath}?signature=storage-test-signature`,
+              },
+              error: null,
+            };
+          },
         };
       },
     },
@@ -668,7 +690,10 @@ try {
   assert.equal(uploadCalls[0].contentType, 'image/png');
   assert.equal(uploadCalls[0].size, 4);
   assert.match(uploadCalls[0].objectPath, /unit-test-user\/kling-scene-anchors\/.+kling-scene-anchor\.png/);
-  assert.match(persistedSceneAnchor.url, /^https:\/\/demo\.supabase\.co\/storage\/v1\/object\/public\/lumora-assets\//);
+  assert.deepEqual(signedUrlCalls, [uploadCalls[0].objectPath]);
+  assert.deepEqual(publicUrlCalls, []);
+  assert.match(persistedSceneAnchor.url, /^https:\/\/demo\.supabase\.co\/storage\/v1\/object\/sign\/lumora-assets\//);
+  assert.match(persistedSceneAnchor.url, /signature=storage-test-signature/);
   assert.equal(persistedSceneAnchor.privateUrlsRedacted, true);
   assert.doesNotMatch(JSON.stringify(persistedSceneAnchor), /provider\.example\/private-scene-anchor|token=secret/);
 

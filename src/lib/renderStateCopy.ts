@@ -112,6 +112,12 @@ export function sanitizeCreatorErrorMessage(value: unknown, fallback = 'Lumora p
   ) {
     return 'Lumora could not save the scene anchor for Kling. Save this draft or try the identity-only fallback.';
   }
+  if (
+    lower.includes('kling image-to-video') &&
+    (lower.includes('scene-anchor video payload') || lower.includes('payload shape'))
+  ) {
+    return 'Kling could not start from the scene anchor. Save this draft or try the identity-only fallback.';
+  }
   if (lower.includes('rate limit') || lower.includes('too many requests') || lower.includes('429')) {
     return 'Render queue is cooling down.';
   }

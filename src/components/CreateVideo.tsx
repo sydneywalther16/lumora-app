@@ -836,7 +836,7 @@ function renderFailureTitleForCategory(category: string | null | undefined) {
     return 'Create runtime is missing scene-anchor configuration.';
   }
   if (category === 'kling_scene_anchor_video_input_schema') {
-    return 'Kling image-to-video rejected the scene-anchor video payload.';
+    return 'Kling could not start from the scene anchor.';
   }
   if (category === 'kling_scene_anchor_video_model_not_found') {
     return 'Kling image-to-video model was not found.';
@@ -881,7 +881,7 @@ function renderFailureMessageForCategory(category: string | null | undefined, fa
     return 'Scene anchor was generated, but Lumora could not download it for persistence.';
   }
   if (category === 'kling_scene_anchor_video_input_schema') {
-    return 'Kling image-to-video rejected the scene-anchor video payload.';
+    return 'Kling could not start from the scene anchor. Save this draft or try the identity-only fallback.';
   }
   return 'Lumora paused this render, but no specific provider category was returned.';
 }

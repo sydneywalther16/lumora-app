@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   buildCreateRuntimeSceneAnchorStatus,
@@ -214,7 +214,18 @@ assert.match(generateSource, /CREATE_RUNTIME_SCENE_ANCHOR_PAYLOAD_SHAPE/);
 assert.match(generateSource, /sceneAnchorAssetStorage/);
 assert.match(generateSource, /scene_anchor_storage_adapter_load_failed/);
 assert.match(generateSource, /scene_anchor_storage_config_missing/);
+assert.match(generateSource, /import\(['"]\.\.\/\.\.\/serverless\/lumora\/sceneAnchorAssetStorage\.js['"]\)/);
 assert.doesNotMatch(generateSource, /backend\/src\/services\/storageService|backend\\\\src\\\\services\\\\storageService|storageService/);
 assert.doesNotMatch(generateSource, /buildCreateRuntimeSceneAnchorStatus/);
+
+function listEndpointFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = join(directory, entry.name);
+    if (entry.isDirectory()) return listEndpointFiles(entryPath);
+    return /\.(?:ts|js)$/.test(entry.name) && !entry.name.endsWith('.d.ts') ? [entryPath] : [];
+  });
+}
+
+assert.equal(listEndpointFiles(join(process.cwd(), 'api')).length, 12);
 
 console.log('createRuntimeSceneAnchorStatus unit tests passed');

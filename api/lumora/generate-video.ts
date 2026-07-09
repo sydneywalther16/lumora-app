@@ -3645,7 +3645,7 @@ function sceneAnchorRecommendedNextAction(category: string): string {
 
 function klingStage2RecommendedNextAction(category: string): string {
   if (category === 'kling_scene_anchor_video_input_schema') {
-    return 'Fix the Kling image-to-video payload shape before retrying this scene-anchor render.';
+    return 'Save this draft or try the identity-only Kling fallback.';
   }
   if (category === 'kling_scene_anchor_video_model_not_found' || category === 'kling_scene_anchor_video_model_not_configured') {
     return 'Configure KLING_SCENE_ANCHOR_VIDEO_MODEL with a mapped Kling image-to-video model.';
@@ -3715,8 +3715,8 @@ function renderFailureCopyForCategory(category: string, fallbackMessage = '') {
   }
   if (category === 'kling_scene_anchor_video_input_schema') {
     return {
-      safeTitle: 'Kling image-to-video rejected the scene-anchor video payload.',
-      safeMessage: 'Kling image-to-video rejected the scene-anchor video payload.',
+      safeTitle: 'Kling could not start from the scene anchor.',
+      safeMessage: 'Kling could not start from the scene anchor. Save this draft or try the identity-only fallback.',
     };
   }
   if (category === 'kling_scene_anchor_video_model_not_found') {
