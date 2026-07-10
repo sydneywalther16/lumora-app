@@ -20,6 +20,8 @@ type SupabaseClient = NonNullable<typeof supabase>;
 
 export const AUTH_CALLBACK_PATH = '/auth/callback';
 const AUTH_REDIRECT_STORAGE_KEY = 'lumora_auth_redirect_path';
+const LOCALHOST_HOSTNAMES = new Set(['localhost', '127.0.0.1']);
+const configuredPublicAppUrl = import.meta.env.VITE_PUBLIC_APP_URL?.trim();
 const authParamNames = [
   'access_token',
   'code',
@@ -106,9 +108,31 @@ export function rememberAuthRedirectPath(path = currentRoutePath()): string {
   return redirectPath;
 }
 
+function resolveAppOrigin(candidate: string | undefined): string | null {
+  if (!candidate) return null;
+
+  try {
+    return new URL(candidate).origin;
+  } catch {
+    console.warn('INVALID PUBLIC APP URL', { candidate });
+    return null;
+  }
+}
+
+export function getAppOrigin(): string {
+  if (typeof window === 'undefined') {
+    return resolveAppOrigin(configuredPublicAppUrl) ?? 'http://localhost:4173';
+  }
+
+  if (LOCALHOST_HOSTNAMES.has(window.location.hostname) || window.location.hostname.endsWith('.local')) {
+    return window.location.origin;
+  }
+
+  return resolveAppOrigin(configuredPublicAppUrl) ?? window.location.origin;
+}
+
 export function getAuthCallbackUrl(): string {
-  if (typeof window === 'undefined') return AUTH_CALLBACK_PATH;
-  return `${window.location.origin}${AUTH_CALLBACK_PATH}`;
+  return `${getAppOrigin()}${AUTH_CALLBACK_PATH}`;
 }
 
 function consumeRememberedRedirectPath(fallbackPath: string): string {
