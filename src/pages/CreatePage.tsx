@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import CharacterLibrary from '../components/CharacterLibrary';
 import CreateVideo from '../components/CreateVideo';
 import {
   getCreatorSelfCharacter,
@@ -128,8 +127,6 @@ export default function CreatePage() {
   const [resolvedReference, setResolvedReference] = useState<SelfCharacterReferenceImage | null>(null);
   const [referenceLoading, setReferenceLoading] = useState(false);
   const [remixProject, setRemixProject] = useState<RemixProjectPayload | null>(null);
-  const [castConfirmation, setCastConfirmation] = useState('');
-  const castSectionRef = useRef<HTMLElement | null>(null);
 
   const [profile, setProfile] = useState<LumoraProfile>({
     displayName: 'Creator',
@@ -155,11 +152,6 @@ export default function CreatePage() {
       const character = JSON.parse(raw) as CharacterProfile;
       if (character && typeof character === 'object' && typeof character.id === 'string') {
         setSelectedCharacter(character);
-        setCastConfirmation(`${character.displayName || character.name} is cast for this scene`);
-        window.setTimeout(() => {
-          castSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          castSectionRef.current?.focus();
-        }, 120);
       }
     } catch {
       // Ignore malformed local return payloads.
@@ -331,7 +323,7 @@ export default function CreatePage() {
     ?? activeSelfCharacter?.name
     ?? selectedCharacter?.displayName
     ?? selectedCharacter?.name
-    ?? profile.displayName;
+    ?? null;
   const effectiveCharacterAvatar = remixProject?.characterAvatar ?? effectiveReferenceImageUrl;
   const identityProfile = hasSelfCharacter
     ? buildLumoraIdentityProfile({
@@ -391,16 +383,6 @@ export default function CreatePage() {
     window.location.href = '/profile';
   }
 
-  function handleCastSelection(character: CharacterProfile | null) {
-    setSelectedCharacter(character);
-    setCastConfirmation(character ? `${character.displayName || character.name} is cast for this scene` : '');
-    if (character) {
-      window.setTimeout(() => {
-        castSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, 80);
-    }
-  }
-
   function handleCharacterUpdated(character: CharacterProfile) {
     if (selectedCharacter?.id === character.id) {
       setSelectedCharacter(character);
@@ -424,29 +406,6 @@ export default function CreatePage() {
 
   return (
     <div className="page lumora-page focused-create-page">
-      <section
-        ref={castSectionRef}
-        className="cast-selection-anchor focused-cast-section"
-        tabIndex={-1}
-        aria-label="Cast for this scene"
-      >
-        {castConfirmation ? (
-          <div className="story-memory-moment cast-confirmation">
-            <span className="tiny-dot" />
-            <p>Character casted: {selectedCharacter?.displayName || selectedCharacter?.name || castConfirmation.replace(' is cast for this scene', '')}</p>
-          </div>
-        ) : null}
-        <CharacterLibrary
-          refreshKey={characterRefreshKey}
-          selectedCharacterId={selectedCharacter?.id ?? null}
-          onSelect={handleCastSelection}
-          compact
-        />
-        <button type="button" className="quiet-btn focused-cast-manage" onClick={openCharactersHub}>
-          Open Your AI Cast
-        </button>
-      </section>
-
       <CreateVideo
         refreshKey={characterRefreshKey}
         characterId={effectiveCharacterId}

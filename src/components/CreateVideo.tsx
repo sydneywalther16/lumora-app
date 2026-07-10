@@ -1980,6 +1980,9 @@ export default function CreateVideo({
   const cinematicStructureSummary = cinematicBeatCount
     ? `Structure ready - ${cinematicBeatCount} beat${cinematicBeatCount === 1 ? '' : 's'}`
     : 'Structure ready';
+  const featuredViralScenePresets = viralScenePresets.slice(0, 4);
+  const additionalViralScenePresets = viralScenePresets.slice(4);
+  const selectedStageOption = providerOptions.find((option) => option.engine === engine) ?? providerOptions[0];
 
   useEffect(() => {
     const savedPrompt = localStorage.getItem('remixPrompt');
@@ -4400,16 +4403,50 @@ export default function CreateVideo({
           </div>
         ) : null}
 
-        <div className="cast-summary-card">
+        <details className="advanced-create-details minimal-title-details">
+          <summary>Title</summary>
+          <label className="field-block">
+            <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Scene title" />
+          </label>
+        </details>
+
+        <label className="field-block minimal-scene-idea">
+          <div className="row-between create-scene-heading-row">
+            <span>Scene idea</span>
+            <button type="button" className="ghost-btn compact-action" onClick={handlePolishPrompt} disabled={!hasPrompt}>
+              Prompt polish
+            </button>
+          </div>
+          <textarea
+            ref={promptTextareaRef}
+            value={activePrompt}
+            onChange={(event) => setActivePrompt(event.target.value)}
+            rows={5}
+            placeholder="Describe the generated scene for your cast member..."
+          />
+        </label>
+
+        <div className="cast-summary-card focused-cast-summary-card">
           <div>
-            <strong>{characterName ? (isDefaultSelfCharacter ? 'Soft self guidance selected' : characterName) : 'Soft self guidance selected'}</strong>
+            <strong>{characterName ? (isDefaultSelfCharacter ? 'Soft self guidance selected' : characterName) : 'Choose or create your AI Cast'}</strong>
             <p className="muted">
-              {isSeedanceEngine
+              {!characterName
+                ? 'Choose or create your AI Cast'
+                : isSeedanceEngine
                 ? `${readySeedanceReferenceCount} reference${readySeedanceReferenceCount === 1 ? '' : 's'} ready`
                 : hasGenerationReference
                   ? 'Reference ready'
                   : 'Choose a cast reference'}
             </p>
+            {onResaveReferencePhoto ? (
+              <button
+                type="button"
+                className="ghost-btn reference-setup-btn"
+                onClick={onResaveReferencePhoto}
+              >
+                Open Your AI Cast
+              </button>
+            ) : null}
           </div>
           {characterAvatar ? (
             <img src={characterAvatar} alt="" />
@@ -4418,7 +4455,8 @@ export default function CreateVideo({
           )}
         </div>
 
-        <section className="ai-cast-readiness-card" aria-label="Sora-worthy readiness checklist">
+        <details className="advanced-create-details ai-cast-readiness-card" aria-label="Sora-worthy readiness checklist">
+          <summary>Cast readiness</summary>
           <div className="row-between create-section-header">
             <div className="ai-cast-readiness-heading create-section-heading">
               <span className="eyebrow">SORA-WORTHY READINESS</span>
@@ -4434,38 +4472,19 @@ export default function CreateVideo({
               </span>
             ))}
           </div>
-        </section>
-
-        <details className="advanced-create-details minimal-title-details">
-          <summary>Title</summary>
-          <label className="field-block">
-            <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Scene title" />
-          </label>
         </details>
 
-        <label className="field-block minimal-scene-idea">
-          <span>Scene idea</span>
-          <textarea
-            ref={promptTextareaRef}
-            value={activePrompt}
-            onChange={(event) => setActivePrompt(event.target.value)}
-            rows={5}
-            placeholder="Describe the generated scene for your cast member..."
-          />
-        </label>
-
-        <section className="viral-polish-panel" aria-label="Viral AI cast scene tools">
+        <details className="advanced-create-details viral-polish-panel" aria-label="Viral AI cast scene tools">
+          <summary>Scene presets</summary>
           <div className="row-between create-section-header">
             <div className="viral-polish-heading create-section-heading">
               <span className="eyebrow">VIRAL SCENE PRESETS</span>
               <strong>Tap a safe AI-cast setup</strong>
             </div>
-            <button type="button" className="ghost-btn compact-action" onClick={handlePolishPrompt} disabled={!hasPrompt}>
-              Prompt polish
-            </button>
+            <span className="tiny-pill">Secondary tool</span>
           </div>
           <div className="chip-row wrap viral-preset-row">
-            {viralScenePresets.map((preset) => (
+            {featuredViralScenePresets.map((preset) => (
               <button
                 key={preset.id}
                 type="button"
@@ -4476,6 +4495,23 @@ export default function CreateVideo({
               </button>
             ))}
           </div>
+          {additionalViralScenePresets.length ? (
+            <details className="compact-reference-details caption-helper-details">
+              <summary>More presets</summary>
+              <div className="chip-row wrap viral-preset-row">
+                {additionalViralScenePresets.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className={`chip ${viralPresetUsed === preset.id ? 'active' : ''}`}
+                    onClick={() => handleApplyViralPreset(preset)}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </details>
+          ) : null}
           <details className="compact-reference-details caption-helper-details">
             <summary>Caption helper</summary>
             <div className="caption-helper-grid">
@@ -4485,12 +4521,12 @@ export default function CreateVideo({
               <p><strong>Dreamy</strong>{captionSuggestions.dreamyCinematic}</p>
             </div>
           </details>
-        </section>
+        </details>
 
         <div className="field-block minimal-style-field">
           <span>Cinematic style</span>
           <div className="chip-row wrap">
-            {STYLE_PRESETS.map((style) => (
+            {STYLE_PRESETS.slice(0, 5).map((style) => (
               <button
                 key={style}
                 type="button"
@@ -4502,6 +4538,24 @@ export default function CreateVideo({
               </button>
             ))}
           </div>
+          {STYLE_PRESETS.length > 5 ? (
+            <details className="compact-reference-details">
+              <summary>More styles</summary>
+              <div className="chip-row wrap">
+                {STYLE_PRESETS.slice(5).map((style) => (
+                  <button
+                    key={style}
+                    type="button"
+                    aria-pressed={selectedStyles.includes(style)}
+                    className={`chip ${selectedStyles.includes(style) ? 'active' : ''}`}
+                    onClick={() => toggleSelectedStyle(style)}
+                  >
+                    {style}
+                  </button>
+                ))}
+              </div>
+            </details>
+          ) : null}
         </div>
 
         <div className="continuity-memory-panel focused-memory-moment">
@@ -4866,8 +4920,15 @@ export default function CreateVideo({
           ) : null}
         </details>
 
-        <details className="advanced-create-details renderer-details">
-          <summary>Lumora Stage</summary>
+        <section className="renderer-details stage-main-card" aria-label="Lumora Stage">
+          <div className="row-between create-section-header">
+            <div className="create-section-heading">
+              <span className="eyebrow">LUMORA STAGE</span>
+              <strong>{selectedStageOption.label}</strong>
+            </div>
+            <span className="tiny-pill">{selectedStageOption.speed}</span>
+          </div>
+          <p className="muted stage-main-copy">{selectedStageOption.description}</p>
           <div className="provider-grid" role="radiogroup" aria-label="Lumora Stage">
             {providerOptions.map((option) => {
               const optionActive = engine === option.engine;
@@ -4904,8 +4965,11 @@ export default function CreateVideo({
               );
             })}
           </div>
-          <small className="muted">{engineRoutingMessage}</small>
-        </details>
+          <details className="advanced-create-details stage-technical-details">
+            <summary>Stage details</summary>
+            <small className="muted">{engineRoutingMessage}</small>
+          </details>
+        </section>
 
         <div className="reference-mode-card focused-reference-summary">
           <div className="reference-mode-copy">

@@ -5395,7 +5395,7 @@ input, textarea, select { width: 100%; padding: 12px 14px; border-radius: 18px; 
 }
 
 .focused-create-page .cast-summary-card {
-  order: 3;
+  order: 5;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -5416,11 +5416,11 @@ input, textarea, select { width: 100%; padding: 12px 14px; border-radius: 18px; 
 }
 
 .minimal-scene-idea {
-  order: 4;
+  order: 3;
 }
 
 .minimal-title-details {
-  order: 5;
+  order: 4;
   border: 0;
   background: transparent;
   margin-bottom: 0;
@@ -5443,7 +5443,7 @@ input, textarea, select { width: 100%; padding: 12px 14px; border-radius: 18px; 
 }
 
 .minimal-style-field {
-  order: 6;
+  order: 9;
 }
 
 .minimal-duration-field {
@@ -5455,16 +5455,16 @@ input, textarea, select { width: 100%; padding: 12px 14px; border-radius: 18px; 
 }
 
 .minimal-render-feel {
-  order: 9;
+  order: 31;
   margin-bottom: 0;
 }
 
 .renderer-details {
-  order: 10;
+  order: 6;
 }
 
 .focused-reference-summary {
-  order: 11;
+  order: 34;
   display: block;
   padding: 0;
   border: 0;
@@ -5490,7 +5490,7 @@ input, textarea, select { width: 100%; padding: 12px 14px; border-radius: 18px; 
 }
 
 .reference-detail-shell {
-  order: 12;
+  order: 34;
 }
 
 .reference-repair-panel {
@@ -5640,11 +5640,68 @@ input, textarea, select { width: 100%; padding: 12px 14px; border-radius: 18px; 
 }
 
 .focused-memory-moment {
-  order: 25;
+  order: 33;
   padding: 0;
   border: 0;
   background: transparent;
   box-shadow: none;
+}
+
+.focused-create-page .ai-cast-readiness-card {
+  order: 35;
+}
+
+.focused-create-page .viral-polish-panel {
+  order: 32;
+}
+
+.focused-create-page .minimal-scene-idea > span,
+.create-scene-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.focused-create-page .minimal-scene-idea .compact-action {
+  min-height: 34px;
+  padding: 7px 11px;
+  font-size: 0.78rem;
+}
+
+.focused-cast-summary-card .reference-setup-btn {
+  margin-top: 8px;
+}
+
+.stage-main-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--surface-border);
+  border-radius: 18px;
+  background: var(--panel-background);
+  box-shadow: var(--surface-shadow);
+}
+
+.stage-main-card .stage-main-copy {
+  margin: 0;
+}
+
+.stage-main-card .provider-grid {
+  gap: 8px;
+}
+
+.stage-main-card .provider-option {
+  padding: 10px 12px;
+}
+
+.stage-technical-details {
+  margin-bottom: 0;
+}
+
+.stage-technical-details > small {
+  display: block;
+  margin: 0 12px 12px;
 }
 
 .focused-memory-moment .row-between {
