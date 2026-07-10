@@ -1639,16 +1639,19 @@ export default function CreateVideo({
     exactLikenessRouter?.canaryStatus === 'canary_succeeded' &&
     exactLikenessRouter?.exactLikeness,
   );
+  const demoModeActive = isDemoModeEngine(engine);
   const klingReferenceSelected = engine === 'replicate';
   const selectedKlingExactReady = klingReferenceSelected && klingExactLikenessReady;
   const klingExactReadyOnOtherRenderer = klingExactLikenessReady && !klingReferenceSelected;
-  const showKlingReferenceSwitch = klingExactReadyOnOtherRenderer && hasGenerationReference;
+  const showKlingReferenceSwitch = !demoModeActive && klingExactReadyOnOtherRenderer && hasGenerationReference;
   const sceneAnchorConfigured = Boolean(healthDiagnostics?.sceneAnchorConfigured);
-  const sceneAnchorGuidance = buildSceneAnchorCreateGuidance({
-    klingReferenceSelected,
-    klingExactReady: selectedKlingExactReady,
-    sceneAnchorConfigured,
-  });
+  const sceneAnchorGuidance = demoModeActive
+    ? null
+    : buildSceneAnchorCreateGuidance({
+        klingReferenceSelected,
+        klingExactReady: selectedKlingExactReady,
+        sceneAnchorConfigured,
+      });
   const providerSelfCharacterReady = openAIProviderSelfCharacterReady || seedanceVideoReferenceReady || selectedKlingExactReady;
   const effectiveVerificationVideoPresent = hasEffectiveSelfVerificationVideo(characterProfile);
   const providerSelfCharacterSetupStarted =
@@ -1658,7 +1661,9 @@ export default function CreateVideo({
       effectiveVerificationVideoPresent ||
       characterProfile?.videoReferenceRouteStatus,
     );
-  const selfCharacterProviderStatusLabel = selectedKlingExactReady
+  const selfCharacterProviderStatusLabel = demoModeActive
+    ? 'Demo Mode'
+    : selectedKlingExactReady
     ? 'Kling Reference Beta'
     : klingExactReadyOnOtherRenderer
       ? 'Soft guidance renderer'
@@ -1680,7 +1685,9 @@ export default function CreateVideo({
       : selfReferenceMode
         ? 'Record self verification video'
         : '';
-  const selfCharacterProviderStatusCopy = selectedKlingExactReady
+  const selfCharacterProviderStatusCopy = demoModeActive
+    ? 'Demo preview only. No real render was created.'
+    : selectedKlingExactReady
     ? sceneAnchorConfigured
       ? 'Kling Reference is experimental for exact-likeness testing. Use Seedance Fast for the safest first render.'
       : 'Kling Reference is experimental. Identity-only fallback is available if you want to test exact likeness.'
@@ -4905,11 +4912,13 @@ export default function CreateVideo({
             <strong>
               {referenceLoading
                 ? 'Preparing your cast...'
-                : isSeedanceEngine
-                  ? `${readySeedanceReferenceCount} reference${readySeedanceReferenceCount === 1 ? '' : 's'} ready`
-                  : hasGenerationReference
-                    ? 'Cast reference ready'
-                    : 'Save a reference before rendering'}
+                : demoModeActive
+                  ? 'Demo Mode preview'
+                  : isSeedanceEngine
+                    ? `${readySeedanceReferenceCount} reference${readySeedanceReferenceCount === 1 ? '' : 's'} ready`
+                    : hasGenerationReference
+                      ? 'Cast reference ready'
+                      : 'Save a reference before rendering'}
             </strong>
             {showReferenceSetupGuidance ? (
               <>
