@@ -1786,15 +1786,15 @@ export default function CreateVideo({
     isSeedanceEngine
       ? engine === SEEDANCE_ENGINE_ID
         ? renderPreference === 'success_first'
-          ? 'Use Seedance Fast for the safest first render. Save a draft first, then preview when ready.'
-          : `Use Seedance Fast for the safest first render with ${readySeedanceReferenceCount} cast reference${readySeedanceReferenceCount === 1 ? '' : 's'}.`
+          ? 'Stage: safest first render with Seedance Fast. Save a draft first, then preview when ready.'
+          : `Stage: safest first render with Seedance Fast and ${readySeedanceReferenceCount} cast reference${readySeedanceReferenceCount === 1 ? '' : 's'}.`
         : 'Seedance Quality is the slower real render path after Seedance Fast or a saved draft feels right.'
     : engine === 'veo'
       ? klingExactReadyOnOtherRenderer
         ? 'Veo Experimental uses soft self guidance. Seedance Fast is the safest first render.'
         : 'Veo Experimental is available for cinematic route testing.'
     : engine === 'mock'
-      ? 'Use Demo Mode to preview without credits.'
+      ? 'Stage preview without credits.'
     : isSoraEngine
       ? (providerSelfCharacterReady
           ? 'Exact self character route is ready.'
@@ -4867,8 +4867,8 @@ export default function CreateVideo({
         </details>
 
         <details className="advanced-create-details renderer-details">
-          <summary>AI cast renderer</summary>
-          <div className="provider-grid" role="radiogroup" aria-label="AI cast renderer">
+          <summary>Lumora Stage</summary>
+          <div className="provider-grid" role="radiogroup" aria-label="Lumora Stage">
             {providerOptions.map((option) => {
               const optionActive = engine === option.engine;
               const optionKling = option.engine === 'replicate';
@@ -4913,7 +4913,7 @@ export default function CreateVideo({
               {referenceLoading
                 ? 'Preparing your cast...'
                 : demoModeActive
-                  ? 'Demo Mode preview'
+                  ? 'Stage preview'
                   : isSeedanceEngine
                     ? `${readySeedanceReferenceCount} reference${readySeedanceReferenceCount === 1 ? '' : 's'} ready`
                     : hasGenerationReference
