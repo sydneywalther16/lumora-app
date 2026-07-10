@@ -9,6 +9,9 @@ import InboxPage from './pages/InboxPage';
 import ProfilePage from './pages/ProfilePage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
 import DiagnosticsPage from './pages/DiagnosticsPage';
+import PrivacyPage from './pages/PrivacyPage';
+import TermsPage from './pages/TermsPage';
+import InstallPage from './pages/InstallPage';
 import CreatorOnboarding from './components/CreatorOnboarding';
 import { useSession } from './hooks/useSession';
 
@@ -41,6 +44,9 @@ export default function App() {
         <Route path="/inbox" element={<InboxPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/diagnostics" element={<DiagnosticsPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/terms" element={<TermsPage />} />
+        <Route path="/install" element={<InstallPage />} />
         <Route path="/auth/callback" element={<AuthCallbackPage />} />
       </Route>
     </Routes>

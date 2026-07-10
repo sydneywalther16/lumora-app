@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import FeedVideoCard from '../components/FeedVideoCard';
 import GeneratedVideoPreview from '../components/GeneratedVideoPreview';
 import { type LumoraPost } from '../lib/api';
@@ -218,8 +219,25 @@ export default function HomePage() {
     <div className="page lumora-page cinematic-feed-page">
       <header className="home-feed-header">
         <h1>Lumora</h1>
-        <p>AI cast videos from reusable characters and story worlds</p>
+        <p>Beta preview: create scenes, use Lumora Stage, save Drafts, and continue your story world.</p>
       </header>
+
+      <section className="list-stack" style={{ marginBottom: '8px' }}>
+        <article className="list-card lumora-card">
+          <div className="row-between" style={{ alignItems: 'center' }}>
+            <h3 style={{ margin: 0 }}>Public beta</h3>
+            <span className="tiny-pill">Beta Preview</span>
+          </div>
+          <p style={{ marginTop: '8px' }}>
+            Stage: safest first render with Seedance Fast. Demo Mode previews without credits. Kling Reference Beta is experimental.
+          </p>
+          <div className="button-row" style={{ marginTop: '8px' }}>
+            <Link className="ghost-btn" to="/install">Install Lumora</Link>
+            <Link className="ghost-btn" to="/privacy">Privacy</Link>
+            <Link className="ghost-btn" to="/terms">Terms</Link>
+          </div>
+        </article>
+      </section>
 
       {feedMessage ? <p className="muted">{feedMessage}</p> : null}
 
@@ -253,6 +271,10 @@ export default function HomePage() {
           onClose={() => setSelectedPost(null)}
         />
       ) : null}
+
+      <p className="muted" style={{ marginTop: '10px' }}>
+        Feedback: beta@lumora.app
+      </p>
     </div>
   );
 }
