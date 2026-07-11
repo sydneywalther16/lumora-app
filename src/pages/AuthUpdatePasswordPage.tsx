@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useSession } from '../hooks/useSession';
 import { supabase } from '../lib/supabase';
@@ -8,16 +8,109 @@ import {
   validatePasswordConfirmation,
 } from '../lib/authMessages';
 
+const INVALID_RESET_LINK_MESSAGE = 'This reset link expired or could not be verified. Request a new one.';
+
+function parseRecoveryParams() {
+  const searchParams = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(
+    window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash,
+  );
+
+  return {
+    code: searchParams.get('code') ?? hashParams.get('code'),
+    accessToken: hashParams.get('access_token') ?? searchParams.get('access_token'),
+    refreshToken: hashParams.get('refresh_token') ?? searchParams.get('refresh_token'),
+    tokenHash: searchParams.get('token_hash') ?? hashParams.get('token_hash'),
+    authType: searchParams.get('type') ?? hashParams.get('type'),
+  };
+}
+
+function hasRecoveryIntent(params: ReturnType<typeof parseRecoveryParams>) {
+  return Boolean(
+    params.code
+      || (params.accessToken && params.refreshToken)
+      || params.tokenHash
+      || params.authType === 'recovery',
+  );
+}
+
 export default function AuthUpdatePasswordPage() {
-  const { loading, session } = useSession();
+  const { loading, session, refreshSession } = useSession();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [checkingRecovery, setCheckingRecovery] = useState(true);
+  const [hasRecoverySession, setHasRecoverySession] = useState(false);
+  const [invalidRecoveryLink, setInvalidRecoveryLink] = useState(false);
 
-  const hasSession = Boolean(session?.user);
+  const recoveryParams = useMemo(() => parseRecoveryParams(), []);
+  const recoveryIntent = useMemo(() => hasRecoveryIntent(recoveryParams), [recoveryParams]);
+
+  useEffect(() => {
+    if (!supabase) {
+      setCheckingRecovery(false);
+      return;
+    }
+
+    const client = supabase;
+
+    let mounted = true;
+    const {
+      data: { subscription },
+    } = client.auth.onAuthStateChange((event, nextSession) => {
+      if (!mounted) return;
+      if (event === 'PASSWORD_RECOVERY' && nextSession) {
+        setHasRecoverySession(true);
+        setInvalidRecoveryLink(false);
+        setCheckingRecovery(false);
+      }
+    });
+
+    async function resolveRecoverySession() {
+      try {
+        const refreshedSession = await refreshSession();
+        if (!mounted) return;
+
+        if (refreshedSession?.user) {
+          setHasRecoverySession(true);
+          setInvalidRecoveryLink(false);
+          return;
+        }
+
+        const { data, error } = await client.auth.getSession();
+        if (!mounted) return;
+
+        if (error) {
+          setInvalidRecoveryLink(recoveryIntent);
+          return;
+        }
+
+        if (data.session?.user) {
+          setHasRecoverySession(true);
+          setInvalidRecoveryLink(false);
+          return;
+        }
+
+        setInvalidRecoveryLink(recoveryIntent);
+      } finally {
+        if (mounted) {
+          setCheckingRecovery(false);
+        }
+      }
+    }
+
+    void resolveRecoverySession();
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [recoveryIntent, refreshSession]);
+
+  const hasSession = Boolean(session?.user) || hasRecoverySession;
 
   async function handleUpdatePassword() {
     if (!supabase) {
@@ -48,12 +141,12 @@ export default function AuthUpdatePasswordPage() {
     }
   }
 
-  if (loading) {
+  if (checkingRecovery || loading) {
     return (
       <div className="page" style={{ minHeight: '60vh', display: 'grid', placeItems: 'center' }}>
         <section className="headline-card" style={{ width: '100%', textAlign: 'center' }}>
           <span className="eyebrow">auth</span>
-          <h1 style={{ marginTop: '8px' }}>Checking session...</h1>
+          <h1 style={{ marginTop: '8px' }}>Checking reset link...</h1>
         </section>
       </div>
     );
@@ -70,7 +163,11 @@ export default function AuthUpdatePasswordPage() {
 
         {!hasSession ? (
           <>
-            <p className="muted">Open the password reset link from your email to continue.</p>
+            <p className="muted">
+              {invalidRecoveryLink
+                ? INVALID_RESET_LINK_MESSAGE
+                : 'Open the password reset link from your email to continue.'}
+            </p>
             <div className="button-row">
               <Link to="/profile" className="ghost-btn">Back to profile</Link>
             </div>

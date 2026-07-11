@@ -30,6 +30,8 @@ assert.equal(
 const appSource = readFileSync(join(process.cwd(), 'src/App.tsx'), 'utf8');
 const authCardSource = readFileSync(join(process.cwd(), 'src/components/auth/AuthCard.tsx'), 'utf8');
 const callbackSource = readFileSync(join(process.cwd(), 'src/pages/AuthCallbackPage.tsx'), 'utf8');
+const bootstrapSource = readFileSync(join(process.cwd(), 'src/lib/bootstrapSession.ts'), 'utf8');
+const updatePasswordSource = readFileSync(join(process.cwd(), 'src/pages/AuthUpdatePasswordPage.tsx'), 'utf8');
 
 assert.match(authCardSource, /Email link/);
 assert.match(authCardSource, /Password/);
@@ -45,5 +47,17 @@ assert.match(authCardSource, /We'll never ask for your provider keys or render c
 assert.match(appSource, /path="\/auth\/callback"/);
 assert.match(appSource, /path="\/auth\/update-password"/);
 assert.match(callbackSource, /exchangeCodeForSession/);
+assert.match(callbackSource, /setSession/);
+
+assert.match(bootstrapSource, /verifyOtp/);
+assert.match(bootstrapSource, /token_hash/);
+assert.match(bootstrapSource, /type:\s*'recovery'/);
+
+assert.match(updatePasswordSource, /Checking reset link\.\.\./);
+assert.match(updatePasswordSource, /PASSWORD_RECOVERY/);
+assert.match(updatePasswordSource, /exchangeCodeForSession|refreshSession/);
+assert.match(updatePasswordSource, /This reset link expired or could not be verified\. Request a new one\./);
+assert.match(updatePasswordSource, /Open the password reset link from your email to continue\./);
+assert.match(updatePasswordSource, /validatePasswordConfirmation/);
 
 console.log('authPasswordFlow unit tests passed');

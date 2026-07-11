@@ -184,6 +184,8 @@ async function exchangeRedirectSession(client: SupabaseClient): Promise<Session 
   const code = searchParams.get('code');
   const accessToken = hashParams.get('access_token');
   const refreshToken = hashParams.get('refresh_token');
+  const tokenHash = searchParams.get('token_hash') ?? hashParams.get('token_hash');
+  const authType = searchParams.get('type') ?? hashParams.get('type');
 
   if (code) {
     const { data, error } = await client.auth.exchangeCodeForSession(code);
@@ -214,6 +216,25 @@ async function exchangeRedirectSession(client: SupabaseClient): Promise<Session 
       console.log('AUTH CODE EXCHANGED', {
         authUserId: data.session.user.id,
         format: 'hash',
+      });
+      return data.session;
+    }
+  }
+
+  if (tokenHash && authType === 'recovery') {
+    const { data, error } = await client.auth.verifyOtp({
+      type: 'recovery',
+      token_hash: tokenHash,
+    });
+
+    if (error) {
+      console.error('AUTH RECOVERY VERIFY FAILED', error);
+    }
+
+    if (data.session) {
+      console.log('AUTH CODE EXCHANGED', {
+        authUserId: data.session.user.id,
+        format: 'recovery-token-hash',
       });
       return data.session;
     }
