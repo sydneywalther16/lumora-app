@@ -19,6 +19,7 @@ export type BootstrapSessionSnapshot = {
 type SupabaseClient = NonNullable<typeof supabase>;
 
 export const AUTH_CALLBACK_PATH = '/auth/callback';
+export const AUTH_UPDATE_PASSWORD_PATH = '/auth/update-password';
 const AUTH_REDIRECT_STORAGE_KEY = 'lumora_auth_redirect_path';
 const LOCALHOST_HOSTNAMES = new Set(['localhost', '127.0.0.1']);
 const configuredPublicAppUrl = import.meta.env.VITE_PUBLIC_APP_URL?.trim();
@@ -133,6 +134,10 @@ export function getAppOrigin(): string {
 
 export function getAuthCallbackUrl(): string {
   return `${getAppOrigin()}${AUTH_CALLBACK_PATH}`;
+}
+
+export function getPasswordUpdateUrl(): string {
+  return `${getAppOrigin()}${AUTH_UPDATE_PASSWORD_PATH}`;
 }
 
 function consumeRememberedRedirectPath(fallbackPath: string): string {
