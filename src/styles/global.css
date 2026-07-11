@@ -5395,7 +5395,7 @@ input, textarea, select { width: 100%; padding: 12px 14px; border-radius: 18px; 
 }
 
 .focused-create-page .cast-summary-card {
-  order: 5;
+  order: 3;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -5416,11 +5416,11 @@ input, textarea, select { width: 100%; padding: 12px 14px; border-radius: 18px; 
 }
 
 .minimal-scene-idea {
-  order: 3;
+  order: 4;
 }
 
 .minimal-title-details {
-  order: 4;
+  order: 5;
   border: 0;
   background: transparent;
   margin-bottom: 0;
@@ -5443,15 +5443,15 @@ input, textarea, select { width: 100%; padding: 12px 14px; border-radius: 18px; 
 }
 
 .minimal-style-field {
-  order: 9;
+  order: 6;
 }
 
 .minimal-duration-field {
-  order: 7;
+  order: 8;
 }
 
 .minimal-aspect-field {
-  order: 8;
+  order: 9;
 }
 
 .minimal-render-feel {
@@ -5460,7 +5460,7 @@ input, textarea, select { width: 100%; padding: 12px 14px; border-radius: 18px; 
 }
 
 .renderer-details {
-  order: 6;
+  order: 10;
 }
 
 .focused-reference-summary {
@@ -5640,7 +5640,7 @@ input, textarea, select { width: 100%; padding: 12px 14px; border-radius: 18px; 
 }
 
 .focused-memory-moment {
-  order: 33;
+  order: 7;
   padding: 0;
   border: 0;
   background: transparent;
