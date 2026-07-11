@@ -5395,7 +5395,7 @@ input, textarea, select { width: 100%; padding: 12px 14px; border-radius: 18px; 
 }
 
 .focused-create-page .cast-summary-card {
-  order: 3;
+  order: 4;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -5415,12 +5415,12 @@ input, textarea, select { width: 100%; padding: 12px 14px; border-radius: 18px; 
   font-size: 0.82rem;
 }
 
-.minimal-scene-idea {
-  order: 4;
+.focused-create-page .minimal-scene-idea {
+  order: 3;
 }
 
-.minimal-title-details {
-  order: 5;
+.focused-create-page .minimal-title-details {
+  order: 36;
   border: 0;
   background: transparent;
   margin-bottom: 0;
@@ -5442,28 +5442,28 @@ input, textarea, select { width: 100%; padding: 12px 14px; border-radius: 18px; 
   margin: 0 12px 12px;
 }
 
-.minimal-style-field {
-  order: 6;
-}
-
-.minimal-duration-field {
+.focused-create-page .minimal-style-field {
   order: 8;
 }
 
-.minimal-aspect-field {
-  order: 9;
+.focused-create-page .minimal-duration-field {
+  order: 6;
 }
 
-.minimal-render-feel {
+.focused-create-page .minimal-aspect-field {
+  order: 7;
+}
+
+.focused-create-page .minimal-render-feel {
   order: 31;
   margin-bottom: 0;
 }
 
-.renderer-details {
-  order: 10;
+.focused-create-page .renderer-details {
+  order: 5;
 }
 
-.focused-reference-summary {
+.focused-create-page .focused-reference-summary {
   order: 34;
   display: block;
   padding: 0;
@@ -5489,19 +5489,19 @@ input, textarea, select { width: 100%; padding: 12px 14px; border-radius: 18px; 
   display: none;
 }
 
-.reference-detail-shell {
+.focused-create-page .reference-detail-shell {
   order: 34;
 }
 
-.reference-repair-panel {
+.focused-create-page .reference-repair-panel {
   order: 13;
 }
 
-.luxury-action-row {
+.focused-create-page .luxury-action-row {
   order: 20;
 }
 
-.render-state-card {
+.focused-create-page .render-state-card {
   order: 21;
 }
 
@@ -5510,11 +5510,11 @@ input, textarea, select { width: 100%; padding: 12px 14px; border-radius: 18px; 
   display: none;
 }
 
-.render-trust-stack {
+.focused-create-page .render-trust-stack {
   order: 22;
 }
 
-.invisible-flow-details {
+.focused-create-page .invisible-flow-details {
   order: 24;
   margin-bottom: 0;
   border: 0;
@@ -5639,8 +5639,8 @@ input, textarea, select { width: 100%; padding: 12px 14px; border-radius: 18px; 
   font-size: 0.74rem;
 }
 
-.focused-memory-moment {
-  order: 7;
+.focused-create-page .focused-memory-moment {
+  order: 33;
   padding: 0;
   border: 0;
   background: transparent;
