@@ -3,11 +3,14 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   applyViralScenePreset,
+  buildPublicCaptionFromPrompt,
   buildAiCastReadiness,
   buildContinueStoryScaffold,
   buildDraftAiCastLabels,
   buildSceneAnchorCreateGuidance,
   buildViralCaptionSuggestions,
+  decideAutoStage,
+  looksLikeInternalRenderPrompt,
   polishKlingCinematicPrompt,
   viralScenePresets,
 } from '../../src/lib/aiCastExperience';
@@ -159,12 +162,55 @@ const captions = buildViralCaptionSuggestions('golden hour garden walk', 'Sydney
 assert.match(captions.short, /Sydney/);
 assert.match(captions.dramatic, /golden hour garden walk/i);
 
+const autoDefaultRoute = decideAutoStage({
+  hasPrompt: true,
+  explicitDemoMode: false,
+  exactLikenessReady: false,
+  selfCharacterReady: false,
+  userPrompt: 'she sees the sunshine',
+});
+assert.equal(autoDefaultRoute.engine, 'seedance-2.0');
+assert.equal(autoDefaultRoute.route, 'seedance_fast_default');
+
+const autoExactRoute = decideAutoStage({
+  hasPrompt: true,
+  explicitDemoMode: false,
+  exactLikenessReady: true,
+  selfCharacterReady: true,
+  userPrompt: 'keep my exact face and same face through motion',
+});
+assert.equal(autoExactRoute.engine, 'replicate');
+assert.equal(autoExactRoute.fallbackEngine, 'seedance-2.0');
+
+const autoDemoRoute = decideAutoStage({
+  hasPrompt: true,
+  explicitDemoMode: true,
+  exactLikenessReady: true,
+  selfCharacterReady: true,
+  userPrompt: 'anything',
+});
+assert.equal(autoDemoRoute.engine, 'mock');
+
+assert.equal(
+  buildPublicCaptionFromPrompt('Use medium-wide or full-body cinematic framing. Preserve the saved self character identity.'),
+  'A cinematic scene is ready.',
+);
+assert.equal(buildPublicCaptionFromPrompt('she sees the sunshine'), 'She sees the sunshine.');
+assert.equal(
+  looksLikeInternalRenderPrompt('Use medium-wide or full-body cinematic framing with visible environment around the subject.'),
+  true,
+);
+
 assert.doesNotMatch(aiCastHelperSource, /\bfetch\s*\(/);
 assert.doesNotMatch(aiCastHelperSource, /FAL_KEY|KLING_API_KEY|OPENAI_API_KEY|SUPABASE_SERVICE_ROLE/i);
+assert.match(aiCastHelperSource, /decideAutoStage/);
 assert.match(createVideoSource, /Sora-worthy readiness/);
+assert.match(createVideoSource, /Lumora Auto Stage/);
 assert.match(createVideoSource, /VIRAL SCENE PRESETS/i);
 assert.match(createVideoSource, /Kling Reference is experimental/);
 assert.match(createVideoSource, /Prompt polish/);
+assert.match(createVideoSource, /Lumora tried the best Stage route and switched to a safer fallback\./);
+assert.match(createVideoSource, /buildPublicCaptionFromPrompt/);
 assert.match(studioListSource, /buildDraftAiCastLabels/);
 assert.match(studioListSource, /Viral caption helper/);
 

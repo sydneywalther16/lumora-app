@@ -72,10 +72,29 @@ type ContinueStoryInput = {
   framingIntent?: string | null;
 };
 
+export type AutoStageInput = {
+  hasPrompt: boolean;
+  explicitDemoMode: boolean;
+  exactLikenessReady: boolean;
+  selfCharacterReady: boolean;
+  userPrompt: string;
+};
+
+export type AutoStageDecision = {
+  modeLabel: 'Lumora Auto Stage' | 'Demo Mode';
+  engine: 'seedance-2.0' | 'replicate' | 'mock';
+  route: 'seedance_fast_default' | 'kling_exact_likeness' | 'demo_mode';
+  fallbackEngine: 'seedance-2.0' | null;
+  reason: string;
+};
+
 const outfitPattern = /\b(?:ivory|white|black|red|blue|pink|gold|silver|emerald|silk|satin|velvet|flowing|tailored|sparkling|evening|red\s*carpet|fairy[-\s]?tale|gown|dress|suit|coat|jacket|jeans|skirt|boots|heels|robe)\b/i;
 const framingPattern = /\b(?:full[-\s]?body|medium[-\s]?wide|medium[-\s]?full|wide shot|cinematic shot|walking shot|standing shot|visible ground|open space)\b/i;
 const motionPattern = /\b(?:walk|walking|turn|slow turn|moving|passes through|enters|arrives|steps|camera motion|tracking shot|gentle camera)\b/i;
 const identityPattern = /\b(?:identity|self character|same face|same hair|saved self|consistent face|consistent body)\b/i;
+const explicitExactLikenessPattern = /\b(?:exact(?:[-\s]?likeness)?|same face|looks like me|match my face|my exact face|identical face|preserve my face)\b/i;
+const internalPromptLeakPattern = /\b(?:use medium-wide|full-body cinematic framing|preserve the saved self character identity|reference image|camera drift|provider|render payload|payload)\b/i;
+const captionForbiddenPattern = /\b(?:use medium-wide|preserve identity|preserve the saved self character identity|saved self character identity|reference image|camera drift|provider|render|payload)\b/i;
 
 export const viralScenePresets: ViralScenePreset[] = [
   {
@@ -132,6 +151,76 @@ export const viralScenePresets: ViralScenePreset[] = [
 
 function compactText(value: string) {
   return value.replace(/\s+/g, ' ').trim();
+}
+
+function toSentence(value: string) {
+  const clean = compactText(value).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!clean) return '';
+  const normalized = clean.replace(/[.?!]+$/g, '');
+  if (!normalized) return '';
+  const capped = normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  return `${capped}.`;
+}
+
+export function looksLikeInternalRenderPrompt(value: string): boolean {
+  const text = compactText(value).toLowerCase();
+  return internalPromptLeakPattern.test(text) || text.includes('ai cast preset:');
+}
+
+export function buildPublicCaptionFromPrompt(prompt: string): string {
+  const source = compactText(prompt);
+  if (!source) return 'A cinematic scene is ready.';
+
+  const sentence = source
+    .split(/[.!?]+/)
+    .map((part) => compactText(part))
+    .find((part) => part.length > 0 && !captionForbiddenPattern.test(part.toLowerCase()));
+  const cleaned = toSentence(sentence || source);
+  if (!cleaned || captionForbiddenPattern.test(cleaned.toLowerCase())) {
+    return 'A cinematic scene is ready.';
+  }
+  return cleaned;
+}
+
+export function decideAutoStage(input: AutoStageInput): AutoStageDecision {
+  if (input.explicitDemoMode) {
+    return {
+      modeLabel: 'Demo Mode',
+      engine: 'mock',
+      route: 'demo_mode',
+      fallbackEngine: null,
+      reason: 'Demo Mode selected explicitly.',
+    };
+  }
+
+  if (!input.hasPrompt) {
+    return {
+      modeLabel: 'Lumora Auto Stage',
+      engine: 'seedance-2.0',
+      route: 'seedance_fast_default',
+      fallbackEngine: null,
+      reason: 'Add a scene idea to route this render.',
+    };
+  }
+
+  const promptNeedsExactLikeness = explicitExactLikenessPattern.test(input.userPrompt);
+  if (promptNeedsExactLikeness && input.exactLikenessReady && input.selfCharacterReady) {
+    return {
+      modeLabel: 'Lumora Auto Stage',
+      engine: 'replicate',
+      route: 'kling_exact_likeness',
+      fallbackEngine: 'seedance-2.0',
+      reason: 'Exact-likeness request detected and Kling Reference Beta is ready.',
+    };
+  }
+
+  return {
+    modeLabel: 'Lumora Auto Stage',
+    engine: 'seedance-2.0',
+    route: 'seedance_fast_default',
+    fallbackEngine: null,
+    reason: 'Seedance Fast is the safest first render path.',
+  };
 }
 
 function sentenceHas(text: string, pattern: RegExp) {

@@ -74,10 +74,13 @@ import {
 import { createSelfCharacterStatusCopy, hasEffectiveSelfVerificationVideo } from '../lib/selfCharacterSetup';
 import {
   applyViralScenePreset,
+  buildPublicCaptionFromPrompt,
   buildAiCastReadiness,
   buildSceneAnchorCreateGuidance,
   buildViralCaptionSuggestions,
+  decideAutoStage,
   isDemoModeEngine,
+  looksLikeInternalRenderPrompt,
   polishKlingCinematicPrompt,
   shouldShowCreatePreparingState,
   viralScenePresets,
@@ -1063,7 +1066,8 @@ function providerFallbackWarningMessages(value: unknown): string[] {
 
 function creatorVisibleFinalPrompt(data: GenerateVideoApiResponse, fallbackPrompt: string) {
   if (typeof data.suggestedPrompt === 'string' && data.suggestedPrompt.trim()) {
-    return data.suggestedPrompt.trim();
+    const suggested = data.suggestedPrompt.trim();
+    if (!looksLikeInternalRenderPrompt(suggested)) return suggested;
   }
 
   if (typeof data.finalPrompt === 'string' && data.finalPrompt.trim()) {
@@ -1072,7 +1076,8 @@ function creatorVisibleFinalPrompt(data: GenerateVideoApiResponse, fallbackPromp
     const looksProviderInternal = finalPrompt.includes('[Image') ||
       lower.includes('reference_images') ||
       lower.includes('use all provided images') ||
-      lower.includes('the cinematic character from [image');
+      lower.includes('the cinematic character from [image') ||
+      looksLikeInternalRenderPrompt(finalPrompt);
     if (!looksProviderInternal) return finalPrompt;
   }
 
@@ -1455,6 +1460,7 @@ export default function CreateVideo({
   const [renderPreference, setRenderPreference] = useState<RenderSuccessMode>('success_first');
   const [selfLikenessIntensity, setSelfLikenessIntensity] = useState<SelfLikenessIntensity>('balanced');
   const [engine, setEngine] = useState<VideoEngine>(SEEDANCE_ENGINE_ID);
+  const [stageSelectionMode, setStageSelectionMode] = useState<'auto' | 'manual'>('auto');
   const [status, setStatus] = useState('');
   const [generationStatusState, setGenerationStatusState] = useState<GenerationStatusState>('idle');
   const [toast, setToast] = useState<ToastState>(null);
@@ -1639,8 +1645,16 @@ export default function CreateVideo({
     exactLikenessRouter?.canaryStatus === 'canary_succeeded' &&
     exactLikenessRouter?.exactLikeness,
   );
-  const demoModeActive = isDemoModeEngine(engine);
-  const klingReferenceSelected = engine === 'replicate';
+  const autoStageDecision = decideAutoStage({
+    hasPrompt,
+    explicitDemoMode: stageSelectionMode === 'manual' && engine === 'mock',
+    exactLikenessReady: klingExactLikenessReady,
+    selfCharacterReady: Boolean(selfReferenceMode && hasGenerationReference),
+    userPrompt: activePrompt,
+  });
+  const effectiveUiEngine = stageSelectionMode === 'manual' ? engine : autoStageDecision.engine;
+  const demoModeActive = isDemoModeEngine(effectiveUiEngine);
+  const klingReferenceSelected = effectiveUiEngine === 'replicate';
   const selectedKlingExactReady = klingReferenceSelected && klingExactLikenessReady;
   const klingExactReadyOnOtherRenderer = klingExactLikenessReady && !klingReferenceSelected;
   const showKlingReferenceSwitch = !demoModeActive && klingExactReadyOnOtherRenderer && hasGenerationReference;
@@ -3013,6 +3027,8 @@ export default function CreateVideo({
     durationOverride?: number;
     forceNewTake?: boolean;
     allowIdentityOnlyKlingFallback?: boolean;
+    engineOverride?: VideoEngine;
+    fallbackAttempted?: boolean;
   } = {}) {
     if (generationInFlightRef.current) return;
 
@@ -3034,11 +3050,15 @@ export default function CreateVideo({
     };
 
     const currentPrompt = options.promptOverride ?? activePrompt;
-    const selectedEngine = engine;
+    const userPrompt = currentPrompt.trim();
+    const autoPromptPolish = polishKlingCinematicPrompt(userPrompt);
+    const renderPrompt = autoPromptPolish.prompt;
+    const publicCaption = buildPublicCaptionFromPrompt(userPrompt);
+    const selectedEngine = options.engineOverride ?? (stageSelectionMode === 'manual' ? engine : autoStageDecision.engine);
     const selectedEngineRequiresBackend = !isDemoModeEngine(selectedEngine);
     const isDemoModeSelection = isDemoModeEngine(selectedEngine);
 
-    if (!currentPrompt.trim()) {
+    if (!userPrompt) {
       setGenerationError('Add a prompt before generating.');
       setGenerationStatusState('failed');
       releaseGenerateLock();
@@ -3053,7 +3073,7 @@ export default function CreateVideo({
       const demoVideoUrl = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
       finishGenerationProgress('completed');
       setGeneratedVideoUrl(demoVideoUrl);
-      setFinalGeneratedPrompt(currentPrompt);
+      setFinalGeneratedPrompt(userPrompt);
       setGeneratedDisplayEngine('Demo Mode');
       setGeneratedMode('text-to-video-fallback');
       setGenerationResult({
@@ -3066,11 +3086,11 @@ export default function CreateVideo({
         characterName,
         characterAvatar,
         isDefaultSelfCharacter,
-        prompt: currentPrompt,
+        prompt: userPrompt,
         outputUrl: demoVideoUrl,
         videoUrl: demoVideoUrl,
         generationMode: 'text-to-video-fallback',
-        finalPrompt: currentPrompt,
+        finalPrompt: userPrompt,
         model: 'demo-preview',
         displayEngine: 'Demo Mode',
         createdAt: now,
@@ -3262,7 +3282,7 @@ export default function CreateVideo({
       if (selectedIsSeedanceEngine) {
         const seedanceResult = await api.createSeedanceGeneration({
           title: draftTitle,
-          prompt: currentPrompt,
+          prompt: renderPrompt,
           stylePreset: selectedStyles,
           userId: authUser?.id ?? identityProfile?.userId ?? null,
           engine: selectedEngine,
@@ -3315,7 +3335,7 @@ export default function CreateVideo({
       } else if (selectedIsBackendProviderEngine) {
         const providerResult = await api.createGeneration({
           title: draftTitle,
-          prompt: currentPrompt,
+          prompt: renderPrompt,
           stylePreset: selectedStyles,
           userId: authUser?.id ?? identityProfile?.userId ?? null,
           characterId,
@@ -3363,7 +3383,7 @@ export default function CreateVideo({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            prompt: currentPrompt,
+            prompt: renderPrompt,
             characterId,
             userId: authUser?.id ?? identityProfile?.userId ?? null,
             identityId: identityProfile?.identityId,
@@ -3655,7 +3675,7 @@ export default function CreateVideo({
         : viralPresetUsed;
       const nextPromptPolished = typeof data.promptPolished === 'boolean'
         ? data.promptPolished
-        : promptPolished;
+        : (promptPolished || autoPromptPolish.promptPolished);
       const nextAudioConfigured = typeof data.audioConfigured === 'boolean'
         ? data.audioConfigured
         : false;
@@ -3699,7 +3719,10 @@ export default function CreateVideo({
         return;
       }
 
-      const nextFinalPrompt = creatorVisibleFinalPrompt(data, currentPrompt);
+      const nextFinalPrompt = creatorVisibleFinalPrompt(data, userPrompt);
+      const hiddenRenderPrompt = typeof data.finalPrompt === 'string' && data.finalPrompt.trim()
+        ? data.finalPrompt.trim()
+        : renderPrompt;
       const renderedWithIdentityOnlyKlingFallback = Boolean(
         nextExactLikenessRoute === 'kling_reference' &&
         nextSceneAnchorReason === 'identity_only_fallback_explicitly_selected' &&
@@ -3743,7 +3766,7 @@ export default function CreateVideo({
         characterName,
         characterAvatar,
         isDefaultSelfCharacter,
-        prompt: currentPrompt,
+        prompt: userPrompt,
         outputUrl: nextVideoUrl,
         thumbnailUrl: nextThumbnailUrl,
         posterUrl: nextPosterUrl,
@@ -3756,7 +3779,7 @@ export default function CreateVideo({
         providerFallbackDiagnostics,
         sceneOptimization: data.sceneOptimization ?? providerFallbackDiagnostics?.sceneOptimization ?? null,
         renderReliability: data.renderReliability ?? null,
-        finalPrompt: nextFinalPrompt,
+        finalPrompt: hiddenRenderPrompt,
         model: data.model || null,
         displayEngine: nextDisplayEngine,
         referenceImageUrl: nextReferenceImageUrl,
@@ -3849,9 +3872,9 @@ export default function CreateVideo({
         const studioProject: StudioProject = {
           id: result.jobId,
           title: draftTitle,
-          caption: currentPrompt,
-          prompt: result.prompt,
-          finalPrompt: nextFinalPrompt,
+          caption: publicCaption,
+          prompt: userPrompt,
+          finalPrompt: hiddenRenderPrompt,
           videoUrl: result.outputUrl,
           thumbnailUrl: nextThumbnailUrl,
           posterUrl: nextPosterUrl,
@@ -4030,6 +4053,31 @@ export default function CreateVideo({
       console.error('Generation failed', error);
       const message = error instanceof Error ? error.message : 'Unable to create draft render';
       const apiPayload = error instanceof ApiRequestError ? error.payload : null;
+      const moderationPayload = isProviderModerationPayload(apiPayload) ? apiPayload : null;
+      if (
+        !options.fallbackAttempted &&
+        stageSelectionMode === 'auto' &&
+        selectedEngine === 'replicate' &&
+        autoStageDecision.fallbackEngine === SEEDANCE_ENGINE_ID &&
+        !moderationPayload &&
+        !isProviderSafetyFilterError(message) &&
+        !isReplicateThrottledError(message)
+      ) {
+        setGenerationModerationDetail('Lumora tried the best Stage route and switched to a safer fallback.');
+        setGenerationModerationStages(['Trying Kling Reference Beta route', 'Switching to Seedance Fast fallback']);
+        setGenerationError('');
+        setStatus('Lumora tried the best Stage route and switched to a safer fallback.');
+        releaseGenerateLock();
+        await handleGenerate({
+          promptOverride: userPrompt,
+          renderPreferenceOverride: selectedRenderPreference,
+          durationOverride: selectedDuration,
+          forceNewTake: true,
+          engineOverride: SEEDANCE_ENGINE_ID,
+          fallbackAttempted: true,
+        });
+        return;
+      }
       if (error instanceof ApiRequestError && error.status === 429) {
         const retryAfterSeconds = retrySecondsFromPayload(apiPayload) ?? 10;
         const rateLimitedData: GenerateVideoApiResponse = {
@@ -4078,7 +4126,6 @@ export default function CreateVideo({
         setReferenceRepair(repairIssue);
         setRepairStatus('');
       }
-      const moderationPayload = isProviderModerationPayload(apiPayload) ? apiPayload : null;
       const providerFallbackPayload = isProviderFallbackDiagnostics(moderationPayload?.providerFallbackDiagnostics)
         ? moderationPayload.providerFallbackDiagnostics
         : null;
@@ -4092,7 +4139,9 @@ export default function CreateVideo({
         ...moderationRetryStageMessages(moderationPayload?.moderationDiagnostics),
         ...providerFallbackStageMessages(providerFallbackPayload),
       ]));
-      const displayMessage = moderationPayload
+      const displayMessage = options.fallbackAttempted
+        ? 'Lumora could not complete this route. Your draft is saved.'
+        : moderationPayload
         ? providerFallbackPayload
           ? 'This scene needs a simpler direction before rendering.'
           : providerModerationMessage
@@ -4174,6 +4223,7 @@ export default function CreateVideo({
 
     setActivePrompt(ULTRA_SAFE_SCENE_PROMPT);
     setRenderPreference('success_first');
+    setStageSelectionMode('manual');
     setEngine(SEEDANCE_ENGINE_ID);
     setDuration(overrides.duration);
     setGenerationSafeRewrite('');
@@ -4226,17 +4276,20 @@ export default function CreateVideo({
     try {
       const now = new Date().toISOString();
       const profile = loadLumoraProfile();
-      const displayEngine = engine === SEEDANCE_ENGINE_ID
+      const draftEngine = stageSelectionMode === 'manual' ? engine : autoStageDecision.engine;
+      const displayEngine = stageSelectionMode === 'auto'
+        ? 'Lumora Auto Stage'
+        : draftEngine === SEEDANCE_ENGINE_ID
         ? 'Seedance Fast'
-        : engine === SEEDANCE_QUALITY_ENGINE_ID
+        : draftEngine === SEEDANCE_QUALITY_ENGINE_ID
           ? 'Seedance Quality'
-          : engine === 'replicate'
+          : draftEngine === 'replicate'
             ? 'Kling Reference'
-            : engineLabels[engine] ?? engine;
+            : engineLabels[draftEngine] ?? draftEngine;
       const studioDraft: StudioProject = {
         id: createLocalGenerationId(),
         title: draftTitle.trim() || 'Untitled scene',
-        caption: scenePrompt,
+        caption: buildPublicCaptionFromPrompt(scenePrompt),
         prompt: scenePrompt,
         finalPrompt: scenePrompt,
         videoUrl: '',
@@ -4244,8 +4297,8 @@ export default function CreateVideo({
         posterUrl: null,
         thumbnailSource: null,
         status: 'draft',
-        provider: engine,
-        engine,
+        provider: draftEngine,
+        engine: draftEngine,
         aspectRatio,
         model: null,
         displayEngine,
@@ -4924,50 +4977,66 @@ export default function CreateVideo({
           <div className="row-between create-section-header">
             <div className="create-section-heading">
               <span className="eyebrow">LUMORA STAGE</span>
-              <strong>{selectedStageOption.label}</strong>
+              <strong>{stageSelectionMode === 'auto' ? 'Lumora Auto Stage' : selectedStageOption.label}</strong>
             </div>
-            <span className="tiny-pill">{selectedStageOption.speed}</span>
+            <span className="tiny-pill">{stageSelectionMode === 'auto' ? 'Auto' : selectedStageOption.speed}</span>
           </div>
-          <p className="muted stage-main-copy">{selectedStageOption.description}</p>
-          <div className="provider-grid" role="radiogroup" aria-label="Lumora Stage">
-            {providerOptions.map((option) => {
-              const optionActive = engine === option.engine;
-              const optionKling = option.engine === 'replicate';
-              const optionKlingReady = optionKling && klingExactLikenessReady;
-              const optionSeedanceFast = option.engine === SEEDANCE_ENGINE_ID;
-              const optionDemoMode = option.engine === 'mock';
-              return (
-                <button
-                  key={option.engine}
-                  type="button"
-                  role="radio"
-                  aria-checked={optionActive}
-                  className={`provider-option ${optionActive ? 'active' : ''} ${optionKlingReady ? 'ready' : ''}`}
-                  onClick={() => setEngine(option.engine)}
-                >
-                  <span>
-                    <strong>{option.label}</strong>
-                    <small>{option.description}</small>
-                  </span>
-                  <span className="provider-meta">
-                    <span>Speed {option.speed}</span>
-                    <span>Quality {option.quality}</span>
-                    {optionSeedanceFast ? <span>Safest first render</span> : null}
-                    {optionDemoMode ? <span>No credits</span> : null}
-                    {optionKling ? (
-                      <>
-                        <span>Beta</span>
-                        <span>{optionKlingReady ? 'Exact-likeness ready' : 'Needs AI Cast setup'}</span>
-                      </>
-                    ) : null}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+          <p className="muted stage-main-copy">
+            {stageSelectionMode === 'auto'
+              ? 'Lumora chooses the safest available render path for this scene.'
+              : selectedStageOption.description}
+          </p>
           <details className="advanced-create-details stage-technical-details">
             <summary>Stage details</summary>
-            <small className="muted">{engineRoutingMessage}</small>
+            <small className="muted">{stageSelectionMode === 'auto' ? autoStageDecision.reason : engineRoutingMessage}</small>
+            <div className="button-row" style={{ marginTop: '12px' }}>
+              <button
+                type="button"
+                className={`ghost-btn ${stageSelectionMode === 'auto' ? 'active' : ''}`}
+                onClick={() => setStageSelectionMode('auto')}
+              >
+                Auto Stage
+              </button>
+            </div>
+            <div className="provider-grid" role="radiogroup" aria-label="Lumora Stage provider override">
+              {providerOptions.map((option) => {
+                const optionActive = stageSelectionMode === 'manual' && engine === option.engine;
+                const optionKling = option.engine === 'replicate';
+                const optionKlingReady = optionKling && klingExactLikenessReady;
+                const optionSeedanceFast = option.engine === SEEDANCE_ENGINE_ID;
+                const optionDemoMode = option.engine === 'mock';
+                return (
+                  <button
+                    key={option.engine}
+                    type="button"
+                    role="radio"
+                    aria-checked={optionActive}
+                    className={`provider-option ${optionActive ? 'active' : ''} ${optionKlingReady ? 'ready' : ''}`}
+                    onClick={() => {
+                      setStageSelectionMode('manual');
+                      setEngine(option.engine);
+                    }}
+                  >
+                    <span>
+                      <strong>{option.label}</strong>
+                      <small>{option.description}</small>
+                    </span>
+                    <span className="provider-meta">
+                      <span>Speed {option.speed}</span>
+                      <span>Quality {option.quality}</span>
+                      {optionSeedanceFast ? <span>Safest first render</span> : null}
+                      {optionDemoMode ? <span>No credits</span> : null}
+                      {optionKling ? (
+                        <>
+                          <span>Beta</span>
+                          <span>{optionKlingReady ? 'Exact-likeness ready' : 'Needs AI Cast setup'}</span>
+                        </>
+                      ) : null}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </details>
         </section>
 
@@ -5067,7 +5136,7 @@ export default function CreateVideo({
                 </div>
               </details>
             ) : null}
-            {selfReferenceMode && engine === 'replicate' ? (
+            {selfReferenceMode && effectiveUiEngine === 'replicate' ? (
               <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }}>
                 <span className="tiny-pill" style={{ width: 'fit-content' }}>{identityStatusLabel}</span>
                 <span className="muted">
@@ -5075,7 +5144,7 @@ export default function CreateVideo({
                 </span>
               </div>
             ) : null}
-            {selfReferenceMode && engine === 'replicate' && onResaveReferencePhoto ? (
+            {selfReferenceMode && effectiveUiEngine === 'replicate' && onResaveReferencePhoto ? (
               <button
                 type="button"
                 className="ghost-btn reference-resave-btn"
@@ -5090,7 +5159,7 @@ export default function CreateVideo({
               <SelfReferencePreview
                 label="Selected reference"
                 reference={normalizedSelectedReference}
-                required={engine === 'replicate' && selfReferenceMode}
+                required={effectiveUiEngine === 'replicate' && selfReferenceMode}
               />
             </div>
           ) : null}
@@ -5103,7 +5172,7 @@ export default function CreateVideo({
           ) : null}
         </div>
 
-        {selfReferenceMode && engine === 'replicate' && isHydrated ? (
+        {selfReferenceMode && effectiveUiEngine === 'replicate' && isHydrated ? (
           <details className="advanced-create-details reference-detail-shell">
             <summary>Lumora Cast Reference</summary>
             <div className="reference-grid" style={{ gap: '8px' }}>
