@@ -2,8 +2,15 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  FORGOT_PASSWORD_COOLDOWN_MESSAGE,
+  FORGOT_PASSWORD_GENERIC_MESSAGE,
+  FORGOT_PASSWORD_INVALID_EMAIL_MESSAGE,
+  FORGOT_PASSWORD_NETWORK_MESSAGE,
+  FORGOT_PASSWORD_RATE_LIMIT_MESSAGE,
+  FORGOT_PASSWORD_UNAUTHORIZED_EMAIL_MESSAGE,
   MIN_PASSWORD_LENGTH,
   friendlyAuthError,
+  friendlyForgotPasswordError,
   validatePasswordConfirmation,
   validatePasswordInput,
 } from '../../src/lib/authMessages';
@@ -24,7 +31,35 @@ assert.equal(
 );
 assert.equal(
   friendlyAuthError('forgot_password', ''),
-  'We could not send a reset link right now. Please try again.',
+  FORGOT_PASSWORD_GENERIC_MESSAGE,
+);
+assert.equal(
+  friendlyForgotPasswordError('over_email_send_rate_limit'),
+  FORGOT_PASSWORD_RATE_LIMIT_MESSAGE,
+);
+assert.equal(
+  friendlyForgotPasswordError('429 too many requests'),
+  FORGOT_PASSWORD_RATE_LIMIT_MESSAGE,
+);
+assert.equal(
+  friendlyForgotPasswordError('A reset email was requested recently. Try again after 60 seconds.'),
+  FORGOT_PASSWORD_COOLDOWN_MESSAGE,
+);
+assert.equal(
+  friendlyForgotPasswordError('Email address not authorized for default provider'),
+  FORGOT_PASSWORD_UNAUTHORIZED_EMAIL_MESSAGE,
+);
+assert.equal(
+  friendlyForgotPasswordError('Invalid email address'),
+  FORGOT_PASSWORD_INVALID_EMAIL_MESSAGE,
+);
+assert.equal(
+  friendlyForgotPasswordError('TypeError: Failed to fetch'),
+  FORGOT_PASSWORD_NETWORK_MESSAGE,
+);
+assert.equal(
+  friendlyForgotPasswordError('smtp relay rejected RCPT TO due to policy'),
+  FORGOT_PASSWORD_GENERIC_MESSAGE,
 );
 
 const appSource = readFileSync(join(process.cwd(), 'src/App.tsx'), 'utf8');
@@ -41,8 +76,14 @@ assert.match(authCardSource, /signInWithOtp/);
 assert.match(authCardSource, /signInWithPassword/);
 assert.match(authCardSource, /signUp/);
 assert.match(authCardSource, /resetPasswordForEmail/);
+assert.match(authCardSource, /friendlyForgotPasswordError/);
+assert.match(authCardSource, /FORGOT_PASSWORD_CLIENT_COOLDOWN_MS/);
+assert.match(authCardSource, /forgotPasswordCooldownActive/);
+assert.match(authCardSource, /if \(busy\) return;/);
 assert.match(authCardSource, /validatePasswordConfirmation/);
 assert.match(authCardSource, /We'll never ask for your provider keys or render credentials\./);
+assert.match(authCardSource, /Check your email for a password reset link\./);
+assert.doesNotMatch(authCardSource, /Password reset email sent\. Open the link to set a new password\./);
 
 assert.match(appSource, /path="\/auth\/callback"/);
 assert.match(appSource, /path="\/auth\/update-password"/);
@@ -59,5 +100,14 @@ assert.match(updatePasswordSource, /exchangeCodeForSession|refreshSession/);
 assert.match(updatePasswordSource, /This reset link expired or could not be verified\. Request a new one\./);
 assert.match(updatePasswordSource, /Open the password reset link from your email to continue\./);
 assert.match(updatePasswordSource, /validatePasswordConfirmation/);
+
+const authMessagesSource = readFileSync(join(process.cwd(), 'src/lib/authMessages.ts'), 'utf8');
+assert.match(authMessagesSource, /FORGOT_PASSWORD_RATE_LIMIT_MESSAGE/);
+assert.match(authMessagesSource, /FORGOT_PASSWORD_COOLDOWN_MESSAGE/);
+assert.match(authMessagesSource, /FORGOT_PASSWORD_UNAUTHORIZED_EMAIL_MESSAGE/);
+assert.match(authMessagesSource, /FORGOT_PASSWORD_INVALID_EMAIL_MESSAGE/);
+assert.match(authMessagesSource, /FORGOT_PASSWORD_NETWORK_MESSAGE/);
+assert.match(authMessagesSource, /FORGOT_PASSWORD_GENERIC_MESSAGE/);
+assert.match(authMessagesSource, /function friendlyForgotPasswordError/);
 
 console.log('authPasswordFlow unit tests passed');

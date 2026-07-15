@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import {
   AUTH_CALLBACK_PATH,
@@ -7,12 +7,16 @@ import {
   rememberAuthRedirectPath,
 } from '../../hooks/useSession';
 import {
+  FORGOT_PASSWORD_COOLDOWN_MESSAGE,
   MIN_PASSWORD_LENGTH,
   friendlyAuthError,
+  friendlyForgotPasswordError,
   validatePasswordConfirmation,
   validatePasswordInput,
 } from '../../lib/authMessages';
 import { supabase } from '../../lib/supabase';
+
+const FORGOT_PASSWORD_CLIENT_COOLDOWN_MS = 30_000;
 
 type Props = {
   configured?: boolean;
@@ -33,6 +37,25 @@ export default function AuthCard(props: Props = {}) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [forgotPasswordCooldownUntil, setForgotPasswordCooldownUntil] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+
+  const forgotPasswordCooldownActive = useMemo(
+    () => forgotPasswordCooldownUntil > now,
+    [forgotPasswordCooldownUntil, now],
+  );
+
+  useEffect(() => {
+    if (!forgotPasswordCooldownActive) return;
+
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+    }, 500);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [forgotPasswordCooldownActive]);
 
   function setFriendlyMessage(nextMessage: string) {
     setMessage(nextMessage);
@@ -137,6 +160,12 @@ export default function AuthCard(props: Props = {}) {
 
   async function sendPasswordReset() {
     if (!supabase) return;
+    if (busy) return;
+    if (forgotPasswordCooldownActive) {
+      setFriendlyMessage(FORGOT_PASSWORD_COOLDOWN_MESSAGE);
+      return;
+    }
+
     if (!email.trim()) {
       setFriendlyMessage('Enter your email.');
       return;
@@ -151,10 +180,12 @@ export default function AuthCard(props: Props = {}) {
       });
 
       setFriendlyMessage(error
-        ? friendlyAuthError('forgot_password', error.message)
-        : 'Password reset email sent. Open the link to set a new password.');
+        ? friendlyForgotPasswordError(error.message)
+        : 'Check your email for a password reset link.');
     } finally {
       setBusy(false);
+      setForgotPasswordCooldownUntil(Date.now() + FORGOT_PASSWORD_CLIENT_COOLDOWN_MS);
+      setNow(Date.now());
     }
   }
 
@@ -265,7 +296,12 @@ export default function AuthCard(props: Props = {}) {
             </button>
           ) : null}
           {mode === 'forgot_password' ? (
-            <button type="button" className="primary-btn" onClick={() => void sendPasswordReset()} disabled={busy}>
+            <button
+              type="button"
+              className="primary-btn"
+              onClick={() => void sendPasswordReset()}
+              disabled={busy || forgotPasswordCooldownActive}
+            >
               {busy ? 'Working...' : 'Forgot password?'}
             </button>
           ) : null}
