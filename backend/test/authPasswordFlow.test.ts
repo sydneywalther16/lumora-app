@@ -95,8 +95,8 @@ assert.match(bootstrapSource, /token_hash/);
 assert.match(bootstrapSource, /type:\s*'recovery'/);
 
 assert.match(updatePasswordSource, /Checking reset link\.\.\./);
-assert.match(updatePasswordSource, /PASSWORD_RECOVERY/);
-assert.match(updatePasswordSource, /exchangeCodeForSession|refreshSession/);
+assert.match(updatePasswordSource, /refreshSession/);
+assert.doesNotMatch(updatePasswordSource, /onAuthStateChange/);
 assert.match(updatePasswordSource, /This reset link expired or could not be verified\. Request a new one\./);
 assert.match(updatePasswordSource, /Open the password reset link from your email to continue\./);
 assert.match(updatePasswordSource, /validatePasswordConfirmation/);

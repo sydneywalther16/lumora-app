@@ -23,6 +23,7 @@ export const AUTH_UPDATE_PASSWORD_PATH = '/auth/update-password';
 const AUTH_REDIRECT_STORAGE_KEY = 'lumora_auth_redirect_path';
 const LOCALHOST_HOSTNAMES = new Set(['localhost', '127.0.0.1']);
 const configuredPublicAppUrl = import.meta.env.VITE_PUBLIC_APP_URL?.trim();
+const SESSION_RESTORE_TIMEOUT_MS = 7000;
 const authParamNames = [
   'access_token',
   'code',
@@ -178,6 +179,17 @@ function authHashParams() {
   );
 }
 
+function isAuthRedirectRoute(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.location.pathname === AUTH_CALLBACK_PATH || window.location.pathname === AUTH_UPDATE_PASSWORD_PATH;
+}
+
+function cleanAuthParamsFromCurrentUrl() {
+  if (typeof window === 'undefined') return;
+  const safePath = routeWithoutAuthParams(new URL(window.location.href));
+  window.history.replaceState({}, document.title, safePath);
+}
+
 async function exchangeRedirectSession(client: SupabaseClient): Promise<Session | null> {
   const searchParams = authSearchParams();
   const hashParams = authHashParams();
@@ -189,15 +201,11 @@ async function exchangeRedirectSession(client: SupabaseClient): Promise<Session 
 
   if (code) {
     const { data, error } = await client.auth.exchangeCodeForSession(code);
-
     if (error) {
       console.error('AUTH CODE EXCHANGE FAILED', error);
     }
-
     if (data.session) {
-      console.log('AUTH CODE EXCHANGED', {
-        authUserId: data.session.user.id,
-      });
+      console.log('AUTH CODE EXCHANGED', { authUserId: data.session.user.id });
       return data.session;
     }
   }
@@ -207,11 +215,9 @@ async function exchangeRedirectSession(client: SupabaseClient): Promise<Session 
       access_token: accessToken,
       refresh_token: refreshToken,
     });
-
     if (error) {
       console.error('AUTH HASH SESSION SAVE FAILED', error);
     }
-
     if (data.session) {
       console.log('AUTH CODE EXCHANGED', {
         authUserId: data.session.user.id,
@@ -226,11 +232,9 @@ async function exchangeRedirectSession(client: SupabaseClient): Promise<Session 
       type: 'recovery',
       token_hash: tokenHash,
     });
-
     if (error) {
       console.error('AUTH RECOVERY VERIFY FAILED', error);
     }
-
     if (data.session) {
       console.log('AUTH CODE EXCHANGED', {
         authUserId: data.session.user.id,
@@ -255,17 +259,26 @@ async function exchangeRedirectSession(client: SupabaseClient): Promise<Session 
   return data.session ?? null;
 }
 
-function cleanAuthUrl() {
-  if (typeof window === 'undefined') return;
-
-  const fallbackPath = routeWithoutAuthParams(new URL(window.location.href));
-  const redirectPath = consumeAuthRedirectPath(fallbackPath);
-  window.history.replaceState({}, document.title, redirectPath);
-  window.dispatchEvent(new PopStateEvent('popstate'));
-}
-
 function delay(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return await new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error(`${label} timed out`));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      });
+  });
 }
 
 async function getSessionAfterRedirect(
@@ -302,11 +315,6 @@ function logSession(session: Session | null, source: SessionSource) {
     authUserId,
     source,
     restored: Boolean(session),
-  });
-  console.log('AUTH USER:', session?.user ?? null);
-  console.log('AUTH USER ID', {
-    authUserId,
-    source,
   });
 
   if (!session) {
@@ -366,7 +374,6 @@ function ensureAuthSubscription() {
       authUserId: session?.user?.id ?? null,
       event,
     });
-    console.log('AUTH USER:', session?.user ?? null);
 
     emitSessionState({
       authReady: true,
@@ -381,6 +388,8 @@ function ensureAuthSubscription() {
 }
 
 export async function refreshBootstrapSession(source: SessionSource = 'refresh'): Promise<Session | null> {
+  ensureAuthSubscription();
+
   if (!supabase) {
     emitSessionState({
       authReady: true,
@@ -392,48 +401,68 @@ export async function refreshBootstrapSession(source: SessionSource = 'refresh')
     return null;
   }
 
-  const redirectParamsPresent = hasAuthRedirectParams();
-  if (
-    redirectParamsPresent &&
-    typeof window !== 'undefined' &&
-    window.location.pathname !== AUTH_CALLBACK_PATH
-  ) {
-    console.warn('AUTH REDIRECT URL WARNING', {
-      callbackPath: window.location.pathname,
-      expectedPath: AUTH_CALLBACK_PATH,
-      href: window.location.href,
-    });
+  if (bootstrapPromise) {
+    return bootstrapPromise;
   }
 
-  emitSessionState({
-    ...currentSnapshot,
-    authReady: false,
-    configured: true,
-  });
+  bootstrapPromise = (async () => {
+    const redirectParamsPresent = hasAuthRedirectParams();
+    const shouldProcessRedirectParams = redirectParamsPresent && isAuthRedirectRoute();
 
-  const nextSource: SessionSource = redirectParamsPresent ? 'url-redirect' : source;
-  try {
-    const nextSnapshot = await readSession(supabase, nextSource, redirectParamsPresent);
-    initialHydrated = true;
-    emitSessionState(nextSnapshot);
-
-    if (redirectParamsPresent && nextSnapshot.authSession) {
-      cleanAuthUrl();
+    if (redirectParamsPresent && !shouldProcessRedirectParams && typeof window !== 'undefined') {
+      console.warn('AUTH REDIRECT URL WARNING', {
+        callbackPath: window.location.pathname,
+        expectedPaths: [AUTH_CALLBACK_PATH, AUTH_UPDATE_PASSWORD_PATH],
+      });
     }
 
-    return nextSnapshot.authSession;
-  } catch (error) {
-    console.error('Unable to bootstrap Supabase session:', error);
-    initialHydrated = true;
-    emitSessionState({
-      authReady: true,
-      authUser: null,
-      authSession: null,
-      configured: true,
-      source: nextSource,
-    });
-    return null;
-  }
+    const shouldShowRestoring = source === 'initial' && !initialHydrated;
+    if (shouldShowRestoring) {
+      emitSessionState({
+        ...currentSnapshot,
+        authReady: false,
+        configured: true,
+      });
+    }
+
+    const nextSource: SessionSource = shouldProcessRedirectParams ? 'url-redirect' : source;
+
+    try {
+      const nextSnapshot = await withTimeout(
+        readSession(supabase, nextSource, shouldProcessRedirectParams),
+        SESSION_RESTORE_TIMEOUT_MS,
+        'Auth session restore',
+      );
+      initialHydrated = true;
+      emitSessionState(nextSnapshot);
+
+      if (redirectParamsPresent) {
+        cleanAuthParamsFromCurrentUrl();
+      }
+
+      return nextSnapshot.authSession;
+    } catch (error) {
+      console.error('Unable to bootstrap Supabase session:', error);
+      initialHydrated = true;
+      emitSessionState({
+        authReady: true,
+        authUser: null,
+        authSession: null,
+        configured: true,
+        source: nextSource,
+      });
+
+      if (redirectParamsPresent) {
+        cleanAuthParamsFromCurrentUrl();
+      }
+
+      return null;
+    }
+  })().finally(() => {
+    bootstrapPromise = null;
+  });
+
+  return bootstrapPromise;
 }
 
 export function bootstrapSession(): Promise<Session | null> {
@@ -443,11 +472,5 @@ export function bootstrapSession(): Promise<Session | null> {
     return Promise.resolve(currentSnapshot.authSession);
   }
 
-  if (!bootstrapPromise) {
-    bootstrapPromise = refreshBootstrapSession('initial').finally(() => {
-      bootstrapPromise = null;
-    });
-  }
-
-  return bootstrapPromise;
+  return refreshBootstrapSession('initial');
 }

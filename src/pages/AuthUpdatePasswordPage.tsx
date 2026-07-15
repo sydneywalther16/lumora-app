@@ -58,16 +58,13 @@ export default function AuthUpdatePasswordPage() {
     const client = supabase;
 
     let mounted = true;
-    const {
-      data: { subscription },
-    } = client.auth.onAuthStateChange((event, nextSession) => {
-      if (!mounted) return;
-      if (event === 'PASSWORD_RECOVERY' && nextSession) {
-        setHasRecoverySession(true);
-        setInvalidRecoveryLink(false);
-        setCheckingRecovery(false);
-      }
-    });
+
+    if (!recoveryIntent) {
+      setCheckingRecovery(false);
+      return () => {
+        mounted = false;
+      };
+    }
 
     async function resolveRecoverySession() {
       try {
@@ -106,7 +103,6 @@ export default function AuthUpdatePasswordPage() {
 
     return () => {
       mounted = false;
-      subscription.unsubscribe();
     };
   }, [recoveryIntent, refreshSession]);
 

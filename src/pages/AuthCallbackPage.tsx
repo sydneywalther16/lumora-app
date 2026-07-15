@@ -29,13 +29,15 @@ export default function AuthCallbackPage() {
     let active = true;
 
     async function finishAuthCallback() {
-      const callbackUrl = window.location.href;
-      console.log('AUTH CALLBACK URL', callbackUrl);
+      const callbackUrl = new URL(window.location.href);
+      console.log('AUTH CALLBACK PATH', {
+        pathname: callbackUrl.pathname,
+      });
 
       if (!supabase) {
         console.warn('AUTH REDIRECT URL WARNING', {
           message: 'Supabase is not configured for this app.',
-          callbackUrl,
+          callbackPath: callbackUrl.pathname,
         });
         if (active) setStatus('Supabase is not configured.');
         window.setTimeout(() => window.location.replace('/profile'), 900);
@@ -43,15 +45,14 @@ export default function AuthCallbackPage() {
       }
 
       try {
-        const url = new URL(callbackUrl);
-        const code = url.searchParams.get('code');
-        const hashParams = getHashParams(url);
+        const code = callbackUrl.searchParams.get('code');
+        const hashParams = getHashParams(callbackUrl);
         const accessToken = hashParams.get('access_token');
         const refreshToken = hashParams.get('refresh_token');
 
-        if (url.pathname !== AUTH_CALLBACK_PATH) {
+        if (callbackUrl.pathname !== AUTH_CALLBACK_PATH) {
           console.warn('AUTH REDIRECT URL WARNING', {
-            callbackPath: url.pathname,
+            callbackPath: callbackUrl.pathname,
             expectedPath: AUTH_CALLBACK_PATH,
           });
         }
@@ -59,7 +60,7 @@ export default function AuthCallbackPage() {
         if (!code && !accessToken) {
           console.warn('AUTH REDIRECT URL WARNING', {
             message: 'Auth callback opened without ?code= or #access_token.',
-            callbackUrl,
+            callbackPath: callbackUrl.pathname,
           });
         }
 

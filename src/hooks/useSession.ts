@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import {
   AUTH_CALLBACK_PATH,
@@ -35,6 +35,7 @@ export {
 
 export function useSession(): SessionState {
   const [state, setState] = useState(() => getAuthSessionSnapshot());
+  const refreshSession = useCallback(() => refreshBootstrapSession('refresh'), []);
 
   useEffect(() => {
     const unsubscribe = subscribeAuthSession(setState);
@@ -50,6 +51,6 @@ export function useSession(): SessionState {
     session: state.authSession,
     configured: state.configured,
     source: state.source,
-    refreshSession: () => refreshBootstrapSession('refresh'),
+    refreshSession,
   };
 }
