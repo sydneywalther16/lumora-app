@@ -19,6 +19,7 @@ export type BootstrapSessionSnapshot = {
 type SupabaseClient = NonNullable<typeof supabase>;
 
 export const AUTH_CALLBACK_PATH = '/auth/callback';
+export const AUTH_RESET_CONFIRM_PATH = '/auth/reset-confirm';
 export const AUTH_UPDATE_PASSWORD_PATH = '/auth/update-password';
 const AUTH_REDIRECT_STORAGE_KEY = 'lumora_auth_redirect_path';
 const LOCALHOST_HOSTNAMES = new Set(['localhost', '127.0.0.1']);
@@ -128,6 +129,10 @@ export function getAuthCallbackUrl(): string {
 
 export function getPasswordUpdateUrl(): string {
   return `${getAppOrigin()}${AUTH_UPDATE_PASSWORD_PATH}`;
+}
+
+export function getPasswordResetConfirmUrl(): string {
+  return `${getAppOrigin()}${AUTH_RESET_CONFIRM_PATH}`;
 }
 
 function consumeRememberedRedirectPath(fallbackPath: string): string {
@@ -386,7 +391,7 @@ export async function refreshBootstrapSession(source: SessionSource = 'refresh')
     const redirectParamsPresent = hasAuthRedirectParams();
     const shouldProcessRedirectParams = redirectParamsPresent && isGlobalAuthRedirectRoute();
     const passwordRecoveryOwnsParams = typeof window !== 'undefined'
-      && window.location.pathname === AUTH_UPDATE_PASSWORD_PATH;
+      && window.location.pathname === AUTH_RESET_CONFIRM_PATH;
 
     if (
       redirectParamsPresent

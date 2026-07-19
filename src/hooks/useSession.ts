@@ -2,10 +2,12 @@ import { useCallback, useEffect, useState } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import {
   AUTH_CALLBACK_PATH,
+  AUTH_RESET_CONFIRM_PATH,
   AUTH_UPDATE_PASSWORD_PATH,
   bootstrapSession,
   consumeAuthRedirectPath,
   getAuthCallbackUrl,
+  getPasswordResetConfirmUrl,
   getPasswordUpdateUrl,
   getAuthSessionSnapshot,
   refreshBootstrapSession,
@@ -26,9 +28,11 @@ type SessionState = {
 
 export {
   AUTH_CALLBACK_PATH,
+  AUTH_RESET_CONFIRM_PATH,
   AUTH_UPDATE_PASSWORD_PATH,
   consumeAuthRedirectPath,
   getAuthCallbackUrl,
+  getPasswordResetConfirmUrl,
   getPasswordUpdateUrl,
   rememberAuthRedirectPath,
 };

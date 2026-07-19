@@ -8,6 +8,7 @@ import StudioPage from './pages/StudioPage';
 import InboxPage from './pages/InboxPage';
 import ProfilePage from './pages/ProfilePage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
+import AuthResetConfirmPage from './pages/AuthResetConfirmPage';
 import AuthUpdatePasswordPage from './pages/AuthUpdatePasswordPage';
 import DiagnosticsPage from './pages/DiagnosticsPage';
 import PrivacyPage from './pages/PrivacyPage';
@@ -49,6 +50,7 @@ export default function App() {
         <Route path="/terms" element={<TermsPage />} />
         <Route path="/install" element={<InstallPage />} />
         <Route path="/auth/callback" element={<AuthCallbackPage />} />
+        <Route path="/auth/reset-confirm" element={<AuthResetConfirmPage />} />
         <Route path="/auth/update-password" element={<AuthUpdatePasswordPage />} />
       </Route>
     </Routes>

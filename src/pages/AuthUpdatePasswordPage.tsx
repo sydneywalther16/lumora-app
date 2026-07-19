@@ -1,71 +1,58 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import {
   MIN_PASSWORD_LENGTH,
   friendlyAuthError,
   validatePasswordConfirmation,
 } from '../lib/authMessages';
-import {
-  cleanPasswordRecoveryUrl,
-  hasPasswordRecoveryIntent,
-  parsePasswordRecoveryUrl,
-  processPasswordRecoveryOnce,
-} from '../lib/passwordRecovery';
 
-const INVALID_RESET_LINK_MESSAGE = 'This reset link expired or could not be verified. Request a new one.';
+type RecoveryNavigationState = {
+  passwordRecoveryVerified?: boolean;
+};
 
 export default function AuthUpdatePasswordPage() {
+  const location = useLocation();
+  const recoveryWasVerified = Boolean(
+    (location.state as RecoveryNavigationState | null)?.passwordRecoveryVerified,
+  );
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const [checkingRecovery, setCheckingRecovery] = useState(true);
+  const [checkingRecovery, setCheckingRecovery] = useState(recoveryWasVerified);
   const [hasRecoverySession, setHasRecoverySession] = useState(false);
-  const [invalidRecoveryLink, setInvalidRecoveryLink] = useState(false);
-
-  const [recoveryInput] = useState(() => parsePasswordRecoveryUrl(new URL(window.location.href)));
+  const [passwordUpdated, setPasswordUpdated] = useState(false);
 
   useEffect(() => {
-    if (!supabase) {
-      const recoveryIntent = hasPasswordRecoveryIntent(recoveryInput);
-      setInvalidRecoveryLink(recoveryIntent);
+    if (!recoveryWasVerified || !supabase) {
       setCheckingRecovery(false);
-      if (recoveryIntent) cleanPasswordRecoveryUrl();
       return;
     }
 
     const client = supabase;
     let mounted = true;
 
-    async function resolveRecoverySession() {
-      const result = await processPasswordRecoveryOnce(client, recoveryInput);
+    async function confirmRecoverySession() {
+      const { data, error } = await client.auth.getSession();
       if (!mounted) return;
 
-      const recovered = result.status === 'valid' && Boolean(result.session?.user);
-      setHasRecoverySession(recovered);
-      setInvalidRecoveryLink(result.status === 'invalid' || (result.status === 'valid' && !recovered));
+      setHasRecoverySession(!error && Boolean(data.session?.user));
       setCheckingRecovery(false);
-
-      if (result.status !== 'manual') {
-        cleanPasswordRecoveryUrl();
-      }
     }
 
-    void resolveRecoverySession();
+    void confirmRecoverySession();
 
     return () => {
       mounted = false;
     };
-  }, [recoveryInput]);
-
-  const hasSession = hasRecoverySession;
+  }, [recoveryWasVerified]);
 
   async function handleUpdatePassword() {
-    if (!supabase) {
-      setMessage('Supabase is not configured.');
+    if (!supabase || !hasRecoverySession) {
+      setMessage('Open the password reset link from your email to continue.');
       return;
     }
 
@@ -84,7 +71,8 @@ export default function AuthUpdatePasswordPage() {
         return;
       }
 
-      setMessage('Password updated. You can continue using Lumora.');
+      setPasswordUpdated(true);
+      setHasRecoverySession(false);
       setPassword('');
       setConfirmPassword('');
     } finally {
@@ -97,7 +85,7 @@ export default function AuthUpdatePasswordPage() {
       <div className="page" style={{ minHeight: '60vh', display: 'grid', placeItems: 'center' }}>
         <section className="headline-card" style={{ width: '100%', textAlign: 'center' }}>
           <span className="eyebrow">auth</span>
-          <h1 style={{ marginTop: '8px' }}>Checking reset link...</h1>
+          <h1 style={{ marginTop: '8px' }}>Checking reset session...</h1>
         </section>
       </div>
     );
@@ -112,18 +100,25 @@ export default function AuthUpdatePasswordPage() {
         </div>
         <p>We'll never ask for your provider keys or render credentials.</p>
 
-        {!hasSession ? (
+        {passwordUpdated ? (
           <>
-            <p className="muted">
-              {invalidRecoveryLink
-                ? INVALID_RESET_LINK_MESSAGE
-                : 'Open the password reset link from your email to continue.'}
-            </p>
+            <p className="muted">Password updated. You can continue using Lumora.</p>
+            <div className="button-row">
+              <Link to="/profile" className="primary-btn">Continue to profile</Link>
+            </div>
+          </>
+        ) : null}
+
+        {!passwordUpdated && !hasRecoverySession ? (
+          <>
+            <p className="muted">Open the password reset link from your email to continue.</p>
             <div className="button-row">
               <Link to="/profile" className="ghost-btn">Back to profile</Link>
             </div>
           </>
-        ) : (
+        ) : null}
+
+        {!passwordUpdated && hasRecoverySession ? (
           <>
             <label className="field-block">
               <span>New password</span>
@@ -176,7 +171,7 @@ export default function AuthUpdatePasswordPage() {
               <Link to="/profile" className="ghost-btn">Back to profile</Link>
             </div>
           </>
-        )}
+        ) : null}
 
         {message ? <p className="muted">{message}</p> : null}
       </section>

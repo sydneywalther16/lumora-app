@@ -3,7 +3,7 @@ import type { Session, User } from '@supabase/supabase-js';
 import {
   AUTH_CALLBACK_PATH,
   getAuthCallbackUrl,
-  getPasswordUpdateUrl,
+  getPasswordResetConfirmUrl,
   rememberAuthRedirectPath,
 } from '../../hooks/useSession';
 import {
@@ -176,7 +176,7 @@ export default function AuthCard(props: Props = {}) {
 
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: getPasswordUpdateUrl(),
+        redirectTo: getPasswordResetConfirmUrl(),
       });
 
       setFriendlyMessage(error
