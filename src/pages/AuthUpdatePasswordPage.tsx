@@ -1,41 +1,21 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useSession } from '../hooks/useSession';
 import { supabase } from '../lib/supabase';
 import {
   MIN_PASSWORD_LENGTH,
   friendlyAuthError,
   validatePasswordConfirmation,
 } from '../lib/authMessages';
+import {
+  cleanPasswordRecoveryUrl,
+  hasPasswordRecoveryIntent,
+  parsePasswordRecoveryUrl,
+  processPasswordRecoveryOnce,
+} from '../lib/passwordRecovery';
 
 const INVALID_RESET_LINK_MESSAGE = 'This reset link expired or could not be verified. Request a new one.';
 
-function parseRecoveryParams() {
-  const searchParams = new URLSearchParams(window.location.search);
-  const hashParams = new URLSearchParams(
-    window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash,
-  );
-
-  return {
-    code: searchParams.get('code') ?? hashParams.get('code'),
-    accessToken: hashParams.get('access_token') ?? searchParams.get('access_token'),
-    refreshToken: hashParams.get('refresh_token') ?? searchParams.get('refresh_token'),
-    tokenHash: searchParams.get('token_hash') ?? hashParams.get('token_hash'),
-    authType: searchParams.get('type') ?? hashParams.get('type'),
-  };
-}
-
-function hasRecoveryIntent(params: ReturnType<typeof parseRecoveryParams>) {
-  return Boolean(
-    params.code
-      || (params.accessToken && params.refreshToken)
-      || params.tokenHash
-      || params.authType === 'recovery',
-  );
-}
-
 export default function AuthUpdatePasswordPage() {
-  const { loading, session, refreshSession } = useSession();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -46,56 +26,31 @@ export default function AuthUpdatePasswordPage() {
   const [hasRecoverySession, setHasRecoverySession] = useState(false);
   const [invalidRecoveryLink, setInvalidRecoveryLink] = useState(false);
 
-  const recoveryParams = useMemo(() => parseRecoveryParams(), []);
-  const recoveryIntent = useMemo(() => hasRecoveryIntent(recoveryParams), [recoveryParams]);
+  const [recoveryInput] = useState(() => parsePasswordRecoveryUrl(new URL(window.location.href)));
 
   useEffect(() => {
     if (!supabase) {
+      const recoveryIntent = hasPasswordRecoveryIntent(recoveryInput);
+      setInvalidRecoveryLink(recoveryIntent);
       setCheckingRecovery(false);
+      if (recoveryIntent) cleanPasswordRecoveryUrl();
       return;
     }
 
     const client = supabase;
-
     let mounted = true;
 
-    if (!recoveryIntent) {
-      setCheckingRecovery(false);
-      return () => {
-        mounted = false;
-      };
-    }
-
     async function resolveRecoverySession() {
-      try {
-        const refreshedSession = await refreshSession();
-        if (!mounted) return;
+      const result = await processPasswordRecoveryOnce(client, recoveryInput);
+      if (!mounted) return;
 
-        if (refreshedSession?.user) {
-          setHasRecoverySession(true);
-          setInvalidRecoveryLink(false);
-          return;
-        }
+      const recovered = result.status === 'valid' && Boolean(result.session?.user);
+      setHasRecoverySession(recovered);
+      setInvalidRecoveryLink(result.status === 'invalid' || (result.status === 'valid' && !recovered));
+      setCheckingRecovery(false);
 
-        const { data, error } = await client.auth.getSession();
-        if (!mounted) return;
-
-        if (error) {
-          setInvalidRecoveryLink(recoveryIntent);
-          return;
-        }
-
-        if (data.session?.user) {
-          setHasRecoverySession(true);
-          setInvalidRecoveryLink(false);
-          return;
-        }
-
-        setInvalidRecoveryLink(recoveryIntent);
-      } finally {
-        if (mounted) {
-          setCheckingRecovery(false);
-        }
+      if (result.status !== 'manual') {
+        cleanPasswordRecoveryUrl();
       }
     }
 
@@ -104,9 +59,9 @@ export default function AuthUpdatePasswordPage() {
     return () => {
       mounted = false;
     };
-  }, [recoveryIntent, refreshSession]);
+  }, [recoveryInput]);
 
-  const hasSession = Boolean(session?.user) || hasRecoverySession;
+  const hasSession = hasRecoverySession;
 
   async function handleUpdatePassword() {
     if (!supabase) {
@@ -137,7 +92,7 @@ export default function AuthUpdatePasswordPage() {
     }
   }
 
-  if (checkingRecovery || loading) {
+  if (checkingRecovery) {
     return (
       <div className="page" style={{ minHeight: '60vh', display: 'grid', placeItems: 'center' }}>
         <section className="headline-card" style={{ width: '100%', textAlign: 'center' }}>
@@ -193,12 +148,12 @@ export default function AuthUpdatePasswordPage() {
             </div>
 
             <label className="field-block">
-              <span>Confirm new password</span>
+              <span>Confirm password</span>
               <input
                 type={showConfirmPassword ? 'text' : 'password'}
                 value={confirmPassword}
                 onChange={(event) => setConfirmPassword(event.target.value)}
-                placeholder="Confirm new password"
+                placeholder="Confirm password"
                 autoComplete="new-password"
                 minLength={MIN_PASSWORD_LENGTH}
               />

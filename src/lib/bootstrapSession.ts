@@ -22,7 +22,7 @@ export const AUTH_CALLBACK_PATH = '/auth/callback';
 export const AUTH_UPDATE_PASSWORD_PATH = '/auth/update-password';
 const AUTH_REDIRECT_STORAGE_KEY = 'lumora_auth_redirect_path';
 const LOCALHOST_HOSTNAMES = new Set(['localhost', '127.0.0.1']);
-const configuredPublicAppUrl = import.meta.env.VITE_PUBLIC_APP_URL?.trim();
+export const PRODUCTION_APP_ORIGIN = 'https://lumora-app-topaz.vercel.app';
 const SESSION_RESTORE_TIMEOUT_MS = 7000;
 const authParamNames = [
   'access_token',
@@ -110,27 +110,16 @@ export function rememberAuthRedirectPath(path = currentRoutePath()): string {
   return redirectPath;
 }
 
-function resolveAppOrigin(candidate: string | undefined): string | null {
-  if (!candidate) return null;
-
-  try {
-    return new URL(candidate).origin;
-  } catch {
-    console.warn('INVALID PUBLIC APP URL', { candidate });
-    return null;
-  }
-}
-
 export function getAppOrigin(): string {
   if (typeof window === 'undefined') {
-    return resolveAppOrigin(configuredPublicAppUrl) ?? 'http://localhost:4173';
+    return PRODUCTION_APP_ORIGIN;
   }
 
   if (LOCALHOST_HOSTNAMES.has(window.location.hostname) || window.location.hostname.endsWith('.local')) {
     return window.location.origin;
   }
 
-  return resolveAppOrigin(configuredPublicAppUrl) ?? window.location.origin;
+  return PRODUCTION_APP_ORIGIN;
 }
 
 export function getAuthCallbackUrl(): string {
@@ -179,9 +168,9 @@ function authHashParams() {
   );
 }
 
-function isAuthRedirectRoute(): boolean {
+function isGlobalAuthRedirectRoute(): boolean {
   if (typeof window === 'undefined') return false;
-  return window.location.pathname === AUTH_CALLBACK_PATH || window.location.pathname === AUTH_UPDATE_PASSWORD_PATH;
+  return window.location.pathname === AUTH_CALLBACK_PATH;
 }
 
 function cleanAuthParamsFromCurrentUrl() {
@@ -202,10 +191,10 @@ async function exchangeRedirectSession(client: SupabaseClient): Promise<Session 
   if (code) {
     const { data, error } = await client.auth.exchangeCodeForSession(code);
     if (error) {
-      console.error('AUTH CODE EXCHANGE FAILED', error);
+      console.error('AUTH CODE EXCHANGE FAILED', { hasAuthError: true });
     }
     if (data.session) {
-      console.log('AUTH CODE EXCHANGED', { authUserId: data.session.user.id });
+      console.log('AUTH CODE EXCHANGED', { hasSession: true });
       return data.session;
     }
   }
@@ -216,13 +205,10 @@ async function exchangeRedirectSession(client: SupabaseClient): Promise<Session 
       refresh_token: refreshToken,
     });
     if (error) {
-      console.error('AUTH HASH SESSION SAVE FAILED', error);
+      console.error('AUTH HASH SESSION SAVE FAILED', { hasAuthError: true });
     }
     if (data.session) {
-      console.log('AUTH CODE EXCHANGED', {
-        authUserId: data.session.user.id,
-        format: 'hash',
-      });
+      console.log('AUTH CODE EXCHANGED', { hasSession: true });
       return data.session;
     }
   }
@@ -233,27 +219,21 @@ async function exchangeRedirectSession(client: SupabaseClient): Promise<Session 
       token_hash: tokenHash,
     });
     if (error) {
-      console.error('AUTH RECOVERY VERIFY FAILED', error);
+      console.error('AUTH RECOVERY VERIFY FAILED', { hasAuthError: true });
     }
     if (data.session) {
-      console.log('AUTH CODE EXCHANGED', {
-        authUserId: data.session.user.id,
-        format: 'recovery-token-hash',
-      });
+      console.log('AUTH CODE EXCHANGED', { hasSession: true });
       return data.session;
     }
   }
 
   const { data, error } = await client.auth.getSession();
   if (error) {
-    console.error('AUTH SESSION URL DETECTION FAILED', error);
+    console.error('AUTH SESSION URL DETECTION FAILED', { hasAuthError: true });
   }
 
   if (data.session) {
-    console.log('AUTH CODE EXCHANGED', {
-      authUserId: data.session.user.id,
-      format: 'auto-detected',
-    });
+    console.log('AUTH CODE EXCHANGED', { hasSession: true });
   }
 
   return data.session ?? null;
@@ -309,12 +289,9 @@ async function getSessionAfterRedirect(
 }
 
 function logSession(session: Session | null, source: SessionSource) {
-  const authUserId = session?.user?.id ?? null;
-
   console.log('AUTH SESSION RESTORED', {
-    authUserId,
+    hasSession: Boolean(session),
     source,
-    restored: Boolean(session),
   });
 
   if (!session) {
@@ -329,12 +306,12 @@ async function readSession(
 ): Promise<BootstrapSessionSnapshot> {
   const { data, error } = await getSessionAfterRedirect(client, redirectParamsPresent);
   if (error) {
-    console.error('Unable to load Supabase session:', error);
+    console.error('Unable to load Supabase session', { hasAuthError: true });
   }
 
   const session = data.session ?? null;
   console.log('AUTH SESSION LOADED', {
-    authUserId: session?.user?.id ?? null,
+    hasSession: Boolean(session),
     source,
   });
   logSession(session, source);
@@ -371,8 +348,8 @@ function ensureAuthSubscription() {
     }
 
     console.log('AUTH STATE CHANGED', {
-      authUserId: session?.user?.id ?? null,
       event,
+      hasSession: Boolean(session),
     });
 
     emitSessionState({
@@ -407,12 +384,19 @@ export async function refreshBootstrapSession(source: SessionSource = 'refresh')
 
   bootstrapPromise = (async () => {
     const redirectParamsPresent = hasAuthRedirectParams();
-    const shouldProcessRedirectParams = redirectParamsPresent && isAuthRedirectRoute();
+    const shouldProcessRedirectParams = redirectParamsPresent && isGlobalAuthRedirectRoute();
+    const passwordRecoveryOwnsParams = typeof window !== 'undefined'
+      && window.location.pathname === AUTH_UPDATE_PASSWORD_PATH;
 
-    if (redirectParamsPresent && !shouldProcessRedirectParams && typeof window !== 'undefined') {
+    if (
+      redirectParamsPresent
+      && !shouldProcessRedirectParams
+      && !passwordRecoveryOwnsParams
+      && typeof window !== 'undefined'
+    ) {
       console.warn('AUTH REDIRECT URL WARNING', {
         callbackPath: window.location.pathname,
-        expectedPaths: [AUTH_CALLBACK_PATH, AUTH_UPDATE_PASSWORD_PATH],
+        expectedPath: AUTH_CALLBACK_PATH,
       });
     }
 
@@ -436,13 +420,13 @@ export async function refreshBootstrapSession(source: SessionSource = 'refresh')
       initialHydrated = true;
       emitSessionState(nextSnapshot);
 
-      if (redirectParamsPresent) {
+      if (shouldProcessRedirectParams) {
         cleanAuthParamsFromCurrentUrl();
       }
 
       return nextSnapshot.authSession;
     } catch (error) {
-      console.error('Unable to bootstrap Supabase session:', error);
+      console.error('Unable to bootstrap Supabase session', { hasAuthError: true });
       initialHydrated = true;
       emitSessionState({
         authReady: true,
@@ -452,7 +436,7 @@ export async function refreshBootstrapSession(source: SessionSource = 'refresh')
         source: nextSource,
       });
 
-      if (redirectParamsPresent) {
+      if (shouldProcessRedirectParams) {
         cleanAuthParamsFromCurrentUrl();
       }
 

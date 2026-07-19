@@ -8,17 +8,13 @@ function getHashParams(url: URL) {
 
 function logExchangeResult(input: {
   session: boolean;
-  userId?: string | null;
   skipped?: boolean;
-  reason?: string;
-  error?: string | null;
+  hasAuthError?: boolean;
 }) {
   console.log('EXCHANGE RESULT', {
-    session: input.session,
-    userId: input.userId ?? null,
+    hasSession: input.session,
     skipped: input.skipped ?? false,
-    reason: input.reason ?? null,
-    error: input.error ?? null,
+    hasAuthError: input.hasAuthError ?? false,
   });
 }
 
@@ -68,23 +64,20 @@ export default function AuthCallbackPage() {
 
         const initialSessionResult = await supabase.auth.getSession();
         if (initialSessionResult.error) {
-          console.error('AUTH CALLBACK INITIAL SESSION ERROR', initialSessionResult.error);
+          console.error('AUTH CALLBACK INITIAL SESSION ERROR', { hasAuthError: true });
         }
 
         if (initialSessionResult.data.session) {
           logExchangeResult({
             session: true,
-            userId: initialSessionResult.data.session.user.id,
             skipped: true,
-            reason: code ? 'session already detected from PKCE callback' : 'session already restored',
-            error: initialSessionResult.error?.message ?? null,
+            hasAuthError: Boolean(initialSessionResult.error),
           });
         } else if (code) {
           const exchangeResult = await supabase.auth.exchangeCodeForSession(code);
           logExchangeResult({
             session: Boolean(exchangeResult.data.session),
-            userId: exchangeResult.data.session?.user.id ?? exchangeResult.data.user?.id ?? null,
-            error: exchangeResult.error?.message ?? null,
+            hasAuthError: Boolean(exchangeResult.error),
           });
 
           if (exchangeResult.error) {
@@ -97,9 +90,7 @@ export default function AuthCallbackPage() {
           });
           logExchangeResult({
             session: Boolean(exchangeResult.data.session),
-            userId: exchangeResult.data.session?.user.id ?? null,
-            reason: 'hash token session saved',
-            error: exchangeResult.error?.message ?? null,
+            hasAuthError: Boolean(exchangeResult.error),
           });
 
           if (exchangeResult.error) {
@@ -109,15 +100,13 @@ export default function AuthCallbackPage() {
           logExchangeResult({
             session: false,
             skipped: true,
-            reason: 'no auth code or token in callback URL',
           });
         }
 
         const sessionResult = await supabase.auth.getSession();
         console.log('SESSION AFTER CALLBACK', {
-          session: Boolean(sessionResult.data.session),
-          userId: sessionResult.data.session?.user.id ?? null,
-          error: sessionResult.error?.message ?? null,
+          hasSession: Boolean(sessionResult.data.session),
+          hasAuthError: Boolean(sessionResult.error),
         });
 
         if (sessionResult.error) {
@@ -126,10 +115,10 @@ export default function AuthCallbackPage() {
 
         const redirectPath = sessionResult.data.session ? consumeAuthRedirectPath('/profile') : '/profile';
         window.location.replace(redirectPath);
-      } catch (error) {
-        console.error('AUTH CALLBACK ERROR', error);
+      } catch {
+        console.error('AUTH CALLBACK ERROR', { hasAuthError: true });
         if (active) {
-          setStatus(error instanceof Error ? error.message : 'Unable to finish sign-in.');
+          setStatus('Unable to finish sign-in.');
         }
         window.setTimeout(() => window.location.replace('/profile'), 1400);
       }

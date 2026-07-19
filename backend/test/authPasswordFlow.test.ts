@@ -67,6 +67,7 @@ const authCardSource = readFileSync(join(process.cwd(), 'src/components/auth/Aut
 const callbackSource = readFileSync(join(process.cwd(), 'src/pages/AuthCallbackPage.tsx'), 'utf8');
 const bootstrapSource = readFileSync(join(process.cwd(), 'src/lib/bootstrapSession.ts'), 'utf8');
 const updatePasswordSource = readFileSync(join(process.cwd(), 'src/pages/AuthUpdatePasswordPage.tsx'), 'utf8');
+const recoverySource = readFileSync(join(process.cwd(), 'src/lib/passwordRecovery.ts'), 'utf8');
 
 assert.match(authCardSource, /Email link/);
 assert.match(authCardSource, /Password/);
@@ -76,6 +77,7 @@ assert.match(authCardSource, /signInWithOtp/);
 assert.match(authCardSource, /signInWithPassword/);
 assert.match(authCardSource, /signUp/);
 assert.match(authCardSource, /resetPasswordForEmail/);
+assert.match(authCardSource, /redirectTo: getPasswordUpdateUrl\(\)/);
 assert.match(authCardSource, /friendlyForgotPasswordError/);
 assert.match(authCardSource, /FORGOT_PASSWORD_CLIENT_COOLDOWN_MS/);
 assert.match(authCardSource, /forgotPasswordCooldownActive/);
@@ -90,16 +92,39 @@ assert.match(appSource, /path="\/auth\/update-password"/);
 assert.match(callbackSource, /exchangeCodeForSession/);
 assert.match(callbackSource, /setSession/);
 
-assert.match(bootstrapSource, /verifyOtp/);
-assert.match(bootstrapSource, /token_hash/);
-assert.match(bootstrapSource, /type:\s*'recovery'/);
+assert.match(bootstrapSource, /PRODUCTION_APP_ORIGIN = 'https:\/\/lumora-app-topaz\.vercel\.app'/);
+assert.match(bootstrapSource, /return PRODUCTION_APP_ORIGIN;/);
+assert.doesNotMatch(bootstrapSource, /VERCEL_URL/);
+assert.match(bootstrapSource, /window\.location\.pathname === AUTH_CALLBACK_PATH/);
+assert.doesNotMatch(bootstrapSource, /window\.location\.pathname === AUTH_CALLBACK_PATH \|\|/);
 
 assert.match(updatePasswordSource, /Checking reset link\.\.\./);
-assert.match(updatePasswordSource, /refreshSession/);
-assert.doesNotMatch(updatePasswordSource, /onAuthStateChange/);
+assert.match(updatePasswordSource, /processPasswordRecoveryOnce/);
+assert.match(updatePasswordSource, /cleanPasswordRecoveryUrl/);
 assert.match(updatePasswordSource, /This reset link expired or could not be verified\. Request a new one\./);
 assert.match(updatePasswordSource, /Open the password reset link from your email to continue\./);
 assert.match(updatePasswordSource, /validatePasswordConfirmation/);
+assert.match(updatePasswordSource, /<span>New password<\/span>/);
+assert.match(updatePasswordSource, /<span>Confirm password<\/span>/);
+assert.match(updatePasswordSource, />Update password</);
+
+assert.match(recoverySource, /exchangeCodeForSession/);
+assert.match(recoverySource, /verifyOtp/);
+assert.match(recoverySource, /type:\s*'recovery'/);
+assert.match(recoverySource, /setSession/);
+assert.match(recoverySource, /PASSWORD_RECOVERY/);
+assert.match(recoverySource, /let recoveryHandoffPromise: Promise<PasswordRecoveryResult> \| null = null;/);
+assert.match(recoverySource, /if \(!recoveryHandoffPromise\) \{\s*recoveryHandoffPromise = processPasswordRecovery\(client, input\);\s*\}/s);
+assert.equal((recoverySource.match(/client\.auth\.exchangeCodeForSession\(/g) ?? []).length, 1);
+assert.equal((recoverySource.match(/client\.auth\.verifyOtp\(/g) ?? []).length, 1);
+assert.equal((recoverySource.match(/client\.auth\.setSession\(/g) ?? []).length, 1);
+assert.doesNotMatch(recoverySource, /console\.(?:log|warn|error)/);
+
+const recoveryResultIndex = updatePasswordSource.indexOf('const result = await processPasswordRecoveryOnce');
+const recoveryStateIndex = updatePasswordSource.lastIndexOf('setInvalidRecoveryLink(');
+const recoveryCleanupIndex = updatePasswordSource.lastIndexOf('cleanPasswordRecoveryUrl();');
+assert.ok(recoveryResultIndex >= 0 && recoveryResultIndex < recoveryStateIndex);
+assert.ok(recoveryStateIndex < recoveryCleanupIndex);
 
 const authMessagesSource = readFileSync(join(process.cwd(), 'src/lib/authMessages.ts'), 'utf8');
 assert.match(authMessagesSource, /FORGOT_PASSWORD_RATE_LIMIT_MESSAGE/);
