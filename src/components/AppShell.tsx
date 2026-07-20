@@ -17,6 +17,9 @@ const routeTitles: Record<string, string> = {
   '/diagnostics': 'Diagnostics',
   '/privacy': 'Privacy',
   '/terms': 'Terms',
+  '/community-guidelines': 'Community Guidelines',
+  '/support': 'Support',
+  '/account/delete': 'Account & Data',
   '/install': 'Install',
   '/auth/callback': 'Signing in',
 };

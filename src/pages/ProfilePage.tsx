@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { Link } from 'react-router-dom';
 import AuthCard from '../components/auth/AuthCard';
 import CharacterHub from '../components/CharacterHub';
 import CreatorIdentityCard from '../components/CreatorIdentityCard';
@@ -1347,6 +1348,9 @@ function ProfileMenuDetail({
               >
                 Sign out
               </button>
+              <Link className="ghost-btn" to="/account/delete" style={{ width: '100%', borderRadius: '18px' }}>
+                Account, blocks, and deletion
+              </Link>
             </>
           ) : (
             <>
@@ -1429,8 +1433,8 @@ function ProfileMenuDetail({
 
       {item.id === 'contact' ? (
         <MenuSectionCard title="Support">
-          <p style={mutedTextStyle}>support@lumora.app</p>
-          <p style={mutedTextStyle}>Contact tools are coming soon.</p>
+          <p style={mutedTextStyle}>The public support mailbox is being activated and verified before launch.</p>
+          <Link className="ghost-btn" to="/support">Open Support</Link>
         </MenuSectionCard>
       ) : null}
 
@@ -1446,6 +1450,7 @@ function ProfileMenuDetail({
               {line}
             </p>
           ))}
+          <Link className="ghost-btn" to="/privacy">Read Privacy Policy</Link>
         </MenuSectionCard>
       ) : null}
 
@@ -1461,6 +1466,8 @@ function ProfileMenuDetail({
               {line}
             </p>
           ))}
+          <Link className="ghost-btn" to="/terms">Read Terms</Link>
+          <Link className="ghost-btn" to="/community-guidelines">Community Guidelines</Link>
         </MenuSectionCard>
       ) : null}
     </div>

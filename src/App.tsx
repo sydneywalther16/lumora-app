@@ -13,6 +13,9 @@ import AuthUpdatePasswordPage from './pages/AuthUpdatePasswordPage';
 import DiagnosticsPage from './pages/DiagnosticsPage';
 import PrivacyPage from './pages/PrivacyPage';
 import TermsPage from './pages/TermsPage';
+import AccountDeletionPage from './pages/AccountDeletionPage';
+import CommunityGuidelinesPage from './pages/CommunityGuidelinesPage';
+import SupportPage from './pages/SupportPage';
 import InstallPage from './pages/InstallPage';
 import CreatorOnboarding from './components/CreatorOnboarding';
 import { useSession } from './hooks/useSession';
@@ -48,6 +51,9 @@ export default function App() {
         <Route path="/diagnostics" element={<DiagnosticsPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/terms" element={<TermsPage />} />
+        <Route path="/community-guidelines" element={<CommunityGuidelinesPage />} />
+        <Route path="/support" element={<SupportPage />} />
+        <Route path="/account/delete" element={<AccountDeletionPage />} />
         <Route path="/install" element={<InstallPage />} />
         <Route path="/auth/callback" element={<AuthCallbackPage />} />
         <Route path="/auth/reset-confirm" element={<AuthResetConfirmPage />} />

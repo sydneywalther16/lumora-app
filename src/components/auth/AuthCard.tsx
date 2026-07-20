@@ -307,7 +307,7 @@ export default function AuthCard(props: Props = {}) {
           ) : null}
         </div>
 
-        <div className="button-row">
+        <div className="button-row auth-mode-switcher">
           <button type="button" className="ghost-btn" onClick={() => switchMode('magic_link')} disabled={busy}>
             Email link
           </button>

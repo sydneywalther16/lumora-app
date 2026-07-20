@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { resolveGeneratedVideoMedia } from '../lib/mediaThumbnail';
 
 type FeedVideoCardProps = {
@@ -13,6 +13,7 @@ type FeedVideoCardProps = {
   variant?: 'hero' | 'compact';
   autoPlayMuted?: boolean;
   onOpen?: () => void;
+  actionSlot?: ReactNode;
 };
 
 const CONTROL_HIDE_DELAY_MS = 1800;
@@ -44,6 +45,7 @@ export default function FeedVideoCard({
   variant = 'hero',
   autoPlayMuted = true,
   onOpen,
+  actionSlot,
 }: FeedVideoCardProps) {
   const media = resolveGeneratedVideoMedia(item);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -218,6 +220,12 @@ export default function FeedVideoCard({
       )}
 
       <div className="feed-video-vignette" aria-hidden="true" />
+
+      {actionSlot ? (
+        <div className="feed-video-safety-slot" onClick={(event) => event.stopPropagation()}>
+          {actionSlot}
+        </div>
+      ) : null}
 
       {canUseVideo ? (
         <>

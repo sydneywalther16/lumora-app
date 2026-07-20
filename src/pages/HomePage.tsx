@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import FeedVideoCard from '../components/FeedVideoCard';
+import ContentSafetyActions from '../components/ContentSafetyActions';
 import GeneratedVideoPreview from '../components/GeneratedVideoPreview';
 import { type LumoraPost } from '../lib/api';
 import { loadPostedPublications } from '../lib/postStorage';
@@ -47,9 +48,11 @@ type HomeFeedCardProps = {
   post: LumoraPost;
   fallbackAuthorAvatar?: string | null;
   onSelect: (post: LumoraPost) => void;
+  onBlocked: (blockedUserId: string) => void;
+  currentUserId?: string | null;
 };
 
-function HomeFeedCard({ post, fallbackAuthorAvatar, onSelect }: HomeFeedCardProps) {
+function HomeFeedCard({ post, fallbackAuthorAvatar, onSelect, onBlocked, currentUserId }: HomeFeedCardProps) {
   const title = post.title || post.caption || 'AI cast video';
   const bodyText = post.caption || post.prompt || 'Generated with Lumora';
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
@@ -69,6 +72,18 @@ function HomeFeedCard({ post, fallbackAuthorAvatar, onSelect }: HomeFeedCardProp
       variant="hero"
       autoPlayMuted={Boolean(post.videoUrl)}
       onOpen={() => onSelect(post)}
+      actionSlot={(
+        <ContentSafetyActions
+          contentType="post"
+          contentId={post.id}
+          postId={post.id}
+          creatorUserId={post.userId}
+          creatorLabel={authorName}
+          compact
+          onBlocked={onBlocked}
+          currentUserId={currentUserId}
+        />
+      )}
     />
   );
 }
@@ -77,10 +92,14 @@ function HomePostModal({
   post,
   fallbackAuthorAvatar,
   onClose,
+  onBlocked,
+  currentUserId,
 }: {
   post: LumoraPost;
   fallbackAuthorAvatar?: string | null;
   onClose: () => void;
+  onBlocked: (blockedUserId: string) => void;
+  currentUserId?: string | null;
 }) {
   const title = post.title || post.caption || 'Lumora AI cast video';
   const bodyText = post.caption || post.prompt || '';
@@ -158,6 +177,15 @@ function HomePostModal({
         <div style={{ padding: '18px', display: 'grid', gap: '10px' }}>
           <h3 style={{ margin: 0 }}>{title}</h3>
           {bodyText ? <p className="muted" style={{ margin: 0 }}>{bodyText}</p> : null}
+          <ContentSafetyActions
+            contentType="post"
+            contentId={post.id}
+            postId={post.id}
+            creatorUserId={post.userId}
+            creatorLabel={authorName}
+            onBlocked={onBlocked}
+            currentUserId={currentUserId}
+          />
         </div>
       </div>
     </div>
@@ -165,11 +193,17 @@ function HomePostModal({
 }
 
 export default function HomePage() {
-  const { configured } = useSession();
+  const { configured, session, user } = useSession();
+  const authUser = session?.user ?? user;
   const [localPosts, setLocalPosts] = useState<LumoraPost[]>([]);
   const [fallbackAuthorAvatar, setFallbackAuthorAvatar] = useState<string | null>(null);
   const [feedMessage, setFeedMessage] = useState('');
   const [selectedPost, setSelectedPost] = useState<LumoraPost | null>(null);
+
+  function handleBlocked(blockedUserId: string) {
+    setLocalPosts((current) => current.filter((post) => post.userId !== blockedUserId));
+    setSelectedPost((current) => current?.userId === blockedUserId ? null : current);
+  }
 
   useEffect(() => {
     let active = true;
@@ -219,22 +253,23 @@ export default function HomePage() {
     <div className="page lumora-page cinematic-feed-page">
       <header className="home-feed-header">
         <h1>Lumora</h1>
-        <p>Beta preview: create scenes, use Lumora Stage, save Drafts, and continue your story world.</p>
+        <p>Create scenes, build an AI Cast, save drafts, and continue your story world.</p>
       </header>
 
       <section className="list-stack" style={{ marginBottom: '8px' }}>
         <article className="list-card lumora-card">
           <div className="row-between" style={{ alignItems: 'center' }}>
-            <h3 style={{ margin: 0 }}>Public beta</h3>
-            <span className="tiny-pill">Beta Preview</span>
+            <h3 style={{ margin: 0 }}>Creator safety</h3>
+            <span className="tiny-pill">Community</span>
           </div>
           <p style={{ marginTop: '8px' }}>
-            Stage: safest first render with Seedance Fast. Demo Mode previews without credits. Kling Reference Beta is experimental.
+            Public AI Cast videos can be reported, and creators can be blocked from every feed card.
           </p>
-          <div className="button-row" style={{ marginTop: '8px' }}>
+          <div className="button-row creator-safety-links" style={{ marginTop: '8px' }}>
             <Link className="ghost-btn" to="/install">Install Lumora</Link>
             <Link className="ghost-btn" to="/privacy">Privacy</Link>
             <Link className="ghost-btn" to="/terms">Terms</Link>
+            <Link className="ghost-btn" to="/community-guidelines">Guidelines</Link>
           </div>
         </article>
       </section>
@@ -249,6 +284,8 @@ export default function HomePage() {
               post={post}
               fallbackAuthorAvatar={fallbackAuthorAvatar}
               onSelect={setSelectedPost}
+              onBlocked={handleBlocked}
+              currentUserId={authUser?.id}
             />
           ))}
         </section>
@@ -269,12 +306,10 @@ export default function HomePage() {
           post={selectedPost}
           fallbackAuthorAvatar={fallbackAuthorAvatar}
           onClose={() => setSelectedPost(null)}
+          onBlocked={handleBlocked}
+          currentUserId={authUser?.id}
         />
       ) : null}
-
-      <p className="muted" style={{ marginTop: '10px' }}>
-        Feedback: beta@lumora.app
-      </p>
     </div>
   );
 }

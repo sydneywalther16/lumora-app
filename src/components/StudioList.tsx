@@ -150,6 +150,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
   const [publishMessage, setPublishMessage] = useState<string | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishPrivacy, setPublishPrivacy] = useState<PrivacySetting>('public');
+  const [communityGuidelinesAccepted, setCommunityGuidelinesAccepted] = useState(false);
   const [captionDraft, setCaptionDraft] = useState('');
   const [hiddenJobIds, setHiddenJobIds] = useState<Set<string>>(new Set());
   const visibleJobs = jobs.filter((job) => !hiddenJobIds.has(job.id));
@@ -189,6 +190,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
     setPublishMessage(null);
     setPublishError(null);
     setPublishPrivacy('public');
+    setCommunityGuidelinesAccepted(false);
     setCaptionDraft(job.caption || job.prompt || '');
     setSelectedJob(job);
   }
@@ -208,6 +210,11 @@ export default function StudioList({ jobs, onPublished }: Props) {
     setPublishMessage(null);
     setPublishError(null);
     const verifiedVideoUrl = verifiedJobVideoUrl(job);
+
+    if (!communityGuidelinesAccepted) {
+      setPublishError('Open Details and confirm the Community Guidelines before publishing.');
+      return;
+    }
 
     if (!verifiedVideoUrl) {
       setPublishError('A video has to finish before this scene can be published.');
@@ -639,7 +646,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
                         className="quiet-btn"
                         onClick={(event) => {
                           event.stopPropagation();
-                          void postToFeed(job, job.caption || job.prompt || '');
+                          openJob(job);
                         }}
                         disabled={isPosted(job.id)}
                       >
@@ -796,6 +803,17 @@ export default function StudioList({ jobs, onPublished }: Props) {
                 </select>
               </label>
 
+              <label className="confirmation-check publish-guidelines-check">
+                <input
+                  type="checkbox"
+                  checked={communityGuidelinesAccepted}
+                  onChange={(event) => setCommunityGuidelinesAccepted(event.target.checked)}
+                />
+                <span>
+                  I have rights and consent for this content and agree to the <Link to="/community-guidelines">Community Guidelines</Link> and <Link to="/terms">Terms</Link>. I understand public content can be reported or removed.
+                </span>
+              </label>
+
               {selectedVideoUrl ? (
                 <button
                   type="button"
@@ -803,7 +821,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
                   onClick={() => {
                     void postToFeed(selectedJob, captionDraft);
                   }}
-                  disabled={isPosted(selectedJob.id)}
+                  disabled={isPosted(selectedJob.id) || !communityGuidelinesAccepted}
                 >
                   {isPosted(selectedJob.id) ? 'Posted' : 'Publish'}
                 </button>

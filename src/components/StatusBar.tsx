@@ -4,7 +4,7 @@ export default function StatusBar({ title }: Props) {
   return (
     <header className="status-bar">
       <div>
-        <div className="eyebrow">beta preview</div>
+        <div className="eyebrow">AI Cast Studio</div>
         <h1>{title}</h1>
       </div>
       <div className="status-icons">

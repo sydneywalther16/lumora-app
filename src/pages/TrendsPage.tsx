@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import FeedVideoCard from '../components/FeedVideoCard';
+import ContentSafetyActions from '../components/ContentSafetyActions';
 import GeneratedVideoPreview from '../components/GeneratedVideoPreview';
 import type { LumoraPost } from '../lib/api';
 import { loadPostedPublications } from '../lib/postStorage';
@@ -162,10 +163,14 @@ function ForYouCard({
   post,
   preview,
   onSelect,
+  onBlocked,
+  currentUserId,
 }: {
   post: FeedPost;
   preview?: boolean;
   onSelect: (post: FeedPost) => void;
+  onBlocked: (blockedUserId: string) => void;
+  currentUserId?: string | null;
 }) {
   const title = post.title || post.caption || 'Lumora AI cast video';
   const caption = post.caption || post.prompt || 'Generated with Lumora';
@@ -186,6 +191,18 @@ function ForYouCard({
       variant="compact"
       autoPlayMuted={Boolean(preview && post.videoUrl)}
       onOpen={() => onSelect(post)}
+      actionSlot={(
+        <ContentSafetyActions
+          contentType="post"
+          contentId={post.id}
+          postId={post.id}
+          creatorUserId={post.userId}
+          creatorLabel={creatorName}
+          compact
+          onBlocked={onBlocked}
+          currentUserId={currentUserId}
+        />
+      )}
     />
   );
 }
@@ -196,12 +213,16 @@ function ForYouPreviewModal({
   onContinueStory,
   onSocialAction,
   socialState,
+  onBlocked,
+  currentUserId,
 }: {
   post: FeedPost;
   onClose: () => void;
   onContinueStory: (post: FeedPost) => void;
   onSocialAction: (action: 'like' | 'save' | 'follow', post: FeedPost) => void;
   socialState: Record<string, boolean>;
+  onBlocked: (blockedUserId: string) => void;
+  currentUserId?: string | null;
 }) {
   const title = post.title || post.caption || 'Lumora AI cast video';
   const bodyText = post.caption || post.prompt || '';
@@ -287,6 +308,15 @@ function ForYouPreviewModal({
             </button>
             <button type="button" className="primary-btn" onClick={() => onContinueStory(post)}>Continue Story</button>
           </div>
+          <ContentSafetyActions
+            contentType="post"
+            contentId={post.id}
+            postId={post.id}
+            creatorUserId={post.userId}
+            creatorLabel={creatorName}
+            onBlocked={onBlocked}
+            currentUserId={currentUserId}
+          />
         </div>
       </div>
     </div>
@@ -397,6 +427,11 @@ export default function TrendsPage() {
     void trackCreatorEvent(eventName, { source: 'for-you', postId: post.id }, authUser?.id ?? null);
   }
 
+  function handleBlocked(blockedUserId: string) {
+    setFeed((current) => current.filter((post) => post.userId !== blockedUserId));
+    setSelectedPost((current) => current?.userId === blockedUserId ? null : current);
+  }
+
   return (
     <div className="page lumora-page cinematic-feed-page">
       <section
@@ -485,7 +520,7 @@ export default function TrendsPage() {
             }}
           >
             {feed.map((post, index) => (
-              <ForYouCard key={post.id} post={post} preview={index < 4} onSelect={openPost} />
+              <ForYouCard key={post.id} post={post} preview={index < 4} onSelect={openPost} onBlocked={handleBlocked} currentUserId={authUser?.id} />
             ))}
           </section>
         </>
@@ -515,6 +550,8 @@ export default function TrendsPage() {
           onContinueStory={handleContinueStory}
           onSocialAction={handleSocialAction}
           socialState={socialState}
+          onBlocked={handleBlocked}
+          currentUserId={authUser?.id}
         />
       ) : null}
     </div>

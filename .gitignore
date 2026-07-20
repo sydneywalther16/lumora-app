@@ -8,3 +8,6 @@ node_modules
 .env.development
 .DS_Store
 **/.DS_Store
+android/keystore.properties
+*.jks
+*.keystore

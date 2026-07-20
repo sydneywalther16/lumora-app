@@ -27,6 +27,7 @@ import {
 import type { LumoraProfile } from './profileStorage';
 import type { StudioProject } from './projectStorage';
 import { supabase } from './supabase';
+import { loadBlockedUserIds } from './accountSafety';
 
 const AI_CAST_SOURCE_FILTER = 'source_generation_id.not.is.null,source_generation_job_id.not.is.null,source_project_id.not.is.null';
 const AI_CAST_GENERATED_MARKER_FILTER = 'is_ai_generated.eq.true,source_type.eq.lumora_generated,media_origin.eq.generated';
@@ -2182,19 +2183,23 @@ export async function getProfileStats(userId: string): Promise<ProfileStats> {
 
 export async function loadSupabasePublicPosts(): Promise<LumoraPost[]> {
   const client = getClient();
-  const { data, error } = await client
-    .from('posts')
-    .select('*')
-    .eq('privacy', 'public')
-    .eq('status', 'published')
-    .not('video_url', 'is', null)
-    .or(AI_CAST_SOURCE_FILTER)
-    .or(AI_CAST_GENERATED_MARKER_FILTER)
-    .order('created_at', { ascending: false })
-    .limit(50);
+  const [{ data, error }, blockedUserIds] = await Promise.all([
+    client
+      .from('posts')
+      .select('*')
+      .eq('privacy', 'public')
+      .eq('status', 'published')
+      .not('video_url', 'is', null)
+      .or(AI_CAST_SOURCE_FILTER)
+      .or(AI_CAST_GENERATED_MARKER_FILTER)
+      .order('created_at', { ascending: false })
+      .limit(50),
+    loadBlockedUserIds(),
+  ]);
 
   if (error) throw error;
-  return filterAiCastPublicPosts((data ?? []).map(mapPostRow));
+  return filterAiCastPublicPosts((data ?? []).map(mapPostRow))
+    .filter((post) => !post.userId || !blockedUserIds.has(post.userId));
 }
 
 async function loadFollowedUserIds(userId: string | null | undefined): Promise<Set<string>> {
@@ -2260,7 +2265,7 @@ export async function listForYouFeed(input: {
 } = {}): Promise<LumoraPost[]> {
   const client = getClient();
   const query = input.searchQuery?.trim().toLowerCase() ?? '';
-  const [{ data, error }, followedUserIds] = await Promise.all([
+  const [{ data, error }, followedUserIds, blockedUserIds] = await Promise.all([
     client
       .from('posts')
       .select('*')
@@ -2272,6 +2277,7 @@ export async function listForYouFeed(input: {
       .order('published_at', { ascending: false, nullsFirst: false })
       .limit(120),
     loadFollowedUserIds(input.currentUserId),
+    loadBlockedUserIds(),
   ]);
 
   if (error) throw error;
@@ -2279,6 +2285,7 @@ export async function listForYouFeed(input: {
   return (data ?? [])
     .map(mapPostRow)
     .filter((post) => filterAiCastPublicPosts([post]).length > 0)
+    .filter((post) => !post.userId || !blockedUserIds.has(post.userId))
     .filter((post) => !query || postSearchText(post).includes(query))
     .sort((left, right) => (
       scorePost(right, { ...input, followedUserIds }) - scorePost(left, { ...input, followedUserIds })

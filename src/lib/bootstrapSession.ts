@@ -1,4 +1,5 @@
 import type { Session, User } from '@supabase/supabase-js';
+import { Capacitor } from '@capacitor/core';
 import { hasSupabaseConfig, supabase } from './supabase';
 
 export type SessionSource =
@@ -24,6 +25,7 @@ export const AUTH_UPDATE_PASSWORD_PATH = '/auth/update-password';
 const AUTH_REDIRECT_STORAGE_KEY = 'lumora_auth_redirect_path';
 const LOCALHOST_HOSTNAMES = new Set(['localhost', '127.0.0.1']);
 export const PRODUCTION_APP_ORIGIN = 'https://lumora-app-topaz.vercel.app';
+export const NATIVE_APP_SCHEME = 'lumoracreator';
 const SESSION_RESTORE_TIMEOUT_MS = 7000;
 const authParamNames = [
   'access_token',
@@ -124,14 +126,23 @@ export function getAppOrigin(): string {
 }
 
 export function getAuthCallbackUrl(): string {
+  if (Capacitor.isNativePlatform()) {
+    return `${NATIVE_APP_SCHEME}://auth/callback`;
+  }
   return `${getAppOrigin()}${AUTH_CALLBACK_PATH}`;
 }
 
 export function getPasswordUpdateUrl(): string {
+  if (Capacitor.isNativePlatform()) {
+    return `${NATIVE_APP_SCHEME}://auth/update-password`;
+  }
   return `${getAppOrigin()}${AUTH_UPDATE_PASSWORD_PATH}`;
 }
 
 export function getPasswordResetConfirmUrl(): string {
+  if (Capacitor.isNativePlatform()) {
+    return `${NATIVE_APP_SCHEME}://auth/reset-confirm`;
+  }
   return `${getAppOrigin()}${AUTH_RESET_CONFIRM_PATH}`;
 }
 

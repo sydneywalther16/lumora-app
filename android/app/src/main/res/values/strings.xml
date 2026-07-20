@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Lumora</string>
+    <string name="title_activity_main">Lumora</string>
+    <string name="package_name">com.lumoracreator.app</string>
+    <string name="custom_url_scheme">lumoracreator</string>
+</resources>

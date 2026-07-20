@@ -47,6 +47,7 @@ import { useSession } from '../hooks/useSession';
 import { useAppStore } from '../store/useAppStore';
 import SelfReferencePreview, { normalizeReference } from './SelfReferencePreview';
 import GeneratedVideoPreview from './GeneratedVideoPreview';
+import ContentSafetyActions from './ContentSafetyActions';
 import { STYLE_PRESETS, selectedStylePrompt } from '../lib/stylePresets';
 import { trackCreatorEvent } from '../lib/creatorEvents';
 import {
@@ -5683,6 +5684,12 @@ export default function CreateVideo({
               style={{ width: '100%', aspectRatio: '9 / 16', borderRadius: 12 }}
             />
           ) : null}
+          <ContentSafetyActions
+            contentType="generation"
+            contentId={generationResult.jobId}
+            creatorLabel="this AI output"
+            currentUserId={authUser?.id}
+          />
           <div className="button-row">
             <button type="button" className="primary-btn" onClick={handleRemixResult}>
               Continue Story

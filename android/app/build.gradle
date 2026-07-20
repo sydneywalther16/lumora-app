@@ -1,0 +1,110 @@
+apply plugin: 'com.android.application'
+
+def releaseSigningProperties = new Properties()
+def releaseSigningPropertiesFile = rootProject.file('keystore.properties')
+
+if (releaseSigningPropertiesFile.exists()) {
+    releaseSigningPropertiesFile.withInputStream { stream ->
+        releaseSigningProperties.load(stream)
+    }
+}
+
+def releaseStoreFile = System.getenv('LUMORA_ANDROID_KEYSTORE_PATH') ?: releaseSigningProperties.getProperty('storeFile')
+def releaseStorePassword = System.getenv('LUMORA_ANDROID_KEYSTORE_PASSWORD') ?: releaseSigningProperties.getProperty('storePassword')
+def releaseKeyAlias = System.getenv('LUMORA_ANDROID_KEY_ALIAS') ?: releaseSigningProperties.getProperty('keyAlias')
+def releaseKeyPassword = System.getenv('LUMORA_ANDROID_KEY_PASSWORD') ?: releaseSigningProperties.getProperty('keyPassword')
+def hasReleaseSigning = [releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword].every { value ->
+    value != null && !value.trim().isEmpty()
+}
+
+android {
+    namespace = "com.lumoracreator.app"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "com.lumoracreator.app"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "1.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile rootProject.file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
+    buildTypes {
+        release {
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+tasks.register('verifyReleaseSigningConfigured') {
+    group = 'verification'
+    description = 'Fails unless the Lumora Android upload signing key is configured outside source control.'
+    doLast {
+        if (!hasReleaseSigning) {
+            throw new GradleException('Release signing is not configured. Add android/keystore.properties or the LUMORA_ANDROID_* environment variables before creating an upload bundle.')
+        }
+
+        if (!rootProject.file(releaseStoreFile).exists()) {
+            throw new GradleException('The configured Android release keystore file does not exist.')
+        }
+    }
+}
+
+tasks.register('bundleSignedRelease') {
+    group = 'build'
+    description = 'Creates a release bundle only after verifying that secure upload signing is configured.'
+    dependsOn 'verifyReleaseSigningConfigured', 'bundleRelease'
+}
+
+tasks.configureEach { task ->
+    if (task.name == 'bundleRelease') {
+        task.mustRunAfter 'verifyReleaseSigningConfigured'
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
