@@ -8,6 +8,7 @@ import {
   type SeedanceModerationDiagnostics,
   type SeedancePredictionEvent,
   type SeedanceAspectRatio,
+  type SeedanceInputMode,
   type SeedanceQualityMode,
   type SeedanceResolution,
   type SeedanceReferenceImage,
@@ -114,9 +115,15 @@ export type SeedanceGenerationRecord = {
   storagePath: string | null;
   warnings: string[];
   finalPrompt: string;
+  firstFrameImage: SeedanceReferenceImage | null;
   referenceImages: SeedanceReferenceImage[];
   referenceImageCount: number;
   multimodalReferenceMode: boolean;
+  promptAdaptationApplied: boolean;
+  providerRequestCount: number;
+  providerRetryCount: number;
+  providerFallbackCount: number;
+  inputMode: SeedanceInputMode;
   assetPersistence?: AssetPersistenceSummary;
   moderationDiagnostics?: SeedanceModerationDiagnostics;
   providerFallbackDiagnostics?: ProviderFallbackDiagnostics;
@@ -145,6 +152,8 @@ export async function createSeedanceGeneration(input: {
   isDefaultSelfCharacter?: boolean | null;
   renderPreference?: RenderSuccessMode | string | null;
   referenceImages?: SeedanceReferenceImage[];
+  firstFrameImage?: SeedanceReferenceImage | null;
+  inputMode?: SeedanceInputMode | null;
   durationSeconds?: number | null;
   aspectRatio?: SeedanceAspectRatio | string | null;
   resolution?: SeedanceResolution | string | null;
@@ -153,17 +162,26 @@ export async function createSeedanceGeneration(input: {
   onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
   onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 }): Promise<SeedanceGenerationRecord> {
+  const firstFrameMode = input.inputMode === 'image_to_video_first_frame';
+  const sourceImages = firstFrameMode
+    ? (input.firstFrameImage ? [input.firstFrameImage] : [])
+    : input.referenceImages;
   const persistedReferences = await persistSeedanceReferenceImages({
     userId: input.userId ?? null,
     characterId: input.characterId ?? null,
-    referenceImages: input.referenceImages,
+    referenceImages: sourceImages,
     usage: 'character_reference_image',
   });
+  const persistedFirstFrameImage = firstFrameMode
+    ? persistedReferences.referenceImages[0] ?? null
+    : null;
   const result = await generateSeedanceWithProviderFallback({
     prompt: input.prompt,
     quality: input.quality,
     renderPreference: input.renderPreference,
-    referenceImages: persistedReferences.referenceImages,
+    referenceImages: firstFrameMode ? [] : persistedReferences.referenceImages,
+    firstFrameImage: persistedFirstFrameImage,
+    inputMode: input.inputMode,
     userId: input.userId,
     characterId: input.characterId,
     characterName: input.characterName,
@@ -187,7 +205,11 @@ export async function createSeedanceGeneration(input: {
     provider: result.provider,
     engine: input.quality === 'quality' ? 'seedance-quality' : 'seedance-2.0',
     model: result.model,
-    displayEngine: input.quality === 'quality' ? 'Seedance Quality' : 'Seedance Fast',
+    displayEngine: result.inputMode === 'image_to_video_first_frame'
+      ? 'Seedance Fast — first-frame animation'
+      : input.quality === 'quality'
+        ? 'Seedance Quality'
+        : 'Seedance Fast',
     videoUrl: result.videoUrl,
     thumbnailUrl: null,
     characterId: input.characterId ?? null,
@@ -215,15 +237,23 @@ export async function createSeedanceGeneration(input: {
     durationSeconds: result.settings.duration,
     aspectRatio: result.settings.aspect_ratio,
     resolution: result.settings.resolution,
-    message: 'Seedance 2.0 video generated successfully.',
+    message: result.inputMode === 'image_to_video_first_frame'
+      ? 'Seedance Fast first-frame animation generated successfully.'
+      : 'Seedance 2.0 video generated successfully.',
     createdAt,
     projectId: persistence.projectId,
     storagePath: persistence.storagePath,
     warnings: [...result.warnings, ...persistence.warnings],
     finalPrompt: result.finalPrompt,
+    firstFrameImage: result.firstFrameImage,
     referenceImages: result.referenceImages,
     referenceImageCount: result.referenceImageCount,
     multimodalReferenceMode: result.multimodalReferenceMode,
+    promptAdaptationApplied: result.promptAdaptationApplied,
+    providerRequestCount: result.providerRequestCount,
+    providerRetryCount: result.providerRetryCount,
+    providerFallbackCount: result.providerFallbackCount,
+    inputMode: result.inputMode,
     assetPersistence: persistedReferences.summary,
     moderationDiagnostics: result.moderationDiagnostics,
     providerFallbackDiagnostics: result.providerFallbackDiagnostics,

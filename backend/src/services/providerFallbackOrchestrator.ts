@@ -5,6 +5,7 @@ import {
   type SeedanceModerationDiagnostics,
   type SeedancePredictionEvent,
   type SeedanceAspectRatio,
+  type SeedanceInputMode,
   type SeedanceQualityMode,
   type SeedanceResolution,
   type SeedanceReferenceImage,
@@ -81,6 +82,11 @@ export type ProviderFallbackDiagnostics = {
   castSafePromptApplied: boolean;
   displayNameMasked: boolean;
   riskyTermsRemoved: string[];
+  promptAdaptationApplied: boolean;
+  providerRequestCount: number;
+  providerRetryCount: number;
+  providerFallbackCount: number;
+  inputMode: SeedanceInputMode;
   finalProviderStatus: 'succeeded' | 'blocked' | 'paused';
   blockedReasonCategory?: string | null;
   finalProvider: ProviderFallbackProvider | null;
@@ -310,7 +316,18 @@ function diagnosticsFromStages(input: {
   suggestedPrompt?: string | null;
   sanitizedPrompt?: string | null;
   sceneOptimization?: SceneOptimizationDiagnostics | null;
+  executionTelemetry?: Pick<
+    SeedanceVideoResult,
+    | 'promptAdaptationApplied'
+    | 'providerRequestCount'
+    | 'providerRetryCount'
+    | 'providerFallbackCount'
+    | 'inputMode'
+  > | null;
 }) {
+  const attemptedStages = input.stages.filter((stage) => (
+    stage.status === 'attempted' || stage.status === 'blocked' || stage.status === 'succeeded'
+  ));
   const providersAttempted = uniqueValues(
     input.stages
       .filter((stage) => stage.status === 'attempted' || stage.status === 'blocked' || stage.status === 'succeeded')
@@ -335,6 +352,32 @@ function diagnosticsFromStages(input: {
     castSafePromptApplied: input.castSafePrompt.castSafePromptApplied,
     displayNameMasked: input.castSafePrompt.displayNameMasked,
     riskyTermsRemoved: input.castSafePrompt.riskyTermsRemoved,
+    promptAdaptationApplied: Boolean(
+      input.executionTelemetry?.promptAdaptationApplied ||
+      input.moderationDiagnostics?.promptAdaptationApplied ||
+      input.castSafePrompt.castSafePromptApplied ||
+      input.stages.some((stage) => stage.promptChanged)
+    ),
+    providerRequestCount: Math.max(
+      attemptedStages.length,
+      (input.executionTelemetry?.providerRequestCount ??
+        input.moderationDiagnostics?.providerRequestCount ??
+        0) + Math.max(0, attemptedStages.length - 1),
+    ),
+    providerRetryCount: input.executionTelemetry?.providerRetryCount ??
+      input.moderationDiagnostics?.providerRetryCount ??
+      0,
+    providerFallbackCount: Math.max(
+      input.executionTelemetry?.providerFallbackCount ??
+        input.moderationDiagnostics?.providerFallbackCount ??
+        0,
+      Math.max(0, attemptedStages.length - 1),
+    ),
+    inputMode: input.executionTelemetry?.inputMode ??
+      input.moderationDiagnostics?.inputMode ??
+      (attemptedStages.some((stage) => (stage.referenceCount ?? 0) > 0)
+        ? 'multimodal_reference'
+        : 'text_to_video'),
     finalProviderStatus: input.finalProviderStatus,
     blockedReasonCategory,
     finalProvider: input.finalProvider,
@@ -393,6 +436,18 @@ function withProviderFallbackDiagnostics(
     enriched.suggestedPrompt = diagnostics.suggestedPrompt ?? buildCreatorSafeRewrite();
     enriched.sanitizedPrompt = diagnostics.sanitizedPrompt ?? diagnostics.finalPrompt;
     enriched.providerFallbackDiagnostics = diagnostics;
+    if (enriched.diagnostics) {
+      enriched.diagnostics.promptAdaptationApplied = diagnostics.promptAdaptationApplied;
+      enriched.diagnostics.providerRequestCount = diagnostics.providerRequestCount;
+      enriched.diagnostics.providerRetryCount = diagnostics.providerRetryCount;
+      enriched.diagnostics.providerFallbackCount = diagnostics.providerFallbackCount;
+      enriched.diagnostics.inputMode = diagnostics.inputMode;
+      enriched.diagnostics.retryAttempted = diagnostics.providerRetryCount > 0;
+      enriched.diagnostics.retrySucceeded = false;
+      enriched.diagnostics.retryMode = diagnostics.providerRetryCount > 0
+        ? enriched.diagnostics.retryMode
+        : null;
+    }
     return enriched;
   }
 
@@ -434,10 +489,39 @@ export async function generateSeedanceWithProviderFallback(input: {
   resolution?: SeedanceResolution | string | null;
   generateAudio?: boolean | null;
   maxProviderRequests?: number | null;
+  inputMode?: SeedanceInputMode | null;
+  firstFrameImage?: SeedanceReferenceImage | null;
   onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
   onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 }): Promise<ProviderFallbackSeedanceResult> {
   const requestedQuality = input.quality ?? 'fast';
+  if (input.inputMode === 'image_to_video_first_frame') {
+    if (requestedQuality !== 'fast') {
+      throw new Error('Seedance first-frame canary mode only supports Seedance Fast.');
+    }
+    if (!input.firstFrameImage || (input.referenceImages?.length ?? 0) > 0) {
+      throw new Error('Seedance first-frame mode requires exactly one first-frame image and no multimodal references.');
+    }
+
+    return generateSeedanceVideo(input.prompt, {
+      quality: 'fast',
+      inputMode: 'image_to_video_first_frame',
+      firstFrameImage: input.firstFrameImage,
+      referenceImages: [],
+      userId: input.userId,
+      characterId: input.characterId,
+      projectId: input.projectId,
+      providerFallbackStage: 'first_frame',
+      durationSeconds: input.durationSeconds,
+      aspectRatio: input.aspectRatio,
+      resolution: input.resolution,
+      generateAudio: input.generateAudio,
+      maxProviderAttempts: 1,
+      onPredictionCreated: input.onPredictionCreated,
+      onPredictionPolled: input.onPredictionPolled,
+    });
+  }
+
   const providerAttempted = providerForQuality(requestedQuality);
   const optimization = optimizeCinematicScene({
     prompt: input.prompt,
@@ -534,6 +618,7 @@ export async function generateSeedanceWithProviderFallback(input: {
         suggestedPrompt: result.suggestedPrompt ?? null,
         sanitizedPrompt: result.sanitizedPrompt ?? null,
         sceneOptimization: optimization.diagnostics,
+        executionTelemetry: result,
       });
       recordProviderFallbackDiagnostics(diagnostics);
       await recordRenderSuccessMemory({
@@ -569,6 +654,11 @@ export async function generateSeedanceWithProviderFallback(input: {
 
       return {
         ...result,
+        promptAdaptationApplied: diagnostics.promptAdaptationApplied,
+        providerRequestCount: diagnostics.providerRequestCount,
+        providerRetryCount: diagnostics.providerRetryCount,
+        providerFallbackCount: diagnostics.providerFallbackCount,
+        inputMode: diagnostics.inputMode,
         warnings: [
           ...result.warnings,
           ...(optimization.creatorMessage ? [optimization.creatorMessage] : []),

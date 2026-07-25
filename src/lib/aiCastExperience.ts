@@ -78,12 +78,20 @@ export type AutoStageInput = {
   exactLikenessReady: boolean;
   selfCharacterReady: boolean;
   userPrompt: string;
+  activeFrontFaceReferenceCount?: number;
+  activeOtherReferenceCount?: number;
+  referenceLedRouteModerated?: boolean;
+  explicitFirstFrameCanaryAuthorized?: boolean;
 };
 
 export type AutoStageDecision = {
   modeLabel: 'Lumora Auto Stage' | 'Demo Mode';
   engine: 'seedance-2.0' | 'replicate' | 'mock';
-  route: 'seedance_fast_default' | 'kling_exact_likeness' | 'demo_mode';
+  route:
+    | 'seedance_fast_default'
+    | 'seedance_fast_first_frame'
+    | 'kling_exact_likeness'
+    | 'demo_mode';
   fallbackEngine: 'seedance-2.0' | null;
   reason: string;
 };
@@ -254,6 +262,16 @@ export function decideAutoStage(input: AutoStageInput): AutoStageDecision {
     };
   }
 
+  if (isSeedanceFirstFrameCanaryEligible(input) && input.explicitFirstFrameCanaryAuthorized) {
+    return {
+      modeLabel: 'Lumora Auto Stage',
+      engine: 'seedance-2.0',
+      route: 'seedance_fast_first_frame',
+      fallbackEngine: null,
+      reason: 'Seedance Fast — first-frame animation',
+    };
+  }
+
   if (!input.hasPrompt) {
     return {
       modeLabel: 'Lumora Auto Stage',
@@ -282,6 +300,17 @@ export function decideAutoStage(input: AutoStageInput): AutoStageDecision {
     fallbackEngine: null,
     reason: 'Seedance Fast is the safest first render path.',
   };
+}
+
+export function isSeedanceFirstFrameCanaryEligible(input: Pick<
+  AutoStageInput,
+  | 'activeFrontFaceReferenceCount'
+  | 'activeOtherReferenceCount'
+  | 'referenceLedRouteModerated'
+>): boolean {
+  return input.activeFrontFaceReferenceCount === 1 &&
+    input.activeOtherReferenceCount === 0 &&
+    input.referenceLedRouteModerated === true;
 }
 
 function sentenceHas(text: string, pattern: RegExp) {

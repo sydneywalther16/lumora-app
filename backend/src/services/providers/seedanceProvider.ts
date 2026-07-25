@@ -33,6 +33,18 @@ export const SEEDANCE_QUALITY_MODEL = 'bytedance/seedance-2.0';
 export type SeedanceQualityMode = 'fast' | 'quality';
 export type SeedanceAspectRatio = '9:16' | '16:9' | '1:1';
 export type SeedanceResolution = '480p' | '720p' | '1080p';
+export type SeedanceInputMode =
+  | 'text_to_video'
+  | 'image_to_video_first_frame'
+  | 'multimodal_reference';
+
+export type SeedanceExecutionTelemetry = {
+  promptAdaptationApplied: boolean;
+  providerRequestCount: number;
+  providerRetryCount: number;
+  providerFallbackCount: number;
+  inputMode: SeedanceInputMode;
+};
 
 const DEFAULT_SEEDANCE_SETTINGS = {
   duration: 5,
@@ -57,9 +69,15 @@ export type SeedanceVideoResult = {
   providerJobId: string;
   videoUrl: string;
   finalPrompt: string;
+  firstFrameImage: SeedanceReferenceImage | null;
   referenceImages: SeedanceReferenceImage[];
   referenceImageCount: number;
   multimodalReferenceMode: boolean;
+  promptAdaptationApplied: boolean;
+  providerRequestCount: number;
+  providerRetryCount: number;
+  providerFallbackCount: number;
+  inputMode: SeedanceInputMode;
   warnings: string[];
   moderationDiagnostics?: SeedanceModerationDiagnostics;
   suggestedPrompt?: string;
@@ -87,6 +105,7 @@ export type SeedancePredictionEvent = {
   attemptLabel: string;
   renderingMode: ModerationRenderingMode;
   providerFallbackStage?: string | null;
+  inputMode: SeedanceInputMode;
 };
 
 export type SeedanceModerationDiagnostics = {
@@ -96,6 +115,11 @@ export type SeedanceModerationDiagnostics = {
   retryAttempted: boolean;
   retrySucceeded: boolean;
   retryMode: string | null;
+  promptAdaptationApplied: boolean;
+  providerRequestCount: number;
+  providerRetryCount: number;
+  providerFallbackCount: number;
+  inputMode: SeedanceInputMode;
   providerJobId: string | null;
   providerStatus: string | null;
   providerMessage: string;
@@ -143,6 +167,8 @@ type GenerateSeedanceVideoOptions = {
   resolution?: SeedanceResolution | string | null;
   generateAudio?: boolean | null;
   maxProviderAttempts?: number | null;
+  inputMode?: SeedanceInputMode | null;
+  firstFrameImage?: SeedanceReferenceImage | null;
   onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
   onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 };
@@ -152,8 +178,11 @@ export type SeedanceProviderPayload = {
   duration: number;
   aspect_ratio: SeedanceAspectRatio;
   resolution: SeedanceResolution;
+  image?: string;
+  last_frame_image?: string;
   reference_images?: string[];
   reference_videos?: string[];
+  reference_audios?: string[];
   video_urls?: string[];
   generate_audio?: boolean;
 };
@@ -364,7 +393,7 @@ export function isSeedanceModerationResponse(value: unknown) {
 
 export class SeedanceModerationError extends Error {
   readonly statusCode = 422;
-  readonly suggestion = 'Try a safer cinematic editorial prompt with fully clothed styling and neutral posing.';
+  readonly suggestion: string;
   readonly suggestedPrompt: string;
   readonly sanitizedPrompt: string;
   readonly diagnostics: SeedanceModerationDiagnostics;
@@ -376,6 +405,7 @@ export class SeedanceModerationError extends Error {
     sanitizedPrompt: string;
     diagnostics: SeedanceModerationDiagnostics;
     referenceImages: SeedanceReferenceImage[];
+    suggestion?: string;
   }) {
     super(input.message ?? 'Provider moderation paused this render.');
     this.name = 'SeedanceModerationError';
@@ -383,6 +413,8 @@ export class SeedanceModerationError extends Error {
     this.sanitizedPrompt = input.sanitizedPrompt;
     this.diagnostics = input.diagnostics;
     this.referenceImages = input.referenceImages;
+    this.suggestion = input.suggestion ??
+      'Try a safer cinematic editorial prompt with fully clothed styling and neutral posing.';
   }
 }
 
@@ -508,6 +540,7 @@ async function withReplicateRetry<T>(
   action: () => Promise<T>,
   context: Record<string, unknown>,
   allowRetry = true,
+  onRetry?: () => void,
 ): Promise<T> {
   try {
     return await action();
@@ -530,6 +563,7 @@ async function withReplicateRetry<T>(
     const waitMs = retryAfterMsForError(error) ?? 6_000;
     logReplicateError('retryable_request_failed', error, { ...context, waitMs });
     await sleep(waitMs);
+    onRetry?.();
 
     try {
       return await action();
@@ -550,6 +584,7 @@ async function pollPrediction(input: {
   attemptLabel: string;
   renderingMode: ModerationRenderingMode;
   providerFallbackStage?: string | null;
+  inputMode: SeedanceInputMode;
   timeoutMs: number;
   pollIntervalMs: number;
   onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
@@ -576,6 +611,7 @@ async function pollPrediction(input: {
       attemptLabel: input.attemptLabel,
       renderingMode: input.renderingMode,
       providerFallbackStage: input.providerFallbackStage,
+      inputMode: input.inputMode,
     });
 
     if (elapsedMs >= input.timeoutMs) {
@@ -609,6 +645,7 @@ async function pollPrediction(input: {
     attemptLabel: input.attemptLabel,
     renderingMode: input.renderingMode,
     providerFallbackStage: input.providerFallbackStage,
+    inputMode: input.inputMode,
   });
 
   return prediction;
@@ -644,14 +681,65 @@ function settingsForOptions(options: GenerateSeedanceVideoOptions): SeedanceSett
   return settings;
 }
 
-function buildSeedanceRequestInput(
+export function createSeedanceExecutionTelemetry(
+  inputMode: SeedanceInputMode,
+): SeedanceExecutionTelemetry {
+  return {
+    promptAdaptationApplied: false,
+    providerRequestCount: 0,
+    providerRetryCount: 0,
+    providerFallbackCount: 0,
+    inputMode,
+  };
+}
+
+export function resolveSeedanceInputMode(input: {
+  inputMode?: SeedanceInputMode | null;
+  firstFrameImage?: SeedanceReferenceImage | null;
+  referenceImages?: SeedanceReferenceImage[];
+}): SeedanceInputMode {
+  if (input.inputMode) return input.inputMode;
+  if (input.firstFrameImage) return 'image_to_video_first_frame';
+  return input.referenceImages?.length ? 'multimodal_reference' : 'text_to_video';
+}
+
+export function buildSeedanceRequestInput(
   prompt: string,
   referenceImages: SeedanceReferenceImage[],
   settings: SeedanceSettings,
-) {
+  options: {
+    inputMode?: SeedanceInputMode;
+    firstFrameImage?: SeedanceReferenceImage | null;
+  } = {},
+): SeedanceProviderPayload {
+  const inputMode = resolveSeedanceInputMode({
+    inputMode: options.inputMode,
+    firstFrameImage: options.firstFrameImage,
+    referenceImages,
+  });
+
+  if (inputMode === 'image_to_video_first_frame') {
+    const image = normalizeReferenceImages(
+      options.firstFrameImage ? [options.firstFrameImage] : [],
+    )[0]?.url;
+    if (!image) {
+      throw new SeedanceInputSchemaError([{
+        field: 'image',
+        valueSummary: 'missing',
+        expected: 'one valid HTTPS first-frame image URL',
+      }]);
+    }
+
+    return {
+      prompt,
+      image,
+      ...settings,
+    };
+  }
+
   return {
     prompt,
-    ...(referenceImages.length
+    ...(inputMode === 'multimodal_reference' && referenceImages.length
       ? { reference_images: referenceImages.map((reference) => reference.url) }
       : {}),
     ...settings,
@@ -692,7 +780,19 @@ export function validateSeedanceProviderPayload(payload: unknown): SeedancePaylo
     };
   }
 
-  const allowedKeys = new Set(['prompt', 'duration', 'aspect_ratio', 'resolution', 'reference_images', 'reference_videos', 'video_urls', 'generate_audio']);
+  const allowedKeys = new Set([
+    'prompt',
+    'duration',
+    'aspect_ratio',
+    'resolution',
+    'image',
+    'last_frame_image',
+    'reference_images',
+    'reference_videos',
+    'reference_audios',
+    'video_urls',
+    'generate_audio',
+  ]);
   for (const key of Object.keys(record)) {
     if (!allowedKeys.has(key)) {
       issues.push({
@@ -736,6 +836,16 @@ export function validateSeedanceProviderPayload(payload: unknown): SeedancePaylo
       valueSummary: payloadValueSummary(record.resolution),
       expected: '480p, 720p, or 1080p',
     });
+  }
+
+  for (const field of ['image', 'last_frame_image'] as const) {
+    if (field in record && (typeof record[field] !== 'string' || !/^https?:\/\//i.test(record[field]))) {
+      issues.push({
+        field,
+        valueSummary: payloadValueSummary(record[field]),
+        expected: 'http(s) image URL string',
+      });
+    }
   }
 
   if ('generate_audio' in record && typeof record.generate_audio !== 'boolean') {
@@ -793,6 +903,26 @@ export function validateSeedanceProviderPayload(payload: unknown): SeedancePaylo
     }
   }
 
+  if ('reference_audios' in record) {
+    if (!Array.isArray(record.reference_audios)) {
+      issues.push({
+        field: 'reference_audios',
+        valueSummary: payloadValueSummary(record.reference_audios),
+        expected: 'array of http(s) audio URLs',
+      });
+    } else {
+      record.reference_audios.forEach((value, index) => {
+        if (typeof value !== 'string' || !/^https?:\/\//i.test(value)) {
+          issues.push({
+            field: `reference_audios[${index}]`,
+            valueSummary: payloadValueSummary(value),
+            expected: 'http(s) audio URL string',
+          });
+        }
+      });
+    }
+  }
+
   if ('video_urls' in record) {
     if (!Array.isArray(record.video_urls)) {
       issues.push({
@@ -831,6 +961,8 @@ export function seedancePayloadSummary(payload: SeedanceProviderPayload) {
     aspect_ratio: payload.aspect_ratio,
     resolution: payload.resolution,
     generate_audio: typeof payload.generate_audio === 'boolean' ? payload.generate_audio : 'omitted',
+    image: payload.image ? payloadValueSummary(payload.image) : 'omitted',
+    last_frame_image: payload.last_frame_image ? payloadValueSummary(payload.last_frame_image) : 'omitted',
     reference_images: payload.reference_images
       ? payload.reference_images.map((url) => payloadValueSummary(url))
       : [],
@@ -842,6 +974,7 @@ export function seedancePayloadSummary(payload: SeedanceProviderPayload) {
       : [],
     referenceCount: payload.reference_images?.length ?? 0,
     referenceVideoCount: payload.reference_videos?.length ?? payload.video_urls?.length ?? 0,
+    referenceAudioCount: payload.reference_audios?.length ?? 0,
   };
 }
 
@@ -860,6 +993,7 @@ function moderationDiagnostics(input: {
   orchestrationPath?: ModerationOrchestrationAttempt[];
   moderationMemoryApplied?: boolean;
   finalSuccessfulOrchestrationPath?: string | null;
+  telemetry: SeedanceExecutionTelemetry;
 }): SeedanceModerationDiagnostics {
   const categories = input.categories ?? input.attempt?.categories ?? [];
   const orchestrationPath = input.orchestrationPath ?? [];
@@ -870,6 +1004,11 @@ function moderationDiagnostics(input: {
     retryAttempted: input.retryAttempted,
     retrySucceeded: input.retrySucceeded,
     retryMode: input.retryMode,
+    promptAdaptationApplied: input.telemetry.promptAdaptationApplied,
+    providerRequestCount: input.telemetry.providerRequestCount,
+    providerRetryCount: input.telemetry.providerRetryCount,
+    providerFallbackCount: input.telemetry.providerFallbackCount,
+    inputMode: input.telemetry.inputMode,
     providerJobId: input.prediction?.id ?? null,
     providerStatus: input.prediction?.status ?? null,
     providerMessage: providerResponseText(input.providerResponse),
@@ -908,6 +1047,9 @@ async function runSeedanceAttempt(input: {
   quality: SeedanceQualityMode;
   prompt: string;
   referenceImages: SeedanceReferenceImage[];
+  firstFrameImage: SeedanceReferenceImage | null;
+  inputMode: SeedanceInputMode;
+  telemetry: SeedanceExecutionTelemetry;
   sanitizer: ProviderPromptSanitizerResult;
   settings: SeedanceSettings;
   timeoutMs: number;
@@ -919,7 +1061,10 @@ async function runSeedanceAttempt(input: {
   onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
   onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 }) {
-  const requestInput = buildSeedanceRequestInput(input.prompt, input.referenceImages, input.settings);
+  const requestInput = buildSeedanceRequestInput(input.prompt, input.referenceImages, input.settings, {
+    inputMode: input.inputMode,
+    firstFrameImage: input.firstFrameImage,
+  });
   const validation = validateSeedanceProviderPayload(requestInput);
   if (!validation.ok) {
     console.warn('SEEDANCE PAYLOAD VALIDATION FAILED:', {
@@ -937,6 +1082,8 @@ async function runSeedanceAttempt(input: {
     attempt: input.attemptLabel,
     inputKeys: Object.keys(requestInput),
     referenceImageCount: input.referenceImages.length,
+    firstFrameImagePresent: Boolean(input.firstFrameImage),
+    inputMode: input.inputMode,
     promptLength: input.prompt.length,
     displayNameMasked: input.sanitizer.displayNameMasked,
     riskyTermsRemoved: input.sanitizer.riskyTermsRemoved,
@@ -946,11 +1093,17 @@ async function runSeedanceAttempt(input: {
   });
 
   const prediction = await withReplicateRetry(
-    () => input.replicate.predictions.create({
-      model: input.model,
-      input: requestInput,
-      wait: false,
-    }),
+    () => {
+      if (input.telemetry.providerRequestCount > 0) {
+        input.telemetry.providerRetryCount += 1;
+      }
+      input.telemetry.providerRequestCount += 1;
+      return input.replicate.predictions.create({
+        model: input.model,
+        input: requestInput,
+        wait: false,
+      });
+    },
     {
       model: input.model,
       action: 'predictions.create',
@@ -976,6 +1129,7 @@ async function runSeedanceAttempt(input: {
     attemptLabel: input.attemptLabel,
     renderingMode: input.renderingMode,
     providerFallbackStage: input.providerFallbackStage,
+    inputMode: input.inputMode,
   });
 
   const completedPrediction = await pollPrediction({
@@ -988,6 +1142,7 @@ async function runSeedanceAttempt(input: {
     attemptLabel: input.attemptLabel,
     renderingMode: input.renderingMode,
     providerFallbackStage: input.providerFallbackStage,
+    inputMode: input.inputMode,
     timeoutMs: input.timeoutMs,
     pollIntervalMs: input.pollIntervalMs,
     onPredictionPolled: input.onPredictionPolled,
@@ -1040,6 +1195,129 @@ async function runSeedanceAttempt(input: {
   };
 }
 
+async function generateSeedanceFirstFrameVideo(input: {
+  replicate: Replicate;
+  model: typeof SEEDANCE_FAST_MODEL | typeof SEEDANCE_QUALITY_MODEL;
+  quality: SeedanceQualityMode;
+  safePrompt: string;
+  firstFrameImage: SeedanceReferenceImage;
+  settings: SeedanceSettings;
+  telemetry: SeedanceExecutionTelemetry;
+  options: GenerateSeedanceVideoOptions;
+}): Promise<SeedanceVideoResult> {
+  const finalSanitizer = sanitizeProviderPrompt({ prompt: input.safePrompt });
+  const finalPrompt = finalSanitizer.prompt;
+  input.telemetry.promptAdaptationApplied = finalSanitizer.changed;
+
+  logProviderPromptFinalization({
+    providerId: input.model,
+    originalPrompt: input.safePrompt,
+    sanitizer: finalSanitizer,
+    referenceCount: 0,
+    renderingMode: 'cinematic realism',
+    fallbackStage: 'first_frame',
+  });
+
+  try {
+    const attempt = await runSeedanceAttempt({
+      replicate: input.replicate,
+      model: input.model,
+      quality: input.quality,
+      prompt: finalPrompt,
+      referenceImages: [],
+      firstFrameImage: input.firstFrameImage,
+      inputMode: 'image_to_video_first_frame',
+      telemetry: input.telemetry,
+      sanitizer: finalSanitizer,
+      settings: input.settings,
+      timeoutMs: input.options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      pollIntervalMs: input.options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
+      attemptLabel: 'first_frame',
+      renderingMode: 'cinematic realism',
+      allowPaidCreateRetry: false,
+      providerFallbackStage: 'first_frame',
+      onPredictionCreated: input.options.onPredictionCreated,
+      onPredictionPolled: input.options.onPredictionPolled,
+    });
+
+    return {
+      id: randomUUID(),
+      provider: 'replicate',
+      model: input.model,
+      status: 'completed',
+      providerJobId: attempt.completedPrediction.id,
+      videoUrl: attempt.videoUrl,
+      finalPrompt,
+      firstFrameImage: input.firstFrameImage,
+      referenceImages: [],
+      referenceImageCount: 0,
+      multimodalReferenceMode: false,
+      promptAdaptationApplied: input.telemetry.promptAdaptationApplied,
+      providerRequestCount: input.telemetry.providerRequestCount,
+      providerRetryCount: input.telemetry.providerRetryCount,
+      providerFallbackCount: input.telemetry.providerFallbackCount,
+      inputMode: input.telemetry.inputMode,
+      warnings: [],
+      suggestedPrompt: input.safePrompt,
+      sanitizedPrompt: finalPrompt,
+      rawOutput: attempt.completedPrediction.output,
+      logs: attempt.completedPrediction.logs,
+      metrics: attempt.completedPrediction.metrics,
+      settings: input.settings,
+    };
+  } catch (error) {
+    if (!isSeedanceModerationResponse(error)) throw error;
+
+    const moderationError = error as {
+      prediction?: Prediction;
+      providerResponse?: unknown;
+    };
+    const providerResponse = moderationError.providerResponse ?? error;
+    const categories = detectModerationCategories({
+      prompt: finalPrompt,
+      providerResponse,
+      referenceImageCount: 1,
+      includeUnknownFallback: true,
+    });
+    const diagnostics = moderationDiagnostics({
+      model: input.model,
+      prediction: moderationError.prediction ?? null,
+      providerResponse,
+      retryAttempted: input.telemetry.providerRetryCount > 0,
+      retrySucceeded: false,
+      retryMode: null,
+      sanitizedPrompt: finalPrompt,
+      suggestedPrompt: input.safePrompt,
+      referenceImageCount: 0,
+      categories,
+      orchestrationPath: [],
+      moderationMemoryApplied: false,
+      telemetry: input.telemetry,
+    });
+
+    await recordModerationOrchestrationResult({
+      userId: input.options.userId,
+      characterId: input.options.characterId,
+      provider: 'seedance',
+      originalPrompt: input.safePrompt,
+      categories,
+      attempt: null,
+      orchestrationPath: [],
+      success: false,
+      providerMessage: providerResponseText(providerResponse),
+    });
+
+    throw new SeedanceModerationError({
+      message: 'Seedance provider moderation paused this image-to-video first-frame render.',
+      suggestion: 'Save this scene as a draft or choose a different first frame before a separately authorized attempt.',
+      suggestedPrompt: input.safePrompt,
+      sanitizedPrompt: finalPrompt,
+      diagnostics,
+      referenceImages: [],
+    });
+  }
+}
+
 export async function generateSeedanceVideo(
   prompt: string,
   options: GenerateSeedanceVideoOptions = {},
@@ -1060,7 +1338,36 @@ export async function generateSeedanceVideo(
   const quality = options.quality ?? 'fast';
   const model = modelForQuality(quality);
   const referenceImages = normalizeReferenceImages(options.referenceImages);
+  const firstFrameImage = normalizeReferenceImages(
+    options.firstFrameImage ? [options.firstFrameImage] : [],
+  )[0] ?? null;
+  const inputMode = resolveSeedanceInputMode({
+    inputMode: options.inputMode,
+    firstFrameImage,
+    referenceImages,
+  });
+  const telemetry = createSeedanceExecutionTelemetry(inputMode);
   const settings = settingsForOptions(options);
+
+  if (inputMode === 'image_to_video_first_frame') {
+    if (!firstFrameImage || referenceImages.length > 0) {
+      throw new SeedanceInputSchemaError([{
+        field: 'image',
+        valueSummary: firstFrameImage ? `first-frame plus ${referenceImages.length} reference image(s)` : 'missing',
+        expected: 'exactly one first-frame image and no multimodal reference images',
+      }]);
+    }
+    return generateSeedanceFirstFrameVideo({
+      replicate,
+      model,
+      quality,
+      safePrompt,
+      firstFrameImage,
+      settings,
+      telemetry,
+      options,
+    });
+  }
   const orchestrationPlan = await createModerationOrchestrationPlan({
     prompt: safePrompt,
     provider: 'seedance',
@@ -1100,6 +1407,7 @@ export async function generateSeedanceVideo(
       characterDisplayName: options.characterDisplayName,
     });
     const finalPrompt = finalSanitizer.prompt;
+    telemetry.promptAdaptationApplied ||= orchestrationAttempt.changed || finalSanitizer.changed;
     orchestrationPath.push(orchestrationAttempt);
 
     console.info('SEEDANCE FINAL PROMPT:', {
@@ -1141,6 +1449,9 @@ export async function generateSeedanceVideo(
         quality,
         prompt: finalPrompt,
         referenceImages,
+        firstFrameImage: null,
+        inputMode,
+        telemetry,
         sanitizer: finalSanitizer,
         settings,
         timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
@@ -1155,7 +1466,7 @@ export async function generateSeedanceVideo(
       const finalSuccessfulOrchestrationPath = orchestrationPath
         .map((pathAttempt) => `${pathAttempt.attemptLabel}:${pathAttempt.realismModeSelected}`)
         .join(' -> ');
-      const retryAttempted = orchestrationPath.length > 1;
+      const retryAttempted = telemetry.providerRetryCount > 0;
       const successDiagnostics = (retryAttempted || orchestrationPlan.moderationMemoryApplied || orchestrationAttempt.escalationLevel > 1)
         ? moderationDiagnostics({
             model,
@@ -1166,7 +1477,7 @@ export async function generateSeedanceVideo(
             },
             retryAttempted,
             retrySucceeded: retryAttempted,
-            retryMode: orchestrationAttempt.rewriteStrategy,
+            retryMode: retryAttempted ? orchestrationAttempt.rewriteStrategy : null,
             sanitizedPrompt: finalPrompt,
             suggestedPrompt: orchestrationAttempt.prompt,
             referenceImageCount: referenceImages.length,
@@ -1175,6 +1486,7 @@ export async function generateSeedanceVideo(
             orchestrationPath,
             moderationMemoryApplied: orchestrationPlan.moderationMemoryApplied,
             finalSuccessfulOrchestrationPath,
+            telemetry,
           })
         : undefined;
       const moderationWarnings = [
@@ -1215,9 +1527,15 @@ export async function generateSeedanceVideo(
         providerJobId: attempt.completedPrediction.id,
         videoUrl: attempt.videoUrl,
         finalPrompt,
+        firstFrameImage: null,
         referenceImages,
         referenceImageCount: referenceImages.length,
-        multimodalReferenceMode: referenceImages.length > 1,
+        multimodalReferenceMode: inputMode === 'multimodal_reference',
+        promptAdaptationApplied: telemetry.promptAdaptationApplied,
+        providerRequestCount: telemetry.providerRequestCount,
+        providerRetryCount: telemetry.providerRetryCount,
+        providerFallbackCount: telemetry.providerFallbackCount,
+        inputMode,
         warnings: [
           ...(referenceImages.length === 1
             ? ['Only one reference image was sent to Seedance. Add side, full-body, expression, or outfit references for stronger multimodal visual continuity.']
@@ -1262,9 +1580,9 @@ export async function generateSeedanceVideo(
         model,
         prediction: lastPrediction,
         providerResponse,
-        retryAttempted: true,
+        retryAttempted: telemetry.providerRetryCount > 0,
         retrySucceeded: false,
-        retryMode: enrichedAttempt.rewriteStrategy,
+        retryMode: telemetry.providerRetryCount > 0 ? enrichedAttempt.rewriteStrategy : null,
         sanitizedPrompt: finalPrompt,
         suggestedPrompt: enrichedAttempt.prompt,
         referenceImageCount: referenceImages.length,
@@ -1272,6 +1590,7 @@ export async function generateSeedanceVideo(
         attempt: enrichedAttempt,
         orchestrationPath,
         moderationMemoryApplied: orchestrationPlan.moderationMemoryApplied,
+        telemetry,
       });
       console.warn('SEEDANCE MODERATION DIAGNOSTICS:', lastDiagnostics);
       logModerationOrchestration({
@@ -1303,9 +1622,11 @@ export async function generateSeedanceVideo(
     model,
     prediction: lastPrediction,
     providerResponse: lastProviderResponse,
-    retryAttempted: orchestrationPath.length > 1,
+    retryAttempted: telemetry.providerRetryCount > 0,
     retrySucceeded: false,
-    retryMode: failedAttempt?.rewriteStrategy ?? 'provider fallback orchestration',
+    retryMode: telemetry.providerRetryCount > 0
+      ? failedAttempt?.rewriteStrategy ?? 'provider fallback orchestration'
+      : null,
     sanitizedPrompt: suggestedPrompt,
     suggestedPrompt,
     referenceImageCount: referenceImages.length,
@@ -1313,6 +1634,7 @@ export async function generateSeedanceVideo(
     attempt: failedAttempt,
     orchestrationPath,
     moderationMemoryApplied: orchestrationPlan.moderationMemoryApplied,
+    telemetry,
   });
 
   logModerationOrchestration({

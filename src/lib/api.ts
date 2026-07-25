@@ -129,6 +129,8 @@ export type GenerationPayload = {
   selfLikenessIntensity?: SelfLikenessIntensity;
   privacy?: PrivacySetting;
   referenceImages?: SeedanceReferenceImage[];
+  firstFrameImage?: SeedanceReferenceImage | null;
+  inputMode?: SeedanceInputMode;
   referenceImageUrls?: Partial<ReferenceImageUrls> | null;
   additionalReferenceImageUrls?: string[] | null;
 };
@@ -366,6 +368,11 @@ export type GenerationResponse = {
   referenceImages?: SeedanceReferenceImage[] | null;
   referenceImageCount?: number | null;
   multimodalReferenceMode?: boolean | null;
+  promptAdaptationApplied?: boolean | null;
+  providerRequestCount?: number | null;
+  providerRetryCount?: number | null;
+  providerFallbackCount?: number | null;
+  inputMode?: SeedanceInputMode | null;
   createdAt: string;
   message?: string;
   exactLikenessRoute?: string | null;
@@ -576,7 +583,13 @@ export type GenerationMode =
   | 'text-to-video-fallback'
   | 'kling-exact-likeness-reference'
   | 'seedance-text-to-video'
+  | 'seedance-image-to-video-first-frame'
   | 'seedance-multimodal-reference';
+
+export type SeedanceInputMode =
+  | 'text_to_video'
+  | 'image_to_video_first_frame'
+  | 'multimodal_reference';
 
 export type SeedanceReferenceImage = {
   url: string;
@@ -672,6 +685,11 @@ export type ProviderModerationDiagnostics = {
   retryAttempted: boolean;
   retrySucceeded: boolean;
   retryMode: string | null;
+  promptAdaptationApplied: boolean;
+  providerRequestCount: number;
+  providerRetryCount: number;
+  providerFallbackCount: number;
+  inputMode: SeedanceInputMode;
   providerJobId: string | null;
   providerStatus: string | null;
   providerMessage: string;
@@ -752,6 +770,11 @@ export type ProviderFallbackDiagnostics = {
   castSafePromptApplied: boolean;
   displayNameMasked: boolean;
   riskyTermsRemoved: string[];
+  promptAdaptationApplied: boolean;
+  providerRequestCount: number;
+  providerRetryCount: number;
+  providerFallbackCount: number;
+  inputMode: SeedanceInputMode;
   finalProviderStatus: 'succeeded' | 'blocked' | 'paused';
   blockedReasonCategory?: string | null;
   finalProvider: ProviderFallbackProvider | null;

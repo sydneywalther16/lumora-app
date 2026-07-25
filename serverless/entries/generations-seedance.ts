@@ -1,7 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { checkRateLimit, sendRateLimitHeaders } from '../../serverless/_lib/rateLimit';
 import { createSeedanceGeneration } from '../../backend/src/services/generationService';
-import { isSeedanceModerationError } from '../../backend/src/services/providers/seedanceProvider';
+import {
+  isSeedanceModerationError,
+  type SeedanceInputMode,
+} from '../../backend/src/services/providers/seedanceProvider';
 
 type SeedanceRequest = IncomingMessage & {
   body?: unknown;
@@ -25,6 +28,8 @@ type SeedanceRequestBody = {
   isDefaultSelfCharacter?: unknown;
   renderPreference?: unknown;
   referenceImages?: unknown;
+  firstFrameImage?: unknown;
+  inputMode?: unknown;
 };
 
 function sendJson(res: ServerResponse, statusCode: number, payload: unknown) {
@@ -74,6 +79,18 @@ function referenceImagesValue(value: unknown) {
 function qualityValue(body: SeedanceRequestBody) {
   if (body.engine === 'seedance-quality' || body.quality === 'quality') return 'quality';
   return 'fast';
+}
+
+function inputModeValue(value: unknown): SeedanceInputMode | null {
+  return value === 'text_to_video' ||
+    value === 'image_to_video_first_frame' ||
+    value === 'multimodal_reference'
+    ? value
+    : null;
+}
+
+function firstFrameImageValue(value: unknown) {
+  return referenceImagesValue(value == null ? [] : [value])[0] ?? null;
 }
 
 function renderPreferenceValue(value: unknown) {
@@ -177,9 +194,16 @@ export default async function handler(req: SeedanceRequest, res: ServerResponse)
     return;
   }
 
-  const selectedStyle = stylePrompt(body.stylePreset, prompt);
+  const inputMode = inputModeValue(body.inputMode);
+  const selectedStyle = inputMode === 'image_to_video_first_frame'
+    ? ''
+    : stylePrompt(body.stylePreset, prompt);
   const finalPrompt = selectedStyle ? `${prompt}\n\nStyle: ${selectedStyle}` : prompt;
   const quality = qualityValue(body);
+  const firstFrameImage = firstFrameImageValue(body.firstFrameImage);
+  const referenceImages = inputMode === 'image_to_video_first_frame'
+    ? []
+    : referenceImagesValue(body.referenceImages);
 
   try {
     const result = await createSeedanceGeneration({
@@ -192,7 +216,9 @@ export default async function handler(req: SeedanceRequest, res: ServerResponse)
       characterAvatar: stringValue(body.characterAvatar),
       isDefaultSelfCharacter: booleanValue(body.isDefaultSelfCharacter),
       renderPreference: renderPreferenceValue(body.renderPreference),
-      referenceImages: referenceImagesValue(body.referenceImages),
+      referenceImages,
+      firstFrameImage,
+      inputMode,
       durationSeconds: durationValue(body.duration),
       aspectRatio: aspectRatioValue(body.aspectRatio),
       resolution: resolutionValue(body.resolution),
@@ -207,18 +233,32 @@ export default async function handler(req: SeedanceRequest, res: ServerResponse)
       characterName: stringValue(body.characterName),
       characterAvatar: stringValue(body.characterAvatar),
       isDefaultSelfCharacter: booleanValue(body.isDefaultSelfCharacter),
-      displayEngine: quality === 'quality' ? 'Seedance Quality' : 'Seedance Fast',
-      generationMode: publicResult.multimodalReferenceMode ? 'seedance-multimodal-reference' : 'seedance-text-to-video',
+      displayEngine: publicResult.inputMode === 'image_to_video_first_frame'
+        ? 'Seedance Fast — first-frame animation'
+        : quality === 'quality'
+          ? 'Seedance Quality'
+          : 'Seedance Fast',
+      generationMode: publicResult.inputMode === 'image_to_video_first_frame'
+        ? 'seedance-image-to-video-first-frame'
+        : publicResult.multimodalReferenceMode
+          ? 'seedance-multimodal-reference'
+          : 'seedance-text-to-video',
     });
   } catch (error) {
     const message = errorMessage(error);
     if (isSeedanceModerationError(error)) {
       console.warn('SEEDANCE MODERATION RESPONSE:', {
-        prompt: finalPrompt,
         quality,
-        diagnostics: error.diagnostics,
-        exactProviderMessage: error.diagnostics.providerMessage,
+        inputMode: error.diagnostics.inputMode,
+        providerStatus: error.diagnostics.providerStatus,
+        providerRequestCount: error.diagnostics.providerRequestCount,
+        providerRetryCount: error.diagnostics.providerRetryCount,
+        providerFallbackCount: error.diagnostics.providerFallbackCount,
       });
+      const firstFrameModeration = error.diagnostics.inputMode === 'image_to_video_first_frame';
+      const safeMessage = firstFrameModeration
+        ? 'Seedance provider moderation paused this image-to-video first-frame animation. Your scene text is preserved.'
+        : 'Seedance provider moderation paused this render.';
       sendJson(res, error.statusCode, {
         id: null,
         jobId: null,
@@ -228,8 +268,8 @@ export default async function handler(req: SeedanceRequest, res: ServerResponse)
         prompt: finalPrompt,
         outputUrl: '',
         videoUrl: '',
-        error: 'Seedance moderation paused this render after Lumora tried a safer cinematic rewrite.',
-        message: 'Seedance moderation paused this render after Lumora tried a safer cinematic rewrite.',
+        error: safeMessage,
+        message: safeMessage,
         moderation: true,
         suggestion: error.suggestion,
         suggestedPrompt: error.suggestedPrompt,
@@ -237,8 +277,17 @@ export default async function handler(req: SeedanceRequest, res: ServerResponse)
         moderationDiagnostics: error.diagnostics,
         referenceImages: error.referenceImages,
         referenceImageCount: error.referenceImages.length,
-        multimodalReferenceMode: error.referenceImages.length > 1,
-        generationMode: error.referenceImages.length > 0 ? 'seedance-multimodal-reference' : 'seedance-text-to-video',
+        multimodalReferenceMode: error.diagnostics.inputMode === 'multimodal_reference',
+        promptAdaptationApplied: error.diagnostics.promptAdaptationApplied,
+        providerRequestCount: error.diagnostics.providerRequestCount,
+        providerRetryCount: error.diagnostics.providerRetryCount,
+        providerFallbackCount: error.diagnostics.providerFallbackCount,
+        inputMode: error.diagnostics.inputMode,
+        generationMode: firstFrameModeration
+          ? 'seedance-image-to-video-first-frame'
+          : error.referenceImages.length > 0
+            ? 'seedance-multimodal-reference'
+            : 'seedance-text-to-video',
         createdAt: new Date().toISOString(),
       });
       return;

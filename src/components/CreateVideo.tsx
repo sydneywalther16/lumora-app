@@ -23,6 +23,7 @@ import {
   type SceneExecutorResult,
   type SceneOptimizationDiagnostics,
   type SelfLikenessIntensity,
+  type SeedanceInputMode,
   type SeedanceReferenceImage,
   type VideoAspectRatio,
   type VideoEngine,
@@ -82,6 +83,7 @@ import {
   buildSceneAnchorCreateGuidance,
   buildViralCaptionSuggestions,
   decideAutoStage,
+  isSeedanceFirstFrameCanaryEligible,
   isDemoModeEngine,
   looksLikeInternalRenderPrompt,
   polishKlingCinematicPrompt,
@@ -360,6 +362,11 @@ type GenerateVideoApiResponse = {
   frontOnlyFallback?: boolean | null;
   klingReferenceDiagnostics?: Record<string, unknown> | null;
   multimodalReferenceMode?: unknown;
+  promptAdaptationApplied?: boolean | null;
+  providerRequestCount?: number | null;
+  providerRetryCount?: number | null;
+  providerFallbackCount?: number | null;
+  inputMode?: SeedanceInputMode | null;
   assetPersistence?: unknown;
   moderation?: unknown;
   suggestedPrompt?: unknown;
@@ -530,6 +537,8 @@ function creatorRenderModeLabel(mode: string) {
       return 'Cast reference scene';
     case 'seedance-text-to-video':
       return 'Cinematic text scene';
+    case 'seedance-image-to-video-first-frame':
+      return 'Seedance Fast — first-frame animation';
     case 'self-reference-video':
       return 'Self reference scene';
     case 'image-to-video':
@@ -1524,6 +1533,7 @@ export default function CreateVideo({
   const [selfLikenessIntensity, setSelfLikenessIntensity] = useState<SelfLikenessIntensity>('balanced');
   const [engine, setEngine] = useState<VideoEngine>(SEEDANCE_ENGINE_ID);
   const [stageSelectionMode, setStageSelectionMode] = useState<'auto' | 'manual'>('auto');
+  const [firstFrameCanaryEnabled, setFirstFrameCanaryEnabled] = useState(false);
   const [status, setStatus] = useState('');
   const [generationStatusState, setGenerationStatusState] = useState<GenerationStatusState>('idle');
   const [toast, setToast] = useState<ToastState>(null);
@@ -1661,6 +1671,23 @@ export default function CreateVideo({
     .find((issue): issue is ReferenceRepairIssue => Boolean(issue)) ?? null;
   const activeReferenceRepair = referenceRepair ?? preflightReferenceRepair;
   const seedanceReferenceCount = seedanceReferenceImages.length;
+  const activeFrontFaceReferenceCount = seedanceReferenceImages.filter((reference) => (
+    reference.role === 'front_angle'
+  )).length;
+  const activeOtherReferenceCount = seedanceReferenceCount - activeFrontFaceReferenceCount;
+  const referenceLedRouteModerated = Boolean(
+    healthDiagnostics?.referenceRouteStatus?.seedanceReferenceRoutesBlocked ||
+    healthDiagnostics?.seedanceImageReferenceBlocked
+  );
+  const firstFrameCanaryEligible = isSeedanceFirstFrameCanaryEligible({
+    activeFrontFaceReferenceCount,
+    activeOtherReferenceCount,
+    referenceLedRouteModerated,
+  });
+  const firstFrameCanaryActive =
+    stageSelectionMode === 'auto' &&
+    firstFrameCanaryEnabled &&
+    firstFrameCanaryEligible;
   const savedSeedanceReferenceCount = seedanceReferenceImages.filter((reference) => (
     referenceStatus(reference.url, true).kind === 'saved'
   )).length;
@@ -1672,10 +1699,19 @@ export default function CreateVideo({
     readySeedanceReferenceCount === 0;
   const sceneExecutorUserId = authUser?.id ?? identityProfile?.userId ?? null;
   const seedanceMultimodalActive = isSeedanceEngine && seedanceReferenceCount > 1;
-  const seedanceSingleReferenceWarning = isSeedanceEngine && seedanceReferenceCount === 1;
+  const seedanceSingleReferenceWarning =
+    isSeedanceEngine &&
+    seedanceReferenceCount === 1 &&
+    !firstFrameCanaryEligible;
   const successFirstLighterReferencePath = isSeedanceEngine && renderPreference === 'success_first' && seedanceReferenceCount > 0;
   const selectedGenerationMode: GenerationMode = isSeedanceEngine
-    ? (renderPreference === 'success_first' ? 'seedance-text-to-video' : seedanceReferenceCount > 0 ? 'seedance-multimodal-reference' : 'seedance-text-to-video')
+    ? firstFrameCanaryActive
+      ? 'seedance-image-to-video-first-frame'
+      : renderPreference === 'success_first'
+        ? 'seedance-text-to-video'
+        : seedanceReferenceCount > 0
+          ? 'seedance-multimodal-reference'
+          : 'seedance-text-to-video'
     : engine !== 'replicate'
       ? 'text-to-video-fallback'
       : selfReferenceMode
@@ -1719,7 +1755,16 @@ export default function CreateVideo({
     exactLikenessReady: klingExactLikenessReady,
     selfCharacterReady: Boolean(selfReferenceMode && hasGenerationReference),
     userPrompt: activePrompt,
+    activeFrontFaceReferenceCount,
+    activeOtherReferenceCount,
+    referenceLedRouteModerated,
+    explicitFirstFrameCanaryAuthorized: firstFrameCanaryActive,
   });
+
+  useEffect(() => {
+    if (!firstFrameCanaryEligible) setFirstFrameCanaryEnabled(false);
+  }, [firstFrameCanaryEligible, characterId]);
+
   const effectiveUiEngine = stageSelectionMode === 'manual' ? engine : autoStageDecision.engine;
   const demoModeActive = isDemoModeEngine(effectiveUiEngine);
   const castSetupIncomplete =
@@ -3260,14 +3305,33 @@ export default function CreateVideo({
 
     const selectedIsSeedanceEngine = selectedEngine === SEEDANCE_ENGINE_ID || selectedEngine === SEEDANCE_QUALITY_ENGINE_ID;
     const selectedIsBackendProviderEngine = selectedIsSeedanceEngine || selectedEngine === 'veo' || selectedEngine === 'mock';
+    const selectedFirstFrameCanaryActive =
+      selectedIsSeedanceEngine &&
+      selectedEngine === SEEDANCE_ENGINE_ID &&
+      firstFrameCanaryActive &&
+      autoStageDecision.route === 'seedance_fast_first_frame';
+    const selectedFirstFrameImage = selectedFirstFrameCanaryActive
+      ? seedanceReferenceImages[0] ?? null
+      : null;
     const selectedSeedanceReferences: SeedanceReferenceImage[] = selectedIsSeedanceEngine
-      ? seedanceReferenceImages
+      ? selectedFirstFrameCanaryActive
+        ? []
+        : seedanceReferenceImages
       : [];
+    const selectedSeedanceInputMode: SeedanceInputMode = selectedFirstFrameCanaryActive
+      ? 'image_to_video_first_frame'
+      : selectedSeedanceReferences.length > 0
+        ? 'multimodal_reference'
+        : 'text_to_video';
     const referenceImageForRequest = selectedIsSeedanceEngine
       ? null
       : selectedReferenceImageUrl;
     const selectedGenerationMode: GenerationMode = selectedIsSeedanceEngine
-      ? (selectedSeedanceReferences.length > 0 ? 'seedance-multimodal-reference' : 'seedance-text-to-video')
+      ? selectedFirstFrameCanaryActive
+        ? 'seedance-image-to-video-first-frame'
+        : selectedSeedanceReferences.length > 0
+          ? 'seedance-multimodal-reference'
+          : 'seedance-text-to-video'
       : selectedEngine !== 'replicate'
         ? 'text-to-video-fallback'
       : selfReferenceMode
@@ -3385,8 +3449,10 @@ export default function CreateVideo({
           generateAudio: false,
           maxProviderRequests: 1,
           referenceImages: selectedSeedanceReferences,
-          referenceImageUrls: referencePayload,
-          additionalReferenceImageUrls,
+          firstFrameImage: selectedFirstFrameImage,
+          inputMode: selectedSeedanceInputMode,
+          referenceImageUrls: selectedFirstFrameCanaryActive ? undefined : referencePayload,
+          additionalReferenceImageUrls: selectedFirstFrameCanaryActive ? [] : additionalReferenceImageUrls,
         });
 
         data = {
@@ -3405,6 +3471,11 @@ export default function CreateVideo({
           referenceImages: seedanceResult.referenceImages ?? selectedSeedanceReferences,
           referenceImageCount: seedanceResult.referenceImageCount ?? selectedSeedanceReferences.length,
           multimodalReferenceMode: seedanceResult.multimodalReferenceMode ?? selectedSeedanceReferences.length > 1,
+          promptAdaptationApplied: seedanceResult.promptAdaptationApplied ?? null,
+          providerRequestCount: seedanceResult.providerRequestCount ?? null,
+          providerRetryCount: seedanceResult.providerRetryCount ?? null,
+          providerFallbackCount: seedanceResult.providerFallbackCount ?? null,
+          inputMode: seedanceResult.inputMode ?? selectedSeedanceInputMode,
           suggestedPrompt: seedanceResult.suggestedPrompt ?? undefined,
           sanitizedPrompt: seedanceResult.sanitizedPrompt ?? undefined,
           moderationDiagnostics: seedanceResult.moderationDiagnostics ?? undefined,
@@ -4219,18 +4290,26 @@ export default function CreateVideo({
       const providerFallbackPayload = isProviderFallbackDiagnostics(moderationPayload?.providerFallbackDiagnostics)
         ? moderationPayload.providerFallbackDiagnostics
         : null;
-      const suggestedRewrite =
+      const firstFrameModeration = Boolean(
+        moderationPayload &&
+        selectedFirstFrameCanaryActive
+      );
+      const suggestedRewrite = firstFrameModeration
+        ? ''
+        :
         providerFallbackPayload?.suggestedPrompt ||
         providerFallbackPayload?.sanitizedPrompt ||
         moderationPayload?.suggestedPrompt ||
         moderationPayload?.sanitizedPrompt ||
         '';
-      const retryStages = Array.from(new Set([
+      const retryStages = firstFrameModeration ? [] : Array.from(new Set([
         ...moderationRetryStageMessages(moderationPayload?.moderationDiagnostics),
         ...providerFallbackStageMessages(providerFallbackPayload),
       ]));
       const displayMessage = options.fallbackAttempted
         ? 'Lumora could not complete this route. Your draft is saved.'
+        : firstFrameModeration
+        ? 'Seedance paused this image-to-video first-frame animation at provider moderation. Your scene is preserved.'
         : moderationPayload
         ? providerFallbackPayload
           ? 'This scene needs a simpler direction before rendering.'
@@ -4248,6 +4327,8 @@ export default function CreateVideo({
       setGenerationModerationDetail(
         repairIssue
           ? assetRepairCopy(repairIssue)
+          : firstFrameModeration
+          ? 'No retry or fallback was attempted. Save Draft remains available.'
           : providerFallbackPayload
           ? 'Lumora kept your cast and Story Memory intact. Try the safer rewrite, simplify the scene, or save the draft before another take.'
           : moderationPayload?.suggestion && !isProviderTechnicalText(moderationPayload.suggestion)
@@ -4275,7 +4356,9 @@ export default function CreateVideo({
       finishGenerationProgress('failed');
       showToast({
         type: 'error',
-        message: moderationPayload
+        message: firstFrameModeration
+          ? 'First-frame animation paused. No retry or fallback occurred.'
+          : moderationPayload
           ? 'Lumora is trying a softer cinematic direction.'
           : 'Lumora paused this scene. You can retry when ready.',
       });
@@ -4368,7 +4451,9 @@ export default function CreateVideo({
       const profile = loadLumoraProfile();
       const draftEngine = stageSelectionMode === 'manual' ? engine : autoStageDecision.engine;
       const displayEngine = stageSelectionMode === 'auto'
-        ? 'Lumora Auto Stage'
+        ? firstFrameCanaryActive
+          ? 'Seedance Fast — first-frame animation'
+          : 'Lumora Auto Stage'
         : draftEngine === SEEDANCE_ENGINE_ID
         ? 'Seedance Fast'
         : draftEngine === SEEDANCE_QUALITY_ENGINE_ID
@@ -5082,6 +5167,28 @@ export default function CreateVideo({
               ? 'Lumora chooses the safest available render path for this scene.'
               : selectedStageOption.description}
           </p>
+          {firstFrameCanaryEligible ? (
+            <div className="reference-mode-copy">
+              <strong>Seedance Fast — first-frame animation</strong>
+              <span className="muted">
+                Proposed no-fallback route: animate the single Front face image as the first frame.
+              </span>
+              <button
+                type="button"
+                className={`ghost-btn ${firstFrameCanaryActive ? 'active' : ''}`}
+                onClick={() => {
+                  setStageSelectionMode('auto');
+                  setFirstFrameCanaryEnabled((enabled) => !enabled);
+                  setDuration(4);
+                  setAspectRatio('9:16');
+                  setStatus('First-frame route prepared. No render has started.');
+                }}
+              >
+                {firstFrameCanaryActive ? 'First-frame route prepared' : 'Prepare first-frame route'}
+              </button>
+              <small className="muted">This only selects the route. Generate remains a separate action.</small>
+            </div>
+          ) : null}
           <details className="advanced-create-details stage-technical-details">
             <summary>Stage details</summary>
             <small className="muted">{stageSelectionMode === 'auto' ? autoStageDecision.reason : engineRoutingMessage}</small>
@@ -5110,6 +5217,7 @@ export default function CreateVideo({
                     className={`provider-option ${optionActive ? 'active' : ''} ${optionKlingReady ? 'ready' : ''}`}
                     onClick={() => {
                       setStageSelectionMode('manual');
+                      setFirstFrameCanaryEnabled(false);
                       setEngine(option.engine);
                     }}
                   >
