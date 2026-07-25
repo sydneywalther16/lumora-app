@@ -2142,7 +2142,7 @@ button {
 }
 
 .is-native .app-bg {
-  --bottom-nav-space: 24px;
+  --bottom-nav-space: 72px;
   min-height: 100dvh;
   padding: 0;
   place-items: stretch;
@@ -2161,6 +2161,8 @@ button {
 .is-native .screen-scroll {
   padding-left: max(14px, env(safe-area-inset-left, 0px));
   padding-right: max(14px, env(safe-area-inset-right, 0px));
+  padding-bottom: calc(var(--bottom-nav-space) + 18px + env(safe-area-inset-bottom, 0px));
+  scroll-padding-bottom: calc(var(--bottom-nav-space) + 34px + env(safe-area-inset-bottom, 0px));
 }
 
 .is-native .cinematic-feed-page {
@@ -2169,6 +2171,11 @@ button {
 
 .is-native .cinematic-feed-page .list-stack > *:last-child {
   margin-bottom: 0;
+}
+
+.is-native .screen-scroll:has(.focused-create-page) {
+  padding-bottom: calc(var(--bottom-nav-space) + 42px + env(safe-area-inset-bottom, 0px));
+  scroll-padding-bottom: calc(var(--bottom-nav-space) + 58px + env(safe-area-inset-bottom, 0px));
 }
 
 .is-native .bottom-nav {

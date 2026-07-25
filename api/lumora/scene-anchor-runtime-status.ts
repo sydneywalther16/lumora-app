@@ -32,6 +32,12 @@ type RuntimeStatus = {
   klingSceneAnchorVideoModel: string | null;
   klingSceneAnchorVideoModelConfigured: boolean;
   enableRenderProbe: boolean;
+  generationProviders: Array<{
+    id: string;
+    ready: boolean;
+    status: 'ready' | 'not_configured';
+  }>;
+  missingRecommended: string[];
   nodeEnv: string | null;
   build: {
     vercelEnv: string | null;
@@ -171,6 +177,31 @@ export function buildCreateRuntimeSceneAnchorStatus(
     sceneAnchorFalCredentialPresent &&
     implementedKlingSceneAnchorVideoModel(klingSceneAnchorVideoModel),
   );
+  const replicateConfigured = Boolean(textValue(envSource.REPLICATE_API_TOKEN));
+  const klingReferenceConfigured = Boolean(
+    booleanValue(envSource.KLING_ENABLED) &&
+    textValue(envSource.KLING_REFERENCE_MODEL) &&
+    sceneAnchorFalCredentialPresent,
+  );
+  const generationProviders: RuntimeStatus['generationProviders'] = [
+    {
+      id: 'seedance-2.0',
+      ready: replicateConfigured,
+      status: replicateConfigured ? 'ready' : 'not_configured',
+    },
+    {
+      id: 'seedance-quality',
+      ready: replicateConfigured,
+      status: replicateConfigured ? 'ready' : 'not_configured',
+    },
+    {
+      id: 'kling-reference-beta',
+      ready: klingReferenceConfigured,
+      status: klingReferenceConfigured ? 'ready' : 'not_configured',
+    },
+    { id: 'demo-mode', ready: true, status: 'ready' },
+  ];
+  const missingRecommended = replicateConfigured ? [] : ['REPLICATE_API_TOKEN'];
   const recommendedNextAction = !sceneAnchorConfigured
     ? `Set missing scene-anchor env vars on the Create runtime (${runtime === 'vercel' ? 'Vercel' : runtime}), then redeploy. Render diagnostics do not prove Create runtime config.`
     : !klingSceneAnchorVideoModelConfigured
@@ -199,6 +230,8 @@ export function buildCreateRuntimeSceneAnchorStatus(
     klingSceneAnchorVideoModel,
     klingSceneAnchorVideoModelConfigured,
     enableRenderProbe: booleanValue(envSource.ENABLE_RENDER_PROBE),
+    generationProviders,
+    missingRecommended,
     nodeEnv: textValue(envSource.NODE_ENV) || null,
     build: {
       vercelEnv: textValue(envSource.VERCEL_ENV) || null,

@@ -24,6 +24,9 @@ assert.equal(missingRuntime.secretsRedacted, true);
 assert.equal(missingRuntime.endpointLoaded, true);
 assert.equal(missingRuntime.helperLoaded, true);
 assert.equal(missingRuntime.runtimeStatusBuilt, true);
+assert.deepEqual(missingRuntime.missingRecommended, ['REPLICATE_API_TOKEN']);
+assert.equal(missingRuntime.generationProviders.find((provider) => provider.id === 'seedance-2.0')?.ready, false);
+assert.equal(missingRuntime.generationProviders.find((provider) => provider.id === 'demo-mode')?.ready, true);
 
 const configuredRuntime = buildCreateRuntimeSceneAnchorStatus({
   VERCEL: '1',
@@ -41,6 +44,7 @@ const configuredRuntime = buildCreateRuntimeSceneAnchorStatus({
   KLING_REFERENCE_MODEL: 'fal-ai/kling-video/o1/reference-to-video',
   KLING_SCENE_ANCHOR_VIDEO_MODEL: 'fal-ai/kling-video/v2.1/master/image-to-video',
   ENABLE_RENDER_PROBE: 'false',
+  REPLICATE_API_TOKEN: 'replicate-secret-value-should-not-leak',
 } as NodeJS.ProcessEnv);
 
 assert.equal(configuredRuntime.sceneAnchorEnabled, true);
@@ -56,12 +60,16 @@ assert.equal(configuredRuntime.klingEnabled, true);
 assert.equal(configuredRuntime.klingProvider, 'fal');
 assert.equal(configuredRuntime.klingSceneAnchorVideoModelConfigured, true);
 assert.equal(configuredRuntime.enableRenderProbe, false);
+assert.deepEqual(configuredRuntime.missingRecommended, []);
+assert.equal(configuredRuntime.generationProviders.find((provider) => provider.id === 'seedance-2.0')?.ready, true);
+assert.equal(configuredRuntime.generationProviders.find((provider) => provider.id === 'kling-reference-beta')?.ready, true);
 assert.equal(configuredRuntime.secretsRedacted, true);
 assert.match(configuredRuntime.recommendedNextAction, /ready/i);
 
 const serialized = JSON.stringify(configuredRuntime);
 assert.doesNotMatch(serialized, /fal-secret-value-should-not-leak/);
 assert.doesNotMatch(serialized, /kling-secret-value-should-not-leak/);
+assert.doesNotMatch(serialized, /replicate-secret-value-should-not-leak/);
 assert.match(serialized, /"falKeyPresent":true/);
 assert.match(serialized, /"klingApiKeyPresent":true/);
 

@@ -8,7 +8,7 @@ import { listForYouFeed } from '../lib/supabaseAppData';
 import { useSession } from '../hooks/useSession';
 import { openContinueStory } from '../lib/continueStory';
 import { trackCreatorEvent } from '../lib/creatorEvents';
-import { buildDraftPublicCaption, buildPortrayalDisclosure } from '../lib/aiCastExperience';
+import { buildDraftPublicCaption, buildPortrayalDisclosure, isLegacyDemoMedia } from '../lib/aiCastExperience';
 
 type FeedPost = LumoraPost & {
   tags?: string[] | string | null;
@@ -103,7 +103,7 @@ function recommendationReason(post: FeedPost, index: number) {
 
 function whyThisPost(post: FeedPost, index = 0) {
   const portrayalDisclosure = buildPortrayalDisclosure(post);
-  if (portrayalDisclosure === 'Demo/Test media' || portrayalDisclosure === 'Synthetic portrayal') {
+  if (portrayalDisclosure === 'Sample AI portrayal' || portrayalDisclosure === 'Synthetic portrayal') {
     return portrayalDisclosure;
   }
   if ((post.likeCount ?? 0) > 100) return 'Popular this week';
@@ -473,6 +473,15 @@ export default function TrendsPage() {
       {errorMessage ? (
         <article className="list-card lumora-card-soft" style={{ borderRadius: '18px', padding: '12px' }}>
           <p style={{ margin: 0 }}>{errorMessage}</p>
+        </article>
+      ) : null}
+
+      {feed.some(isLegacyDemoMedia) ? (
+        <article className="list-card lumora-card-soft" style={{ borderRadius: '18px', padding: '12px' }}>
+          <span className="tiny-pill">Sample gallery</span>
+          <p className="muted" style={{ margin: '8px 0 0' }}>
+            Items marked “Sample AI portrayal” are preserved beta examples, not verified creator portfolio work.
+          </p>
         </article>
       ) : null}
 

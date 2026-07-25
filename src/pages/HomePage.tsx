@@ -10,7 +10,7 @@ import { loadLumoraProfile } from '../lib/profileStorage';
 import { loadLocalProfileAvatarUrl } from '../lib/localAvatarStorage';
 import { useSession } from '../hooks/useSession';
 import { loadSupabasePublicPosts } from '../lib/supabaseAppData';
-import { buildDraftPublicCaption, buildPortrayalDisclosure } from '../lib/aiCastExperience';
+import { buildDraftPublicCaption, buildPortrayalDisclosure, isLegacyDemoMedia } from '../lib/aiCastExperience';
 import { shouldShowInstallAction } from '../lib/nativeUi';
 
 function homeMockVideoPost(): LumoraPost {
@@ -288,6 +288,14 @@ export default function HomePage() {
       {!isNativePlatform ? creatorSafetyCard : null}
 
       {feedMessage ? <p className="muted">{feedMessage}</p> : null}
+      {localPosts.some(isLegacyDemoMedia) ? (
+        <article className="list-card lumora-card">
+          <span className="tiny-pill">Sample gallery</span>
+          <p className="muted" style={{ marginBottom: 0 }}>
+            Items marked “Sample AI portrayal” are preserved beta examples, not verified creator portfolio work.
+          </p>
+        </article>
+      ) : null}
 
       {localPosts.length ? (
         <section className="list-stack">

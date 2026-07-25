@@ -22,10 +22,15 @@ assert.equal(SAFE_NATIVE_STATUS_PATH, '/api/lumora/scene-anchor-runtime-status')
 const fallbackHealth = buildSafeHealthFallback({
   ok: true,
   sceneAnchorConfigured: false,
+  generationProviders: [
+    { id: 'seedance-2.0', ready: true, status: 'ready' },
+    { id: 'demo-mode', ready: true, status: 'ready' },
+  ],
 });
 assert.equal(fallbackHealth.ok, true);
 assert.equal(fallbackHealth.mode, 'production-fallback');
 assert.deepEqual(fallbackHealth.generationProviders, [
+  { id: 'seedance-2.0', ready: true, status: 'ready' },
   { id: 'demo-mode', ready: true, status: 'ready' },
 ]);
 assert.equal(shouldShowInstallAction(true), false);
@@ -46,7 +51,9 @@ assert.doesNotMatch(createSource, /Start the API server|VITE_API_BASE_URL/);
 assert.match(apiSource, /CapacitorHttp\.request/);
 assert.match(apiSource, /SAFE_NATIVE_STATUS_PATH/);
 assert.match(createSource, /Lumora Stage is temporarily unavailable\. Your scene can still be saved as a draft\./);
-assert.match(createSource, /Lumora Stage is connected\. Real rendering is temporarily unavailable; Demo Mode and draft saving are ready\./);
+assert.match(createSource, /Real rendering needs the server-side REPLICATE_API_TOKEN setting\./);
+assert.match(createSource, /Preview Demo/);
+assert.doesNotMatch(createSource, /Setup needed/);
 assert.match(createSource, /fetchApiResponse\('\/api\/lumora\/generate-video'/);
 assert.match(profileSource, /fetchApiResponse\('\/api\/lumora\/build-identity'/);
 assert.match(homeSource, /shouldShowInstallAction/);

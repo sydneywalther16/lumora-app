@@ -9,10 +9,10 @@ export default function InboxPage() {
     <div className="page">
       <section className="headline-card">
         <div>
-          <span className="eyebrow">communications</span>
-          <h2>Collabs, alerts, and brand interest</h2>
+          <span className="eyebrow">Sample Inbox</span>
+          <h2>Demo messages</h2>
         </div>
-        <p>A clean inbox for creator ops, product notifications, and trend updates.</p>
+        <p>These example messages demonstrate future creator communication features.</p>
       </section>
       <section className="list-stack">
         {inboxThreads.map((thread) => (
@@ -33,9 +33,9 @@ export default function InboxPage() {
           >
             <div className="row-between">
               <h3>{thread.subject}</h3>
-              {thread.unread ? <span className="tiny-dot" /> : <span className="muted">Read</span>}
+              <span className="tiny-pill">Sample</span>
             </div>
-            <strong className="subline">From: {thread.from}</strong>
+            <strong className="subline">Sample sender: {thread.from}</strong>
             <p>{thread.preview}</p>
           </article>
         ))}
@@ -67,7 +67,7 @@ export default function InboxPage() {
           >
             <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start' }}>
               <div>
-                <span className="eyebrow">message</span>
+                <span className="eyebrow">Sample message</span>
                 <h2 style={{ margin: '6px 0 0' }}>{selectedThread.subject}</h2>
               </div>
               <button type="button" className="text-btn" onClick={() => setSelectedThreadId(null)}>
@@ -75,10 +75,10 @@ export default function InboxPage() {
               </button>
             </div>
             <p className="muted" style={{ marginTop: '12px' }}>
-              From: {selectedThread.from}
+              Sample sender: {selectedThread.from}
             </p>
             <p>{selectedThread.preview}</p>
-            <p className="muted">Reply tools are coming soon.</p>
+            <p className="muted">Replies are unavailable in this beta.</p>
           </section>
         </div>
       ) : null}

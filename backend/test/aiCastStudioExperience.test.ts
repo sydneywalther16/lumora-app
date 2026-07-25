@@ -12,6 +12,7 @@ import {
   buildSceneAnchorCreateGuidance,
   buildViralCaptionSuggestions,
   decideAutoStage,
+  isLegacyDemoMedia,
   looksLikeInternalRenderPrompt,
   polishKlingCinematicPrompt,
   viralScenePresets,
@@ -22,6 +23,17 @@ const repoRoot = process.cwd();
 const aiCastHelperSource = readFileSync(join(repoRoot, 'src/lib/aiCastExperience.ts'), 'utf8');
 const createVideoSource = readFileSync(join(repoRoot, 'src/components/CreateVideo.tsx'), 'utf8');
 const studioListSource = readFileSync(join(repoRoot, 'src/components/StudioList.tsx'), 'utf8');
+
+assert.equal(isLegacyDemoMedia({ title: 'Testing 5/16', username: 'TheCreator' }), true);
+assert.equal(isLegacyDemoMedia({ title: 'A finished campaign', username: 'sydney' }), false);
+assert.equal(
+  buildPortrayalDisclosure({ title: 'Untitled concept', username: 'TheCreator', isDefaultSelfCharacter: true }),
+  'Sample AI portrayal',
+);
+assert.equal(
+  buildPortrayalDisclosure({ title: 'A finished campaign', username: 'sydney', isDefaultSelfCharacter: true }),
+  'Synthetic portrayal',
+);
 
 const gardenPreset = viralScenePresets.find((preset) => preset.id === 'golden-hour-garden-walk');
 assert.ok(gardenPreset);
@@ -217,7 +229,7 @@ assert.equal(buildPortrayalDisclosure({
   provider: 'mock',
   characterName: 'Sydney Spears',
   creatorName: 'Sydney Spears',
-}), 'Demo/Test media');
+}), 'Sample AI portrayal');
 assert.equal(buildPortrayalDisclosure({
   characterName: 'Sydney Spears',
   creatorName: 'Sydney Spears',

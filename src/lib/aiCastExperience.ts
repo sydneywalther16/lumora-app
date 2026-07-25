@@ -202,8 +202,10 @@ export function buildPortrayalDisclosure(input: {
   creatorName?: unknown;
   displayName?: unknown;
   username?: unknown;
+  creatorUsername?: unknown;
+  title?: unknown;
 }): string {
-  if (input.provider === 'mock') return 'Demo/Test media';
+  if (isLegacyDemoMedia(input)) return 'Sample AI portrayal';
   if (Boolean(input.isDefaultSelfCharacter)) return 'Synthetic portrayal';
 
   const characterName = typeof input.characterName === 'string' ? input.characterName.trim() : '';
@@ -220,6 +222,25 @@ export function buildPortrayalDisclosure(input: {
   }
 
   return `Featuring ${characterName}`;
+}
+
+export function isLegacyDemoMedia(input: {
+  provider?: unknown;
+  title?: unknown;
+  username?: unknown;
+  creatorUsername?: unknown;
+}): boolean {
+  if (input.provider === 'mock') return true;
+
+  const title = typeof input.title === 'string' ? input.title.trim().toLowerCase() : '';
+  const username = [input.creatorUsername, input.username]
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    ?.trim()
+    .replace(/^@/, '')
+    .toLowerCase() ?? '';
+
+  return username === 'thecreator' ||
+    /^(?:testing\b|untitled concept\b|continue:\s*untitled concept\b|remix of testing\b)/i.test(title);
 }
 
 export function decideAutoStage(input: AutoStageInput): AutoStageDecision {

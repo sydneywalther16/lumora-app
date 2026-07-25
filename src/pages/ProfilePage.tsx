@@ -52,6 +52,7 @@ import SelfReferencePreview, { normalizeReference } from '../components/SelfRefe
 import { openContinueStory } from '../lib/continueStory';
 import { trackCreatorEvent } from '../lib/creatorEvents';
 import { buildCreatorIdentityCard, buildStoryWorldProgress } from '../lib/storyWorld';
+import { buildPortrayalDisclosure, isLegacyDemoMedia } from '../lib/aiCastExperience';
 
 type Draft = { id: string; title: string; prompt: string; createdAt: string };
 type ProfileDebugInfo = {
@@ -1031,11 +1032,7 @@ function ProfilePostTile({
   const title = post.title || post.caption || 'Untitled post';
   const bodyText = post.caption || post.prompt || 'No prompt available';
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
-  const characterLabel = post.isDefaultSelfCharacter
-    ? 'Soft self guidance'
-    : post.characterName
-      ? `Featuring ${post.characterName}`
-      : null;
+  const characterLabel = buildPortrayalDisclosure(post);
 
   return (
     <button
@@ -1122,11 +1119,7 @@ function ProfilePostPreviewModal({
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
   const authorUsername = post.creatorUsername || post.username || 'lumora.creator';
   const authorAvatar = post.creatorAvatar || post.avatar || fallbackAvatar;
-  const characterLabel = post.isDefaultSelfCharacter
-    ? 'Soft self guidance'
-    : post.characterName
-      ? `Featuring ${post.characterName}`
-      : null;
+  const characterLabel = buildPortrayalDisclosure(post);
 
   return (
     <div
@@ -2961,6 +2954,8 @@ export default function ProfilePage() {
       hasSelfReferenceSource(selfForm, 'leftAngle') &&
       hasSelfReferenceSource(selfForm, 'rightAngle'));
   const debugSource = authUserId ? 'supabase' : debugInfo.source;
+  const verifiedPosts = posts.filter((post) => !isLegacyDemoMedia(post));
+  const samplePosts = posts.filter(isLegacyDemoMedia);
 
   if (!authReady || sessionLoading || !isHydrated) {
     return (
@@ -3498,7 +3493,7 @@ export default function ProfilePage() {
       </CharacterHub>
 
       <SectionCard title="AI cast videos">
-        {posts.length ? (
+        {verifiedPosts.length ? (
           <div
             className="profile-published-grid"
             style={{
@@ -3507,7 +3502,7 @@ export default function ProfilePage() {
               gap: '8px',
             }}
           >
-            {posts.map((post) => (
+            {verifiedPosts.map((post) => (
               <ProfilePostTile key={post.id} post={post} onSelect={setSelectedPost} />
             ))}
           </div>
@@ -3521,6 +3516,29 @@ export default function ProfilePage() {
           </article>
         )}
       </SectionCard>
+
+      {samplePosts.length ? (
+        <SectionCard title="Sample gallery">
+          <article className="list-card lumora-card" style={{ marginBottom: '10px' }}>
+            <span className="tiny-pill">Demo/sample media</span>
+            <p className="muted" style={{ marginBottom: 0 }}>
+              These preserved beta samples are separate from your verified creator portfolio. They can be archived or unpublished later from profile management.
+            </p>
+          </article>
+          <div
+            className="profile-published-grid"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(104px, 1fr))',
+              gap: '8px',
+            }}
+          >
+            {samplePosts.map((post) => (
+              <ProfilePostTile key={post.id} post={post} onSelect={setSelectedPost} />
+            ))}
+          </div>
+        </SectionCard>
+      ) : null}
 
       {selectedPost ? (
         <ProfilePostPreviewModal

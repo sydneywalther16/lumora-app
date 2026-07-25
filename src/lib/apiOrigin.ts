@@ -17,17 +17,25 @@ export function buildSafeHealthFallback(input: {
   sceneAnchorModel?: string | null;
   sceneAnchorConfigured?: boolean;
   sceneAnchorFallbackMode?: string;
+  generationProviders?: Array<{
+    id: string;
+    ready: boolean;
+    status: 'ready' | 'not_configured' | 'placeholder';
+  }>;
+  missingRecommended?: string[];
 }) {
+  const generationProviders = Array.isArray(input.generationProviders) && input.generationProviders.length
+    ? input.generationProviders
+    : [{ id: 'demo-mode', ready: true, status: 'ready' as const }];
+
   return {
     service: 'lumora-production-status',
     checkedAt: new Date().toISOString(),
     ok: input.ok === true,
     mode: 'production-fallback',
     configured: {},
-    missingRecommended: [],
-    generationProviders: [
-      { id: 'demo-mode', ready: true, status: 'ready' as const },
-    ],
+    missingRecommended: input.missingRecommended ?? [],
+    generationProviders,
     sceneAnchorEnabled: input.sceneAnchorEnabled,
     sceneAnchorProvider: input.sceneAnchorProvider,
     sceneAnchorModel: input.sceneAnchorModel,

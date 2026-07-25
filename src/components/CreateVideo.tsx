@@ -212,7 +212,7 @@ const engineLabels: Record<VideoEngine, string> = {
 const apiOfflineVideoEngineMessage =
   'Lumora Stage is temporarily unavailable. Your scene can still be saved as a draft.';
 const providerConfigVideoEngineMessage =
-  'Lumora Stage is connected. Real rendering is temporarily unavailable; Demo Mode and draft saving are ready.';
+  'Real rendering needs the server-side REPLICATE_API_TOKEN setting. Demo Mode and draft saving remain available.';
 const identityOnlyKlingFallbackMessage =
   'Using identity-only Kling fallback. This uses your saved identity references without staging a scene anchor.';
 const sceneAnchorStartFailureMessage =
@@ -1330,11 +1330,41 @@ function characterProfileSchemaWarning(diagnostics: ApiHealthDiagnostics) {
   return missingCharacterId ? characterProfilesMigrationWarning : '';
 }
 
-function hasReadyRealGenerationProvider(diagnostics: ApiHealthDiagnostics | null) {
+function hasReadyRealGenerationProvider(diagnostics: ApiHealthDiagnostics | null, engine: VideoEngine) {
   const providers = diagnostics?.generationProviders;
   if (!Array.isArray(providers)) return false;
 
-  return providers.some((provider) => provider.ready && provider.id !== 'demo-mode');
+  const providerIds: Partial<Record<VideoEngine, string[]>> = {
+    'seedance-2.0': ['seedance-2.0'],
+    'seedance-quality': ['seedance-quality', 'seedance-2.0'],
+    replicate: ['kling-reference-beta', 'kling'],
+    'sora-2': ['openai-sora'],
+    'sora-2-pro': ['openai-sora'],
+    veo: ['veo'],
+    runway: ['runway'],
+    openai: ['openai-sora'],
+  };
+  const expectedIds = providerIds[engine] ?? [];
+  return providers.some((provider) => provider.ready && expectedIds.includes(provider.id));
+}
+
+function providerConfigurationMessage(engine: VideoEngine) {
+  if (engine === 'seedance-2.0' || engine === 'seedance-quality') {
+    return 'Real rendering needs the server-side REPLICATE_API_TOKEN setting. Demo Mode and draft saving remain available.';
+  }
+  if (engine === 'replicate') {
+    return 'Kling rendering needs the server-side KLING_ENABLED, KLING_REFERENCE_MODEL, and FAL_KEY or KLING_API_KEY settings. Demo Mode and draft saving remain available.';
+  }
+  if (engine === 'sora-2' || engine === 'sora-2-pro' || engine === 'openai') {
+    return 'Sora rendering needs the server-side OPENAI_API_KEY and OPENAI_VIDEO_ENABLED settings. Demo Mode and draft saving remain available.';
+  }
+  if (engine === 'veo') {
+    return 'Veo rendering needs its server-side Google provider credential. Demo Mode and draft saving remain available.';
+  }
+  if (engine === 'runway') {
+    return 'Runway rendering needs its server-side provider credential. Demo Mode and draft saving remain available.';
+  }
+  return providerConfigVideoEngineMessage;
 }
 
 function creatorStoryMemoryErrorMessage(error: unknown, fallback = 'Story Memory could not sync. You can still draft scenes.') {
@@ -1553,14 +1583,18 @@ export default function CreateVideo({
   const isBackendProviderEngine = isSeedanceEngine || engine === 'veo' || engine === 'mock';
   const requiresReferenceImage = engine === 'replicate';
   const hasPrompt = activePrompt.trim().length > 0;
-  const selectedEngineRequiresBackend = engine !== 'mock';
-  const realProviderReady = hasReadyRealGenerationProvider(healthDiagnostics);
+  const realProviderReady = hasReadyRealGenerationProvider(healthDiagnostics, engine);
+  const autoDemoFallbackActive =
+    stageSelectionMode === 'auto' &&
+    healthDiagnosticsStatus === 'connected' &&
+    !realProviderReady;
+  const selectedEngineRequiresBackend = engine !== 'mock' && !autoDemoFallbackActive;
   const providerReadinessMessage = !selectedEngineRequiresBackend
     ? null
     : healthDiagnosticsStatus === 'offline'
       ? apiOfflineVideoEngineMessage
       : healthDiagnosticsStatus === 'connected' && !realProviderReady
-        ? providerConfigVideoEngineMessage
+        ? providerConfigurationMessage(engine)
         : null;
   const backendReadyForGeneration = !selectedEngineRequiresBackend || (
     healthDiagnosticsStatus === 'connected' &&
@@ -1649,13 +1683,18 @@ export default function CreateVideo({
   );
   const autoStageDecision = decideAutoStage({
     hasPrompt,
-    explicitDemoMode: stageSelectionMode === 'manual' && engine === 'mock',
+    explicitDemoMode: (stageSelectionMode === 'manual' && engine === 'mock') || autoDemoFallbackActive,
     exactLikenessReady: klingExactLikenessReady,
     selfCharacterReady: Boolean(selfReferenceMode && hasGenerationReference),
     userPrompt: activePrompt,
   });
   const effectiveUiEngine = stageSelectionMode === 'manual' ? engine : autoStageDecision.engine;
   const demoModeActive = isDemoModeEngine(effectiveUiEngine);
+  const castSetupIncomplete =
+    selfReferenceMode &&
+    !referenceLoading &&
+    !hasGenerationReference &&
+    !demoModeActive;
   const klingReferenceSelected = effectiveUiEngine === 'replicate';
   const selectedKlingExactReady = klingReferenceSelected && klingExactLikenessReady;
   const klingExactReadyOnOtherRenderer = klingExactLikenessReady && !klingReferenceSelected;
@@ -1782,6 +1821,7 @@ export default function CreateVideo({
     !referenceLoading &&
     hasPrompt &&
     backendReadyForGeneration &&
+    !castSetupIncomplete &&
     !(activeReferenceRepair && !activeReferenceRepair.canContinueWithoutReference) &&
     (!requiresReferenceImage || hasGenerationReference || mockRateLimitUi);
   const renderCooldownActive = renderCooldownSeconds > 0;
@@ -1931,7 +1971,7 @@ export default function CreateVideo({
     { displayName: characterName },
   );
   const tryTakeBusy = busy || generationLoading || referenceLoading || renderCooldownActive || activeRenderBlocksGenerate;
-  const baseGenerateCtaLabel = engine === 'mock' ? 'Demo preview' : 'Generate';
+  const baseGenerateCtaLabel = demoModeActive ? 'Preview Demo' : 'Generate';
   const isCreateFlowPreparing = shouldShowCreatePreparingState({
     engine,
     isHydrated,
@@ -1954,15 +1994,21 @@ export default function CreateVideo({
               : isCreateFlowPreparing
                 ? 'Preparing'
                 : !canGenerate
-                  ? engine === 'mock'
-                    ? 'Demo preview'
+                  ? castSetupIncomplete
+                    ? 'Finish AI Cast'
+                    : demoModeActive
+                    ? 'Preview Demo'
                     : requiresReferenceImage && !hasGenerationReference && !mockRateLimitUi
                       ? 'Add a cast reference'
                       : !backendReadyForGeneration
-                        ? 'Setup needed'
+                        ? healthDiagnosticsStatus === 'offline'
+                          ? 'Stage unavailable'
+                          : 'Preview Demo'
                         : baseGenerateCtaLabel
                   : baseGenerateCtaLabel;
-  const generateButtonDisabled = generationError && !activeReferenceRepair
+  const generateButtonDisabled = castSetupIncomplete && onResaveReferencePhoto
+    ? false
+    : generationError && !activeReferenceRepair
     ? tryTakeBusy
     : generateBusy || !hasPrompt || !canGenerate;
   const showCinematicStructure = Boolean(
@@ -4457,6 +4503,12 @@ export default function CreateVideo({
             <p>{providerReadinessMessage}</p>
           </div>
         ) : null}
+        {autoDemoFallbackActive ? (
+          <div className="generation-warning-list schema-warning-card" role="status">
+            <p>Demo Mode is available for this preview and uses no render credits. Save Draft remains available.</p>
+            <p className="muted">{providerConfigurationMessage(engine)}</p>
+          </div>
+        ) : null}
 
         <details className="advanced-create-details minimal-title-details">
           <summary>Title</summary>
@@ -5226,6 +5278,10 @@ export default function CreateVideo({
             type="button"
             className={`primary-btn cinematic-generate-btn state-${generationStatusState}`}
             onClick={() => {
+              if (castSetupIncomplete && onResaveReferencePhoto) {
+                onResaveReferencePhoto();
+                return;
+              }
               void (generationError && !activeReferenceRepair ? handleTryUltraSafeScene() : handleGenerate());
             }}
             disabled={generationError && !activeReferenceRepair ? tryTakeBusy : generateButtonDisabled}
@@ -5237,6 +5293,11 @@ export default function CreateVideo({
             Save draft
           </button>
         </div>
+        {castSetupIncomplete ? (
+          <p className="muted">Add at least one saved AI Cast reference before generating a real scene.</p>
+        ) : demoModeActive ? (
+          <p className="muted">Demo preview only. No render credits will be used.</p>
+        ) : null}
         {visibleRenderState && !(generationError && generationStatusState === 'failed') ? (
           <div
             className={`render-state-card render-state-${visibleRenderState.tone} ${generationStatusState === 'rate_limited' ? 'rate-limit-card' : ''}`}
