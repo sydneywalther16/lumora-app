@@ -18,7 +18,7 @@ import {
   saveLumoraProfile,
   type LumoraProfile,
 } from '../lib/profileStorage';
-import type { CharacterProfile, CreatorSelfStylePreferences, LumoraIdentityProfile, LumoraPost } from '../lib/api';
+import { fetchApiResponse, type CharacterProfile, type CreatorSelfStylePreferences, type LumoraIdentityProfile, type LumoraPost } from '../lib/api';
 import type { StudioProject } from '../lib/projectStorage';
 import { useSession } from '../hooks/useSession';
 import { useLumoraTheme, type LumoraTheme } from '../hooks/useLumoraTheme';
@@ -2540,7 +2540,7 @@ export default function ProfilePage() {
     setIdentityBuildStatus('Building self character...');
 
     try {
-      const response = await fetch('/api/lumora/build-identity', {
+      const response = await fetchApiResponse('/api/lumora/build-identity', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

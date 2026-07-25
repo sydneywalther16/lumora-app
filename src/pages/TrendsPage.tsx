@@ -8,6 +8,7 @@ import { listForYouFeed } from '../lib/supabaseAppData';
 import { useSession } from '../hooks/useSession';
 import { openContinueStory } from '../lib/continueStory';
 import { trackCreatorEvent } from '../lib/creatorEvents';
+import { buildDraftPublicCaption, buildPortrayalDisclosure } from '../lib/aiCastExperience';
 
 type FeedPost = LumoraPost & {
   tags?: string[] | string | null;
@@ -93,13 +94,18 @@ function scoreFallbackPost(post: FeedPost, index: number) {
 }
 
 function recommendationReason(post: FeedPost, index: number) {
-  if (post.characterName) return `Recurring cast: ${post.characterName}`;
+  const portrayalDisclosure = buildPortrayalDisclosure(post);
+  if (portrayalDisclosure) return portrayalDisclosure;
   if ((post.likeCount ?? 0) + (post.shareCount ?? 0) > 50) return 'AI cast video';
   if (index < 3) return 'Story world pick';
   return 'Generated with Lumora';
 }
 
 function whyThisPost(post: FeedPost, index = 0) {
+  const portrayalDisclosure = buildPortrayalDisclosure(post);
+  if (portrayalDisclosure === 'Demo/Test media' || portrayalDisclosure === 'Synthetic portrayal') {
+    return portrayalDisclosure;
+  }
   if ((post.likeCount ?? 0) > 100) return 'Popular this week';
   if (post.characterName) return 'Popular cast moment';
   if (index < 3) return 'Similar cinematic mood';
@@ -173,7 +179,7 @@ function ForYouCard({
   currentUserId?: string | null;
 }) {
   const title = post.title || post.caption || 'Lumora AI cast video';
-  const caption = post.caption || post.prompt || 'Generated with Lumora';
+  const caption = buildDraftPublicCaption(post);
   const creatorName = post.creatorName || post.displayName || post.username || 'Lumora Creator';
   const creatorAvatar = post.creatorAvatar || post.avatar || post.characterAvatar || null;
   const statsText = `${formatCompactCount(post.likeCount)} likes`;
@@ -225,7 +231,7 @@ function ForYouPreviewModal({
   currentUserId?: string | null;
 }) {
   const title = post.title || post.caption || 'Lumora AI cast video';
-  const bodyText = post.caption || post.prompt || '';
+  const bodyText = buildDraftPublicCaption(post);
   const creatorName = post.creatorName || post.displayName || post.username || 'Lumora Creator';
   const creatorUsername = post.creatorUsername || post.username || 'lumora.creator';
 

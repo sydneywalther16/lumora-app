@@ -93,8 +93,8 @@ const framingPattern = /\b(?:full[-\s]?body|medium[-\s]?wide|medium[-\s]?full|wi
 const motionPattern = /\b(?:walk|walking|turn|slow turn|moving|passes through|enters|arrives|steps|camera motion|tracking shot|gentle camera)\b/i;
 const identityPattern = /\b(?:identity|self character|same face|same hair|saved self|consistent face|consistent body)\b/i;
 const explicitExactLikenessPattern = /\b(?:exact(?:[-\s]?likeness)?|same face|looks like me|match my face|my exact face|identical face|preserve my face)\b/i;
-const internalPromptLeakPattern = /\b(?:use medium-wide|full-body cinematic framing|preserve the saved self character identity|reference image|camera drift|provider|render payload|payload)\b/i;
-const captionForbiddenPattern = /\b(?:use medium-wide|preserve identity|preserve the saved self character identity|saved self character identity|reference image|camera drift|provider|render|payload)\b/i;
+const internalPromptLeakPattern = /\b(?:use medium-wide|full-body cinematic framing|preserve (?:the saved self character )?identity|reference image|camera drift|provider|payload|render(?:ing)? instructions?|fully clothed|aspect ratio(?: guidance)?|\d{1,2}\s*:\s*\d{1,2})\b/i;
+const captionForbiddenPattern = /\b(?:use medium-wide|full-body cinematic framing|preserve (?:the saved self character )?identity|saved self character identity|reference image|camera drift|provider|payload|render(?:ing)? instructions?|fully clothed|aspect ratio(?: guidance)?|\d{1,2}\s*:\s*\d{1,2})\b/i;
 
 export const viralScenePresets: ViralScenePreset[] = [
   {
@@ -179,7 +179,47 @@ export function buildPublicCaptionFromPrompt(prompt: string): string {
   if (!cleaned || captionForbiddenPattern.test(cleaned.toLowerCase())) {
     return 'A cinematic scene is ready.';
   }
-  return cleaned;
+  if (cleaned.length <= 160) return cleaned;
+  return `${cleaned.slice(0, 156).trimEnd().replace(/[,:;\-]+$/g, '')}...`;
+}
+
+export function buildDraftPublicCaption(input: {
+  caption?: string | null;
+  prompt?: string | null;
+}): string {
+  const explicitCaption = compactText(input.caption ?? '');
+  if (explicitCaption && !looksLikeInternalRenderPrompt(explicitCaption)) {
+    return buildPublicCaptionFromPrompt(explicitCaption);
+  }
+
+  return buildPublicCaptionFromPrompt(input.prompt ?? '');
+}
+
+export function buildPortrayalDisclosure(input: {
+  provider?: unknown;
+  isDefaultSelfCharacter?: unknown;
+  characterName?: unknown;
+  creatorName?: unknown;
+  displayName?: unknown;
+  username?: unknown;
+}): string {
+  if (input.provider === 'mock') return 'Demo/Test media';
+  if (Boolean(input.isDefaultSelfCharacter)) return 'Synthetic portrayal';
+
+  const characterName = typeof input.characterName === 'string' ? input.characterName.trim() : '';
+  if (!characterName) return 'Demo/Test media';
+
+  const creatorName = [input.creatorName, input.displayName, input.username]
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    ?.trim() ?? '';
+  const normalizedCharacter = characterName.toLocaleLowerCase();
+  const normalizedCreator = creatorName.replace(/^@/, '').toLocaleLowerCase();
+
+  if (normalizedCreator && normalizedCharacter === normalizedCreator) {
+    return 'Demo/Test media';
+  }
+
+  return `Featuring ${characterName}`;
 }
 
 export function decideAutoStage(input: AutoStageInput): AutoStageDecision {

@@ -1,6 +1,9 @@
 import type { Session, User } from '@supabase/supabase-js';
 import { Capacitor } from '@capacitor/core';
+import { PRODUCTION_APP_ORIGIN } from './apiOrigin';
 import { hasSupabaseConfig, supabase } from './supabase';
+
+export { PRODUCTION_APP_ORIGIN } from './apiOrigin';
 
 export type SessionSource =
   | 'auth-state-change'
@@ -24,7 +27,6 @@ export const AUTH_RESET_CONFIRM_PATH = '/auth/reset-confirm';
 export const AUTH_UPDATE_PASSWORD_PATH = '/auth/update-password';
 const AUTH_REDIRECT_STORAGE_KEY = 'lumora_auth_redirect_path';
 const LOCALHOST_HOSTNAMES = new Set(['localhost', '127.0.0.1']);
-export const PRODUCTION_APP_ORIGIN = 'https://lumora-app-topaz.vercel.app';
 export const NATIVE_APP_SCHEME = 'lumoracreator';
 const SESSION_RESTORE_TIMEOUT_MS = 7000;
 const authParamNames = [

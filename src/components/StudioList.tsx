@@ -19,7 +19,7 @@ import { openContinueStory } from '../lib/continueStory';
 import { trackCreatorEvent } from '../lib/creatorEvents';
 import { buildSafeTakePrompt, creatorRenderStateCopy } from '../lib/renderStateCopy';
 import { getVerifiedVideoOutputUrl, hasVerifiedVideoOutput, lighterCastGuidanceMessage } from '../lib/renderCompletion';
-import { buildDraftAiCastLabels, buildViralCaptionSuggestions } from '../lib/aiCastExperience';
+import { buildDraftAiCastLabels, buildDraftPublicCaption, buildViralCaptionSuggestions } from '../lib/aiCastExperience';
 
 type Props = {
   jobs: GenerationJob[];
@@ -191,7 +191,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
     setPublishError(null);
     setPublishPrivacy('public');
     setCommunityGuidelinesAccepted(false);
-    setCaptionDraft(job.caption || job.prompt || '');
+    setCaptionDraft(buildDraftPublicCaption(job));
     setSelectedJob(job);
   }
 
@@ -488,7 +488,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
   ) : null;
   const selectedVideoUrl = verifiedJobVideoUrl(selectedJob);
   const selectedCaptionSuggestions = selectedJob
-    ? buildViralCaptionSuggestions(selectedJob.prompt || selectedJob.caption || '', selectedJob.characterName)
+    ? buildViralCaptionSuggestions(buildDraftPublicCaption(selectedJob), selectedJob.characterName)
     : null;
 
   if (!jobs.length || !visibleJobs.length) {
@@ -591,7 +591,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
                 <div>
                   <h3>{job.title}</h3>
                   <p className="draft-summary-clamp">
-                    {job.prompt}
+                    {buildDraftPublicCaption(job)}
                   </p>
                 </div>
                 {showProviderDetail ? (

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   getBestPoster,
   getBestThumbnail,
@@ -91,5 +93,19 @@ assert.equal(noOutputReferenceOnly.mainPreviewType, 'placeholder');
 assert.equal(noOutputReferenceOnly.thumbnailSource, 'character_badge_only');
 assert.equal(noOutputReferenceOnly.thumbnailUrl, null);
 assert.equal(noOutputReferenceOnly.castBadgeUrl, referenceUrl);
+
+const explicitlyAssociatedCastAvatar = 'https://demo.supabase.co/storage/v1/object/public/character/associated-cast.jpg';
+const historicalMismatchedReference = resolveGeneratedVideoMedia({
+  videoUrl,
+  characterAvatar: explicitlyAssociatedCastAvatar,
+  referenceImageUrl: referenceUrl,
+});
+assert.equal(historicalMismatchedReference.castBadgeUrl, explicitlyAssociatedCastAvatar);
+
+const previewSource = readFileSync(join(process.cwd(), 'src/components/GeneratedVideoPreview.tsx'), 'utf8');
+const characterHubSource = readFileSync(join(process.cwd(), 'src/components/CharacterHub.tsx'), 'utf8');
+assert.match(previewSource, /lumora-media-fallback-mark/);
+assert.match(previewSource, /setCastBadgeFailed\(true\)/);
+assert.match(characterHubSource, /setFailedThumbnail\(thumbnail\)/);
 
 console.log('generatedMedia unit tests passed');

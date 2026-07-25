@@ -38,18 +38,20 @@ export function initializeNativeApp() {
   initialized = true;
   document.documentElement.classList.add('is-native');
 
-  void StatusBar.setStyle({ style: Style.Dark });
-  void Keyboard.setResizeMode({ mode: KeyboardResize.Native });
+  void StatusBar.setOverlaysWebView({ overlay: false }).catch(() => undefined);
+  void StatusBar.setBackgroundColor({ color: '#111018' }).catch(() => undefined);
+  void StatusBar.setStyle({ style: Style.Dark }).catch(() => undefined);
+  void Keyboard.setResizeMode({ mode: KeyboardResize.Native }).catch(() => undefined);
 
   void CapacitorApp.addListener('appUrlOpen', ({ url }) => {
     const localPath = localPathForNativeUrl(url);
     if (!localPath) return;
 
-    void Haptics.impact({ style: ImpactStyle.Light });
+    void Haptics.impact({ style: ImpactStyle.Light }).catch(() => undefined);
     window.location.replace(localPath);
   });
 
   window.setTimeout(() => {
-    void SplashScreen.hide();
+    void SplashScreen.hide().catch(() => undefined);
   }, 250);
 }

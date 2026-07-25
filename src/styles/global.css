@@ -276,6 +276,11 @@ button {
   font-size: 0.85rem;
 }
 
+.native-route-header {
+  padding-top: 12px;
+  padding-bottom: 10px;
+}
+
 .screen-scroll {
   flex: 1 1 auto;
   min-height: 0;
@@ -853,6 +858,36 @@ button {
   padding: 10px 4px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.lumora-media-fallback {
+  grid-template-rows: auto auto;
+  gap: 8px;
+  background:
+    radial-gradient(circle at 70% 18%, rgba(206, 160, 255, 0.22), transparent 32%),
+    linear-gradient(145deg, #17121f, #0e1322);
+}
+
+.lumora-media-fallback-mark,
+.lumora-cast-fallback {
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-weight: 800;
+  background: linear-gradient(135deg, #ae6fff, #536dfe);
+}
+
+.lumora-media-fallback-mark {
+  width: 42px;
+  height: 42px;
+  margin: 0 auto;
+  border-radius: 14px;
+  box-shadow: 0 10px 28px rgba(96, 70, 196, 0.34);
+}
+
+.lumora-cast-fallback {
+  width: 100%;
+  height: 100%;
 }
 
 .create-video-stack,
@@ -2085,6 +2120,68 @@ button {
   color: var(--muted-text);
   font-size: 0.92rem;
   line-height: 1.45;
+}
+
+.native-home-create {
+  width: 100%;
+  margin-top: 12px;
+  text-align: center;
+}
+
+.native-compact-safety {
+  margin-top: 2px !important;
+}
+
+.native-compact-safety .lumora-card {
+  padding: 14px;
+}
+
+.native-compact-safety p {
+  margin-bottom: 6px;
+  font-size: 0.86rem;
+}
+
+.is-native .app-bg {
+  --bottom-nav-space: 24px;
+  min-height: 100dvh;
+  padding: 0;
+  place-items: stretch;
+  background: var(--phone-background);
+}
+
+.is-native .phone-frame {
+  width: 100%;
+  height: 100dvh;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.is-native .screen-scroll {
+  padding-left: max(14px, env(safe-area-inset-left, 0px));
+  padding-right: max(14px, env(safe-area-inset-right, 0px));
+}
+
+.is-native .cinematic-feed-page {
+  padding-bottom: 24px;
+}
+
+.is-native .cinematic-feed-page .list-stack > *:last-child {
+  margin-bottom: 0;
+}
+
+.is-native .bottom-nav {
+  padding-left: max(10px, env(safe-area-inset-left, 0px));
+  padding-right: max(10px, env(safe-area-inset-right, 0px));
+}
+
+.is-native .luxury-modal-backdrop,
+.is-native .character-hub-overlay {
+  padding-top: max(18px, env(safe-area-inset-top, 0px)) !important;
+  padding-right: max(18px, env(safe-area-inset-right, 0px)) !important;
+  padding-bottom: max(18px, env(safe-area-inset-bottom, 0px)) !important;
+  padding-left: max(18px, env(safe-area-inset-left, 0px)) !important;
 }
 
 .cinematic-feed-page .list-stack {

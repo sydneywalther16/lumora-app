@@ -37,6 +37,7 @@ export default function GeneratedVideoPreview({
   const [loaded, setLoaded] = useState(false);
   const [posterFailed, setPosterFailed] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
+  const [castBadgeFailed, setCastBadgeFailed] = useState(false);
   const media = resolveGeneratedVideoMedia(item);
   const alt = title || 'Generated video preview';
   const useVideo = Boolean(media.videoUrl && !videoFailed && (forceVideo || posterFailed || !media.posterUrl || media.mainPreviewType === 'video'));
@@ -107,6 +108,7 @@ export default function GeneratedVideoPreview({
         />
       ) : (
         <div
+          className="lumora-media-fallback"
           style={{
             width: '100%',
             height: '100%',
@@ -118,6 +120,7 @@ export default function GeneratedVideoPreview({
             textAlign: 'center',
           }}
         >
+          <span className="lumora-media-fallback-mark" aria-hidden="true">L</span>
           <strong>{placeholderLabel}</strong>
         </div>
       )}
@@ -138,11 +141,14 @@ export default function GeneratedVideoPreview({
             background: 'var(--surface-strong)',
           }}
         >
-          <img
-            src={media.castBadgeUrl}
-            alt=""
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-          />
+          {!castBadgeFailed ? (
+            <img
+              src={media.castBadgeUrl}
+              alt=""
+              onError={() => setCastBadgeFailed(true)}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            />
+          ) : <span className="lumora-cast-fallback" aria-hidden="true">L</span>}
         </span>
       ) : null}
     </div>

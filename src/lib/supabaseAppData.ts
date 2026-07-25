@@ -24,6 +24,7 @@ import {
   repairMissingThumbnailIfNeeded,
   resolveGeneratedVideoMedia,
 } from './mediaThumbnail';
+import { buildDraftPublicCaption } from './aiCastExperience';
 import type { LumoraProfile } from './profileStorage';
 import type { StudioProject } from './projectStorage';
 import { supabase } from './supabase';
@@ -1677,7 +1678,7 @@ export async function saveSupabaseProject(userId: string, project: StudioProject
       id: project.id,
       user_id: userId,
       title: project.title || 'Untitled concept',
-      caption: project.caption ?? project.prompt,
+      caption: buildDraftPublicCaption(project),
       prompt: project.prompt,
       final_prompt: project.finalPrompt ?? project.prompt,
       thumbnail_url: storageUrl(thumbnailUrl, 'Generated project thumbnail'),

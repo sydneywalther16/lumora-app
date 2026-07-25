@@ -66,6 +66,7 @@ const appSource = readFileSync(join(process.cwd(), 'src/App.tsx'), 'utf8');
 const authCardSource = readFileSync(join(process.cwd(), 'src/components/auth/AuthCard.tsx'), 'utf8');
 const callbackSource = readFileSync(join(process.cwd(), 'src/pages/AuthCallbackPage.tsx'), 'utf8');
 const bootstrapSource = readFileSync(join(process.cwd(), 'src/lib/bootstrapSession.ts'), 'utf8');
+const apiOriginSource = readFileSync(join(process.cwd(), 'src/lib/apiOrigin.ts'), 'utf8');
 const resetConfirmSource = readFileSync(join(process.cwd(), 'src/pages/AuthResetConfirmPage.tsx'), 'utf8');
 const updatePasswordSource = readFileSync(join(process.cwd(), 'src/pages/AuthUpdatePasswordPage.tsx'), 'utf8');
 const recoveryTokenSource = readFileSync(join(process.cwd(), 'src/lib/passwordRecoveryTokenHash.ts'), 'utf8');
@@ -94,7 +95,8 @@ assert.match(appSource, /path="\/auth\/update-password"/);
 assert.match(callbackSource, /exchangeCodeForSession/);
 assert.match(callbackSource, /setSession/);
 
-assert.match(bootstrapSource, /PRODUCTION_APP_ORIGIN = 'https:\/\/lumora-app-topaz\.vercel\.app'/);
+assert.match(apiOriginSource, /PRODUCTION_APP_ORIGIN = 'https:\/\/lumora-app-topaz\.vercel\.app'/);
+assert.match(bootstrapSource, /export \{ PRODUCTION_APP_ORIGIN \} from '\.\/apiOrigin'/);
 assert.match(bootstrapSource, /return PRODUCTION_APP_ORIGIN;/);
 assert.doesNotMatch(bootstrapSource, /VERCEL_URL/);
 assert.match(bootstrapSource, /window\.location\.pathname === AUTH_CALLBACK_PATH/);

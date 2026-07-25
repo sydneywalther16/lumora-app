@@ -7,6 +7,8 @@ import {
   buildAiCastReadiness,
   buildContinueStoryScaffold,
   buildDraftAiCastLabels,
+  buildDraftPublicCaption,
+  buildPortrayalDisclosure,
   buildSceneAnchorCreateGuidance,
   buildViralCaptionSuggestions,
   decideAutoStage,
@@ -196,6 +198,39 @@ assert.equal(
   'A cinematic scene is ready.',
 );
 assert.equal(buildPublicCaptionFromPrompt('she sees the sunshine'), 'She sees the sunshine.');
+assert.equal(buildDraftPublicCaption({
+  caption: 'A quiet garden arrival',
+  prompt: 'Use medium-wide framing and preserve identity.',
+}), 'A quiet garden arrival.');
+assert.equal(buildDraftPublicCaption({
+  caption: 'Render instructions: use 9:16 aspect ratio guidance.',
+  prompt: 'she sees the sunshine. Use medium-wide framing with camera drift.',
+}), 'She sees the sunshine.');
+assert.equal(buildDraftPublicCaption({
+  prompt: 'Provider payload: keep the subject fully clothed and use the reference image.',
+}), 'A cinematic scene is ready.');
+assert.equal(buildDraftPublicCaption({
+  prompt: 'A rooftop hello',
+  finalPrompt: 'Use medium-wide framing with provider payload instructions.',
+} as Parameters<typeof buildDraftPublicCaption>[0] & { finalPrompt: string }), 'A rooftop hello.');
+assert.equal(buildPortrayalDisclosure({
+  provider: 'mock',
+  characterName: 'Sydney Spears',
+  creatorName: 'Sydney Spears',
+}), 'Demo/Test media');
+assert.equal(buildPortrayalDisclosure({
+  characterName: 'Sydney Spears',
+  creatorName: 'Sydney Spears',
+}), 'Demo/Test media');
+assert.equal(buildPortrayalDisclosure({
+  isDefaultSelfCharacter: true,
+  characterName: 'Sydney Spears',
+  creatorName: 'Sydney Spears',
+}), 'Synthetic portrayal');
+assert.equal(buildPortrayalDisclosure({
+  characterName: 'Nova',
+  creatorName: 'Sydney Spears',
+}), 'Featuring Nova');
 assert.equal(
   looksLikeInternalRenderPrompt('Use medium-wide or full-body cinematic framing with visible environment around the subject.'),
   true,
@@ -212,6 +247,7 @@ assert.match(createVideoSource, /Prompt polish/);
 assert.match(createVideoSource, /Lumora tried the best Stage route and switched to a safer fallback\./);
 assert.match(createVideoSource, /buildPublicCaptionFromPrompt/);
 assert.match(studioListSource, /buildDraftAiCastLabels/);
+assert.match(studioListSource, /buildDraftPublicCaption\(job\)/);
 assert.match(studioListSource, /Viral caption helper/);
 
 console.log('aiCastStudioExperience unit tests passed');

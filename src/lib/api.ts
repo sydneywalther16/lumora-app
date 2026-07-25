@@ -1,6 +1,6 @@
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
+import { buildSafeHealthFallback, resolveApiUrl, SAFE_NATIVE_STATUS_PATH } from './apiOrigin';
 import { supabase } from './supabase';
-
-const baseUrl = import.meta.env.VITE_API_BASE_URL ?? import.meta.env.VITE_API_URL ?? '';
 
 async function buildRequestHeaders(headers: HeadersInit | undefined) {
   const requestHeaders = new Headers(headers);
@@ -36,6 +36,39 @@ export class ApiRequestError extends Error {
   }
 }
 
+export async function fetchApiResponse(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = await buildRequestHeaders(init.headers);
+  const url = resolveApiUrl(path, Capacitor.isNativePlatform());
+
+  if (Capacitor.isNativePlatform()) {
+    const contentType = headers.get('Content-Type') ?? '';
+    let data: unknown = init.body;
+    if (typeof init.body === 'string' && contentType.includes('application/json')) {
+      data = JSON.parse(init.body);
+    }
+
+    const nativeResponse = await CapacitorHttp.request({
+      url,
+      method: init.method ?? 'GET',
+      headers: Object.fromEntries(headers.entries()),
+      data,
+      responseType: 'text',
+    });
+    const responseBody = typeof nativeResponse.data === 'string'
+      ? nativeResponse.data
+      : JSON.stringify(nativeResponse.data ?? {});
+    return new Response(responseBody, {
+      status: nativeResponse.status,
+      headers: nativeResponse.headers,
+    });
+  }
+
+  return fetch(url, {
+    ...init,
+    headers,
+  });
+}
+
 async function request<T>(path: string, init: RequestInitWithTimeout = {}): Promise<T> {
   const { timeoutMs, signal, ...fetchInit } = init;
   const controller = timeoutMs ? new AbortController() : null;
@@ -45,14 +78,10 @@ async function request<T>(path: string, init: RequestInitWithTimeout = {}): Prom
 
   let response: Response;
   try {
-    const headers = await buildRequestHeaders(init.headers);
-    response = await fetch(
-      `${baseUrl}${path}`,
-      Object.assign({}, fetchInit, {
-        headers,
-        signal: signal ?? controller?.signal,
-      }),
-    );
+    response = await fetchApiResponse(path, {
+      ...fetchInit,
+      signal: signal ?? controller?.signal,
+    });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       throw new Error('Your scene is still rendering. Lumora will keep checking and save it to Drafts.');
@@ -1381,8 +1410,21 @@ function continuityMemorySearchParams(payload: ContinuityMemoryScopePayload) {
   return params.toString();
 }
 
+async function requestHealthDiagnostics(): Promise<ApiHealthDiagnostics> {
+  try {
+    return await request<ApiHealthDiagnostics>('/api/health/diagnostics', {
+      timeoutMs: 15_000,
+    });
+  } catch {
+    const safeStatus = await request<Parameters<typeof buildSafeHealthFallback>[0]>(SAFE_NATIVE_STATUS_PATH, {
+      timeoutMs: 15_000,
+    });
+    return buildSafeHealthFallback(safeStatus) as ApiHealthDiagnostics;
+  }
+}
+
 export const api = {
-  health: () => request<{ ok: boolean; service: string }>('/health'),
+  health: requestHealthDiagnostics,
 
   createGeneration: (payload: GenerationPayload) =>
     request<GenerationResponse>('/api/generations', {
@@ -1411,9 +1453,7 @@ export const api = {
 
   listGenerationJobs: () => request<{ jobs: GenerationJob[] }>('/api/generations'),
 
-  healthDiagnostics: () => request<ApiHealthDiagnostics>('/api/health/diagnostics', {
-    timeoutMs: 15_000,
-  }),
+  healthDiagnostics: requestHealthDiagnostics,
 
   startRunwayLikenessCanary: (payload: { userId?: string | null; saveAsDraft?: boolean } = {}) =>
     request<ExactLikenessCanaryResponse>('/api/diagnostics/runway-likeness-canary/self', {

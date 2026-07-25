@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   api,
   ApiRequestError,
+  fetchApiResponse,
   continuityMemoryFields,
   type ApiHealthDiagnostics,
   type CreativeBrainScenePlan,
@@ -209,9 +210,9 @@ const engineLabels: Record<VideoEngine, string> = {
   openai: 'OpenAI',
 };
 const apiOfflineVideoEngineMessage =
-  'Video engine is not connected yet. Start the API server with npm run dev:api or connect VITE_API_BASE_URL to the deployed backend.';
+  'Lumora Stage is temporarily unavailable. Your scene can still be saved as a draft.';
 const providerConfigVideoEngineMessage =
-  'Video engine is connected, but real render providers are not configured yet. Add provider keys or use Demo Mode for UI testing.';
+  'Lumora Stage is connected. Real rendering is temporarily unavailable; Demo Mode and draft saving are ready.';
 const identityOnlyKlingFallbackMessage =
   'Using identity-only Kling fallback. This uses your saved identity references without staging a scene anchor.';
 const sceneAnchorStartFailureMessage =
@@ -3380,7 +3381,7 @@ export default function CreateVideo({
           textSelfGuidanceAvailable: providerResult.textSelfGuidanceAvailable ?? null,
         };
       } else {
-        const res = await fetch('/api/lumora/generate-video', {
+        const res = await fetchApiResponse('/api/lumora/generate-video', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

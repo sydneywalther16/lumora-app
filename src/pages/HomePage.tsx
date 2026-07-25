@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import FeedVideoCard from '../components/FeedVideoCard';
 import ContentSafetyActions from '../components/ContentSafetyActions';
 import GeneratedVideoPreview from '../components/GeneratedVideoPreview';
@@ -9,6 +10,8 @@ import { loadLumoraProfile } from '../lib/profileStorage';
 import { loadLocalProfileAvatarUrl } from '../lib/localAvatarStorage';
 import { useSession } from '../hooks/useSession';
 import { loadSupabasePublicPosts } from '../lib/supabaseAppData';
+import { buildDraftPublicCaption, buildPortrayalDisclosure } from '../lib/aiCastExperience';
+import { shouldShowInstallAction } from '../lib/nativeUi';
 
 function homeMockVideoPost(): LumoraPost {
   const now = new Date().toISOString();
@@ -54,11 +57,11 @@ type HomeFeedCardProps = {
 
 function HomeFeedCard({ post, fallbackAuthorAvatar, onSelect, onBlocked, currentUserId }: HomeFeedCardProps) {
   const title = post.title || post.caption || 'AI cast video';
-  const bodyText = post.caption || post.prompt || 'Generated with Lumora';
+  const bodyText = buildDraftPublicCaption(post);
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
   const authorUsername = post.creatorUsername || post.username || 'lumora.creator';
   const authorAvatar = post.creatorAvatar || post.avatar || fallbackAuthorAvatar;
-  const featuring = !post.isDefaultSelfCharacter && post.characterName ? `Featuring ${post.characterName}` : undefined;
+  const portrayalLabel = buildPortrayalDisclosure(post);
 
   return (
     <FeedVideoCard
@@ -68,7 +71,7 @@ function HomeFeedCard({ post, fallbackAuthorAvatar, onSelect, onBlocked, current
       creatorName={authorName}
       creatorUsername={authorUsername}
       creatorAvatar={authorAvatar}
-      badges={['AI Cast Video', featuring].filter((badge): badge is string => Boolean(badge))}
+      badges={['AI Cast Video', portrayalLabel]}
       variant="hero"
       autoPlayMuted={Boolean(post.videoUrl)}
       onOpen={() => onSelect(post)}
@@ -102,10 +105,11 @@ function HomePostModal({
   currentUserId?: string | null;
 }) {
   const title = post.title || post.caption || 'Lumora AI cast video';
-  const bodyText = post.caption || post.prompt || '';
+  const bodyText = buildDraftPublicCaption(post);
   const authorName = post.creatorName || post.displayName || 'Lumora Creator';
   const authorUsername = post.creatorUsername || post.username || 'lumora.creator';
   const authorAvatar = post.creatorAvatar || post.avatar || fallbackAuthorAvatar;
+  const portrayalLabel = buildPortrayalDisclosure(post);
 
   return (
     <div
@@ -176,6 +180,7 @@ function HomePostModal({
 
         <div style={{ padding: '18px', display: 'grid', gap: '10px' }}>
           <h3 style={{ margin: 0 }}>{title}</h3>
+          <span className="tiny-pill" style={{ width: 'fit-content' }}>{portrayalLabel}</span>
           {bodyText ? <p className="muted" style={{ margin: 0 }}>{bodyText}</p> : null}
           <ContentSafetyActions
             contentType="post"
@@ -199,6 +204,27 @@ export default function HomePage() {
   const [fallbackAuthorAvatar, setFallbackAuthorAvatar] = useState<string | null>(null);
   const [feedMessage, setFeedMessage] = useState('');
   const [selectedPost, setSelectedPost] = useState<LumoraPost | null>(null);
+  const isNativePlatform = Capacitor.isNativePlatform();
+
+  const creatorSafetyCard = (
+    <section className={`list-stack creator-safety-section${isNativePlatform ? ' native-compact-safety' : ''}`}>
+      <article className="list-card lumora-card">
+        <div className="row-between" style={{ alignItems: 'center' }}>
+          <h3 style={{ margin: 0 }}>Creator safety</h3>
+          <span className="tiny-pill">Community</span>
+        </div>
+        <p style={{ marginTop: '8px' }}>
+          Public AI Cast videos can be reported, and creators can be blocked from every feed card.
+        </p>
+        <div className="button-row creator-safety-links" style={{ marginTop: '8px' }}>
+          {shouldShowInstallAction(isNativePlatform) ? <Link className="ghost-btn" to="/install">Install Lumora</Link> : null}
+          <Link className="ghost-btn" to="/privacy">Privacy</Link>
+          <Link className="ghost-btn" to="/terms">Terms</Link>
+          <Link className="ghost-btn" to="/community-guidelines">Guidelines</Link>
+        </div>
+      </article>
+    </section>
+  );
 
   function handleBlocked(blockedUserId: string) {
     setLocalPosts((current) => current.filter((post) => post.userId !== blockedUserId));
@@ -254,25 +280,12 @@ export default function HomePage() {
       <header className="home-feed-header">
         <h1>Lumora</h1>
         <p>Create scenes, build an AI Cast, save drafts, and continue your story world.</p>
+        {isNativePlatform ? (
+          <Link className="primary-btn native-home-create" to="/create">Open Lumora Stage</Link>
+        ) : null}
       </header>
 
-      <section className="list-stack" style={{ marginBottom: '8px' }}>
-        <article className="list-card lumora-card">
-          <div className="row-between" style={{ alignItems: 'center' }}>
-            <h3 style={{ margin: 0 }}>Creator safety</h3>
-            <span className="tiny-pill">Community</span>
-          </div>
-          <p style={{ marginTop: '8px' }}>
-            Public AI Cast videos can be reported, and creators can be blocked from every feed card.
-          </p>
-          <div className="button-row creator-safety-links" style={{ marginTop: '8px' }}>
-            <Link className="ghost-btn" to="/install">Install Lumora</Link>
-            <Link className="ghost-btn" to="/privacy">Privacy</Link>
-            <Link className="ghost-btn" to="/terms">Terms</Link>
-            <Link className="ghost-btn" to="/community-guidelines">Guidelines</Link>
-          </div>
-        </article>
-      </section>
+      {!isNativePlatform ? creatorSafetyCard : null}
 
       {feedMessage ? <p className="muted">{feedMessage}</p> : null}
 
@@ -300,6 +313,8 @@ export default function HomePage() {
           </article>
         </section>
       ) : null}
+
+      {isNativePlatform ? creatorSafetyCard : null}
 
       {selectedPost ? (
         <HomePostModal

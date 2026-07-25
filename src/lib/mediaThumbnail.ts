@@ -1,4 +1,5 @@
 import type { ReferenceImageUrls } from './api';
+import { buildDraftPublicCaption } from './aiCastExperience';
 import { normalizeVerifiedVideoOutputUrl } from './renderCompletion';
 
 type MediaRecord = Record<string, unknown>;
@@ -105,6 +106,10 @@ function collectReferenceImageValues(value: unknown) {
 
 function collectReferenceImages(record: MediaRecord) {
   return Array.from(new Set([
+    imageLikeUrl(record.characterAvatar),
+    imageLikeUrl(record.character_avatar),
+    imageLikeUrl(record.castAvatar),
+    imageLikeUrl(record.cast_avatar),
     imageLikeUrl(record.referenceImageUrl),
     imageLikeUrl(record.reference_image_url),
     ...collectReferenceImageValues(record.referenceImageUrls),
@@ -113,13 +118,9 @@ function collectReferenceImages(record: MediaRecord) {
     ...collectReferenceImageValues(record.reference_images),
     ...collectReferenceImageValues(record.additionalReferenceImageUrls),
     ...collectReferenceImageValues(record.additional_reference_image_urls),
-    imageLikeUrl(record.characterAvatar),
-    imageLikeUrl(record.character_avatar),
     imageLikeUrl(record.creatorAvatar),
     imageLikeUrl(record.creator_avatar),
     imageLikeUrl(record.avatar),
-    imageLikeUrl(record.castAvatar),
-    imageLikeUrl(record.cast_avatar),
   ].filter((url): url is string => Boolean(url))));
 }
 
@@ -277,7 +278,10 @@ export function getBestVideo(item: unknown): string | null {
 export function normalizeMediaCard(item: unknown): NormalizedMediaCard {
   const record = readRecord(item);
   const title = readString(record.title, record.caption, record.prompt, record.name) ?? 'Untitled AI cast video';
-  const caption = readString(record.caption, record.prompt, record.finalPrompt, record.final_prompt) ?? '';
+  const caption = buildDraftPublicCaption({
+    caption: readString(record.caption),
+    prompt: readString(record.prompt),
+  });
 
   return {
     id: readString(record.id, record.projectId, record.project_id, record.sourceGenerationId, record.source_generation_id) ?? title,

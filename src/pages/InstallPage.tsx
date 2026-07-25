@@ -1,6 +1,26 @@
 import { Link } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
+import { shouldShowInstallAction } from '../lib/nativeUi';
 
 export default function InstallPage() {
+  if (!shouldShowInstallAction(Capacitor.isNativePlatform())) {
+    return (
+      <div className="page lumora-page">
+        <section className="headline-card lumora-card lumora-card-hero">
+          <div>
+            <span className="eyebrow">Lumora app</span>
+            <h2>You are already using Lumora</h2>
+          </div>
+          <p>Open Stage to create a scene or return Home to browse your feed.</p>
+        </section>
+        <div className="button-row">
+          <Link className="primary-btn" to="/create">Open Lumora Stage</Link>
+          <Link className="ghost-btn" to="/home">Back to Home</Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="page lumora-page">
       <section className="headline-card lumora-card lumora-card-hero">

@@ -98,11 +98,13 @@ function displayName(character: CharacterProfile | null | undefined) {
 function CharacterThumbnail({ character, size = 56 }: { character: CharacterProfile; size?: number }) {
   const thumbnail = getBestThumbnail(character);
   const name = displayName(character);
+  const [failedThumbnail, setFailedThumbnail] = useState<string | null>(null);
+  const showThumbnail = Boolean(thumbnail && failedThumbnail !== thumbnail);
 
   return (
     <span className="character-avatar" style={{ width: `${size}px`, height: `${size}px`, borderRadius: size > 60 ? '22px' : '18px' }}>
-      {thumbnail ? (
-        <img src={thumbnail} alt={name} />
+      {showThumbnail ? (
+        <img src={thumbnail ?? undefined} alt={name} onError={() => setFailedThumbnail(thumbnail)} />
       ) : (
         characterInitial(name)
       )}
