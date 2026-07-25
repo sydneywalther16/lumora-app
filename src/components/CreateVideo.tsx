@@ -68,6 +68,7 @@ import {
   sanitizeCreatorErrorMessage,
   successFirstOverrides,
   ULTRA_SAFE_SCENE_PROMPT,
+  type CreatorRenderStatus,
 } from '../lib/renderStateCopy';
 import {
   getVerifiedVideoOutputUrl,
@@ -431,6 +432,7 @@ type RenderFailureEnvelope = {
 };
 
 type GenerationStatusState = 'idle' | 'queued' | 'processing' | 'verifying_output' | 'rate_limited' | 'completed' | 'failed';
+type GenerationFailureStatus = Extract<CreatorRenderStatus, 'paused' | 'blocked' | 'failed' | 'timeout' | 'reference_repair'>;
 type ToastState = {
   type: 'success' | 'error';
   message: string;
@@ -1274,6 +1276,35 @@ function collectErrorText(value: unknown): string {
   return Array.from(new Set(fragments)).join(' ');
 }
 
+function generationFailureStatusFor(
+  error: unknown,
+  options: {
+    moderation: boolean;
+    referenceRepair: boolean;
+  },
+): GenerationFailureStatus {
+  if (options.referenceRepair) return 'reference_repair';
+
+  const text = collectErrorText(error);
+  if (options.moderation || isProviderSafetyFilterError(text)) return 'paused';
+  if (isTimeoutOrStillProcessingText(text)) return 'timeout';
+
+  const lower = text.toLowerCase();
+  const status = error instanceof ApiRequestError ? error.status : null;
+  if (
+    status === 401 ||
+    status === 403 ||
+    lower.includes('not configured') ||
+    lower.includes('missing config') ||
+    lower.includes('account session') ||
+    lower.includes('authentication')
+  ) {
+    return 'blocked';
+  }
+
+  return 'failed';
+}
+
 function parseGenerateResponse(text: string): {
   data: GenerateVideoApiResponse;
   parseError: string | null;
@@ -1498,6 +1529,7 @@ export default function CreateVideo({
   const [toast, setToast] = useState<ToastState>(null);
   const [generationLoading, setGenerationLoading] = useState(false);
   const [generationError, setGenerationError] = useState('');
+  const [generationFailureStatus, setGenerationFailureStatus] = useState<GenerationFailureStatus | null>(null);
   const [activeRenderFailure, setActiveRenderFailure] = useState<RenderFailureEnvelope | null>(null);
   const [generationSafeRewrite, setGenerationSafeRewrite] = useState('');
   const [generationModerationDetail, setGenerationModerationDetail] = useState('');
@@ -1956,7 +1988,7 @@ export default function CreateVideo({
           ? 'Suggested next step: use identity-only fallback, save this draft, or return to Seedance Fast.'
           : 'Suggested next step: retry Kling later, edit the scene, or switch to soft guidance.',
       }
-    : creatorRenderStateCopy('paused');
+    : creatorRenderStateCopy(generationFailureStatus ?? 'failed');
   const sceneAnchorPauseActive = selectedKlingExactReady && (
     /scene[-\s]?anchor/i.test(generationError) ||
     Boolean(activeRenderFailure?.category?.startsWith('scene_anchor_')) ||
@@ -2465,6 +2497,7 @@ export default function CreateVideo({
     setAspectRatio('16:9');
     setEngine(SEEDANCE_ENGINE_ID);
     setGenerationStatusState('failed');
+    setGenerationFailureStatus('paused');
     setGenerationError('This scene needs a simpler direction before rendering.');
     setGenerationSafeRewrite(ULTRA_SAFE_SCENE_PROMPT);
     setGenerationResult(null);
@@ -2564,6 +2597,7 @@ export default function CreateVideo({
   function beginGenerationProgress() {
     clearRenderCooldown();
     setActiveRenderFailure(null);
+    setGenerationFailureStatus(null);
     setGenerationStatusState('queued');
     setStatus('Lumora is finding the cleanest render path...');
     if (progressTimerRef.current) window.clearTimeout(progressTimerRef.current);
@@ -3099,15 +3133,18 @@ export default function CreateVideo({
 
     const currentPrompt = options.promptOverride ?? activePrompt;
     const userPrompt = currentPrompt.trim();
-    const autoPromptPolish = polishKlingCinematicPrompt(userPrompt);
+    const selectedEngine = options.engineOverride ?? (stageSelectionMode === 'manual' ? engine : autoStageDecision.engine);
+    const autoPromptPolish = selectedEngine === 'replicate'
+      ? polishKlingCinematicPrompt(userPrompt)
+      : { prompt: userPrompt, promptPolished: false, additions: [] };
     const renderPrompt = autoPromptPolish.prompt;
     const publicCaption = buildPublicCaptionFromPrompt(userPrompt);
-    const selectedEngine = options.engineOverride ?? (stageSelectionMode === 'manual' ? engine : autoStageDecision.engine);
     const selectedEngineRequiresBackend = !isDemoModeEngine(selectedEngine);
     const isDemoModeSelection = isDemoModeEngine(selectedEngine);
 
     if (!userPrompt) {
       setGenerationError('Add a prompt before generating.');
+      setGenerationFailureStatus('failed');
       setGenerationStatusState('failed');
       releaseGenerateLock();
       return;
@@ -3180,6 +3217,7 @@ export default function CreateVideo({
 
     if (providerReadinessMessage) {
       setGenerationError(providerReadinessMessage);
+      setGenerationFailureStatus('blocked');
       setGenerationStatusState('failed');
       setStatus(providerReadinessMessage);
       showToast({ type: 'error', message: providerReadinessMessage });
@@ -3342,6 +3380,10 @@ export default function CreateVideo({
           characterAvatar,
           isDefaultSelfCharacter,
           duration: selectedDuration,
+          aspectRatio: selectedAspectRatio,
+          resolution: '480p',
+          generateAudio: false,
+          maxProviderRequests: 1,
           referenceImages: selectedSeedanceReferences,
           referenceImageUrls: referencePayload,
           additionalReferenceImageUrls,
@@ -4226,6 +4268,10 @@ export default function CreateVideo({
           ? `${displayMessage} Self-character likeness is currently using the reference-led video path.`
           : displayMessage,
       );
+      setGenerationFailureStatus(generationFailureStatusFor(error, {
+        moderation: Boolean(moderationPayload),
+        referenceRepair: Boolean(repairIssue),
+      }));
       finishGenerationProgress('failed');
       showToast({
         type: 'error',
@@ -4266,7 +4312,7 @@ export default function CreateVideo({
     });
   }
 
-  async function handleTryUltraSafeScene() {
+  function handleUseSaferSceneIdea() {
     const overrides = successFirstOverrides(duration);
 
     setActivePrompt(ULTRA_SAFE_SCENE_PROMPT);
@@ -4278,19 +4324,15 @@ export default function CreateVideo({
     setGenerationModerationDetail('');
     setGenerationModerationStages([]);
     setGenerationError('');
-    setStatus('Trying ultra-safe scene.');
+    setGenerationFailureStatus(null);
+    setPromptPolished(true);
+    setStatus('Safer scene idea loaded. Review it, then tap Generate.');
     void trackCreatorEvent('continue_story_clicked', {
-      source: 'create_ultra_safe_scene',
+      source: 'create_safer_scene_adaptation',
       renderPreference: 'success_first',
       shortenedDuration: overrides.duration !== duration,
     }, authUser?.id ?? null);
-
-    await handleGenerate({
-      promptOverride: ULTRA_SAFE_SCENE_PROMPT,
-      renderPreferenceOverride: 'success_first',
-      durationOverride: overrides.duration,
-      forceNewTake: true,
-    });
+    window.setTimeout(() => promptTextareaRef.current?.focus(), 0);
   }
 
   async function handleUseIdentityOnlyKlingFallback() {
@@ -5282,7 +5324,9 @@ export default function CreateVideo({
                 onResaveReferencePhoto();
                 return;
               }
-              void (generationError && !activeReferenceRepair ? handleTryUltraSafeScene() : handleGenerate());
+              void (generationError && !activeReferenceRepair
+                ? handleGenerate({ forceNewTake: true })
+                : handleGenerate());
             }}
             disabled={generationError && !activeReferenceRepair ? tryTakeBusy : generateButtonDisabled}
             aria-busy={generateBusy}
@@ -5462,7 +5506,7 @@ export default function CreateVideo({
           <div className="render-trust-stack">
             <div className="generation-error-card paused-render-card">
               <div className="render-state-topline">
-                <span className="render-state-safe-note">Saved safely</span>
+                <span className="render-state-safe-note">Scene idea kept</span>
               </div>
               <div className="render-state-copy">
                 <strong>{activeReferenceRepair ? 'One reference needs to be re-uploaded.' : pausedRenderCopy.title}</strong>
@@ -5572,7 +5616,7 @@ export default function CreateVideo({
               </div>
               {!activeReferenceRepair ? (
                 <div className="focused-next-take">
-                  <strong>Ultra-safe scene</strong>
+                  <strong>Safer scene idea</strong>
                   <p>
                     {sceneAnchorPauseActive
                       ? 'Kling Reference is experimental. Use identity-only fallback for exact-likeness testing, or save this draft and continue with Seedance Fast.'
@@ -5593,10 +5637,10 @@ export default function CreateVideo({
                     <button
                       type="button"
                       className={sceneAnchorPauseActive ? 'ghost-btn' : 'primary-btn cinematic-generate-btn'}
-                      onClick={() => void handleTryUltraSafeScene()}
+                      onClick={handleUseSaferSceneIdea}
                       disabled={tryTakeBusy}
                     >
-                      Try ultra-safe scene
+                      Use safer scene idea
                     </button>
                     <button
                       type="button"

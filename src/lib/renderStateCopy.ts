@@ -271,17 +271,43 @@ export function creatorRenderStateCopy(status: CreatorRenderStatus, cooldownSeco
         tone: 'paused',
       };
     case 'blocked':
+      return {
+        label: 'Needs setup',
+        title: 'Lumora could not start this render.',
+        body: 'Check the account or renderer setup, then generate again. No provider render was started.',
+        primaryActionLabel: 'Check setup',
+        secondaryActionLabel: 'Edit scene',
+        tertiaryActionLabel: 'Save draft',
+        tone: 'paused',
+      };
     case 'failed':
+      return {
+        label: 'Failed',
+        title: 'Lumora could not start this render.',
+        body: 'A technical problem stopped the request before a video completed. Your scene idea is still here.',
+        primaryActionLabel: 'Generate again',
+        secondaryActionLabel: 'Edit scene',
+        tertiaryActionLabel: 'Save draft',
+        tone: 'paused',
+      };
     case 'paused':
-    default:
       return {
         label: 'Paused',
         title: 'Lumora paused this scene safely.',
         body: 'This scene needs a simpler direction before rendering.',
-        primaryActionLabel: 'Try ultra-safe scene',
+        primaryActionLabel: 'Use safer scene idea',
         secondaryActionLabel: 'Edit scene',
         tertiaryActionLabel: 'Save draft',
-        suggestedNextStep: 'Suggested next step: try the ultra-safe garden scene.',
+        suggestedNextStep: 'Suggested next step: load the safer scene idea, review it, then tap Generate.',
+        tone: 'paused',
+      };
+    default:
+      return {
+        label: 'Paused',
+        title: 'Lumora paused this scene.',
+        body: 'Your scene idea is still here.',
+        secondaryActionLabel: 'Edit scene',
+        tertiaryActionLabel: 'Save draft',
         tone: 'paused',
       };
   }

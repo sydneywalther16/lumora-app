@@ -142,6 +142,7 @@ type GenerateSeedanceVideoOptions = {
   aspectRatio?: SeedanceAspectRatio | string | null;
   resolution?: SeedanceResolution | string | null;
   generateAudio?: boolean | null;
+  maxProviderAttempts?: number | null;
   onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
   onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 };
@@ -506,6 +507,7 @@ function logReplicateError(stage: string, error: unknown, context: Record<string
 async function withReplicateRetry<T>(
   action: () => Promise<T>,
   context: Record<string, unknown>,
+  allowRetry = true,
 ): Promise<T> {
   try {
     return await action();
@@ -520,7 +522,7 @@ async function withReplicateRetry<T>(
       });
     }
 
-    if (status !== 429 && status !== 503 && status !== 504) {
+    if (!allowRetry || (status !== 429 && status !== 503 && status !== 504)) {
       logReplicateError('request_failed', error, context);
       throw error;
     }
@@ -612,10 +614,11 @@ async function pollPrediction(input: {
   return prediction;
 }
 
-function normalizedDurationSeconds(value?: number | null) {
+export function normalizedDurationSeconds(value?: number | null) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_SEEDANCE_SETTINGS.duration;
   const rounded = Math.round(value);
-  return rounded <= 5 ? 5 : 10;
+  if (rounded === -1) return -1;
+  return Math.min(15, Math.max(1, rounded));
 }
 
 function normalizedAspectRatio(value?: string | null): SeedanceAspectRatio {
@@ -708,11 +711,14 @@ export function validateSeedanceProviderPayload(payload: unknown): SeedancePaylo
     });
   }
 
-  if (record.duration !== 5 && record.duration !== 10) {
+  const validDuration = typeof record.duration === 'number' &&
+    Number.isInteger(record.duration) &&
+    (record.duration === -1 || (record.duration >= 1 && record.duration <= 15));
+  if (!validDuration) {
     issues.push({
       field: 'duration',
       valueSummary: payloadValueSummary(record.duration),
-      expected: '5 or 10 seconds',
+      expected: '-1 for intelligent duration, or an integer from 1 to 15 seconds',
     });
   }
 
@@ -908,6 +914,7 @@ async function runSeedanceAttempt(input: {
   pollIntervalMs: number;
   attemptLabel: string;
   renderingMode: ModerationRenderingMode;
+  allowPaidCreateRetry: boolean;
   providerFallbackStage?: string | null;
   onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
   onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
@@ -950,6 +957,7 @@ async function runSeedanceAttempt(input: {
       quality: input.quality,
       attempt: input.attemptLabel,
     },
+    input.allowPaidCreateRetry,
   );
   console.info('SEEDANCE PREDICTION CREATED:', {
     providerJobId: prediction.id,
@@ -1076,7 +1084,11 @@ export async function generateSeedanceVideo(
     })),
   });
 
-  for (const orchestrationAttempt of orchestrationPlan.attempts) {
+  const providerAttemptBudget = typeof options.maxProviderAttempts === 'number' && Number.isFinite(options.maxProviderAttempts)
+    ? Math.max(1, Math.floor(options.maxProviderAttempts))
+    : orchestrationPlan.attempts.length;
+
+  for (const orchestrationAttempt of orchestrationPlan.attempts.slice(0, providerAttemptBudget)) {
     const rawFinalPrompt = buildMultimodalSeedancePrompt(
       orchestrationAttempt.prompt,
       referenceImages,
@@ -1135,6 +1147,7 @@ export async function generateSeedanceVideo(
         pollIntervalMs: options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
         attemptLabel: orchestrationAttempt.attemptLabel,
         renderingMode: orchestrationAttempt.renderingMode,
+        allowPaidCreateRetry: options.maxProviderAttempts !== 1,
         providerFallbackStage: options.providerFallbackStage ?? orchestrationAttempt.attemptLabel,
         onPredictionCreated: options.onPredictionCreated,
         onPredictionPolled: options.onPredictionPolled,

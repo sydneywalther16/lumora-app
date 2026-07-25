@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:vercel": "npm run bundle:vercel-api && npm run build",
+    "bundle:vercel-api": "node scripts/build-vercel-api.mjs",
+    "test:canary-regression": "tsx backend/test/realRenderCanaryRegression.test.ts",
     "preview": "vite preview",
     "dev:api": "tsx backend/src/index.ts",
     "seed": "tsx backend/src/scripts/seed.ts",
@@ -54,6 +57,7 @@
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
     "@vitejs/plugin-react": "^4.3.4",
+    "esbuild": "^0.27.7",
     "tsx": "^4.20.5",
     "typescript": "~5.7.2",
     "vite": "^6.2.0"

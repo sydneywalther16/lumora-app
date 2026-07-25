@@ -14,6 +14,11 @@ type SeedanceRequestBody = {
   stylePreset?: unknown;
   quality?: unknown;
   engine?: unknown;
+  duration?: unknown;
+  aspectRatio?: unknown;
+  resolution?: unknown;
+  generateAudio?: unknown;
+  maxProviderRequests?: unknown;
   characterId?: unknown;
   characterName?: unknown;
   characterAvatar?: unknown;
@@ -75,6 +80,24 @@ function renderPreferenceValue(value: unknown) {
   return value === 'cinematic_quality' || value === 'success_first' || value === 'balanced'
     ? value
     : 'balanced';
+}
+
+function durationValue(value: unknown) {
+  const duration = Number(value);
+  return Number.isFinite(duration) ? Math.min(10, Math.max(2, Math.round(duration))) : null;
+}
+
+function aspectRatioValue(value: unknown) {
+  return value === '9:16' || value === '16:9' || value === '1:1' ? value : null;
+}
+
+function resolutionValue(value: unknown) {
+  return value === '480p' || value === '720p' || value === '1080p' ? value : null;
+}
+
+function maxProviderRequestsValue(value: unknown) {
+  const count = Number(value);
+  return Number.isFinite(count) ? Math.min(3, Math.max(1, Math.round(count))) : 1;
 }
 
 function stylePrompt(value: unknown, prompt: string) {
@@ -170,6 +193,11 @@ export default async function handler(req: SeedanceRequest, res: ServerResponse)
       isDefaultSelfCharacter: booleanValue(body.isDefaultSelfCharacter),
       renderPreference: renderPreferenceValue(body.renderPreference),
       referenceImages: referenceImagesValue(body.referenceImages),
+      durationSeconds: durationValue(body.duration),
+      aspectRatio: aspectRatioValue(body.aspectRatio),
+      resolution: resolutionValue(body.resolution),
+      generateAudio: booleanValue(body.generateAudio),
+      maxProviderRequests: maxProviderRequestsValue(body.maxProviderRequests),
     });
     const { rawOutput: _rawOutput, ...publicResult } = result;
 

@@ -146,6 +146,10 @@ export async function createSeedanceGeneration(input: {
   renderPreference?: RenderSuccessMode | string | null;
   referenceImages?: SeedanceReferenceImage[];
   durationSeconds?: number | null;
+  aspectRatio?: SeedanceAspectRatio | string | null;
+  resolution?: SeedanceResolution | string | null;
+  generateAudio?: boolean | null;
+  maxProviderRequests?: number | null;
   onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
   onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 }): Promise<SeedanceGenerationRecord> {
@@ -165,6 +169,10 @@ export async function createSeedanceGeneration(input: {
     characterName: input.characterName,
     projectId: input.projectId,
     durationSeconds: input.durationSeconds,
+    aspectRatio: input.aspectRatio,
+    resolution: input.resolution,
+    generateAudio: input.generateAudio,
+    maxProviderRequests: input.maxProviderRequests,
     onPredictionCreated: input.onPredictionCreated,
     onPredictionPolled: input.onPredictionPolled,
   });

@@ -239,9 +239,15 @@ assert.equal(verificationPatch.verificationAudioPresent, true);
 assert.equal(redactVerificationVideoUrl(verificationPatch.verificationVideoUrl), '[private-verification-video-present]');
 assert.equal(redactVerificationVideoUrl(verificationPatch.verificationVideoUrl)?.includes('token=secret'), false);
 
-const invalidDuration = validateSeedanceProviderPayload({
+const fourSecondDuration = validateSeedanceProviderPayload({
   ...textPayload,
   duration: 4,
+});
+assert.equal(fourSecondDuration.ok, true);
+
+const invalidDuration = validateSeedanceProviderPayload({
+  ...textPayload,
+  duration: 16,
 });
 assert.equal(invalidDuration.ok, false);
 assert.equal(invalidDuration.ok ? '' : invalidDuration.issues[0].field, 'duration');

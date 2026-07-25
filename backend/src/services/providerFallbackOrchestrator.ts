@@ -4,7 +4,9 @@ import {
   isSeedanceModerationError,
   type SeedanceModerationDiagnostics,
   type SeedancePredictionEvent,
+  type SeedanceAspectRatio,
   type SeedanceQualityMode,
+  type SeedanceResolution,
   type SeedanceReferenceImage,
   type SeedanceVideoResult,
 } from './providers/seedanceProvider';
@@ -428,6 +430,10 @@ export async function generateSeedanceWithProviderFallback(input: {
   emotionalText?: string | null;
   continuityNotes?: string[];
   durationSeconds?: number | null;
+  aspectRatio?: SeedanceAspectRatio | string | null;
+  resolution?: SeedanceResolution | string | null;
+  generateAudio?: boolean | null;
+  maxProviderRequests?: number | null;
   onPredictionCreated?: (event: SeedancePredictionEvent) => void | Promise<void>;
   onPredictionPolled?: (event: SeedancePredictionEvent) => void | Promise<void>;
 }): Promise<ProviderFallbackSeedanceResult> {
@@ -508,6 +514,10 @@ export async function generateSeedanceWithProviderFallback(input: {
         projectId: input.projectId,
         providerFallbackStage: inputAttempt.stage,
         durationSeconds: input.durationSeconds,
+        aspectRatio: input.aspectRatio,
+        resolution: input.resolution,
+        generateAudio: input.generateAudio,
+        maxProviderAttempts: input.maxProviderRequests,
         onPredictionCreated: input.onPredictionCreated,
         onPredictionPolled: input.onPredictionPolled,
       });
@@ -608,7 +618,11 @@ export async function generateSeedanceWithProviderFallback(input: {
     }
   }
 
-  for (const plan of attemptPlan) {
+  const providerRequestBudget = typeof input.maxProviderRequests === 'number' && Number.isFinite(input.maxProviderRequests)
+    ? Math.max(1, Math.floor(input.maxProviderRequests))
+    : attemptPlan.length;
+
+  for (const plan of attemptPlan.slice(0, providerRequestBudget)) {
     const prompt = plan.promptVariant === 'storybook'
       ? storybookPrompt
       : plan.promptVariant === 'stylized'

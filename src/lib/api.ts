@@ -122,6 +122,9 @@ export type GenerationPayload = {
   aspectRatio?: VideoAspectRatio;
   engine?: VideoEngine;
   quality?: 'fast' | 'quality';
+  resolution?: '480p' | '720p' | '1080p';
+  generateAudio?: boolean;
+  maxProviderRequests?: number;
   renderPreference?: RenderSuccessMode;
   selfLikenessIntensity?: SelfLikenessIntensity;
   privacy?: PrivacySetting;
