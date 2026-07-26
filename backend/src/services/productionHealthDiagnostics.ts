@@ -1,5 +1,6 @@
 import { env } from '../lib/env';
 import { query } from './db';
+import { buildDirectorProductionDryRun } from './director/dryRunDiagnostics';
 
 export type ReferenceRouteReadinessRow = {
   provider: string | null;
@@ -208,6 +209,7 @@ function generationProviders() {
 export async function buildProductionHealthDiagnostics() {
   const checkedAt = new Date().toISOString();
   const providers = generationProviders();
+  const director = buildDirectorProductionDryRun();
 
   try {
     const readiness = await readSafeReferenceRouteReadiness();
@@ -231,6 +233,7 @@ export async function buildProductionHealthDiagnostics() {
         schemaChecks: [],
       },
       ...readiness,
+      director,
       secretsRedacted: true,
       privateUrlsRedacted: true,
     };
@@ -255,6 +258,7 @@ export async function buildProductionHealthDiagnostics() {
         schemaChecks: [],
       },
       ...buildSafeReferenceRouteReadiness([]),
+      director,
       diagnosticsError: {
         ok: false,
         key: 'referenceRouteStatus',

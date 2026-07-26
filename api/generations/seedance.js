@@ -4595,6 +4595,11 @@ async function createSeedanceGeneration(input) {
   };
 }
 
+// backend/src/services/director/routing.ts
+function seedancePersonalReferenceRouteAllowed(input) {
+  return !input.hasPersonalIdentityImage && input.inputMode === "text_to_video";
+}
+
 // serverless/entries/generations-seedance.ts
 function sendJson(res, statusCode, payload) {
   res.statusCode = statusCode;
@@ -4731,6 +4736,22 @@ Style: ${selectedStyle}` : prompt;
   const quality = qualityValue(body);
   const firstFrameImage = firstFrameImageValue(body.firstFrameImage);
   const referenceImages = inputMode === "image_to_video_first_frame" ? [] : referenceImagesValue(body.referenceImages);
+  const hasPersonalIdentityImage = booleanValue(body.isDefaultSelfCharacter) === true && Boolean(firstFrameImage || referenceImages.length);
+  if (!seedancePersonalReferenceRouteAllowed({
+    hasPersonalIdentityImage,
+    inputMode: inputMode ?? (referenceImages.length ? "multimodal_reference" : "text_to_video")
+  })) {
+    sendJson(res, 409, {
+      status: "failed",
+      error: "Personal AI Cast image routes are disabled for this renderer. Your scene is preserved for Lumora Director.",
+      message: "Personal AI Cast image routes are disabled for this renderer. Your scene is preserved for Lumora Director.",
+      providerRequestCount: 0,
+      providerRetryCount: 0,
+      providerFallbackCount: 0,
+      scenePreserved: true
+    });
+    return;
+  }
   try {
     const result = await createSeedanceGeneration({
       prompt: finalPrompt,

@@ -193,8 +193,8 @@ const autoExactRoute = decideAutoStage({
   selfCharacterReady: true,
   userPrompt: 'keep my exact face and same face through motion',
 });
-assert.equal(autoExactRoute.engine, 'replicate');
-assert.equal(autoExactRoute.fallbackEngine, 'seedance-2.0');
+assert.equal(autoExactRoute.route, 'director_primary');
+assert.equal(autoExactRoute.fallbackEngine, null);
 
 const autoDemoRoute = decideAutoStage({
   hasPrompt: true,

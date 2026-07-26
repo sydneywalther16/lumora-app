@@ -23,8 +23,8 @@ const autoKling = decideAutoStage({
   selfCharacterReady: true,
   userPrompt: 'preserve my exact face in motion',
 });
-assert.equal(autoKling.engine, 'replicate');
-assert.equal(autoKling.fallbackEngine, 'seedance-2.0');
+assert.equal(autoKling.route, 'director_primary');
+assert.equal(autoKling.fallbackEngine, null);
 
 const demoMode = decideAutoStage({
   hasPrompt: true,

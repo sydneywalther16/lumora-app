@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
 import { env } from '../src/lib/env';
@@ -10,7 +11,10 @@ const app = express();
 app.use(express.json());
 app.use(healthRouter);
 
-const server = app.listen(0);
+const server = await new Promise<ReturnType<typeof createServer>>((resolve, reject) => {
+  const listeningServer = createServer(app).listen(0, '127.0.0.1', () => resolve(listeningServer));
+  listeningServer.once('error', reject);
+});
 const address = server.address() as AddressInfo;
 const baseUrl = `http://127.0.0.1:${address.port}`;
 

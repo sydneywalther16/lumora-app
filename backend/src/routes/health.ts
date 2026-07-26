@@ -58,6 +58,7 @@ import {
   publicSelfCharacterOwnershipDiagnostic,
   resolveSelfCharacterForAuthenticatedUser,
 } from '../services/selfCharacterOwnership';
+import { buildDirectorProductionDryRun } from '../services/director/dryRunDiagnostics';
 
 export const healthRouter = Router();
 const canarySchema = z.object({
@@ -140,6 +141,7 @@ healthRouter.get('/health', (_req, res) => {
 
 healthRouter.get('/api/health/diagnostics', async (_req, res) => {
   const checkedAt = new Date().toISOString();
+  const director = buildDirectorProductionDryRun();
   try {
     const posterGenerationAvailability = await getPosterGenerationAvailability();
     const posterBackfillRuntime = getPosterBackfillRuntimeDiagnostics();
@@ -254,6 +256,7 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
         'videoThumbnails',
         () => buildVideoThumbnailDiagnostics({ posterGenerationAvailability, posterBackfillRuntime }),
       ),
+      director,
     });
   } catch (error) {
     res.json({
@@ -268,6 +271,7 @@ healthRouter.get('/api/health/diagnostics', async (_req, res) => {
         error: serializeDiagnosticError(error),
       },
       aiCastPosts: await safeHealthDiagnostic('aiCastStudio', buildAiCastPostDiagnostics),
+      director,
     });
   }
 });

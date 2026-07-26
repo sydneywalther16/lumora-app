@@ -83,7 +83,6 @@ import {
   buildSceneAnchorCreateGuidance,
   buildViralCaptionSuggestions,
   decideAutoStage,
-  isSeedanceFirstFrameCanaryEligible,
   isDemoModeEngine,
   looksLikeInternalRenderPrompt,
   polishKlingCinematicPrompt,
@@ -91,6 +90,10 @@ import {
   viralScenePresets,
   type ViralScenePreset,
 } from '../lib/aiCastExperience';
+import {
+  DIRECTOR_PROGRESS_STATES,
+  directorProgressForGenerationState,
+} from '../lib/directorExperience';
 
 type CreateVideoProps = {
   refreshKey?: number;
@@ -538,7 +541,7 @@ function creatorRenderModeLabel(mode: string) {
     case 'seedance-text-to-video':
       return 'Cinematic text scene';
     case 'seedance-image-to-video-first-frame':
-      return 'Seedance Fast — first-frame animation';
+      return 'Legacy first-frame scene';
     case 'self-reference-video':
       return 'Self reference scene';
     case 'image-to-video':
@@ -1533,7 +1536,6 @@ export default function CreateVideo({
   const [selfLikenessIntensity, setSelfLikenessIntensity] = useState<SelfLikenessIntensity>('balanced');
   const [engine, setEngine] = useState<VideoEngine>(SEEDANCE_ENGINE_ID);
   const [stageSelectionMode, setStageSelectionMode] = useState<'auto' | 'manual'>('auto');
-  const [firstFrameCanaryEnabled, setFirstFrameCanaryEnabled] = useState(false);
   const [status, setStatus] = useState('');
   const [generationStatusState, setGenerationStatusState] = useState<GenerationStatusState>('idle');
   const [toast, setToast] = useState<ToastState>(null);
@@ -1679,15 +1681,7 @@ export default function CreateVideo({
     healthDiagnostics?.referenceRouteStatus?.seedanceReferenceRoutesBlocked ||
     healthDiagnostics?.seedanceImageReferenceBlocked
   );
-  const firstFrameCanaryEligible = isSeedanceFirstFrameCanaryEligible({
-    activeFrontFaceReferenceCount,
-    activeOtherReferenceCount,
-    referenceLedRouteModerated,
-  });
-  const firstFrameCanaryActive =
-    stageSelectionMode === 'auto' &&
-    firstFrameCanaryEnabled &&
-    firstFrameCanaryEligible;
+  const firstFrameCanaryActive = false;
   const savedSeedanceReferenceCount = seedanceReferenceImages.filter((reference) => (
     referenceStatus(reference.url, true).kind === 'saved'
   )).length;
@@ -1702,7 +1696,7 @@ export default function CreateVideo({
   const seedanceSingleReferenceWarning =
     isSeedanceEngine &&
     seedanceReferenceCount === 1 &&
-    !firstFrameCanaryEligible;
+    hasSelfCharacter;
   const successFirstLighterReferencePath = isSeedanceEngine && renderPreference === 'success_first' && seedanceReferenceCount > 0;
   const selectedGenerationMode: GenerationMode = isSeedanceEngine
     ? firstFrameCanaryActive
@@ -1760,10 +1754,6 @@ export default function CreateVideo({
     referenceLedRouteModerated,
     explicitFirstFrameCanaryAuthorized: firstFrameCanaryActive,
   });
-
-  useEffect(() => {
-    if (!firstFrameCanaryEligible) setFirstFrameCanaryEnabled(false);
-  }, [firstFrameCanaryEligible, characterId]);
 
   const effectiveUiEngine = stageSelectionMode === 'manual' ? engine : autoStageDecision.engine;
   const demoModeActive = isDemoModeEngine(effectiveUiEngine);
@@ -1980,34 +1970,12 @@ export default function CreateVideo({
     generationStatusState === 'verifying_output' ||
     generationStatusState === 'rate_limited'
   );
-  const klingExactRenderStateActive = selectedKlingExactReady && (
-    generationStatusState === 'queued' ||
-    generationStatusState === 'processing' ||
-    generationStatusState === 'verifying_output'
-  );
-  const identityOnlyKlingFallbackRenderActive = identityOnlyKlingFallbackActive && klingExactRenderStateActive;
-  const sceneAnchorKlingRenderStateActive = klingExactRenderStateActive && !identityOnlyKlingFallbackRenderActive;
+  const neutralGenerationProgress = directorProgressForGenerationState(generationStatusState);
   const visibleRenderState = generationStatusState === 'idle' || hasVerifiedGenerationOutput ? null : {
     label: generationStatusLabels[generationStatusState],
     tone: renderStateTone(generationStatusState),
-    headline: identityOnlyKlingFallbackRenderActive
-      ? generationStatusState === 'verifying_output'
-        ? 'Saving to Drafts'
-        : 'Using identity-only Kling fallback'
-      : sceneAnchorKlingRenderStateActive
-      ? generationStatusState === 'verifying_output'
-        ? 'Saving to Drafts'
-        : 'Generating scene anchor...'
-      : renderStateHeadline(generationStatusState),
-    body: identityOnlyKlingFallbackRenderActive
-      ? generationStatusState === 'verifying_output'
-        ? 'Lumora is verifying the Kling video before marking the draft ready.'
-        : 'This uses your saved identity references without staging a scene anchor.'
-      : sceneAnchorKlingRenderStateActive
-      ? generationStatusState === 'verifying_output'
-        ? 'Lumora is verifying the Kling video before marking the draft ready.'
-        : 'Kling Reference Beta is staging the scene before Kling animation.'
-      : status && !isProviderTechnicalText(status)
+    headline: neutralGenerationProgress ?? renderStateHeadline(generationStatusState),
+    body: status && !isProviderTechnicalText(status)
       ? status
       : renderStateBody(generationStatusState, renderCooldownSeconds),
   };
@@ -2027,11 +1995,9 @@ export default function CreateVideo({
     : selectedKlingExactReady && generationError
     ? {
         ...creatorRenderStateCopy('paused'),
-        title: 'Kling Reference Beta render paused.',
+        title: 'This scene is paused.',
         body: generationError,
-        suggestedNextStep: /scene[-\s]?anchor/i.test(generationError)
-          ? 'Suggested next step: use identity-only fallback, save this draft, or return to Seedance Fast.'
-          : 'Suggested next step: retry Kling later, edit the scene, or switch to soft guidance.',
+        suggestedNextStep: 'Suggested next step: save the scene to Drafts and review the internal diagnostics before trying another paid request.',
       }
     : creatorRenderStateCopy(generationFailureStatus ?? 'failed');
   const sceneAnchorPauseActive = selectedKlingExactReady && (
@@ -3232,6 +3198,15 @@ export default function CreateVideo({
       return;
     }
 
+    if (stageSelectionMode === 'auto' && autoStageDecision.route === 'director_primary') {
+      setGenerationError('');
+      setGenerationFailureStatus(null);
+      setGenerationStatusState('idle');
+      setStatus('Your personal AI Cast scene is prepared for Lumora Director. Save it to Drafts until a separately authorized Director canary is enabled.');
+      releaseGenerateLock();
+      return;
+    }
+
     if (selectedEngineRequiresBackend && healthDiagnosticsStatus === 'checking') {
       setStatus('Checking video engine. Try again in a moment.');
       return;
@@ -3305,16 +3280,10 @@ export default function CreateVideo({
 
     const selectedIsSeedanceEngine = selectedEngine === SEEDANCE_ENGINE_ID || selectedEngine === SEEDANCE_QUALITY_ENGINE_ID;
     const selectedIsBackendProviderEngine = selectedIsSeedanceEngine || selectedEngine === 'veo' || selectedEngine === 'mock';
-    const selectedFirstFrameCanaryActive =
-      selectedIsSeedanceEngine &&
-      selectedEngine === SEEDANCE_ENGINE_ID &&
-      firstFrameCanaryActive &&
-      autoStageDecision.route === 'seedance_fast_first_frame';
-    const selectedFirstFrameImage = selectedFirstFrameCanaryActive
-      ? seedanceReferenceImages[0] ?? null
-      : null;
+    const selectedFirstFrameCanaryActive = false;
+    const selectedFirstFrameImage = null;
     const selectedSeedanceReferences: SeedanceReferenceImage[] = selectedIsSeedanceEngine
-      ? selectedFirstFrameCanaryActive
+      ? hasSelfCharacter
         ? []
         : seedanceReferenceImages
       : [];
@@ -3346,6 +3315,15 @@ export default function CreateVideo({
         characterName,
         isDefaultSelfCharacter: hasSelfCharacter,
       });
+
+    if (selectedIsSeedanceEngine && hasSelfCharacter) {
+      setGenerationError('');
+      setGenerationFailureStatus(null);
+      setGenerationStatusState('idle');
+      setStatus('Your personal AI Cast scene is prepared for Lumora Director. Save it to Drafts until a separately authorized Director canary is enabled.');
+      releaseGenerateLock();
+      return;
+    }
 
     console.log('FORCED SELF MODE:', {
       hasSelfCharacter,
@@ -3405,24 +3383,24 @@ export default function CreateVideo({
 
     try {
       if (continuityMemoryDirty && sceneExecutorUserId) {
-        setStatus('Preserving Story Memory...');
+        setStatus(DIRECTOR_PROGRESS_STATES[0]);
         await saveContinuityMemory({ silent: true });
       }
       let invisiblePlan: CreativeBrainScenePlan | null = null;
       if (selectedRenderPreference === 'success_first') {
-        setStatus('Story Memory is guiding this scene.');
+        setStatus(DIRECTOR_PROGRESS_STATES[0]);
       } else {
-        setStatus('Shaping cinematic beats...');
+        setStatus(DIRECTOR_PROGRESS_STATES[0]);
         invisiblePlan = await buildCinematicStructureForPrompt({ source: 'generate', promptOverride: currentPrompt });
       }
       if (identityOnlyKlingFallbackRequest) {
-        setStatus('Using identity-only Kling fallback...');
+        setStatus(DIRECTOR_PROGRESS_STATES[2]);
       } else if (selectedKlingExactReadyForRequest) {
-        setStatus('Generating scene anchor...');
+        setStatus(DIRECTOR_PROGRESS_STATES[1]);
       } else if (invisiblePlan && selectedRenderPreference !== 'success_first') {
-        setStatus('Preparing your cast for the render...');
+        setStatus(DIRECTOR_PROGRESS_STATES[1]);
       } else {
-        setStatus('Lumora is finding the cleanest render path...');
+        setStatus(DIRECTOR_PROGRESS_STATES[2]);
       }
 
       const generationStylePrompt = selectedStylePrompt(selectedStyles, currentPrompt);
@@ -3641,7 +3619,7 @@ export default function CreateVideo({
       console.log('GENERATION RESPONSE:', data);
       setActiveRenderFailure(null);
       if (selectedKlingExactReadyForRequest && data.sceneAnchorGenerated) {
-        setStatus('Scene anchor approved. Animating with Kling Reference Beta...');
+        setStatus(DIRECTOR_PROGRESS_STATES[2]);
       }
 
       if (isAsyncRenderResponse(data)) {
@@ -3909,7 +3887,7 @@ export default function CreateVideo({
 
       const profile = authUser ? await loadSupabaseProfile(authUser.id) : loadLumoraProfile();
       if (selectedKlingExactReadyForRequest) {
-        setStatus('Saving to Drafts');
+        setStatus(DIRECTOR_PROGRESS_STATES[5]);
       }
       const now = new Date().toISOString();
       const generationId = createLocalGenerationId();
@@ -4451,9 +4429,7 @@ export default function CreateVideo({
       const profile = loadLumoraProfile();
       const draftEngine = stageSelectionMode === 'manual' ? engine : autoStageDecision.engine;
       const displayEngine = stageSelectionMode === 'auto'
-        ? firstFrameCanaryActive
-          ? 'Seedance Fast — first-frame animation'
-          : 'Lumora Auto Stage'
+        ? 'Lumora Auto Stage'
         : draftEngine === SEEDANCE_ENGINE_ID
         ? 'Seedance Fast'
         : draftEngine === SEEDANCE_QUALITY_ENGINE_ID
@@ -5158,89 +5134,18 @@ export default function CreateVideo({
           <div className="row-between create-section-header">
             <div className="create-section-heading">
               <span className="eyebrow">LUMORA STAGE</span>
-              <strong>{stageSelectionMode === 'auto' ? 'Lumora Auto Stage' : selectedStageOption.label}</strong>
+              <strong>Lumora Auto Stage</strong>
             </div>
-            <span className="tiny-pill">{stageSelectionMode === 'auto' ? 'Auto' : selectedStageOption.speed}</span>
+            <span className="tiny-pill">Auto</span>
           </div>
           <p className="muted stage-main-copy">
-            {stageSelectionMode === 'auto'
-              ? 'Lumora chooses the safest available render path for this scene.'
-              : selectedStageOption.description}
+            Lumora plans, creates, checks, and saves the safest available scene path.
           </p>
-          {firstFrameCanaryEligible ? (
-            <div className="reference-mode-copy">
-              <strong>Seedance Fast — first-frame animation</strong>
-              <span className="muted">
-                Proposed no-fallback route: animate the single Front face image as the first frame.
-              </span>
-              <button
-                type="button"
-                className={`ghost-btn ${firstFrameCanaryActive ? 'active' : ''}`}
-                onClick={() => {
-                  setStageSelectionMode('auto');
-                  setFirstFrameCanaryEnabled((enabled) => !enabled);
-                  setDuration(4);
-                  setAspectRatio('9:16');
-                  setStatus('First-frame route prepared. No render has started.');
-                }}
-              >
-                {firstFrameCanaryActive ? 'First-frame route prepared' : 'Prepare first-frame route'}
-              </button>
-              <small className="muted">This only selects the route. Generate remains a separate action.</small>
-            </div>
-          ) : null}
           <details className="advanced-create-details stage-technical-details">
             <summary>Stage details</summary>
-            <small className="muted">{stageSelectionMode === 'auto' ? autoStageDecision.reason : engineRoutingMessage}</small>
-            <div className="button-row" style={{ marginTop: '12px' }}>
-              <button
-                type="button"
-                className={`ghost-btn ${stageSelectionMode === 'auto' ? 'active' : ''}`}
-                onClick={() => setStageSelectionMode('auto')}
-              >
-                Auto Stage
-              </button>
-            </div>
-            <div className="provider-grid" role="radiogroup" aria-label="Lumora Stage provider override">
-              {providerOptions.map((option) => {
-                const optionActive = stageSelectionMode === 'manual' && engine === option.engine;
-                const optionKling = option.engine === 'replicate';
-                const optionKlingReady = optionKling && klingExactLikenessReady;
-                const optionSeedanceFast = option.engine === SEEDANCE_ENGINE_ID;
-                const optionDemoMode = option.engine === 'mock';
-                return (
-                  <button
-                    key={option.engine}
-                    type="button"
-                    role="radio"
-                    aria-checked={optionActive}
-                    className={`provider-option ${optionActive ? 'active' : ''} ${optionKlingReady ? 'ready' : ''}`}
-                    onClick={() => {
-                      setStageSelectionMode('manual');
-                      setFirstFrameCanaryEnabled(false);
-                      setEngine(option.engine);
-                    }}
-                  >
-                    <span>
-                      <strong>{option.label}</strong>
-                      <small>{option.description}</small>
-                    </span>
-                    <span className="provider-meta">
-                      <span>Speed {option.speed}</span>
-                      <span>Quality {option.quality}</span>
-                      {optionSeedanceFast ? <span>Safest first render</span> : null}
-                      {optionDemoMode ? <span>No credits</span> : null}
-                      {optionKling ? (
-                        <>
-                          <span>Beta</span>
-                          <span>{optionKlingReady ? 'Exact-likeness ready' : 'Needs AI Cast setup'}</span>
-                        </>
-                      ) : null}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+            <small className="muted">
+              {autoStageDecision.reason} Technical provider details are available only in internal diagnostics.
+            </small>
           </details>
         </section>
 
@@ -5251,11 +5156,9 @@ export default function CreateVideo({
                 ? 'Preparing your cast...'
                 : demoModeActive
                   ? 'Stage preview'
-                  : isSeedanceEngine
-                    ? `${readySeedanceReferenceCount} reference${readySeedanceReferenceCount === 1 ? '' : 's'} ready`
-                    : hasGenerationReference
-                      ? 'Cast reference ready'
-                      : 'Save a reference before rendering'}
+                  : hasGenerationReference
+                    ? `${readySeedanceReferenceCount || 1} cast reference${(readySeedanceReferenceCount || 1) === 1 ? '' : 's'} ready`
+                    : 'Save a reference before rendering'}
             </strong>
             {showReferenceSetupGuidance ? (
               <>
@@ -5272,14 +5175,6 @@ export default function CreateVideo({
                   </button>
                 ) : null}
               </>
-            ) : null}
-            {seedanceMultimodalActive ? (
-              <span className="tiny-pill multimodal-reference-badge">Cast reference mode</span>
-            ) : null}
-            {seedanceSingleReferenceWarning ? (
-              <span className="seedance-reference-warning">
-                Only one image uploaded. Add side, full-body, expression, or outfit references for stronger cast consistency.
-              </span>
             ) : null}
             {successFirstLighterReferencePath && !klingExactReadyOnOtherRenderer ? (
               <>
@@ -5476,14 +5371,7 @@ export default function CreateVideo({
             </div>
             {(generationStatusState === 'queued' || generationStatusState === 'processing' || generationStatusState === 'rate_limited') ? (
               <ol className="success-ladder-progress" aria-label="Render progress">
-                {[
-                  selectedKlingExactReady ? 'Generating scene anchor' : 'Preparing cast',
-                  selectedKlingExactReady
-                    ? 'Scene anchor approved'
-                    : successFirstLighterReferencePath ? 'Creating soft self-guided draft' : 'Trying storybook cinematic take',
-                  selectedKlingExactReady ? 'Animating with Kling Reference Beta' : 'Saving to Drafts',
-                  ...(selectedKlingExactReady ? ['Saving to Drafts'] : []),
-                ].map((step, index) => (
+                {DIRECTOR_PROGRESS_STATES.map((step, index) => (
                   <li key={step} className={index === 0 || generationStatusState === 'processing' ? 'active' : ''}>
                     {step}
                   </li>
@@ -5770,13 +5658,10 @@ export default function CreateVideo({
                   </div>
                   {generationModerationDetail || generationModerationStages.length ? (
                     <details className="advanced-create-details technical-details">
-                      <summary>Creative adaptation steps</summary>
-                      {generationModerationDetail ? <p className="muted">{generationModerationDetail}</p> : null}
-                      <div className="generation-warning-list">
-                        {generationModerationStages.map((stage) => (
-                          <p key={stage}>{stage}</p>
-                        ))}
-                      </div>
+                      <summary>Scene check</summary>
+                      <p className="muted">
+                        Lumora preserved the scene and kept technical provider details inside internal diagnostics.
+                      </p>
                     </details>
                   ) : null}
                 </div>

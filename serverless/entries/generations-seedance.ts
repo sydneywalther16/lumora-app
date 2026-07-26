@@ -5,6 +5,7 @@ import {
   isSeedanceModerationError,
   type SeedanceInputMode,
 } from '../../backend/src/services/providers/seedanceProvider';
+import { seedancePersonalReferenceRouteAllowed } from '../../backend/src/services/director/routing';
 
 type SeedanceRequest = IncomingMessage & {
   body?: unknown;
@@ -204,6 +205,24 @@ export default async function handler(req: SeedanceRequest, res: ServerResponse)
   const referenceImages = inputMode === 'image_to_video_first_frame'
     ? []
     : referenceImagesValue(body.referenceImages);
+  const hasPersonalIdentityImage = booleanValue(body.isDefaultSelfCharacter) === true &&
+    Boolean(firstFrameImage || referenceImages.length);
+
+  if (!seedancePersonalReferenceRouteAllowed({
+    hasPersonalIdentityImage,
+    inputMode: inputMode ?? (referenceImages.length ? 'multimodal_reference' : 'text_to_video'),
+  })) {
+    sendJson(res, 409, {
+      status: 'failed',
+      error: 'Personal AI Cast image routes are disabled for this renderer. Your scene is preserved for Lumora Director.',
+      message: 'Personal AI Cast image routes are disabled for this renderer. Your scene is preserved for Lumora Director.',
+      providerRequestCount: 0,
+      providerRetryCount: 0,
+      providerFallbackCount: 0,
+      scenePreserved: true,
+    });
+    return;
+  }
 
   try {
     const result = await createSeedanceGeneration({

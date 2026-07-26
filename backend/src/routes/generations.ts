@@ -19,6 +19,7 @@ import {
   startRenderSuccessJob,
 } from '../services/renderSuccessEngine';
 import { resolveExactLikenessRoute } from '../services/exactLikenessRouter';
+import { seedancePersonalReferenceRouteAllowed } from '../services/director/routing';
 import { createVideoGeneration } from '../video';
 
 const generationEngines = ['seedance-2.0', 'seedance-quality', 'veo', 'runway', 'mock', 'openai'] as const;
@@ -152,6 +153,22 @@ generationsRouter.post('/seedance', generationRateLimit, async (req, res) => {
     : payload.prompt;
   const quality = payload.engine === 'seedance-quality' ? 'quality' : payload.quality;
   const engine = quality === 'quality' ? 'seedance-quality' : 'seedance-2.0';
+  const references = seedanceReferenceImages(payload.referenceImages);
+
+  if (!seedancePersonalReferenceRouteAllowed({
+    hasPersonalIdentityImage: payload.isDefaultSelfCharacter === true && references.length > 0,
+    inputMode: references.length ? 'multimodal_reference' : 'text_to_video',
+  })) {
+    res.status(409).json({
+      status: 'failed',
+      error: 'Personal AI Cast image routes are disabled for this renderer. Your scene is preserved for Lumora Director.',
+      providerRequestCount: 0,
+      providerRetryCount: 0,
+      providerFallbackCount: 0,
+      scenePreserved: true,
+    });
+    return;
+  }
 
   try {
     if (payload.renderPreference === 'success_first') {
@@ -163,7 +180,7 @@ generationsRouter.post('/seedance', generationRateLimit, async (req, res) => {
         characterName: payload.characterName ?? null,
         characterAvatar: payload.characterAvatar ?? null,
         isDefaultSelfCharacter: payload.isDefaultSelfCharacter ?? null,
-        referenceImages: seedanceReferenceImages(payload.referenceImages),
+        referenceImages: references,
         allowDemoFallback: false,
         maxPaidAttempts: undefined,
         maxTotalAttempts: undefined,
@@ -200,7 +217,7 @@ generationsRouter.post('/seedance', generationRateLimit, async (req, res) => {
       characterAvatar: payload.characterAvatar ?? null,
       isDefaultSelfCharacter: payload.isDefaultSelfCharacter ?? null,
       renderPreference: payload.renderPreference,
-      referenceImages: seedanceReferenceImages(payload.referenceImages),
+      referenceImages: references,
       referenceImageUrls: payload.referenceImageUrls ?? {},
       additionalReferenceImageUrls: payload.additionalReferenceImageUrls ?? [],
     });
@@ -214,7 +231,7 @@ generationsRouter.post('/seedance', generationRateLimit, async (req, res) => {
       characterAvatar: payload.characterAvatar ?? null,
       isDefaultSelfCharacter: payload.isDefaultSelfCharacter ?? null,
       displayEngine: quality === 'quality' ? 'Seedance Quality' : 'Seedance Fast',
-      generationMode: seedanceReferenceImages(payload.referenceImages).length > 0
+      generationMode: references.length > 0
         ? 'seedance-multimodal-reference'
         : 'seedance-text-to-video',
       outputUrl: status.outputUrl ?? '',
@@ -252,6 +269,20 @@ generationsRouter.post('/', generationRateLimit, async (req, res) => {
     if (payload.engine === 'seedance-2.0' || payload.engine === 'seedance-quality') {
       const quality = payload.engine === 'seedance-quality' ? 'quality' : 'fast';
       const references = seedanceReferenceImages(payload.referenceImages);
+      if (!seedancePersonalReferenceRouteAllowed({
+        hasPersonalIdentityImage: payload.isDefaultSelfCharacter === true && references.length > 0,
+        inputMode: references.length ? 'multimodal_reference' : 'text_to_video',
+      })) {
+        res.status(409).json({
+          status: 'failed',
+          error: 'Personal AI Cast image routes are disabled for this renderer. Your scene is preserved for Lumora Director.',
+          providerRequestCount: 0,
+          providerRetryCount: 0,
+          providerFallbackCount: 0,
+          scenePreserved: true,
+        });
+        return;
+      }
       if (payload.renderPreference === 'success_first') {
         const { job, duplicateOf, message } = await startRenderSuccessJob({
           prompt,

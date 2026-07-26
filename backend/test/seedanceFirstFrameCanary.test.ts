@@ -61,7 +61,7 @@ const eligible = {
   activeOtherReferenceCount: 0,
   referenceLedRouteModerated: true,
 };
-assert.equal(isSeedanceFirstFrameCanaryEligible(eligible), true);
+assert.equal(isSeedanceFirstFrameCanaryEligible(eligible), false);
 assert.equal(isSeedanceFirstFrameCanaryEligible({
   ...eligible,
   activeOtherReferenceCount: 1,
@@ -76,8 +76,8 @@ const authorizedDecision = decideAutoStage({
   ...eligible,
   explicitFirstFrameCanaryAuthorized: true,
 });
-assert.equal(authorizedDecision.route, 'seedance_fast_first_frame');
-assert.equal(authorizedDecision.reason, 'Seedance Fast — first-frame animation');
+assert.equal(authorizedDecision.route, 'director_primary');
+assert.match(authorizedDecision.reason, /Lumora Director/);
 assert.equal(authorizedDecision.fallbackEngine, null);
 
 const unapprovedDecision = decideAutoStage({
@@ -89,7 +89,7 @@ const unapprovedDecision = decideAutoStage({
   ...eligible,
   explicitFirstFrameCanaryAuthorized: false,
 });
-assert.equal(unapprovedDecision.route, 'seedance_fast_default');
+assert.equal(unapprovedDecision.route, 'director_primary');
 
 assert.equal(
   buildPublicCaptionFromPrompt(scene),
@@ -126,7 +126,7 @@ const createSource = readFileSync(
   join(process.cwd(), 'src/components/CreateVideo.tsx'),
   'utf8',
 );
-assert.match(createSource, /Seedance Fast — first-frame animation/);
+assert.doesNotMatch(createSource, /Prepare first-frame route/);
 assert.match(createSource, /No retry or fallback was attempted\. Save Draft remains available\./);
 assert.match(createSource, /firstFrameImage: selectedFirstFrameImage/);
 assert.match(createSource, /maxProviderRequests: 1/);

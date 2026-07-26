@@ -25,7 +25,8 @@ const route = decideAutoStage({
   userPrompt: benignPrompt,
 });
 assert.equal(route.engine, 'seedance-2.0');
-assert.equal(route.route, 'seedance_fast_default');
+assert.equal(route.route, 'director_primary');
+assert.equal(route.fallbackEngine, null);
 
 const moderationCategories = detectModerationCategories({
   prompt: benignPrompt,

@@ -80,6 +80,342 @@ async function query(text, params = []) {
   return result;
 }
 
+// backend/src/services/director/googleMedia.ts
+import { GoogleGenAI } from "@google/genai";
+
+// backend/src/services/director/budget.ts
+var DEFAULT_DIRECTOR_BUDGET = Object.freeze({
+  sceneAnchor: 1,
+  primaryVideo: 1,
+  automaticFallbackVideos: 0,
+  automaticRepairPasses: 0
+});
+
+// backend/src/services/director/quality.ts
+import { z as z2 } from "zod";
+var directorQualityScoreSchema = z2.object({
+  playableVideo: z2.boolean(),
+  identityConsistency: z2.number().min(0).max(100),
+  promptAdherence: z2.number().min(0).max(100),
+  motionStability: z2.number().min(0).max(100),
+  anatomyQuality: z2.number().min(0).max(100),
+  wardrobeContinuity: z2.number().min(0).max(100),
+  visualArtifacts: z2.number().min(0).max(100),
+  overallScore: z2.number().min(0).max(100),
+  acceptable: z2.boolean(),
+  localizedRepairIssue: z2.string().nullable(),
+  failureCategories: z2.array(z2.enum([
+    "not_playable",
+    "identity_drift",
+    "prompt_mismatch",
+    "unstable_motion",
+    "anatomy_defect",
+    "wardrobe_discontinuity",
+    "visual_artifact",
+    "provider_moderation",
+    "unknown"
+  ]))
+});
+
+// backend/src/services/director/adapters.ts
+var NANO_BANANA_2_MODEL = "gemini-3.1-flash-image";
+var GEMINI_OMNI_FLASH_MODEL = "gemini-omni-flash-preview";
+function sceneAnchorPrompt(plan) {
+  return [
+    "Create a provider-safe cinematic scene anchor for a clearly synthetic portrayal.",
+    "Use the user-owned front reference only to preserve the planned cast identity.",
+    "Do not present the result as a real photograph or documentary evidence.",
+    `Synthetic disclosure: ${plan.syntheticDisclosure}.`,
+    `Scene plan JSON: ${JSON.stringify(plan)}`
+  ].join("\n");
+}
+function buildNanoBananaPayload(input) {
+  if (!input.reference.ownershipConfirmed || input.reference.role !== "front_face") {
+    throw new Error("Director scene anchors require one confirmed user-owned Front face reference.");
+  }
+  return {
+    model: NANO_BANANA_2_MODEL,
+    store: false,
+    background: false,
+    input: [
+      {
+        type: "image",
+        data: input.reference.data,
+        mime_type: input.reference.mimeType
+      },
+      {
+        type: "text",
+        text: sceneAnchorPrompt(input.plan)
+      }
+    ],
+    response_format: {
+      type: "image",
+      mime_type: "image/jpeg",
+      aspect_ratio: input.aspectRatio ?? "9:16",
+      image_size: "1K"
+    }
+  };
+}
+function primaryVideoPrompt(plan, shot, durationSeconds) {
+  return [
+    `Create exactly one ${durationSeconds}-second 720p video candidate in a single continuous shot.`,
+    `Animate this synthetic cinematic scene: ${shot.summary}`,
+    `Action: ${shot.action}`,
+    `Camera: ${shot.cameraPlan}`,
+    `Continuity: ${plan.continuityLocks.join("; ")}`,
+    `Wardrobe: ${plan.wardrobe}`,
+    `Environment: ${plan.environment}`,
+    `Lighting: ${plan.lighting}`,
+    "Keep movement natural, anatomy stable, and the portrayal clearly synthetic.",
+    "No dialogue, music, ambient sound, or other audio."
+  ].join("\n");
+}
+function buildOmniFlashPayload(input) {
+  const shot = input.shot ?? input.plan.shots[0];
+  if (!shot) throw new Error("Director primary video requires one planned shot.");
+  const durationSeconds = input.durationSeconds ?? 4;
+  return {
+    model: GEMINI_OMNI_FLASH_MODEL,
+    store: true,
+    background: false,
+    input: [
+      {
+        type: "image",
+        data: input.anchor.data,
+        mime_type: input.anchor.mimeType
+      },
+      {
+        type: "text",
+        text: primaryVideoPrompt(input.plan, shot, durationSeconds)
+      }
+    ],
+    response_format: {
+      type: "video",
+      aspect_ratio: input.aspectRatio ?? "9:16",
+      delivery: "uri"
+    },
+    generation_config: {
+      video_config: {
+        task: "image_to_video"
+      }
+    }
+  };
+}
+
+// backend/src/services/director/contracts.ts
+import { z as z3 } from "zod";
+var compact = (value) => value.replace(/\s+/g, " ").trim();
+var providerLeakPattern = /\b(?:nano banana|gemini omni|gemini|veo|seedance|firefly|replicate|provider payload|api error)\b/i;
+var hiddenInstructionPattern = /\b(?:reference_images|previous_interaction_id|identity wrapper|continuity locks?|system prompt|provider)\b/i;
+var directorShotSchema = z3.object({
+  id: z3.string().min(1),
+  summary: z3.string().min(1),
+  action: z3.string().min(1),
+  cameraPlan: z3.string().min(1),
+  durationSeconds: z3.number().min(1).max(5)
+});
+var directorPlanSchema = z3.object({
+  sceneSummary: z3.string().min(1),
+  castDescription: z3.string().min(1),
+  wardrobe: z3.string().min(1),
+  environment: z3.string().min(1),
+  lighting: z3.string().min(1),
+  action: z3.string().min(1),
+  cameraPlan: z3.string().min(1),
+  continuityLocks: z3.array(z3.string().min(1)).min(1),
+  publicCaption: z3.string().min(1).max(160),
+  syntheticDisclosure: z3.literal("Synthetic portrayal"),
+  shots: z3.array(directorShotSchema).min(1).max(3)
+});
+function sanitizeDirectorPublicCaption(value) {
+  const firstSentence = compact(value).split(/[.!?]+/).map(compact).find((part) => part.length > 0 && !hiddenInstructionPattern.test(part));
+  const caption = firstSentence ? `${firstSentence.replace(/[.?!]+$/g, "")}.` : "A cinematic scene is ready.";
+  return caption.length <= 160 ? caption : `${caption.slice(0, 156).trimEnd()}...`;
+}
+function assertProviderNeutralPublicCaption(value) {
+  const caption = sanitizeDirectorPublicCaption(value);
+  if (providerLeakPattern.test(caption) || hiddenInstructionPattern.test(caption)) {
+    return "A cinematic scene is ready.";
+  }
+  return caption;
+}
+
+// backend/src/services/director/progress.ts
+var DIRECTOR_PROGRESS_STATES = [
+  "Planning your story",
+  "Building your cast and setting",
+  "Creating your scene",
+  "Checking movement and continuity",
+  "Polishing the result",
+  "Saving to Drafts"
+];
+
+// backend/src/services/director/routing.ts
+function selectDirectorRoute(input) {
+  if (input.hasPersonalIdentityImage || input.intent === "personal_ai_cast") {
+    return {
+      route: "director_primary",
+      automatic: false,
+      seedanceInputMode: null,
+      reason: "Personal AI Cast uses the Director anchor and primary-video pipeline only."
+    };
+  }
+  if (["text_only", "establishing_shot", "synthetic_character"].includes(input.intent)) {
+    return {
+      route: "seedance_text_only",
+      automatic: false,
+      seedanceInputMode: "text_to_video",
+      reason: "Seedance is retained only for text-only, establishing, or synthetic-character shots."
+    };
+  }
+  if (["hero_shot", "extension", "first_last_frame"].includes(input.intent)) {
+    return {
+      route: "veo_specialist",
+      automatic: false,
+      seedanceInputMode: null,
+      reason: "Veo remains an explicitly selected specialist route."
+    };
+  }
+  return {
+    route: "firefly_manual",
+    automatic: false,
+    seedanceInputMode: null,
+    reason: "Still-image cleanup is reserved for a future explicitly selected specialist route."
+  };
+}
+
+// backend/src/services/director/dryRunDiagnostics.ts
+var DIRECTOR_DRY_RUN_SCENE = "She walks through a candlelit mansion and pauses after hearing a sound behind her.";
+var DIRECTOR_CANARY_PRICING = Object.freeze({
+  currency: "USD",
+  effectiveDate: "2026-07-26",
+  sceneAnchor1kOutputUsd: 0.067,
+  primaryVideo720pPerSecondUsd: 0.1,
+  primaryVideoDurationSeconds: 4,
+  maximumInputAllowanceUsd: 0.01,
+  source: "Google Gemini Developer API standard pricing"
+});
+function buildLocalDryRunPlan(sceneIdea) {
+  const scene = sceneIdea.replace(/\s+/g, " ").trim() || DIRECTOR_DRY_RUN_SCENE;
+  return directorPlanSchema.parse({
+    sceneSummary: scene,
+    castDescription: "One adult synthetic cast member derived from one user-owned Front face reference.",
+    wardrobe: "A continuity-locked evening outfit appropriate for the mansion setting.",
+    environment: "A candlelit mansion interior with a quiet corridor and deep background shadows.",
+    lighting: "Warm candlelight with controlled shadow detail and a soft edge light.",
+    action: "Walk through the corridor, hear a sound from behind, pause, and listen.",
+    cameraPlan: "One steady tracking move followed by a gentle hold when the cast member pauses.",
+    continuityLocks: [
+      "Preserve the same synthetic cast identity throughout.",
+      "Keep wardrobe, candle direction, mansion geography, and screen direction continuous.",
+      "Do not imply that the synthetic portrayal is a real photograph or recording."
+    ],
+    publicCaption: assertProviderNeutralPublicCaption(scene),
+    syntheticDisclosure: "Synthetic portrayal",
+    shots: [
+      {
+        id: "shot-1",
+        summary: "The cast member walks into the candlelit corridor.",
+        action: "Walk forward at a natural pace.",
+        cameraPlan: "Steady medium tracking shot.",
+        durationSeconds: 1.5
+      },
+      {
+        id: "shot-2",
+        summary: "A sound is heard from behind.",
+        action: "Slow and begin to react without turning fully.",
+        cameraPlan: "Continue the same tracking axis with no cut.",
+        durationSeconds: 1.25
+      },
+      {
+        id: "shot-3",
+        summary: "The cast member pauses and listens.",
+        action: "Hold a subtle alert expression and remain still.",
+        cameraPlan: "Settle into a gentle locked hold.",
+        durationSeconds: 1.25
+      }
+    ]
+  });
+}
+function redactMediaData(payload) {
+  return {
+    ...payload,
+    input: Array.isArray(payload.input) ? payload.input.map((part) => typeof part === "object" && part && "type" in part && part.type === "image" ? {
+      type: "image",
+      mime_type: "image/jpeg",
+      data: "[redacted-reference-bytes]"
+    } : part) : payload.input
+  };
+}
+function buildDirectorProductionDryRun(sceneIdea = DIRECTOR_DRY_RUN_SCENE) {
+  const plan = buildLocalDryRunPlan(sceneIdea);
+  const reference = {
+    data: "[redacted-reference-bytes]",
+    mimeType: "image/jpeg",
+    ownershipConfirmed: true,
+    role: "front_face",
+    hashPrefix: "[redacted]"
+  };
+  const anchorPayload = redactMediaData(buildNanoBananaPayload({
+    reference,
+    plan
+  }));
+  const omniPayload = redactMediaData(buildOmniFlashPayload({
+    anchor: {
+      data: "[redacted-scene-anchor-bytes]",
+      mimeType: "image/jpeg"
+    },
+    plan,
+    durationSeconds: DIRECTOR_CANARY_PRICING.primaryVideoDurationSeconds,
+    aspectRatio: "9:16"
+  }));
+  const projectedVideoCost = DIRECTOR_CANARY_PRICING.primaryVideo720pPerSecondUsd * DIRECTOR_CANARY_PRICING.primaryVideoDurationSeconds;
+  const projectedMaximumCostUsd = Number((DIRECTOR_CANARY_PRICING.sceneAnchor1kOutputUsd + projectedVideoCost + DIRECTOR_CANARY_PRICING.maximumInputAllowanceUsd).toFixed(3));
+  return {
+    enabled: true,
+    mode: "dry_run",
+    paidExecutionEnabled: false,
+    authorizationRecorded: false,
+    providerSdkCallAllowed: false,
+    plan,
+    routing: selectDirectorRoute({
+      intent: "personal_ai_cast",
+      hasPersonalIdentityImage: true
+    }),
+    progressStates: [...DIRECTOR_PROGRESS_STATES],
+    proposedProviderSequence: [
+      { order: 1, role: "scene_anchor", requestCount: 1 },
+      { order: 2, role: "primary_video", requestCount: 1 }
+    ],
+    proposedAnchorPayload: anchorPayload,
+    proposedOmniPayload: omniPayload,
+    projectedRequests: {
+      sceneAnchor: 1,
+      primaryVideo: 1,
+      retry: 0,
+      fallback: 0,
+      repair: 0
+    },
+    actualTelemetry: {
+      providerRequestCount: 0,
+      providerRetryCount: 0,
+      providerFallbackCount: 0,
+      repairRequestCount: 0,
+      billableMetric: null
+    },
+    projectedBudget: {
+      ...DEFAULT_DIRECTOR_BUDGET,
+      pricing: DIRECTOR_CANARY_PRICING,
+      projectedMaximumCostUsd
+    },
+    disclosure: plan.syntheticDisclosure,
+    publicCaption: plan.publicCaption,
+    publicCaptionSeparated: plan.publicCaption !== anchorPayload.input[1]?.text,
+    secretsRedacted: true,
+    privateUrlsRedacted: true
+  };
+}
+
 // backend/src/services/productionHealthDiagnostics.ts
 var requiredSeedanceReferenceRoles = [
   "front_angle",
@@ -231,6 +567,7 @@ function generationProviders() {
 async function buildProductionHealthDiagnostics() {
   const checkedAt = (/* @__PURE__ */ new Date()).toISOString();
   const providers = generationProviders();
+  const director = buildDirectorProductionDryRun();
   try {
     const readiness = await readSafeReferenceRouteReadiness();
     return {
@@ -253,6 +590,7 @@ async function buildProductionHealthDiagnostics() {
         schemaChecks: []
       },
       ...readiness,
+      director,
       secretsRedacted: true,
       privateUrlsRedacted: true
     };
@@ -277,6 +615,7 @@ async function buildProductionHealthDiagnostics() {
         schemaChecks: []
       },
       ...buildSafeReferenceRouteReadiness([]),
+      director,
       diagnosticsError: {
         ok: false,
         key: "referenceRouteStatus",

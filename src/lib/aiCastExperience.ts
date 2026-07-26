@@ -88,8 +88,8 @@ export type AutoStageDecision = {
   modeLabel: 'Lumora Auto Stage' | 'Demo Mode';
   engine: 'seedance-2.0' | 'replicate' | 'mock';
   route:
+    | 'director_primary'
     | 'seedance_fast_default'
-    | 'seedance_fast_first_frame'
     | 'kling_exact_likeness'
     | 'demo_mode';
   fallbackEngine: 'seedance-2.0' | null;
@@ -262,13 +262,13 @@ export function decideAutoStage(input: AutoStageInput): AutoStageDecision {
     };
   }
 
-  if (isSeedanceFirstFrameCanaryEligible(input) && input.explicitFirstFrameCanaryAuthorized) {
+  if (input.selfCharacterReady) {
     return {
       modeLabel: 'Lumora Auto Stage',
       engine: 'seedance-2.0',
-      route: 'seedance_fast_first_frame',
+      route: 'director_primary',
       fallbackEngine: null,
-      reason: 'Seedance Fast — first-frame animation',
+      reason: 'Lumora Director prepares one synthetic scene anchor and one primary video candidate.',
     };
   }
 
@@ -308,9 +308,8 @@ export function isSeedanceFirstFrameCanaryEligible(input: Pick<
   | 'activeOtherReferenceCount'
   | 'referenceLedRouteModerated'
 >): boolean {
-  return input.activeFrontFaceReferenceCount === 1 &&
-    input.activeOtherReferenceCount === 0 &&
-    input.referenceLedRouteModerated === true;
+  void input;
+  return false;
 }
 
 function sentenceHas(text: string, pattern: RegExp) {
