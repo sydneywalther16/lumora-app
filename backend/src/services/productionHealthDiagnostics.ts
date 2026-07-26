@@ -10,12 +10,46 @@ export type ReferenceRouteReadinessRow = {
   failureCategory: string | null;
 };
 
+type SupabaseReferenceRouteReadinessRow = {
+  provider?: unknown;
+  reference_strategy?: unknown;
+  notes?: unknown;
+  success_count?: unknown;
+  failure_count?: unknown;
+  last_failure_category?: unknown;
+};
+
 const requiredSeedanceReferenceRoles = [
   'front_angle',
   'full_body',
   'side_angle_left',
   'side_angle_right',
 ] as const;
+
+function nullableString(value: unknown) {
+  return typeof value === 'string' ? value : null;
+}
+
+function nullableNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function normalizeSupabaseReferenceRouteRow(
+  row: SupabaseReferenceRouteReadinessRow,
+): ReferenceRouteReadinessRow {
+  const notes = row.notes && typeof row.notes === 'object' && !Array.isArray(row.notes)
+    ? row.notes as Record<string, unknown>
+    : {};
+
+  return {
+    provider: nullableString(row.provider),
+    referenceRole: nullableString(row.reference_strategy),
+    variant: nullableString(notes.variant),
+    successCount: nullableNumber(row.success_count),
+    failureCount: nullableNumber(row.failure_count),
+    failureCategory: nullableString(row.last_failure_category),
+  };
+}
 
 function isSeedanceProvider(provider: string | null) {
   return provider === 'seedance-fast' || provider === 'seedance-quality';
@@ -66,7 +100,58 @@ export function buildSafeReferenceRouteReadiness(rows: ReferenceRouteReadinessRo
   };
 }
 
+export async function fetchSafeReferenceRouteRowsFromSupabase({
+  supabaseUrl,
+  serviceRoleKey,
+  fetchImpl = fetch,
+}: {
+  supabaseUrl: string;
+  serviceRoleKey: string;
+  fetchImpl?: typeof fetch;
+}) {
+  const url = new URL('/rest/v1/render_success_memory', supabaseUrl);
+  url.searchParams.set(
+    'select',
+    'provider,reference_strategy,notes,success_count,failure_count,last_failure_category',
+  );
+  url.searchParams.set('render_mode', 'eq.reference_route_canary');
+  url.searchParams.set('order', 'updated_at.desc');
+  url.searchParams.set('limit', '40');
+
+  const response = await fetchImpl(url, {
+    method: 'GET',
+    headers: {
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      Accept: 'application/json',
+    },
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!response.ok) {
+    throw new Error('Supabase readiness query failed.');
+  }
+
+  const payload: unknown = await response.json();
+  if (!Array.isArray(payload)) {
+    throw new Error('Supabase readiness query returned an invalid response.');
+  }
+
+  return payload.map((row) => normalizeSupabaseReferenceRouteRow(
+    row && typeof row === 'object' && !Array.isArray(row)
+      ? row as SupabaseReferenceRouteReadinessRow
+      : {},
+  ));
+}
+
 export async function readSafeReferenceRouteReadiness() {
+  if (!env.DATABASE_URL && env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) {
+    const rows = await fetchSafeReferenceRouteRowsFromSupabase({
+      supabaseUrl: env.SUPABASE_URL,
+      serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
+    });
+    return buildSafeReferenceRouteReadiness(rows);
+  }
+
   const result = await query<ReferenceRouteReadinessRow>(
     `select
        provider,
