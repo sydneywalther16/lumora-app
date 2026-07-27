@@ -926,10 +926,10 @@ function buildSelfFormAppearanceSummary(form: SelfCharacterForm): string {
 
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="list-stack luxury-section-stack" style={{ marginTop: '22px' }}>
-      <div className="headline-card lumora-card lumora-card-soft compact luxury-section-header" style={{ padding: '22px', borderRadius: '30px' }}>
-        <span className="eyebrow">{title}</span>
-      </div>
+    <section className="list-stack profile-section">
+      <header className="profile-section-heading">
+        <h2>{title}</h2>
+      </header>
       {children}
     </section>
   );
@@ -3437,12 +3437,10 @@ export default function ProfilePage() {
 
       {samplePosts.length ? (
         <SectionCard title="Sample gallery">
-          <article className="list-card lumora-card" style={{ marginBottom: '10px' }}>
-            <span className="tiny-pill">Demo/sample media</span>
-            <p className="muted" style={{ marginBottom: 0 }}>
-              These preserved beta samples are separate from your verified creator portfolio. They can be archived or unpublished later from profile management.
-            </p>
-          </article>
+          <aside className="sample-media-banner profile-sample-banner" role="note">
+            <strong>Demo media</strong>
+            <span>Preserved beta samples stay separate from your creator portfolio.</span>
+          </aside>
           <div
             className="profile-published-grid"
             style={{

@@ -298,7 +298,12 @@ export function SimplifiedCreateExperience({
           disabled={state === 'READY' ? generateDisabled : generateBusy}
           aria-busy={generateBusy}
         >
-          {generateBusy ? 'Starting…' : copy.primaryAction}
+          {generateBusy ? (
+            <span className="simple-button-loading">
+              <span className="simple-activity-indicator" aria-hidden="true" />
+              Preparing your scene…
+            </span>
+          ) : copy.primaryAction}
         </button>
         {state === 'TEMPORARILY_UNAVAILABLE' ? null : (
           <button

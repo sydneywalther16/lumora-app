@@ -499,6 +499,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
           const statusLabel = isTextOnlyDraft ? 'Scene draft' : formatStatus(effectiveStatus);
           const mediaStatusLabel = isTextOnlyDraft ? 'No video yet' : statusLabel;
           const previewItem = verifiedVideoUrl ? { ...job, videoUrl: verifiedVideoUrl, outputUrl: verifiedVideoUrl } : job;
+          const castInitial = (job.characterName || 'L').trim().charAt(0).toUpperCase() || 'L';
           return (
             <article
               className={`list-card lumora-card cinematic-draft-card status-${statusClass(statusLabel)}`}
@@ -523,7 +524,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
             >
               <button
                 type="button"
-                className="draft-card-media"
+                className={`draft-card-media${isTextOnlyDraft ? ' draft-card-media-empty' : ''}`}
                 onClick={() => {
                   openJob(job);
                 }}
@@ -537,20 +538,39 @@ export default function StudioList({ jobs, onPublished }: Props) {
                   cursor: 'pointer',
                 }}
               >
-                <GeneratedVideoPreview
-                  item={previewItem}
-                  title={job.title}
-                  controls={Boolean(verifiedVideoUrl)}
-                  placeholderLabel={mediaStatusLabel}
-                  style={{
-                    width: '100%',
-                    height: '260px',
-                    borderRadius: '16px',
-                  }}
-                />
-                <span className="draft-media-overlay">
-                  <span>{mediaStatusLabel}</span>
-                </span>
+                {isTextOnlyDraft ? (
+                  <span className="draft-empty-preview" role="img" aria-label={`${job.title}: No video yet`}>
+                    <span className="draft-empty-preview-icon" aria-hidden="true">✦</span>
+                    <span className="draft-empty-preview-copy">
+                      <strong>No video yet</strong>
+                      <span>Scene draft</span>
+                    </span>
+                    {job.characterAvatar ? (
+                      <img className="draft-empty-cast-thumb" src={job.characterAvatar} alt="" />
+                    ) : (
+                      <span className="draft-empty-cast-thumb draft-empty-cast-fallback" aria-hidden="true">
+                        {castInitial}
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  <>
+                    <GeneratedVideoPreview
+                      item={previewItem}
+                      title={job.title}
+                      controls={Boolean(verifiedVideoUrl)}
+                      placeholderLabel={mediaStatusLabel}
+                      style={{
+                        width: '100%',
+                        height: '260px',
+                        borderRadius: '16px',
+                      }}
+                    />
+                    <span className="draft-media-overlay">
+                      <span>{mediaStatusLabel}</span>
+                    </span>
+                  </>
+                )}
               </button>
 
               <div className="draft-card-copy">

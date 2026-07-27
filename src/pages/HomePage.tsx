@@ -285,12 +285,10 @@ export default function HomePage() {
 
       {feedMessage ? <p className="muted">{feedMessage}</p> : null}
       {localPosts.some(isLegacyDemoMedia) ? (
-        <article className="list-card lumora-card">
-          <span className="tiny-pill">Sample gallery</span>
-          <p className="muted" style={{ marginBottom: 0 }}>
-            Items marked “Sample AI portrayal” are preserved beta examples, not verified creator portfolio work.
-          </p>
-        </article>
+        <aside className="sample-media-banner" role="note">
+          <strong>Sample gallery</strong>
+          <span>Sample AI portrayals are beta examples, not verified creator work.</span>
+        </aside>
       ) : null}
 
       {localPosts.length ? (

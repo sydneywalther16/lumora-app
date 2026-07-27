@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { memo, useMemo } from 'react';
+import { memo } from 'react';
 
 const items = [
   ['Home', '/home'],
@@ -14,11 +14,9 @@ function navPillClass({ isActive }: { isActive: boolean }) {
 }
 
 function BottomNav() {
-  const navItems = useMemo(() => items, []);
-
   return (
     <nav className="bottom-nav" aria-label="Primary">
-      {navItems.map(([label, to]) => (
+      {items.map(([label, to]) => (
         <NavLink
           key={to}
           to={to}
