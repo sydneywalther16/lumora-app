@@ -234,11 +234,11 @@ export default function StudioPage() {
       <section className="headline-card lumora-card lumora-card-hero luxury-page-hero drafts-workbench-hero">
         <div>
           <span className="eyebrow">drafts</span>
-          <h2>Your AI scenes in progress</h2>
+          <h1>Your scenes</h1>
         </div>
-        <p>Private render jobs, paused scenes, and completed AI cast videos gather here until they are ready to publish.</p>
+        <p>Continue a scene or review a finished draft.</p>
       </section>
-      {status ? <p className="muted">{status}</p> : null}
+      {status && jobs.length ? <p className="muted">{status}</p> : null}
       <StudioList
         jobs={jobs}
         onPublished={(jobId) => {

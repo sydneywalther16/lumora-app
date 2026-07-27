@@ -2,8 +2,6 @@ import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Link } from 'react-router-dom';
 import AuthCard from '../components/auth/AuthCard';
 import CharacterHub from '../components/CharacterHub';
-import CreatorIdentityCard from '../components/CreatorIdentityCard';
-import StoryWorldProgress from '../components/StoryWorldProgress';
 import {
   CREATOR_SELF_CHARACTER_ID,
   cleanupCreatorSelfMetadata,
@@ -51,7 +49,6 @@ import { resolveRenderableReferenceUrl } from '../lib/selfCharacterReference';
 import SelfReferencePreview, { normalizeReference } from '../components/SelfReferencePreview';
 import { openContinueStory } from '../lib/continueStory';
 import { trackCreatorEvent } from '../lib/creatorEvents';
-import { buildCreatorIdentityCard, buildStoryWorldProgress } from '../lib/storyWorld';
 import { buildPortrayalDisclosure, isLegacyDemoMedia } from '../lib/aiCastExperience';
 
 type Draft = { id: string; title: string; prompt: string; createdAt: string };
@@ -1226,9 +1223,10 @@ function ProfilePostPreviewModal({
 
 type ProfileMenuPanelId =
   | 'account'
-  | 'about'
   | 'contact'
+  | 'guidelines'
   | 'help'
+  | 'inbox'
   | 'privacy'
   | 'settings'
   | 'terms';
@@ -1240,13 +1238,20 @@ type ProfileMenuItem = {
 };
 
 const profileMenuItems: ProfileMenuItem[] = [
+  { id: 'inbox', label: 'Inbox', title: 'Inbox' },
   { id: 'settings', label: 'Settings', title: 'Settings' },
   { id: 'account', label: 'Account', title: 'Account' },
-  { id: 'about', label: 'About Lumora', title: 'About Lumora' },
   { id: 'help', label: 'Help', title: 'Help' },
   { id: 'contact', label: 'Contact', title: 'Contact' },
   { id: 'privacy', label: 'Privacy', title: 'Privacy' },
   { id: 'terms', label: 'Terms', title: 'Terms' },
+  { id: 'guidelines', label: 'Community Guidelines', title: 'Community Guidelines' },
+];
+
+const profileMenuGroups: Array<{ label: string; itemIds: ProfileMenuPanelId[] }> = [
+  { label: 'Account', itemIds: ['inbox', 'settings', 'account'] },
+  { label: 'Support', itemIds: ['help', 'contact'] },
+  { label: 'Legal', itemIds: ['privacy', 'terms', 'guidelines'] },
 ];
 
 function shortenUserId(userId: string | null): string {
@@ -1401,11 +1406,10 @@ function ProfileMenuDetail({
         </div>
       ) : null}
 
-      {item.id === 'about' ? (
-        <MenuSectionCard title="Lumora">
-          <p style={mutedTextStyle}>
-            Lumora is an AI Cast Studio for reusable characters, generated scenes, Story Memory, and AI cast videos only.
-          </p>
+      {item.id === 'inbox' ? (
+        <MenuSectionCard title="Messages">
+          <p style={mutedTextStyle}>Preview the beta’s clearly labeled sample messages.</p>
+          <Link className="ghost-btn" to="/inbox">Open Inbox</Link>
         </MenuSectionCard>
       ) : null}
 
@@ -1414,7 +1418,7 @@ function ProfileMenuDetail({
           {[
             'Create or sync your self character',
             'Cast a character into a generated scene',
-            'Review the verified video in Drafts',
+            'Review the finished video in Drafts',
             'Publish the AI cast video',
           ].map((step) => (
             <p key={step} style={mutedTextStyle}>
@@ -1461,6 +1465,13 @@ function ProfileMenuDetail({
           ))}
           <Link className="ghost-btn" to="/terms">Read Terms</Link>
           <Link className="ghost-btn" to="/community-guidelines">Community Guidelines</Link>
+        </MenuSectionCard>
+      ) : null}
+
+      {item.id === 'guidelines' ? (
+        <MenuSectionCard title="Community Guidelines">
+          <p style={mutedTextStyle}>Review the rules that help keep Lumora safe and respectful.</p>
+          <Link className="ghost-btn" to="/community-guidelines">Read Community Guidelines</Link>
         </MenuSectionCard>
       ) : null}
     </div>
@@ -1542,40 +1553,32 @@ function ProfileMenuSidebar({
             onJumpToAuth={onJumpToAuth}
           />
         ) : (
-          <nav style={{ display: 'grid', gap: '10px', alignContent: 'start' }}>
-            {profileMenuItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className="ghost-btn"
-                onClick={() => onSelect(item)}
-                style={{
-                  width: '100%',
-                  justifyContent: 'flex-start',
-                  textAlign: 'left',
-                  borderRadius: '18px',
-                  flex: 'unset',
-                  cursor: 'pointer',
-                  touchAction: 'manipulation',
-                }}
-              >
-                {item.label}
-              </button>
+          <nav className="profile-menu-groups">
+            {profileMenuGroups.map((group) => (
+              <section key={group.label} className="profile-menu-group">
+                <span className="eyebrow">{group.label}</span>
+                {group.itemIds.map((itemId) => {
+                  const item = profileMenuItems.find((candidate) => candidate.id === itemId);
+                  if (!item) return null;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="profile-menu-row"
+                      onClick={() => onSelect(item)}
+                    >
+                      {item.label}
+                      <span aria-hidden="true">›</span>
+                    </button>
+                  );
+                })}
+              </section>
             ))}
             {signedIn ? (
               <button
                 type="button"
-                className="ghost-btn"
+                className="profile-menu-row profile-menu-signout"
                 onClick={onSignOut}
-                style={{
-                  width: '100%',
-                  justifyContent: 'flex-start',
-                  textAlign: 'left',
-                  borderRadius: '18px',
-                  flex: 'unset',
-                  cursor: 'pointer',
-                  touchAction: 'manipulation',
-                }}
               >
                 Sign out
               </button>
@@ -1584,57 +1587,6 @@ function ProfileMenuSidebar({
         )}
       </aside>
     </div>
-  );
-}
-
-function ProjectCard({ project, onOpen }: { project: StudioProject; onOpen: () => void }) {
-  const characterLabel = project.isDefaultSelfCharacter
-    ? 'Soft self guidance'
-    : project.characterName
-      ? `Character: ${project.characterName}`
-      : 'No character selected';
-
-  return (
-    <article
-      className="list-card"
-      role="button"
-      tabIndex={0}
-      aria-label={`Open completed project ${project.title || project.prompt || project.id}`}
-      onClick={onOpen}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          onOpen();
-        }
-      }}
-      style={{ borderRadius: '28px', background: 'var(--surface-strong)', padding: '18px', cursor: 'pointer' }}
-    >
-      <div className="row-between" style={{ gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <h3>{project.prompt || 'Cast Video'}</h3>
-          <p className="muted" style={{ marginTop: '10px' }}>
-            {characterLabel} - {(project.displayEngine || project.provider).toUpperCase()}
-          </p>
-        </div>
-        <span className="tiny-pill" style={{ background: 'var(--pill-background)' }}>
-          {project.status}
-        </span>
-      </div>
-      <GeneratedVideoPreview
-        item={project}
-        title={project.title || project.prompt || 'Cast video'}
-        controls={Boolean(project.videoUrl)}
-        forceVideo={Boolean(project.videoUrl)}
-        fit="cover"
-        style={{
-          width: '100%',
-          height: '320px',
-          borderRadius: '20px',
-          background: 'var(--media-background)',
-          marginTop: '14px',
-        }}
-      />
-    </article>
   );
 }
 
@@ -1963,27 +1915,6 @@ export default function ProfilePage() {
           creatorSelfCharacter.referenceImageUrls.manualReferenceImageUrl,
       })
     : null;
-  const identityConfidence = Math.round(creatorIdentityProfile?.identityStrength ?? 0);
-  const identityLifecycleLabel = !creatorIdentityProfile
-    ? 'Needs references'
-    : creatorIdentityProfile.status === 'building'
-      ? 'Building self character'
-    : (creatorIdentityProfile.feedbackIterations ?? 0) > 0
-        ? 'Self guidance learning'
-        : ((creatorIdentityProfile.keyframeUrl && creatorIdentityProfile.keyframeUrl !== creatorIdentityProfile.frontFaceUrl) || identityConfidence >= 70)
-          ? 'Self character stabilized'
-          : creatorIdentityProfile.status === 'ready'
-            ? 'Self character ready'
-            : 'Needs references';
-  const storyWorldProgress = buildStoryWorldProgress({
-    drafts,
-    posts,
-    characters,
-  });
-  const creatorIdentityCard = buildCreatorIdentityCard({
-    profile,
-    characters,
-  });
   function openProfileEditor() {
     setProfileDraft(profile);
     setSaveMessage(null);
@@ -2969,11 +2900,11 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="page lumora-page" style={{ paddingBottom: '40px' }}>
-      <section className="profile-hero lumora-card lumora-card-hero cinematic-profile-hero luxury-page-hero" style={{ borderRadius: '30px', padding: '22px' }}>
+    <div className="page lumora-page simplified-profile-page" style={{ paddingBottom: '40px' }}>
+      <section className="profile-hero simplified-profile-hero">
         <div style={{ display: 'grid', gap: '18px', justifyItems: 'center', textAlign: 'center' }}>
           <div className="row-between" style={{ width: '100%', alignItems: 'center' }}>
-            <span className="eyebrow">creator profile</span>
+            <span className="eyebrow">Profile</span>
             <button
               type="button"
               aria-label="Open profile menu"
@@ -2999,9 +2930,9 @@ export default function ProfilePage() {
 
           <div
             style={{
-              width: '108px',
-              height: '108px',
-              borderRadius: '34px',
+              width: '88px',
+              height: '88px',
+              borderRadius: '28px',
               overflow: 'hidden',
               background: 'var(--control-background)',
               display: 'flex',
@@ -3028,15 +2959,6 @@ export default function ProfilePage() {
             <span><strong>{formatCompactNumber(displayedCharacterCount)}</strong> Characters</span>
           </div>
 
-          <p className="profile-creator-signal">
-            Your profile is becoming an AI cast universe: reusable characters, published scenes, and the story worlds your audience can follow.
-          </p>
-
-          <div className="profile-memory-pulse" aria-label="Profile story signal">
-            <span className="tiny-dot" />
-            <span>Lumora remembered your world.</span>
-          </div>
-
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
             <button type="button" className="primary-btn lumora-primary-action" onClick={openProfileEditor}>
               Edit profile
@@ -3049,10 +2971,6 @@ export default function ProfilePage() {
           {saveMessage ? <p style={{ color: 'var(--success-text)', margin: 0 }}>{saveMessage}</p> : null}
         </div>
       </section>
-
-      <StoryWorldProgress progress={storyWorldProgress} />
-
-      <CreatorIdentityCard card={creatorIdentityCard} compact onEdit={openCharactersHub} />
 
       {!signedIn ? (
         <div id="profile-auth-section">
@@ -3508,8 +3426,8 @@ export default function ProfilePage() {
           </div>
         ) : (
           <article className="list-card lumora-card lumora-empty-state luxury-empty-state" style={{ borderRadius: '28px', padding: '18px' }}>
-            <h3>Your published AI cast videos will appear here.</h3>
-            <p className="muted">Generate a scene, publish the verified video from Drafts, and your profile becomes a living story grid.</p>
+            <h3>Your shared scenes will appear here.</h3>
+            <p className="muted">Finish a scene in Drafts, then share it when you are ready.</p>
             <button type="button" className="primary-btn" onClick={() => { window.location.href = '/create'; }} style={{ width: 'fit-content', flex: 'unset' }}>
               Create your first scene
             </button>

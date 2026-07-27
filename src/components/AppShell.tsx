@@ -5,8 +5,8 @@ import BottomNav from './BottomNav';
 
 const routeTitles: Record<string, string> = {
   '/home': 'Lumora',
-  '/for-you': 'For You',
-  '/trends': 'For You',
+  '/for-you': 'Discover',
+  '/trends': 'Discover',
   '/onboarding': 'Welcome',
   '/create': 'Create',
   '/capture': 'Capture',
@@ -26,6 +26,8 @@ const routeTitles: Record<string, string> = {
 
 export default function AppShell() {
   const location = useLocation();
+  const pageOwnsHeading = ['/home', '/for-you', '/trends', '/create', '/drafts', '/studio', '/profile']
+    .includes(location.pathname);
 
   useEffect(() => {
     console.info('NAV OK');
@@ -34,7 +36,7 @@ export default function AppShell() {
   return (
     <div className="app-bg">
       <div className="phone-frame">
-        <StatusBar title={routeTitles[location.pathname] ?? 'Lumora'} />
+        {pageOwnsHeading ? null : <StatusBar title={routeTitles[location.pathname] ?? 'Lumora'} />}
         <main className="screen-scroll">
           <Outlet />
         </main>

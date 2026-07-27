@@ -258,7 +258,11 @@ assert.match(createVideoSource, /Kling Reference is experimental/);
 assert.match(createVideoSource, /Prompt polish/);
 assert.match(createVideoSource, /Lumora tried the best Stage route and switched to a safer fallback\./);
 assert.match(createVideoSource, /buildPublicCaptionFromPrompt/);
-assert.match(studioListSource, /buildDraftAiCastLabels/);
+assert.doesNotMatch(
+  studioListSource,
+  /buildDraftAiCastLabels/,
+  'Normal Draft cards must not expose internal route and reference labels.',
+);
 assert.match(studioListSource, /buildDraftPublicCaption\(job\)/);
 assert.match(studioListSource, /Viral caption helper/);
 

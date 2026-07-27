@@ -18,8 +18,8 @@ import { resolveGeneratedVideoMedia } from '../lib/mediaThumbnail';
 import { openContinueStory } from '../lib/continueStory';
 import { trackCreatorEvent } from '../lib/creatorEvents';
 import { buildSafeTakePrompt, creatorRenderStateCopy } from '../lib/renderStateCopy';
-import { getVerifiedVideoOutputUrl, hasVerifiedVideoOutput, lighterCastGuidanceMessage } from '../lib/renderCompletion';
-import { buildDraftAiCastLabels, buildDraftPublicCaption, buildViralCaptionSuggestions } from '../lib/aiCastExperience';
+import { getVerifiedVideoOutputUrl, hasVerifiedVideoOutput } from '../lib/renderCompletion';
+import { buildDraftPublicCaption, buildViralCaptionSuggestions } from '../lib/aiCastExperience';
 
 type Props = {
   jobs: GenerationJob[];
@@ -90,34 +90,6 @@ function getPostedProjectIds(): string[] {
   } catch {
     return [];
   }
-}
-
-function getJobCharacterLabel(job: GenerationJob) {
-  if (job.exactLikenessRoute === 'kling_reference' || job.generationMode === 'kling-exact-likeness-reference') {
-    return 'Kling Reference Beta';
-  }
-
-  if (job.displayEngine?.toLowerCase().includes('kling exact likeness')) {
-    return 'Kling Reference Beta';
-  }
-
-  // Always prioritize isDefaultSelfCharacter flag
-  if (Boolean(job.isDefaultSelfCharacter)) {
-    return 'Soft self guidance';
-  }
-  
-  // Otherwise, show character name if available
-  if (job.characterName) {
-    return `Character: ${job.characterName}`;
-  }
-  
-  // Fallback to title if it mentions a character
-  if (job.title && job.title.startsWith('Character: ')) {
-    return job.title;
-  }
-  
-  // Default fallback
-  return '';
 }
 
 function verifiedJobVideoUrl(job: GenerationJob | null) {
@@ -497,14 +469,11 @@ export default function StudioList({ jobs, onPublished }: Props) {
         {publishToast}
         <section className="list-stack">
           <article className="list-card lumora-card lumora-empty-state luxury-empty-state">
-            <div className="row-between">
-              <h3>{jobs.length ? 'Publishing your AI cast video...' : 'Your AI scenes in progress will appear here.'}</h3>
-              <span className="tiny-pill status-drafting">Ready</span>
-            </div>
+            <h3>{jobs.length ? 'Finishing your scene…' : 'No drafts yet'}</h3>
             <p>
               {jobs.length
-                ? 'The scene will leave Drafts once it joins your profile.'
-                : 'Create your first scene and Lumora will autosave the draft before you decide to post.'}
+                ? 'Your scene will leave Drafts after you choose to share it.'
+                : 'Start a scene and save it here whenever you want to continue later.'}
             </p>
             {!jobs.length ? (
               <Link className="primary-btn" to="/create" style={{ display: 'inline-flex', width: 'fit-content', flex: 'unset' }}>
@@ -529,10 +498,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
           const isTextOnlyDraft = statusValue === 'draft' && !verifiedVideoUrl;
           const statusLabel = isTextOnlyDraft ? 'Scene draft' : formatStatus(effectiveStatus);
           const mediaStatusLabel = isTextOnlyDraft ? 'No video yet' : statusLabel;
-          const showProviderDetail = false;
           const previewItem = verifiedVideoUrl ? { ...job, videoUrl: verifiedVideoUrl, outputUrl: verifiedVideoUrl } : job;
-          const draftLabels = buildDraftAiCastLabels(job);
-
           return (
             <article
               className={`list-card lumora-card cinematic-draft-card status-${statusClass(statusLabel)}`}
@@ -594,27 +560,6 @@ export default function StudioList({ jobs, onPublished }: Props) {
                     {buildDraftPublicCaption(job)}
                   </p>
                 </div>
-                {showProviderDetail ? (
-                  <span className="tiny-pill">{(job.displayEngine || job.provider).toUpperCase()}</span>
-                ) : null}
-              </div>
-
-              <div className="draft-continuity-note">
-                <span className="tiny-dot" />
-                <p>
-                  {job.characterName
-                    ? `${getJobCharacterLabel(job)} can carry into the next scene.`
-                    : 'Story Memory can carry this mood forward.'}
-                </p>
-              </div>
-              {lighterCastGuidanceMessage(job as unknown as Record<string, unknown>) ? (
-                <p className="muted">{lighterCastGuidanceMessage(job as unknown as Record<string, unknown>)}</p>
-              ) : null}
-
-              <div className="draft-ai-cast-labels" aria-label="AI cast render metadata">
-                {draftLabels.map((label) => (
-                  <span key={label} className="tiny-pill">{label}</span>
-                ))}
               </div>
 
               <div className="draft-card-footer">
@@ -633,24 +578,13 @@ export default function StudioList({ jobs, onPublished }: Props) {
                       </button>
                       <button
                         type="button"
-                        className="ghost-btn"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          openJob(job);
-                        }}
-                      >
-                        View scene
-                      </button>
-                      <button
-                        type="button"
                         className="quiet-btn"
                         onClick={(event) => {
                           event.stopPropagation();
                           openJob(job);
                         }}
-                        disabled={isPosted(job.id)}
                       >
-                        {isPosted(job.id) ? 'Posted' : 'Publish'}
+                        Details
                       </button>
                     </>
                   ) : (

@@ -10,6 +10,7 @@
     "bundle:vercel-api": "node scripts/build-vercel-api.mjs",
     "test:canary-regression": "tsx backend/test/realRenderCanaryRegression.test.ts",
     "test:director": "tsx backend/test/directorV1.test.ts",
+    "test:creator-experience": "tsx backend/test/createExperience.test.ts && node scripts/audit-production-copy.mjs",
     "preview": "vite preview",
     "dev:api": "tsx backend/src/index.ts",
     "seed": "tsx backend/src/scripts/seed.ts",

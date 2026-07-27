@@ -217,7 +217,7 @@ export default function AuthCard(props: Props = {}) {
           <h2>Sign in to save your creator workspace</h2>
         </div>
         <p>Profiles, self characters, projects, drafts, and posts sync to your account.</p>
-        <p className="muted">We'll never ask for your provider keys or render credentials.</p>
+        <p className="muted">Your private account details stay protected.</p>
         <label className="field-block">
           <span>Email</span>
           <input

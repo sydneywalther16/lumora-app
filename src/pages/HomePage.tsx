@@ -279,13 +279,9 @@ export default function HomePage() {
     <div className="page lumora-page cinematic-feed-page">
       <header className="home-feed-header">
         <h1>Lumora</h1>
-        <p>Create scenes, build an AI Cast, save drafts, and continue your story world.</p>
-        {isNativePlatform ? (
-          <Link className="primary-btn native-home-create" to="/create">Open Lumora Stage</Link>
-        ) : null}
+        <p>Create cinematic moments with your AI Cast.</p>
+        <Link className="primary-btn native-home-create" to="/create">Create a scene</Link>
       </header>
-
-      {!isNativePlatform ? creatorSafetyCard : null}
 
       {feedMessage ? <p className="muted">{feedMessage}</p> : null}
       {localPosts.some(isLegacyDemoMedia) ? (
@@ -313,16 +309,13 @@ export default function HomePage() {
       ) : !localPosts.length ? (
         <section className="list-stack">
           <article className="list-card lumora-card lumora-empty-state">
-            <div className="row-between">
-              <h3>No AI cast videos yet</h3>
-              <span className="tiny-pill status-drafting">Ready</span>
-            </div>
-            <p>Generate a Lumora scene, publish the verified video, and it can appear here.</p>
+            <h3>No scenes shared yet</h3>
+            <p>Your finished scenes can appear here when you choose to share them.</p>
           </article>
         </section>
       ) : null}
 
-      {isNativePlatform ? creatorSafetyCard : null}
+      {creatorSafetyCard}
 
       {selectedPost ? (
         <HomePostModal

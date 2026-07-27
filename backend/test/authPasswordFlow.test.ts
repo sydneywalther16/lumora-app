@@ -85,7 +85,8 @@ assert.match(authCardSource, /FORGOT_PASSWORD_CLIENT_COOLDOWN_MS/);
 assert.match(authCardSource, /forgotPasswordCooldownActive/);
 assert.match(authCardSource, /if \(busy\) return;/);
 assert.match(authCardSource, /validatePasswordConfirmation/);
-assert.match(authCardSource, /We'll never ask for your provider keys or render credentials\./);
+assert.match(authCardSource, /Your private account details stay protected\./);
+assert.doesNotMatch(authCardSource, /provider keys|render credentials/i);
 assert.match(authCardSource, /Check your email for a password reset link\./);
 assert.doesNotMatch(authCardSource, /Password reset email sent\. Open the link to set a new password\./);
 

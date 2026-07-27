@@ -337,9 +337,6 @@ export default function CreatePage() {
     : null;
 
   const pageLoading = creatorDataLoading || !isHydrated;
-  useEffect(() => {
-    console.log("FINAL referenceImageUrl:", referenceImageUrl);
-  }, [referenceImageUrl]);
 
   async function handleLikenessFeedback(feedback: LumoraIdentityFeedback) {
     if (!identityProfile || !activeSelfCharacter) return;
@@ -395,10 +392,10 @@ export default function CreatePage() {
 
   if (pageLoading) {
     return (
-      <div className="page lumora-page">
-        <section className="headline-card lumora-card lumora-card-hero">
-          <span className="eyebrow">cast</span>
-          <h2>Waking up your AI cast...</h2>
+      <div className="page lumora-page focused-create-page">
+        <section className="simple-create simple-create-progress" role="status" aria-live="polite">
+          <div className="lumora-directing-mark" aria-hidden="true"><span>L</span></div>
+          <p className="muted">Preparing Create…</p>
         </section>
       </div>
     );

@@ -234,7 +234,11 @@ assert.match(generateVideoSource, /Scene anchor video model is not configured\./
 assert.match(generateVideoSource, /rawReferenceVisualInputsSentToStage2: false/);
 
 const studioListSource = readFileSync(join(process.cwd(), 'src/components/StudioList.tsx'), 'utf8');
-assert.match(studioListSource, /Kling Reference Beta/);
+assert.doesNotMatch(
+  studioListSource,
+  /Kling Reference Beta/,
+  'Draft cards must not expose specialist provider routes.',
+);
 
 const continueStorySource = readFileSync(join(process.cwd(), 'src/lib/continueStory.ts'), 'utf8');
 assert.match(continueStorySource, /exactLikenessRoute/);

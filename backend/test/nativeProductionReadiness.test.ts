@@ -58,6 +58,11 @@ assert.match(createSource, /fetchApiResponse\('\/api\/lumora\/generate-video'/);
 assert.match(profileSource, /fetchApiResponse\('\/api\/lumora\/build-identity'/);
 assert.match(homeSource, /shouldShowInstallAction/);
 assert.match(homeSource, /buildPortrayalDisclosure/);
-assert.match(statusSource, /shouldShowSimulatedDeviceStatus/);
+assert.doesNotMatch(
+  statusSource,
+  /shouldShowSimulatedDeviceStatus/,
+  'The app shell must not imitate device signal or battery indicators.',
+);
+assert.match(statusSource, /shouldShowNativeRouteHeader/);
 
 console.log('nativeProductionReadiness unit tests passed');

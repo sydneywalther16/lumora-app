@@ -3,10 +3,9 @@ import { memo, useMemo } from 'react';
 
 const items = [
   ['Home', '/home'],
-  ['For You', '/for-you'],
+  ['Discover', '/for-you'],
   ['Create', '/create'],
   ['Drafts', '/drafts'],
-  ['Inbox', '/inbox'],
   ['Profile', '/profile'],
 ] as const;
 

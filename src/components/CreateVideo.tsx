@@ -94,6 +94,17 @@ import {
   DIRECTOR_PROGRESS_STATES,
   directorProgressForGenerationState,
 } from '../lib/directorExperience';
+import {
+  creatorProgressStep,
+  deriveCreatorCreateState,
+  shouldShowInternalCreateDiagnostics,
+} from '../lib/createExperience';
+import {
+  SimplifiedCreateExperience,
+  type CreatorFormat,
+  type CreatorLength,
+  type CreatorStyle,
+} from './SimplifiedCreateExperience';
 
 type CreateVideoProps = {
   refreshKey?: number;
@@ -1531,7 +1542,7 @@ export default function CreateVideo({
   } = useAppStore();
 
   const [duration, setDuration] = useState(4);
-  const [aspectRatio, setAspectRatio] = useState<VideoAspectRatio>('16:9');
+  const [aspectRatio, setAspectRatio] = useState<VideoAspectRatio>('9:16');
   const [renderPreference, setRenderPreference] = useState<RenderSuccessMode>('success_first');
   const [selfLikenessIntensity, setSelfLikenessIntensity] = useState<SelfLikenessIntensity>('balanced');
   const [engine, setEngine] = useState<VideoEngine>(SEEDANCE_ENGINE_ID);
@@ -4581,6 +4592,95 @@ export default function CreateVideo({
     } catch (error) {
       setFeedbackStatus(error instanceof Error ? error.message : 'Unable to save likeness feedback.');
     }
+  }
+
+  const internalCreateDiagnostics = shouldShowInternalCreateDiagnostics(
+    typeof window === 'undefined' ? '' : window.location.search,
+    import.meta.env.DEV,
+  );
+  const creatorFormat: CreatorFormat =
+    aspectRatio === '9:16' ? 'Portrait' : aspectRatio === '1:1' ? 'Square' : 'Landscape';
+  const creatorLength: CreatorLength = duration <= 4 ? 'Short' : 'Standard';
+  const creatorPublicCaption = buildPublicCaptionFromPrompt(
+    finalGeneratedPrompt || generationResult?.prompt || activePrompt,
+  );
+  const creatorStyle: CreatorStyle = selectedStyles.includes('Animated Cartoon')
+    ? 'Animated'
+    : selectedStyles.includes('Virtual Sitcom') || selectedStyles.includes('Luxury POV')
+      ? 'Social'
+      : selectedStyles.length
+        ? 'Cinematic'
+        : 'Auto';
+  const isCreatorGenerating =
+    generationLoading ||
+    generationStatusState === 'queued' ||
+    generationStatusState === 'processing' ||
+    generationStatusState === 'verifying_output';
+  const creatorCreateState = deriveCreatorCreateState({
+    hasCast: Boolean(characterName),
+    isGenerating: isCreatorGenerating,
+    hasSavedResult: Boolean(generatedVideoUrl),
+    isTemporarilyUnavailable:
+      generationStatusState === 'rate_limited' ||
+      Boolean(providerReadinessMessage),
+    needsEdit: Boolean(
+      generationFailureStatus &&
+      ['paused', 'blocked', 'failed', 'timeout', 'reference_repair'].includes(generationFailureStatus),
+    ),
+  });
+
+  function handleCreatorStyleChange(nextStyle: CreatorStyle) {
+    selectedStyles.forEach((selectedStyle) => toggleSelectedStyle(selectedStyle));
+    const selectedPreset =
+      nextStyle === 'Cinematic'
+        ? 'Cinematic Sunset'
+        : nextStyle === 'Social'
+          ? 'Virtual Sitcom'
+          : nextStyle === 'Animated'
+            ? 'Animated Cartoon'
+            : null;
+    if (selectedPreset) toggleSelectedStyle(selectedPreset);
+  }
+
+  if (!internalCreateDiagnostics) {
+    return (
+      <SimplifiedCreateExperience
+        state={creatorCreateState}
+        castName={characterName}
+        castAvatar={characterAvatar}
+        sceneIdea={activePrompt}
+        format={creatorFormat}
+        length={creatorLength}
+        style={creatorStyle}
+        progressStep={creatorProgressStep(generationStatusState)}
+        generateDisabled={generateButtonDisabled}
+        generateBusy={generateBusy}
+        saveBusy={saveBusy}
+        resultItem={generationResult ?? {
+          videoUrl: generatedVideoUrl,
+          outputUrl: generatedVideoUrl,
+          caption: creatorPublicCaption,
+          characterAvatar,
+        }}
+        resultCaption={creatorPublicCaption}
+        onSceneIdeaChange={setActivePrompt}
+        onChangeCast={() => onResaveReferencePhoto?.()}
+        onFormatChange={(nextFormat) => {
+          setAspectRatio(nextFormat === 'Portrait' ? '9:16' : nextFormat === 'Square' ? '1:1' : '16:9');
+        }}
+        onLengthChange={(nextLength) => setDuration(nextLength === 'Short' ? 4 : 8)}
+        onStyleChange={handleCreatorStyleChange}
+        onGenerate={() => {
+          void (generationError && !activeReferenceRepair
+            ? handleGenerate({ forceNewTake: true })
+            : handleGenerate());
+        }}
+        onSaveDraft={() => void handleSaveDraft()}
+        onOpenDrafts={() => {
+          window.location.href = '/drafts';
+        }}
+      />
+    );
   }
 
   return (

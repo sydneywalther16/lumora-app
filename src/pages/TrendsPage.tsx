@@ -389,31 +389,6 @@ export default function TrendsPage() {
     if (debouncedQuery) return feed.length ? `${feed.length} result${feed.length === 1 ? '' : 's'}` : 'No matching AI cast videos yet';
     return feed.length ? 'AI cast videos for you' : 'No public AI cast videos yet';
   }, [debouncedQuery, feed.length, loading]);
-  const discoveryHighlights = useMemo(() => feed.slice(0, 3), [feed]);
-  const shouldPrioritizeVideoGrid = useMemo(() => feed.some((post) => Boolean(post.videoUrl)), [feed]);
-  const trendingStories = useMemo(
-    () =>
-      [...feed]
-        .sort(
-          (left, right) =>
-            ((right.likeCount ?? 0) + (right.shareCount ?? 0) + (right.viewCount ?? 0) / 10) -
-            ((left.likeCount ?? 0) + (left.shareCount ?? 0) + (left.viewCount ?? 0) / 10),
-        )
-        .slice(0, 6),
-    [feed],
-  );
-  const popularCast = useMemo(() => {
-    const counts = new Map<string, number>();
-    feed.forEach((post) => {
-      const name = post.characterName?.trim();
-      if (!name) return;
-      counts.set(name, (counts.get(name) ?? 0) + 1);
-    });
-    return [...counts.entries()]
-      .sort((left, right) => right[1] - left[1])
-      .slice(0, 5);
-  }, [feed]);
-
   function openPost(post: FeedPost) {
     void trackCreatorEvent('for_you_item_opened', { postId: post.id, characterName: post.characterName ?? null }, authUser?.id ?? null);
     setSelectedPost(post);
@@ -441,7 +416,7 @@ export default function TrendsPage() {
   return (
     <div className="page lumora-page cinematic-feed-page">
       <section
-        className="for-you-topbar lumora-card-hero luxury-page-hero"
+        className="for-you-topbar"
         style={{
           position: 'sticky',
           top: 0,
@@ -453,8 +428,8 @@ export default function TrendsPage() {
         }}
       >
         <div>
-          <span className="eyebrow">for you</span>
-          <h2 style={{ margin: '6px 0 0' }}>Discover AI cast worlds</h2>
+          <span className="eyebrow">Explore</span>
+          <h1 style={{ margin: '6px 0 0' }}>Discover</h1>
         </div>
         <label className="field-block" style={{ margin: 0 }}>
           <span className="eyebrow">Search</span>
@@ -477,68 +452,28 @@ export default function TrendsPage() {
       ) : null}
 
       {feed.some(isLegacyDemoMedia) ? (
-        <article className="list-card lumora-card-soft" style={{ borderRadius: '18px', padding: '12px' }}>
-          <span className="tiny-pill">Sample gallery</span>
-          <p className="muted" style={{ margin: '8px 0 0' }}>
-            Items marked “Sample AI portrayal” are preserved beta examples, not verified creator portfolio work.
-          </p>
-        </article>
-      ) : null}
-
-      {!loading && !debouncedQuery && feed.length && !shouldPrioritizeVideoGrid ? (
-        <section className="discovery-magic-stack" aria-label="Recommendation highlights">
-          <div className="discovery-reason-rail">
-            {discoveryHighlights.map((post, index) => (
-              <button key={post.id} type="button" className="discovery-reason-chip" onClick={() => openPost(post)}>
-                <strong>{recommendationReason(post, index)}</strong>
-                <span>{post.caption || post.title || 'Generated scene'}</span>
-              </button>
-            ))}
-          </div>
-          {popularCast.length ? (
-            <div className="chip-row wrap" aria-label="Popular cast members">
-              <span className="tiny-pill">Popular cast members</span>
-              {popularCast.map(([name, count]) => (
-                <span key={name} className="chip">{name} - {count}</span>
-              ))}
-            </div>
-          ) : null}
-        </section>
+        <p className="muted sample-gallery-note">
+          Sample portrayals are beta examples, not creator portfolio work.
+        </p>
       ) : null}
 
       {loading ? (
         <ForYouSkeletonGrid />
       ) : feed.length ? (
-        <>
-          {!debouncedQuery && trendingStories.length && !shouldPrioritizeVideoGrid ? (
-            <div className="row-between" style={{ marginTop: '2px' }}>
-              <span className="eyebrow">Trending story worlds</span>
-              <span className="tiny-pill">Live</span>
-            </div>
-          ) : null}
-          {!debouncedQuery && !shouldPrioritizeVideoGrid ? (
-            <div className="chip-row wrap" aria-label="For You story sections">
-              <span className="tiny-pill">Because you follow creators like this</span>
-              <span className="tiny-pill">Recently generated</span>
-              <span className="tiny-pill">Popular cast moments</span>
-              <span className="tiny-pill">Continue watching</span>
-            </div>
-          ) : null}
-          <section
-            aria-label="For You recommendations"
-            className="for-you-grid"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(132px, 1fr))',
-              gap: '10px',
-              alignItems: 'start',
-            }}
-          >
-            {feed.map((post, index) => (
-              <ForYouCard key={post.id} post={post} preview={index < 4} onSelect={openPost} onBlocked={handleBlocked} currentUserId={authUser?.id} />
-            ))}
-          </section>
-        </>
+        <section
+          aria-label="Discover scenes"
+          className="for-you-grid"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(132px, 1fr))',
+            gap: '10px',
+            alignItems: 'start',
+          }}
+        >
+          {feed.map((post, index) => (
+            <ForYouCard key={post.id} post={post} preview={index < 4} onSelect={openPost} onBlocked={handleBlocked} currentUserId={authUser?.id} />
+          ))}
+        </section>
       ) : (
         <article className="list-card lumora-card lumora-empty-state luxury-empty-state" style={{ borderRadius: '24px' }}>
           <div className="row-between">
