@@ -87,6 +87,9 @@ assert.match(authCardSource, /if \(busy\) return;/);
 assert.match(authCardSource, /validatePasswordConfirmation/);
 assert.match(authCardSource, /Your private account details stay protected\./);
 assert.doesNotMatch(authCardSource, /provider keys|render credentials/i);
+assert.match(authCardSource, /Account services are temporarily unavailable\./);
+assert.match(authCardSource, />\s*Try again\s*</);
+assert.doesNotMatch(authCardSource, /VITE_SUPABASE|ANON_KEY|Connect Supabase|unlock real login|environment variable/i);
 assert.match(authCardSource, /Check your email for a password reset link\./);
 assert.doesNotMatch(authCardSource, /Password reset email sent\. Open the link to set a new password\./);
 

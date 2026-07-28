@@ -96,6 +96,7 @@ import {
 } from '../lib/directorExperience';
 import {
   creatorProgressStep,
+  deriveCreatorCastReadiness,
   deriveCreatorCreateState,
   shouldShowInternalCreateDiagnostics,
 } from '../lib/createExperience';
@@ -122,6 +123,7 @@ type CreateVideoProps = {
   forceSelfMode?: boolean;
   isHydrated?: boolean;
   identityProfile?: LumoraIdentityProfile | null;
+  accountServicesUnavailable?: boolean;
   onLikenessFeedback?: (feedback: LumoraIdentityFeedback) => void | Promise<void>;
   onResaveReferencePhoto?: () => void;
   onOpenSelfVerificationSetup?: () => void;
@@ -1525,6 +1527,7 @@ export default function CreateVideo({
   forceSelfMode = false,
   isHydrated = true,
   identityProfile,
+  accountServicesUnavailable = false,
   onLikenessFeedback,
   onResaveReferencePhoto,
   onOpenSelfVerificationSetup,
@@ -4617,9 +4620,13 @@ export default function CreateVideo({
     generationStatusState === 'processing' ||
     generationStatusState === 'verifying_output';
   const creatorCreateState = deriveCreatorCreateState({
-    hasCast: Boolean(characterName),
+    castReadiness: deriveCreatorCastReadiness({
+      hasSelectedCast: Boolean(characterName),
+      isSetupIncomplete: castSetupIncomplete,
+    }),
     isGenerating: isCreatorGenerating,
     hasSavedResult: Boolean(generatedVideoUrl),
+    isAccountServiceUnavailable: accountServicesUnavailable || !configured,
     isTemporarilyUnavailable:
       generationStatusState === 'rate_limited' ||
       Boolean(providerReadinessMessage),
@@ -4676,6 +4683,7 @@ export default function CreateVideo({
             : handleGenerate());
         }}
         onSaveDraft={() => void handleSaveDraft()}
+        onTryAgain={() => window.location.reload()}
         onOpenDrafts={() => {
           window.location.href = '/drafts';
         }}

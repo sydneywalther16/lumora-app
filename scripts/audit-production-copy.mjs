@@ -5,6 +5,7 @@ const creatorSurfaceFiles = [
   'src/components/SimplifiedCreateExperience.tsx',
   'src/components/BottomNav.tsx',
   'src/components/StatusBar.tsx',
+  'src/components/auth/AuthCard.tsx',
   'src/pages/InboxPage.tsx',
 ];
 
@@ -27,6 +28,11 @@ const forbiddenProductionTerms = [
   'prompt adaptation',
   'provider readiness',
   'Auto Stage',
+  'VITE_SUPABASE',
+  'ANON_KEY',
+  'Connect Supabase',
+  'unlock real login',
+  'environment variable',
 ];
 
 const files = await Promise.all(
@@ -98,6 +104,14 @@ assert.match(globalStyles, /padding:\s*0 14px calc\(var\(--bottom-nav-space\)\s*
 assert.equal(createSurface.includes('Starting…'), false, 'Generate must not expose the old technical loading copy.');
 assert.equal(createSurface.includes('Preparing your scene…'), true, 'Generate must show the provider-neutral loading copy.');
 assert.equal(createSurface.includes('simple-activity-indicator'), true, 'Generate must include an accessible visual activity cue.');
+
+const authSurface = files.find(({ file }) => file.endsWith('AuthCard.tsx'))?.source ?? '';
+assert.equal(
+  authSurface.includes('Account services are temporarily unavailable.'),
+  true,
+  'Missing account configuration must use neutral user-facing copy.',
+);
+assert.equal(authSurface.includes('Try again'), true, 'Missing account configuration must offer a safe retry action.');
 
 const createVideoSource = await readFile(
   new URL('../src/components/CreateVideo.tsx', import.meta.url),

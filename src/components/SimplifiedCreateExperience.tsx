@@ -32,6 +32,7 @@ type SimplifiedCreateExperienceProps = {
   onStyleChange: (value: CreatorStyle) => void;
   onGenerate: () => void;
   onSaveDraft: () => void;
+  onTryAgain: () => void;
   onOpenDrafts: () => void;
 };
 
@@ -66,12 +67,18 @@ export function SimplifiedCreateExperience({
   onStyleChange,
   onGenerate,
   onSaveDraft,
+  onTryAgain,
   onOpenDrafts,
 }: SimplifiedCreateExperienceProps) {
   const [ideasOpen, setIdeasOpen] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const sceneFieldRef = useRef<HTMLTextAreaElement | null>(null);
   const copy = CREATOR_CREATE_STATE_COPY[state];
+  const castStatusCopy = state === 'INCOMPLETE_CAST'
+    ? 'Finish setup to use this AI Cast'
+    : state === 'ACCOUNT_UNAVAILABLE'
+      ? 'Your saved AI Cast remains preserved'
+      : 'Using your saved AI Cast';
 
   if (state === 'GENERATING') {
     const activeStepIndex = Math.max(0, CREATOR_PROGRESS_STEPS.indexOf(progressStep));
@@ -141,7 +148,7 @@ export function SimplifiedCreateExperience({
           )}
           <div>
             <strong>{castName || 'Choose your AI Cast'}</strong>
-            {castName ? <small>Using your saved AI Cast</small> : null}
+            {castName ? <small>{castStatusCopy}</small> : null}
           </div>
         </div>
         <button type="button" className="text-btn simple-change-cast" onClick={onChangeCast}>
@@ -267,12 +274,12 @@ export function SimplifiedCreateExperience({
         </div>
       ) : null}
 
-      {state === 'TEMPORARILY_UNAVAILABLE' || state === 'NEEDS_EDIT' ? (
+      {state === 'TEMPORARILY_UNAVAILABLE' || state === 'ACCOUNT_UNAVAILABLE' || state === 'NEEDS_EDIT' ? (
         <div className="simple-create-notice" role="status">
           <strong>{copy.title}</strong>
           {copy.body ? <p>{copy.body}</p> : null}
         </div>
-      ) : state === 'NEEDS_CAST' && copy.body ? (
+      ) : (state === 'NO_CAST' || state === 'INCOMPLETE_CAST') && copy.body ? (
         <p className="simple-create-helper">{copy.body}</p>
       ) : null}
 
@@ -281,7 +288,7 @@ export function SimplifiedCreateExperience({
           type="button"
           className="primary-btn simple-primary-action"
           onClick={() => {
-            if (state === 'NEEDS_CAST') {
+            if (state === 'NO_CAST' || state === 'INCOMPLETE_CAST') {
               onChangeCast();
               return;
             }
@@ -291,6 +298,10 @@ export function SimplifiedCreateExperience({
             }
             if (state === 'TEMPORARILY_UNAVAILABLE') {
               onSaveDraft();
+              return;
+            }
+            if (state === 'ACCOUNT_UNAVAILABLE') {
+              onTryAgain();
               return;
             }
             onGenerate();
@@ -305,7 +316,7 @@ export function SimplifiedCreateExperience({
             </span>
           ) : copy.primaryAction}
         </button>
-        {state === 'TEMPORARILY_UNAVAILABLE' ? null : (
+        {state === 'TEMPORARILY_UNAVAILABLE' || state === 'ACCOUNT_UNAVAILABLE' ? null : (
           <button
             type="button"
             className="quiet-btn simple-secondary-action"

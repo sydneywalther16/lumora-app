@@ -20,6 +20,7 @@ import { trackCreatorEvent } from '../lib/creatorEvents';
 import { buildSafeTakePrompt, creatorRenderStateCopy } from '../lib/renderStateCopy';
 import { getVerifiedVideoOutputUrl, hasVerifiedVideoOutput } from '../lib/renderCompletion';
 import { buildDraftPublicCaption, buildViralCaptionSuggestions } from '../lib/aiCastExperience';
+import { sceneTextForDraftEdit } from '../lib/createExperience';
 
 type Props = {
   jobs: GenerationJob[];
@@ -346,7 +347,7 @@ export default function StudioList({ jobs, onPublished }: Props) {
   }
 
   function remixJob(job: GenerationJob, mode: 'edit' | 'safe_take' = 'edit') {
-    const sourcePrompt = job.prompt || job.title || '';
+    const sourcePrompt = sceneTextForDraftEdit(job);
     const nextPrompt = mode === 'safe_take'
       ? buildSafeTakePrompt(sourcePrompt, { displayName: job.characterName })
       : sourcePrompt;

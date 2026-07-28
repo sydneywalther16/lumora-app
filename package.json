@@ -20,7 +20,8 @@
     "start:worker": "node --enable-source-maps backend/dist/workers/generationWorker.js",
     "build:api": "tsc -p backend/tsconfig.json",
     "verify:deploy": "node scripts/verify-deploy.mjs",
-    "mobile:sync": "npm run build && cap sync",
+    "verify:client-config": "node scripts/verify-client-config.mjs production",
+    "mobile:sync": "npm run verify:client-config && npm run build && cap sync",
     "mobile:ios": "npm run mobile:sync && cap open ios",
     "mobile:android": "npm run mobile:sync && cap open android",
     "mobile:android:bundle": "npm run mobile:sync && cd android && ./gradlew bundleSignedRelease"

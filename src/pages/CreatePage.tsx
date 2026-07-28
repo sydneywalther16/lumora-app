@@ -123,6 +123,7 @@ export default function CreatePage() {
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterProfile | null>(null);
   const [defaultSelfCharacter, setDefaultSelfCharacter] = useState<CharacterProfile | null>(null);
   const [creatorDataLoading, setCreatorDataLoading] = useState(true);
+  const [accountServicesUnavailable, setAccountServicesUnavailable] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
   const [resolvedReference, setResolvedReference] = useState<SelfCharacterReferenceImage | null>(null);
   const [referenceLoading, setReferenceLoading] = useState(false);
@@ -172,6 +173,7 @@ export default function CreatePage() {
 
     async function loadData() {
       setCreatorDataLoading(true);
+      setAccountServicesUnavailable(!supabaseConfigured);
       setIsHydrated(false);
       setDefaultSelfCharacter(null);
       setResolvedReference(null);
@@ -193,10 +195,12 @@ export default function CreatePage() {
 
           setProfile(remoteProfile);
           setDefaultSelfCharacter(selfChar);
+          setAccountServicesUnavailable(false);
         } catch (err) {
           console.error("Failed to load creator data:", err);
           if (active) {
             setDefaultSelfCharacter(null);
+            setAccountServicesUnavailable(true);
             console.log('PROFILE SOURCE:', 'supabase');
             console.log('SELF CHARACTER SOURCE:', 'supabase');
           }
@@ -217,6 +221,7 @@ export default function CreatePage() {
 
         setProfile(localProfile);
         setDefaultSelfCharacter(localSelf);
+        setAccountServicesUnavailable(!supabaseConfigured);
         setCreatorDataLoading(false);
         setIsHydrated(true);
       }
@@ -419,6 +424,7 @@ export default function CreatePage() {
         forceSelfMode={effectiveIsDefaultSelfCharacter}
         isHydrated={isHydrated}
         identityProfile={effectiveIsDefaultSelfCharacter ? identityProfile : null}
+        accountServicesUnavailable={accountServicesUnavailable}
         onLikenessFeedback={(feedback) => void handleLikenessFeedback(feedback)}
         onCharacterUpdated={handleCharacterUpdated}
         onResaveReferencePhoto={() => {

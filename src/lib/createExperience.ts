@@ -11,16 +11,21 @@ export type CreatorProgressStep = (typeof CREATOR_PROGRESS_STEPS)[number];
 
 export type CreatorCreateState =
   | 'READY'
-  | 'NEEDS_CAST'
+  | 'NO_CAST'
+  | 'INCOMPLETE_CAST'
+  | 'ACCOUNT_UNAVAILABLE'
   | 'GENERATING'
   | 'SAVED'
   | 'TEMPORARILY_UNAVAILABLE'
   | 'NEEDS_EDIT';
 
+export type CreatorCastReadiness = 'none' | 'incomplete' | 'usable';
+
 export type CreatorCreateStateInput = {
-  hasCast: boolean;
+  castReadiness: CreatorCastReadiness;
   isGenerating: boolean;
   hasSavedResult: boolean;
+  isAccountServiceUnavailable: boolean;
   isTemporarilyUnavailable: boolean;
   needsEdit: boolean;
 };
@@ -36,9 +41,18 @@ export const CREATOR_CREATE_STATE_COPY: Record<CreatorCreateState, CreatorCreate
     title: 'Create',
     primaryAction: 'Generate',
   },
-  NEEDS_CAST: {
+  NO_CAST: {
+    title: 'Create',
+    primaryAction: 'Choose your AI Cast',
+  },
+  INCOMPLETE_CAST: {
     title: 'Create',
     primaryAction: 'Finish your AI Cast',
+  },
+  ACCOUNT_UNAVAILABLE: {
+    title: 'Account services are temporarily unavailable.',
+    body: 'Your scene is safely preserved.',
+    primaryAction: 'Try again',
   },
   GENERATING: {
     title: 'Lumora is directing your scene',
@@ -65,10 +79,24 @@ export const CREATOR_CREATE_STATE_COPY: Record<CreatorCreateState, CreatorCreate
 export function deriveCreatorCreateState(input: CreatorCreateStateInput): CreatorCreateState {
   if (input.isGenerating) return 'GENERATING';
   if (input.hasSavedResult) return 'SAVED';
-  if (!input.hasCast) return 'NEEDS_CAST';
+  if (input.isAccountServiceUnavailable) return 'ACCOUNT_UNAVAILABLE';
+  if (input.castReadiness === 'none') return 'NO_CAST';
+  if (input.castReadiness === 'incomplete') return 'INCOMPLETE_CAST';
   if (input.isTemporarilyUnavailable) return 'TEMPORARILY_UNAVAILABLE';
   if (input.needsEdit) return 'NEEDS_EDIT';
   return 'READY';
+}
+
+export function deriveCreatorCastReadiness(input: {
+  hasSelectedCast: boolean;
+  isSetupIncomplete: boolean;
+}): CreatorCastReadiness {
+  if (!input.hasSelectedCast) return 'none';
+  return input.isSetupIncomplete ? 'incomplete' : 'usable';
+}
+
+export function sceneTextForDraftEdit(input: { prompt?: string | null; title?: string | null }): string {
+  return input.prompt || input.title || '';
 }
 
 export function creatorProgressStep(

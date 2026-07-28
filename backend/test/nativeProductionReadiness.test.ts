@@ -46,6 +46,8 @@ const createSource = readFileSync(join(repoRoot, 'src/components/CreateVideo.tsx
 const profileSource = readFileSync(join(repoRoot, 'src/pages/ProfilePage.tsx'), 'utf8');
 const homeSource = readFileSync(join(repoRoot, 'src/pages/HomePage.tsx'), 'utf8');
 const statusSource = readFileSync(join(repoRoot, 'src/components/StatusBar.tsx'), 'utf8');
+const packageSource = readFileSync(join(repoRoot, 'package.json'), 'utf8');
+const clientConfigGuardSource = readFileSync(join(repoRoot, 'scripts/verify-client-config.mjs'), 'utf8');
 
 assert.doesNotMatch(createSource, /Start the API server|VITE_API_BASE_URL/);
 assert.match(apiSource, /CapacitorHttp\.request/);
@@ -64,5 +66,9 @@ assert.doesNotMatch(
   'The app shell must not imitate device signal or battery indicators.',
 );
 assert.match(statusSource, /shouldShowNativeRouteHeader/);
+assert.match(packageSource, /verify:client-config/);
+assert.match(packageSource, /npm run verify:client-config && npm run build && cap sync/);
+assert.match(clientConfigGuardSource, /loadEnv\(mode, process\.cwd\(\), ''\)/);
+assert.doesNotMatch(clientConfigGuardSource, /console\.(?:log|info|warn|error)\([^)]*env\[/s);
 
 console.log('nativeProductionReadiness unit tests passed');

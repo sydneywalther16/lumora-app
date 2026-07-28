@@ -197,10 +197,13 @@ export default function AuthCard(props: Props = {}) {
     return (
       <section className="headline-card">
         <div>
-          <span className="eyebrow">auth</span>
-          <h2>Connect Supabase to unlock real login</h2>
+          <span className="eyebrow">account</span>
+          <h2>Account services are temporarily unavailable.</h2>
         </div>
-        <p>Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to enable accounts.</p>
+        <p>Your work remains safely stored on this device.</p>
+        <button type="button" className="quiet-btn" onClick={() => window.location.reload()}>
+          Try again
+        </button>
       </section>
     );
   }

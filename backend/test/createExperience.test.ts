@@ -3,15 +3,18 @@ import {
   CREATOR_CREATE_STATE_COPY,
   CREATOR_PROGRESS_STEPS,
   creatorProgressStep,
+  deriveCreatorCastReadiness,
   deriveCreatorCreateState,
+  sceneTextForDraftEdit,
   shouldShowInternalCreateDiagnostics,
 } from '../../src/lib/createExperience';
 
 assert.equal(
   deriveCreatorCreateState({
-    hasCast: true,
+    castReadiness: 'usable',
     isGenerating: false,
     hasSavedResult: false,
+    isAccountServiceUnavailable: false,
     isTemporarilyUnavailable: false,
     needsEdit: false,
   }),
@@ -20,20 +23,58 @@ assert.equal(
 
 assert.equal(
   deriveCreatorCreateState({
-    hasCast: false,
+    castReadiness: 'none',
     isGenerating: false,
     hasSavedResult: false,
+    isAccountServiceUnavailable: false,
     isTemporarilyUnavailable: true,
     needsEdit: true,
   }),
-  'NEEDS_CAST',
+  'NO_CAST',
 );
 
 assert.equal(
   deriveCreatorCreateState({
-    hasCast: true,
+    castReadiness: 'incomplete',
+    isGenerating: false,
+    hasSavedResult: false,
+    isAccountServiceUnavailable: false,
+    isTemporarilyUnavailable: false,
+    needsEdit: false,
+  }),
+  'INCOMPLETE_CAST',
+);
+
+assert.equal(
+  deriveCreatorCreateState({
+    castReadiness: 'usable',
+    isGenerating: false,
+    hasSavedResult: false,
+    isAccountServiceUnavailable: true,
+    isTemporarilyUnavailable: false,
+    needsEdit: false,
+  }),
+  'ACCOUNT_UNAVAILABLE',
+);
+
+assert.equal(
+  deriveCreatorCreateState({
+    castReadiness: 'incomplete',
+    isGenerating: false,
+    hasSavedResult: false,
+    isAccountServiceUnavailable: true,
+    isTemporarilyUnavailable: false,
+    needsEdit: false,
+  }),
+  'ACCOUNT_UNAVAILABLE',
+);
+
+assert.equal(
+  deriveCreatorCreateState({
+    castReadiness: 'usable',
     isGenerating: true,
     hasSavedResult: false,
+    isAccountServiceUnavailable: true,
     isTemporarilyUnavailable: true,
     needsEdit: true,
   }),
@@ -42,9 +83,10 @@ assert.equal(
 
 assert.equal(
   deriveCreatorCreateState({
-    hasCast: true,
+    castReadiness: 'usable',
     isGenerating: false,
     hasSavedResult: true,
+    isAccountServiceUnavailable: true,
     isTemporarilyUnavailable: true,
     needsEdit: true,
   }),
@@ -53,9 +95,10 @@ assert.equal(
 
 assert.equal(
   deriveCreatorCreateState({
-    hasCast: true,
+    castReadiness: 'usable',
     isGenerating: false,
     hasSavedResult: false,
+    isAccountServiceUnavailable: false,
     isTemporarilyUnavailable: true,
     needsEdit: true,
   }),
@@ -64,9 +107,10 @@ assert.equal(
 
 assert.equal(
   deriveCreatorCreateState({
-    hasCast: true,
+    castReadiness: 'usable',
     isGenerating: false,
     hasSavedResult: false,
+    isAccountServiceUnavailable: false,
     isTemporarilyUnavailable: false,
     needsEdit: true,
   }),
@@ -87,8 +131,30 @@ assert.equal(creatorProgressStep('verifying_output'), 'Checking movement and con
 assert.equal(creatorProgressStep('completed'), 'Saving to Drafts');
 
 assert.equal(CREATOR_CREATE_STATE_COPY.READY.primaryAction, 'Generate');
+assert.equal(CREATOR_CREATE_STATE_COPY.NO_CAST.primaryAction, 'Choose your AI Cast');
+assert.equal(CREATOR_CREATE_STATE_COPY.INCOMPLETE_CAST.primaryAction, 'Finish your AI Cast');
+assert.equal(CREATOR_CREATE_STATE_COPY.ACCOUNT_UNAVAILABLE.primaryAction, 'Try again');
 assert.equal(CREATOR_CREATE_STATE_COPY.TEMPORARILY_UNAVAILABLE.body, 'Your scene is safely preserved.');
 assert.equal(CREATOR_CREATE_STATE_COPY.NEEDS_EDIT.primaryAction, 'Edit scene');
+assert.equal(
+  deriveCreatorCastReadiness({ hasSelectedCast: true, isSetupIncomplete: false }),
+  'usable',
+);
+assert.equal(
+  deriveCreatorCastReadiness({ hasSelectedCast: true, isSetupIncomplete: true }),
+  'incomplete',
+);
+assert.equal(
+  deriveCreatorCastReadiness({ hasSelectedCast: false, isSetupIncomplete: false }),
+  'none',
+);
+assert.equal(
+  sceneTextForDraftEdit({
+    prompt: 'She pauses beside the candlelit doorway.',
+    title: 'Candlelit doorway',
+  }),
+  'She pauses beside the candlelit doorway.',
+);
 
 assert.equal(shouldShowInternalCreateDiagnostics('?internalDiagnostics=1', true), true);
 assert.equal(shouldShowInternalCreateDiagnostics('?internalDiagnostics=1', false), false);
