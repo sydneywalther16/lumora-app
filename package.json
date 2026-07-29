@@ -21,10 +21,13 @@
     "build:api": "tsc -p backend/tsconfig.json",
     "verify:deploy": "node scripts/verify-deploy.mjs",
     "verify:client-config": "node scripts/verify-client-config.mjs production",
+    "verify:native:release": "node scripts/verify-native-release.mjs",
     "mobile:sync": "npm run verify:client-config && npm run build && cap sync",
+    "mobile:sync:release": "node scripts/mobile-sync-release.mjs",
     "mobile:ios": "npm run mobile:sync && cap open ios",
     "mobile:android": "npm run mobile:sync && cap open android",
-    "mobile:android:bundle": "npm run mobile:sync && cd android && ./gradlew bundleSignedRelease"
+    "mobile:android:bundle": "npm run mobile:sync && cd android && ./gradlew bundleSignedRelease",
+    "test:native-release": "tsx backend/test/nativeReleaseConfiguration.test.ts"
   },
   "dependencies": {
     "@capacitor/app": "^8.1.1",

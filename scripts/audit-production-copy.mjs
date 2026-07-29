@@ -88,17 +88,20 @@ const globalStyles = await readFile(
 );
 const bottomNavStyles = globalStyles.match(/\.bottom-nav\s*\{(?<shell>[\s\S]*?)\}\s*\.bottom-nav \.nav-pill\s*\{(?<tab>[\s\S]*?)\}\s*\.bottom-nav \.nav-pill\.active\s*\{(?<active>[\s\S]*?)\}/);
 assert.ok(bottomNavStyles?.groups, 'Bottom navigation shell, tab, and active-state styles must remain defined together.');
-assert.match(bottomNavStyles.groups.shell, /left:\s*50%/);
-assert.match(bottomNavStyles.groups.shell, /transform:\s*translateX\(-50%\)/);
+assert.match(bottomNavStyles.groups.shell, /left:\s*0/);
+assert.match(bottomNavStyles.groups.shell, /right:\s*0/);
+assert.match(bottomNavStyles.groups.shell, /bottom:\s*0/);
 assert.match(bottomNavStyles.groups.shell, /grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/);
-assert.match(bottomNavStyles.groups.shell, /width:\s*calc\(100%\s*-\s*\(var\(--bottom-nav-side-clearance\)\s*\*\s*2\)\)/);
+assert.match(bottomNavStyles.groups.shell, /width:\s*100%/);
+assert.match(bottomNavStyles.groups.shell, /env\(safe-area-inset-bottom,\s*0px\)/);
+assert.doesNotMatch(bottomNavStyles.groups.shell, /translateX/);
 assert.match(bottomNavStyles.groups.tab, /height:\s*48px/);
 assert.match(bottomNavStyles.groups.tab, /width:\s*100%/);
 assert.match(bottomNavStyles.groups.tab, /font-weight:\s*600/);
 assert.match(bottomNavStyles.groups.tab, /white-space:\s*nowrap/);
 assert.match(bottomNavStyles.groups.active, /font-weight:\s*700/);
-assert.match(globalStyles, /--bottom-nav-shell-height:\s*62px/);
-assert.match(globalStyles, /--bottom-nav-safe-offset:\s*calc\(8px\s*\+\s*env\(safe-area-inset-bottom,\s*0px\)\)/);
+assert.match(globalStyles, /--bottom-nav-controls-height:\s*60px/);
+assert.match(globalStyles, /--bottom-nav-shell-height:\s*calc\(var\(--bottom-nav-controls-height\) \+ env\(safe-area-inset-bottom,\s*0px\)\)/);
 assert.match(globalStyles, /padding:\s*0 14px calc\(var\(--bottom-nav-space\)\s*\+\s*24px\)/);
 
 assert.equal(createSurface.includes('Starting…'), false, 'Generate must not expose the old technical loading copy.');
