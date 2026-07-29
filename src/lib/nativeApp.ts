@@ -42,6 +42,12 @@ export function initializeNativeApp() {
   void StatusBar.setBackgroundColor({ color: '#111018' }).catch(() => undefined);
   void StatusBar.setStyle({ style: Style.Dark }).catch(() => undefined);
   void Keyboard.setResizeMode({ mode: KeyboardResize.Native }).catch(() => undefined);
+  void Keyboard.addListener('keyboardWillShow', () => {
+    document.documentElement.classList.add('keyboard-open');
+  }).catch(() => undefined);
+  void Keyboard.addListener('keyboardWillHide', () => {
+    document.documentElement.classList.remove('keyboard-open');
+  }).catch(() => undefined);
 
   void CapacitorApp.addListener('appUrlOpen', ({ url }) => {
     const localPath = localPathForNativeUrl(url);

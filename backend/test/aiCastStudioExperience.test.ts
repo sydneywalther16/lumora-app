@@ -213,7 +213,30 @@ assert.equal(buildPublicCaptionFromPrompt('she sees the sunshine'), 'She sees th
 assert.equal(buildDraftPublicCaption({
   caption: 'A quiet garden arrival',
   prompt: 'Use medium-wide framing and preserve identity.',
-}), 'A quiet garden arrival.');
+}), 'A quiet garden arrival');
+assert.equal(buildDraftPublicCaption({
+  caption: 'Hey.',
+  prompt: 'Hey! I’m so happy to be creating my first video!',
+  status: 'draft',
+  videoUrl: '',
+}), 'Hey! I’m so happy to be creating my first video!');
+assert.equal(buildDraftPublicCaption({
+  caption: 'She dances at sunset. The sky turns pink!',
+  prompt: 'She dances at sunset. The sky turns pink!',
+  status: 'draft',
+}), 'She dances at sunset. The sky turns pink!');
+assert.equal(buildDraftPublicCaption({
+  caption: 'Will she stay? Yes!',
+  prompt: 'Use a medium-wide shot.',
+  status: 'completed',
+  videoUrl: 'https://example.com/video.mp4',
+}), 'Will she stay? Yes!');
+assert.equal(buildDraftPublicCaption({
+  caption: 'A finished caption',
+  prompt: 'The original render prompt. Keep internal camera instructions.',
+  status: 'draft',
+  resultAssetUrl: 'https://example.com/generated.mp4',
+}), 'A finished caption');
 assert.equal(buildDraftPublicCaption({
   caption: 'Render instructions: use 9:16 aspect ratio guidance.',
   prompt: 'she sees the sunshine. Use medium-wide framing with camera drift.',
