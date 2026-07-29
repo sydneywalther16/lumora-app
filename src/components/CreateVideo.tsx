@@ -47,6 +47,11 @@ import {
 import { resolveGeneratedVideoMedia } from '../lib/mediaThumbnail';
 import { useSession } from '../hooks/useSession';
 import { useAppStore } from '../store/useAppStore';
+import {
+  createManualDraftSaveSession,
+  exactManualDraftText,
+  type ManualDraftSaveSession,
+} from '../lib/manualDraft';
 import SelfReferencePreview, { normalizeReference } from './SelfReferencePreview';
 import GeneratedVideoPreview from './GeneratedVideoPreview';
 import ContentSafetyActions from './ContentSafetyActions';
@@ -109,6 +114,7 @@ import {
 
 type CreateVideoProps = {
   refreshKey?: number;
+  initialDraftId?: string | null;
   characterId: string | null;
   characterName: string | null;
   characterAvatar: string | null;
@@ -1513,6 +1519,7 @@ function formatCreatorWarnings(messages: string[]): string[] {
 
 export default function CreateVideo({
   refreshKey = 0,
+  initialDraftId = null,
   characterId,
   characterName,
   characterAvatar,
@@ -1537,9 +1544,11 @@ export default function CreateVideo({
   const authUser = session?.user ?? user;
   const {
     activePrompt,
+    activeDraftId,
     selectedStyles,
     draftTitle,
     setActivePrompt,
+    setActiveDraftId,
     toggleSelectedStyle,
     setDraftTitle,
   } = useAppStore();
@@ -1601,9 +1610,18 @@ export default function CreateVideo({
   const [selectedFeedbackChoices, setSelectedFeedbackChoices] = useState<LumoraIdentityFeedbackChoice[]>([]);
   const [feedbackNote, setFeedbackNote] = useState('');
   const [feedbackStatus, setFeedbackStatus] = useState('');
+  const [draftSaveMessage, setDraftSaveMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [generationResult, setGenerationResult] = useState<GenerationResponse | null>(null);
   const generationInFlightRef = useRef(false);
+  const manualDraftSaveSessionRef = useRef<ManualDraftSaveSession | null>(null);
+  if (!manualDraftSaveSessionRef.current) {
+    manualDraftSaveSessionRef.current = createManualDraftSaveSession(initialDraftId ?? activeDraftId, () => {
+      const draftId = createLocalGenerationId();
+      setActiveDraftId(draftId);
+      return draftId;
+    });
+  }
   const progressTimerRef = useRef<number | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const repairFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -2102,6 +2120,18 @@ export default function CreateVideo({
   const featuredViralScenePresets = viralScenePresets.slice(0, 4);
   const additionalViralScenePresets = viralScenePresets.slice(4);
   const selectedStageOption = providerOptions.find((option) => option.engine === engine) ?? providerOptions[0];
+
+  useEffect(() => {
+    const draftId = initialDraftId ?? activeDraftId;
+    manualDraftSaveSessionRef.current?.adoptDraftId(draftId);
+    if (initialDraftId && activeDraftId !== initialDraftId) {
+      setActiveDraftId(initialDraftId);
+    }
+  }, [activeDraftId, initialDraftId, setActiveDraftId]);
+
+  useEffect(() => {
+    setDraftSaveMessage('');
+  }, [activePrompt, draftTitle]);
 
   useEffect(() => {
     const savedPrompt = localStorage.getItem('remixPrompt');
@@ -4424,143 +4454,158 @@ export default function CreateVideo({
   }
 
   async function handleSaveDraft() {
+    const saveSession = manualDraftSaveSessionRef.current;
+    if (!saveSession || saveSession.isSaving()) return;
+
     if (configured && sessionLoading && !authUser) {
       setStatus('Checking your account session. Try again in a moment.');
       return;
     }
 
-    const scenePrompt = activePrompt.trim();
+    const scenePrompt = exactManualDraftText(activePrompt);
     if (!scenePrompt) {
       setStatus('Add a scene idea before saving.');
       return;
     }
 
-    setBusy(true);
-    setStatus('Saving draft...');
-
     try {
-      const now = new Date().toISOString();
-      const profile = loadLumoraProfile();
-      const draftEngine = stageSelectionMode === 'manual' ? engine : autoStageDecision.engine;
-      const displayEngine = stageSelectionMode === 'auto'
-        ? 'Lumora Auto Stage'
-        : draftEngine === SEEDANCE_ENGINE_ID
-        ? 'Seedance Fast'
-        : draftEngine === SEEDANCE_QUALITY_ENGINE_ID
-          ? 'Seedance Quality'
-          : draftEngine === 'replicate'
-            ? 'Kling Reference'
-            : engineLabels[draftEngine] ?? draftEngine;
-      const studioDraft: StudioProject = {
-        id: createLocalGenerationId(),
-        title: draftTitle.trim() || 'Untitled scene',
-        caption: buildPublicCaptionFromPrompt(scenePrompt),
-        prompt: scenePrompt,
-        finalPrompt: scenePrompt,
-        videoUrl: '',
-        thumbnailUrl: null,
-        posterUrl: null,
-        thumbnailSource: null,
-        status: 'draft',
-        provider: draftEngine,
-        engine: draftEngine,
-        aspectRatio,
-        model: null,
-        displayEngine,
-        generationMode: selectedGenerationMode,
-        identityId: identityProfile?.identityId ?? null,
-        identityPrompt: identityProfile?.identityPrompt ?? null,
-        consistencyPrompt: identityProfile?.generationConsistencyPrompt ?? null,
-        canonicalReferenceSet: identityProfile?.canonicalReferenceSet ?? null,
-        keyframeUrl: null,
-        referenceImageUrl: selectedSelfReferenceImageUrl,
-        referenceImageUrls: referencePayload,
-        additionalReferenceImageUrls,
-        exactLikenessRoute: null,
-        exactLikenessProvider: null,
-        exactLikenessCanaryStatus: null,
-        referenceStrategy: null,
-        referenceRolesUsed: null,
-        referenceCount: readySeedanceReferenceCount,
-        sceneAnchorStrategy: null,
-        sceneAnchorGenerated: null,
-        sceneAnchorPersisted: null,
-        sceneAnchorProvider: null,
-        sceneAnchorReason: null,
-        sceneAnchorFailureCategory: null,
-        sceneAnchorHttpStatus: null,
-        sceneAnchorErrorType: null,
-        sceneAnchorErrorMessage: null,
-        sceneAnchorPromptLength: null,
-        sceneAnchorPromptLimit: null,
-        sceneAnchorPromptCompressed: null,
-        sceneAnchorPromptTruncated: null,
-        sceneAnchorPayloadFieldNames: null,
-        sceneAnchorReferenceCount: null,
-        sceneAnchorSubmittedReferenceCount: null,
-        sceneAnchorReferenceRolesUsed: null,
-        sceneAnchorDroppedReferenceRoles: null,
-        sceneAnchorProviderReferenceLimit: null,
-        sceneAnchorOutputParsed: null,
-        sceneAnchorValidation: null,
-        primaryInputType: null,
-        primaryVideoInputType: null,
-        primaryVideoInputSource: null,
-        identityReferencesPassedToVideoStage: null,
-        identityReferenceCount: null,
-        identityReferenceMode: null,
-        startFrameSource: null,
-        posterFrameSource: null,
-        firstFrameSource: null,
-        stage2ProviderModel: null,
-        stage2ProviderRouteType: null,
-        rawReferenceVisualInputsSentToStage2: null,
-        sceneIntent: null,
-        framingIntent: null,
-        primaryReferenceRole: null,
-        supportingReferenceRoles: null,
-        userSpecifiedOutfit: null,
-        outfitTermsDetected: null,
-        environmentTermsDetected: null,
-        referenceOutfitCarryoverSuppressed: null,
-        compositionCarryoverSuppressed: null,
-        frontOnlyFallback: null,
-        renderProvider: null,
-        klingReferenceDiagnostics: null,
-        audioConfigured: null,
-        viralPresetUsed,
-        promptPolished,
-        characterId,
-        characterName,
-        characterAvatar,
-        isDefaultSelfCharacter,
-        creatorName: profile.displayName || 'Lumora Creator',
-        creatorUsername: profile.username || 'lumora.creator',
-        creatorAvatar: profile.avatar || null,
-        createdAt: now,
-        updatedAt: now,
-      };
+      const saveResult = await saveSession.save(async (stableDraftId) => {
+        setActiveDraftId(stableDraftId);
+        setBusy(true);
+        setDraftSaveMessage('');
+        setStatus('Saving draft...');
 
-      if (authUser) {
         try {
-          await saveSupabaseProject(authUser.id, studioDraft);
-          setStatus('Draft saved to your account.');
-        } catch (saveError) {
-          console.error('Account draft save failed; saving local draft backup.', saveError);
-          saveStudioProject(studioDraft);
-          setStatus('Account save is unavailable, so a local Drafts backup was saved.');
+          const now = new Date().toISOString();
+          const profile = loadLumoraProfile();
+          const draftEngine = stageSelectionMode === 'manual' ? engine : autoStageDecision.engine;
+          const displayEngine = stageSelectionMode === 'auto'
+            ? 'Lumora Auto Stage'
+            : draftEngine === SEEDANCE_ENGINE_ID
+            ? 'Seedance Fast'
+            : draftEngine === SEEDANCE_QUALITY_ENGINE_ID
+              ? 'Seedance Quality'
+              : draftEngine === 'replicate'
+                ? 'Kling Reference'
+                : engineLabels[draftEngine] ?? draftEngine;
+          const studioDraft: StudioProject = {
+            id: stableDraftId,
+            title: draftTitle.trim() || 'Untitled scene',
+            caption: scenePrompt,
+            prompt: scenePrompt,
+            finalPrompt: scenePrompt,
+            videoUrl: '',
+            thumbnailUrl: null,
+            posterUrl: null,
+            thumbnailSource: null,
+            status: 'draft',
+            provider: draftEngine,
+            engine: draftEngine,
+            aspectRatio,
+            model: null,
+            displayEngine,
+            generationMode: selectedGenerationMode,
+            identityId: identityProfile?.identityId ?? null,
+            identityPrompt: identityProfile?.identityPrompt ?? null,
+            consistencyPrompt: identityProfile?.generationConsistencyPrompt ?? null,
+            canonicalReferenceSet: identityProfile?.canonicalReferenceSet ?? null,
+            keyframeUrl: null,
+            referenceImageUrl: selectedSelfReferenceImageUrl,
+            referenceImageUrls: referencePayload,
+            additionalReferenceImageUrls,
+            exactLikenessRoute: null,
+            exactLikenessProvider: null,
+            exactLikenessCanaryStatus: null,
+            referenceStrategy: null,
+            referenceRolesUsed: null,
+            referenceCount: readySeedanceReferenceCount,
+            sceneAnchorStrategy: null,
+            sceneAnchorGenerated: null,
+            sceneAnchorPersisted: null,
+            sceneAnchorProvider: null,
+            sceneAnchorReason: null,
+            sceneAnchorFailureCategory: null,
+            sceneAnchorHttpStatus: null,
+            sceneAnchorErrorType: null,
+            sceneAnchorErrorMessage: null,
+            sceneAnchorPromptLength: null,
+            sceneAnchorPromptLimit: null,
+            sceneAnchorPromptCompressed: null,
+            sceneAnchorPromptTruncated: null,
+            sceneAnchorPayloadFieldNames: null,
+            sceneAnchorReferenceCount: null,
+            sceneAnchorSubmittedReferenceCount: null,
+            sceneAnchorReferenceRolesUsed: null,
+            sceneAnchorDroppedReferenceRoles: null,
+            sceneAnchorProviderReferenceLimit: null,
+            sceneAnchorOutputParsed: null,
+            sceneAnchorValidation: null,
+            primaryInputType: null,
+            primaryVideoInputType: null,
+            primaryVideoInputSource: null,
+            identityReferencesPassedToVideoStage: null,
+            identityReferenceCount: null,
+            identityReferenceMode: null,
+            startFrameSource: null,
+            posterFrameSource: null,
+            firstFrameSource: null,
+            stage2ProviderModel: null,
+            stage2ProviderRouteType: null,
+            rawReferenceVisualInputsSentToStage2: null,
+            sceneIntent: null,
+            framingIntent: null,
+            primaryReferenceRole: null,
+            supportingReferenceRoles: null,
+            userSpecifiedOutfit: null,
+            outfitTermsDetected: null,
+            environmentTermsDetected: null,
+            referenceOutfitCarryoverSuppressed: null,
+            compositionCarryoverSuppressed: null,
+            frontOnlyFallback: null,
+            renderProvider: null,
+            klingReferenceDiagnostics: null,
+            audioConfigured: null,
+            viralPresetUsed,
+            promptPolished,
+            characterId,
+            characterName,
+            characterAvatar,
+            isDefaultSelfCharacter,
+            creatorName: profile.displayName || 'Lumora Creator',
+            creatorUsername: profile.username || 'lumora.creator',
+            creatorAvatar: profile.avatar || null,
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          if (authUser) {
+            try {
+              await saveSupabaseProject(authUser.id, studioDraft);
+            } catch (saveError) {
+              console.error('Account draft save failed; saving local draft backup.', saveError);
+              saveStudioProject(studioDraft);
+            }
+          } else {
+            saveStudioProject(studioDraft);
+          }
+
+          return studioDraft;
+        } finally {
+          setBusy(false);
         }
-        void trackCreatorEvent('first_draft_created', { source: 'manual-save' }, authUser.id);
-      } else {
-        saveStudioProject(studioDraft);
-        setStatus('Draft saved locally.');
-        void trackCreatorEvent('first_draft_created', { source: 'manual-save' }, null);
+      });
+
+      if (saveResult.status === 'ignored') return;
+
+      setStatus('Draft saved.');
+      setDraftSaveMessage('Draft saved.');
+      if (saveResult.createdDraft) {
+        void trackCreatorEvent('first_draft_created', { source: 'manual-save' }, authUser?.id ?? null);
       }
     } catch (error) {
       console.error('Unable to save draft.', error);
       setStatus('Unable to save draft.');
-    } finally {
-      setBusy(false);
+      setDraftSaveMessage('Draft could not be saved.');
     }
   }
 
@@ -4663,6 +4708,7 @@ export default function CreateVideo({
         generateDisabled={generateButtonDisabled}
         generateBusy={generateBusy}
         saveBusy={saveBusy}
+        draftSaveMessage={draftSaveMessage}
         resultItem={generationResult ?? {
           videoUrl: generatedVideoUrl,
           outputUrl: generatedVideoUrl,

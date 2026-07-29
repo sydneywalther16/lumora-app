@@ -194,13 +194,35 @@ export function buildPublicCaptionFromPrompt(prompt: string): string {
 export function buildDraftPublicCaption(input: {
   caption?: string | null;
   prompt?: string | null;
+  status?: string | null;
+  videoUrl?: string | null;
+  outputUrl?: string | null;
+  coverAssetUrl?: string | null;
+  resultAssetUrl?: string | null;
 }): string {
-  const explicitCaption = compactText(input.caption ?? '');
-  if (explicitCaption && !looksLikeInternalRenderPrompt(explicitCaption)) {
-    return buildPublicCaptionFromPrompt(explicitCaption);
+  const explicitCaption = input.caption?.trim() ?? '';
+  const originalPrompt = input.prompt?.trim() ?? '';
+  const status = input.status?.trim().toLowerCase() ?? '';
+  const hasMedia = Boolean(
+    input.videoUrl?.trim() ||
+    input.outputUrl?.trim() ||
+    input.coverAssetUrl?.trim() ||
+    input.resultAssetUrl?.trim(),
+  );
+
+  if (
+    status === 'draft' &&
+    !hasMedia &&
+    originalPrompt
+  ) {
+    return originalPrompt;
   }
 
-  return buildPublicCaptionFromPrompt(input.prompt ?? '');
+  if (explicitCaption && !looksLikeInternalRenderPrompt(explicitCaption)) {
+    return explicitCaption;
+  }
+
+  return buildPublicCaptionFromPrompt(originalPrompt);
 }
 
 export function buildPortrayalDisclosure(input: {

@@ -410,6 +410,7 @@ export default function CreatePage() {
     <div className="page lumora-page focused-create-page">
       <CreateVideo
         refreshKey={characterRefreshKey}
+        initialDraftId={remixProject?.projectId ?? null}
         characterId={effectiveCharacterId}
         characterName={effectiveCharacterName}
         characterAvatar={effectiveCharacterAvatar}

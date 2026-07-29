@@ -4,6 +4,7 @@ import { toggleStylePreset } from '../lib/stylePresets';
 
 type AppState = {
   activePrompt: string;
+  activeDraftId: string | null;
   selectedStyles: string[];
   selectedTrend: string | null;
   draftTitle: string;
@@ -11,6 +12,7 @@ type AppState = {
   projects: typeof projects;
   trends: typeof trends;
   setActivePrompt: (prompt: string) => void;
+  setActiveDraftId: (draftId: string | null) => void;
   setSelectedStyles: (styles: string[]) => void;
   toggleSelectedStyle: (style: string) => void;
   setSelectedTrend: (trendId: string | null) => void;
@@ -19,6 +21,7 @@ type AppState = {
 
 export const useAppStore = create<AppState>((set) => ({
   activePrompt: '',
+  activeDraftId: null,
   selectedStyles: [],
   selectedTrend: null,
   draftTitle: 'Untitled concept',
@@ -26,6 +29,7 @@ export const useAppStore = create<AppState>((set) => ({
   projects,
   trends,
   setActivePrompt: (prompt) => set({ activePrompt: prompt }),
+  setActiveDraftId: (draftId) => set({ activeDraftId: draftId }),
   setSelectedStyles: (styles) => set({ selectedStyles: styles }),
   toggleSelectedStyle: (style) => set((state) => ({ selectedStyles: toggleStylePreset(state.selectedStyles, style) })),
   setSelectedTrend: (trendId) => set({ selectedTrend: trendId }),

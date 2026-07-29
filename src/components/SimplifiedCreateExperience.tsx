@@ -23,6 +23,7 @@ type SimplifiedCreateExperienceProps = {
   generateDisabled: boolean;
   generateBusy: boolean;
   saveBusy: boolean;
+  draftSaveMessage: string;
   resultItem: unknown;
   resultCaption: string;
   onSceneIdeaChange: (value: string) => void;
@@ -58,6 +59,7 @@ export function SimplifiedCreateExperience({
   generateDisabled,
   generateBusy,
   saveBusy,
+  draftSaveMessage,
   resultItem,
   resultCaption,
   onSceneIdeaChange,
@@ -327,6 +329,11 @@ export function SimplifiedCreateExperience({
           </button>
         )}
       </div>
+      {draftSaveMessage ? (
+        <p className="simple-draft-save-status" role="status" aria-live="polite">
+          {draftSaveMessage}
+        </p>
+      ) : null}
     </section>
   );
 }
