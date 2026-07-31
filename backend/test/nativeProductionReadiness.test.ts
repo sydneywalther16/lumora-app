@@ -48,6 +48,9 @@ const homeSource = readFileSync(join(repoRoot, 'src/pages/HomePage.tsx'), 'utf8'
 const statusSource = readFileSync(join(repoRoot, 'src/components/StatusBar.tsx'), 'utf8');
 const packageSource = readFileSync(join(repoRoot, 'package.json'), 'utf8');
 const clientConfigGuardSource = readFileSync(join(repoRoot, 'scripts/verify-client-config.mjs'), 'utf8');
+const nativeReleaseSource = readFileSync(join(repoRoot, 'scripts/mobile-sync-release.mjs'), 'utf8');
+const nativeArchiveGuardSource = readFileSync(join(repoRoot, 'scripts/verify-native-release.mjs'), 'utf8');
+const xcodeArchiveGuardSource = readFileSync(join(repoRoot, 'scripts/xcode-verify-native-release.sh'), 'utf8');
 
 assert.doesNotMatch(createSource, /Start the API server|VITE_API_BASE_URL/);
 assert.match(apiSource, /CapacitorHttp\.request/);
@@ -68,7 +71,20 @@ assert.doesNotMatch(
 assert.match(statusSource, /shouldShowNativeRouteHeader/);
 assert.match(packageSource, /verify:client-config/);
 assert.match(packageSource, /npm run verify:client-config && npm run build && cap sync/);
+assert.match(packageSource, /mobile:sync:release/);
+assert.match(packageSource, /verify:native:release/);
 assert.match(clientConfigGuardSource, /loadEnv\(mode, process\.cwd\(\), ''\)/);
 assert.doesNotMatch(clientConfigGuardSource, /console\.(?:log|info|warn|error)\([^)]*env\[/s);
+assert.match(nativeReleaseSource, /resetNativeBuildDirectories/);
+assert.match(nativeReleaseSource, /verifyBundledClientConfig/);
+assert.match(nativeReleaseSource, /verifySyncedNativeAssets/);
+assert.match(nativeReleaseSource, /writeNativeReleaseManifest/);
+assert.doesNotMatch(
+  nativeReleaseSource,
+  /console\.(?:log|info|warn|error)\([^;]*clientConfig\.supabase(?:Url|AnonKey)/s,
+);
+assert.match(nativeArchiveGuardSource, /verifyNativeBundle/);
+assert.match(xcodeArchiveGuardSource, /CURRENT_PROJECT_VERSION/);
+assert.match(xcodeArchiveGuardSource, /MARKETING_VERSION/);
 
 console.log('nativeProductionReadiness unit tests passed');
