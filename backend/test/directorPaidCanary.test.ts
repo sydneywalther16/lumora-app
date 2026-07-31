@@ -376,7 +376,7 @@ assert.match(migrationSource, /grant execute[\s\S]*to service_role/);
 assert.doesNotMatch(migrationSource, /candlelit mansion|google_api_key/i);
 
 const endpointSource = readFileSync(
-  join(repositoryRoot, 'api/generations/index.ts'),
+  join(repositoryRoot, 'serverless/entries/generations-index.ts'),
   'utf8',
 );
 assert.match(endpointSource, /lumora-director-v1-canary/);
@@ -384,6 +384,15 @@ assert.match(endpointSource, /authenticatedUserId/);
 assert.match(endpointSource, /idempotency-key/);
 assert.match(endpointSource, /x-lumora-director-authorization/);
 assert.doesNotMatch(endpointSource, /service[_ -]?role[_ -]?key\s*[:=]\s*['"`][^'"`]+/i);
+const endpointBundleSource = readFileSync(
+  join(repositoryRoot, 'api/generations/index.js'),
+  'utf8',
+);
+assert.match(endpointBundleSource, /function checkRateLimit/);
+assert.doesNotMatch(
+  endpointBundleSource,
+  /from\s+['"][^'"]*serverless\/_lib\/rateLimit['"]/,
+);
 
 const creatorExperienceSource = readFileSync(
   join(repositoryRoot, 'src/lib/createExperience.ts'),
@@ -413,7 +422,7 @@ globalThis.fetch = async () => {
   throw new Error('Unexpected external request during unauthorized-route test.');
 };
 try {
-  const { default: generationHandler } = await import('../../api/generations/index');
+  const { default: generationHandler } = await import('../../api/generations/index.js');
   let statusCode = 0;
   let responseBody = '';
   await generationHandler(

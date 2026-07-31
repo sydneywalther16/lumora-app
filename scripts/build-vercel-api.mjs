@@ -6,6 +6,10 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const entries = [
   {
+    entryPoint: join(repoRoot, 'serverless/entries/generations-index.ts'),
+    outfile: join(repoRoot, 'api/generations/index.js'),
+  },
+  {
     entryPoint: join(repoRoot, 'serverless/entries/generations-seedance.ts'),
     outfile: join(repoRoot, 'api/generations/seedance.js'),
   },
@@ -32,4 +36,4 @@ for (const entry of entries) {
   });
 }
 
-console.log('Built the self-contained Seedance and health diagnostics Vercel functions.');
+console.log('Built the self-contained generation and health diagnostics Vercel functions.');
