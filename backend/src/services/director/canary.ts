@@ -16,7 +16,12 @@ import {
   type GoogleInteractionPayload,
   type GoogleMediaExecutionContext,
 } from './googleMedia';
-import { extractDirectorMediaOutput, type DirectorMediaOutput } from './output';
+import {
+  DirectorMediaOutputError,
+  extractDirectorMediaOutput,
+  type DirectorAnchorOutputFailureCategory,
+  type DirectorMediaOutput,
+} from './output';
 
 export const DIRECTOR_CANARY_SCENE =
   'She walks through a candlelit mansion and pauses after hearing a sound behind her.';
@@ -35,6 +40,7 @@ export type DirectorCanaryFailureCategory =
   | 'front_reference_missing'
   | 'front_reference_invalid'
   | 'invalid_anchor_output'
+  | DirectorAnchorOutputFailureCategory
   | 'invalid_video_output'
   | 'persistence_failed';
 
@@ -278,18 +284,36 @@ export async function runDirectorCanarySequence(input: {
   }
 
   let anchorOutput: DirectorMediaOutput;
-  let anchorBytes: Uint8Array;
   try {
     anchorOutput = extractDirectorMediaOutput(anchorInteraction, 'scene_anchor');
+  } catch (error) {
+    return failedResult({
+      plan: input.plan,
+      anchorSuccess: false,
+      failureCategory: error instanceof DirectorMediaOutputError
+        ? error.category
+        : 'anchor_output_unrecognized',
+      telemetry,
+    });
+  }
+
+  let anchorBytes: Uint8Array;
+  try {
     anchorBytes = await input.dependencies.resolveMediaBytes(anchorOutput);
-    if (!anchorOutput.interactionId || !anchorBytes.byteLength) {
-      throw new Error('Invalid anchor output.');
+    if (!anchorOutput.interactionId) {
+      return failedResult({
+        plan: input.plan,
+        anchorSuccess: false,
+        failureCategory: 'anchor_output_unrecognized',
+        telemetry,
+      });
     }
+    if (!anchorBytes.byteLength) throw new Error('Missing anchor bytes.');
   } catch {
     return failedResult({
       plan: input.plan,
       anchorSuccess: false,
-      failureCategory: 'invalid_anchor_output',
+      failureCategory: 'anchor_media_missing',
       telemetry,
     });
   }

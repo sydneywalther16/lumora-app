@@ -32,6 +32,7 @@ export function buildNanoBananaPayload(input: {
     model: NANO_BANANA_2_MODEL,
     store: false,
     background: false,
+    response_modalities: ['image'],
     input: [
       {
         type: 'image',

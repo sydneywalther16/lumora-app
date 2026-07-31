@@ -285,6 +285,37 @@ assert.equal(anchorFailure.failureCategory, 'provider_rate_limit');
 assert.equal(anchorFailure.telemetry.providerRequestCount, 1);
 assert.equal(anchorFailureVideoCalls, 0);
 
+let textOnlyVideoCalls = 0;
+const textOnlyAnchor = await runDirectorCanarySequence({
+  apiKey: 'test-only-placeholder',
+  authorization,
+  plan,
+  frontReference: reference,
+  dependencies: {
+    async runAnchor(_payload, context) {
+      return {
+        interaction: {
+          id: 'text-only-anchor-interaction',
+          status: 'completed',
+          outputs: [{ type: 'text', text: 'Created the scene.' }],
+        },
+        telemetry: recordPaidRequest(context.telemetry, context.decision, context.operation),
+      };
+    },
+    async runVideo() {
+      textOnlyVideoCalls += 1;
+      throw new Error('must not run');
+    },
+    async resolveMediaBytes() {
+      throw new Error('must not run');
+    },
+  },
+});
+assert.equal(textOnlyAnchor.ok, false);
+assert.equal(textOnlyAnchor.failureCategory, 'anchor_text_only');
+assert.equal(textOnlyAnchor.telemetry.providerRequestCount, 1);
+assert.equal(textOnlyVideoCalls, 0);
+
 let failedVideoCalls = 0;
 const videoFailure = await runDirectorCanarySequence({
   apiKey: 'test-only-placeholder',

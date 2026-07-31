@@ -2188,8 +2188,8 @@ function stringifyUrlLike(value) {
       return url instanceof URL ? url.toString() : String(url || "").trim() || null;
     }
     if (typeof maybeFileOutput.toString === "function") {
-      const stringValue2 = maybeFileOutput.toString().trim();
-      if (stringValue2 && stringValue2 !== "[object Object]") return stringValue2;
+      const stringValue3 = maybeFileOutput.toString().trim();
+      if (stringValue3 && stringValue3 !== "[object Object]") return stringValue3;
     }
   }
   return null;
@@ -4901,6 +4901,7 @@ function buildNanoBananaPayload(input) {
     model: NANO_BANANA_2_MODEL,
     store: false,
     background: false,
+    response_modalities: ["image"],
     input: [
       {
         type: "image",
@@ -4997,22 +4998,184 @@ var omniFlashAdapter = {
 };
 
 // backend/src/services/director/output.ts
+var DirectorMediaOutputError = class extends Error {
+  category;
+  safeSummary;
+  constructor(category, safeSummary2) {
+    super("Director scene anchor output did not include a usable final image.");
+    this.name = "DirectorMediaOutputError";
+    this.category = category;
+    this.safeSummary = safeSummary2;
+  }
+};
 function record(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }
+function stringValue(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+function safeType(value) {
+  const type = stringValue(record(value)?.type);
+  return type ? type.slice(0, 48) : "unknown";
+}
+function safeSummary(items, input = {}) {
+  return {
+    outputCount: items.length,
+    outputTypes: items.map(safeType),
+    selectedSource: input.selectedSource ?? null,
+    selectedMimeType: input.selectedMimeType ?? null,
+    selectedHasData: input.selectedHasData ?? false,
+    selectedHasUri: input.selectedHasUri ?? false
+  };
+}
+function base64Value(value) {
+  const text2 = stringValue(value)?.replace(/\s+/g, "") ?? null;
+  if (!text2 || !/^[A-Za-z0-9+/]+={0,2}$/.test(text2)) return null;
+  try {
+    return Buffer.from(text2, "base64").byteLength > 0 ? text2 : null;
+  } catch {
+    return null;
+  }
+}
+function providerFileName(uri) {
+  const trimmed = uri.trim();
+  const direct = trimmed.match(/^files\/([^/:?]+)$/i);
+  if (direct?.[1]) return `files/${direct[1]}`;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "https:" || !parsed.hostname.endsWith("googleapis.com")) return null;
+    const match = parsed.pathname.match(/\/files\/([^/:?]+)/i);
+    return match?.[1] ? `files/${match[1]}` : null;
+  } catch {
+    return null;
+  }
+}
+function validProviderUri(value) {
+  const uri = stringValue(value);
+  return uri && providerFileName(uri) ? uri : null;
+}
+function explicitlyThought(value) {
+  const candidate = record(value);
+  return candidate?.thought === true || candidate?.is_thought === true || candidate?.isThought === true;
+}
+function validImageCandidate(value, source, requireImageType) {
+  const candidate = record(value);
+  if (!candidate || explicitlyThought(candidate)) return null;
+  if (requireImageType && candidate.type !== "image") return null;
+  if (!requireImageType && candidate.type != null && candidate.type !== "image") return null;
+  const mimeType = stringValue(candidate.mime_type) ?? stringValue(candidate.mimeType);
+  if (!mimeType?.toLowerCase().startsWith("image/")) return null;
+  const data = base64Value(candidate.data);
+  const uri = validProviderUri(candidate.uri);
+  if (!data && !uri) return null;
+  return { source, mimeType, data, uri };
+}
+function modelOutputItems(root) {
+  if (!Array.isArray(root.steps)) return [];
+  return root.steps.flatMap((step) => {
+    const value = record(step);
+    return value?.type === "model_output" && Array.isArray(value.content) ? value.content : [];
+  });
+}
+function safeModerationText(value, depth = 0) {
+  if (depth > 5) return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => safeModerationText(item, depth + 1));
+  }
+  const valueRecord = record(value);
+  if (!valueRecord) return [];
+  return Object.entries(valueRecord).flatMap(([key, nested]) => {
+    if (/^(?:data|uri|input|system_instruction)$/i.test(key)) return [];
+    if (typeof nested === "string") {
+      return /(?:error|message|reason|status|block|safety|moderation|text|type)/i.test(key) ? [nested.slice(0, 240)] : [];
+    }
+    return safeModerationText(nested, depth + 1);
+  });
+}
+function hasModerationSignal(root) {
+  return safeModerationText(root).some((value) => /\b(?:safety|moderation|blocked|policy|prohibited|responsible ai)\b/i.test(value));
+}
+function hasTextOutput(root, outputItems, stepItems) {
+  if (stringValue(root.output_text) || stringValue(root.outputText)) return true;
+  return [...outputItems, ...stepItems].some((item) => {
+    const value = record(item);
+    return value?.type === "text" && Boolean(stringValue(value.text));
+  });
+}
+function hasUnrecognizedImageShape(root) {
+  const known = /* @__PURE__ */ new Set(["output_image", "outputImage", "outputs", "steps"]);
+  return Object.entries(root).some(([key, value]) => !known.has(key) && /image/i.test(key) && Boolean(record(value)));
+}
+function extractSceneAnchorOutput(root) {
+  const outputItems = Array.isArray(root.outputs) ? root.outputs : [];
+  const stepItems = modelOutputItems(root);
+  const groups = [
+    { source: "output_image", items: root.output_image == null ? [] : [root.output_image], requireImageType: false },
+    { source: "outputImage", items: root.outputImage == null ? [] : [root.outputImage], requireImageType: false },
+    { source: "outputs", items: outputItems, requireImageType: true },
+    { source: "model_output_step", items: stepItems, requireImageType: true }
+  ];
+  let mostRelevantItems = [];
+  for (const group of groups) {
+    if (!group.items.length) continue;
+    mostRelevantItems = group.items;
+    const candidates = group.items.map((item) => validImageCandidate(item, group.source, group.requireImageType)).filter((candidate2) => Boolean(candidate2));
+    const candidate = candidates.at(-1);
+    if (candidate) {
+      return {
+        candidate,
+        summary: safeSummary(group.items, {
+          selectedSource: candidate.source,
+          selectedMimeType: candidate.mimeType,
+          selectedHasData: Boolean(candidate.data),
+          selectedHasUri: Boolean(candidate.uri)
+        })
+      };
+    }
+  }
+  const recognizedImageCount = groups.reduce((count, group) => count + group.items.filter((item) => record(item)?.type === "image" || !group.requireImageType).length, 0);
+  const summary = safeSummary(mostRelevantItems);
+  const category = hasModerationSignal(root) ? "anchor_moderated" : hasTextOutput(root, outputItems, stepItems) && recognizedImageCount === 0 ? "anchor_text_only" : hasUnrecognizedImageShape(root) || root.outputs != null && !Array.isArray(root.outputs) ? "anchor_output_unrecognized" : "anchor_media_missing";
+  throw new DirectorMediaOutputError(category, summary);
+}
 function extractDirectorMediaOutput(interaction, kind) {
   const root = record(interaction);
-  const preferred = kind === "scene_anchor" ? record(root?.output_image) : record(root?.output_video);
-  if (!root || !preferred) {
+  if (!root) {
     throw new Error("Director interaction completed without the expected media output.");
   }
+  if (kind === "scene_anchor") {
+    const { candidate, summary } = extractSceneAnchorOutput(root);
+    return {
+      interactionId: stringValue(root.id) ?? "",
+      kind,
+      mimeType: candidate.mimeType,
+      data: candidate.data,
+      uri: candidate.uri,
+      status: stringValue(root.status) ?? "unknown",
+      safeSummary: summary
+    };
+  }
+  const source = record(root.output_video) ? "output_video" : "outputVideo";
+  const preferred = record(root.output_video) ?? record(root.outputVideo);
+  if (!preferred) {
+    throw new Error("Director interaction completed without the expected media output.");
+  }
+  const data = stringValue(preferred.data);
+  const uri = stringValue(preferred.uri);
+  const mimeType = stringValue(preferred.mime_type) ?? stringValue(preferred.mimeType) ?? "video/mp4";
   return {
-    interactionId: typeof root.id === "string" ? root.id : "",
+    interactionId: stringValue(root.id) ?? "",
     kind,
-    mimeType: typeof preferred.mime_type === "string" ? preferred.mime_type : kind === "scene_anchor" ? "image/jpeg" : "video/mp4",
-    data: typeof preferred.data === "string" ? preferred.data : null,
-    uri: typeof preferred.uri === "string" ? preferred.uri : null,
-    status: typeof root.status === "string" ? root.status : "unknown"
+    mimeType,
+    data,
+    uri,
+    status: stringValue(root.status) ?? "unknown",
+    safeSummary: safeSummary([preferred], {
+      selectedSource: source,
+      selectedMimeType: mimeType,
+      selectedHasData: Boolean(data),
+      selectedHasUri: Boolean(uri)
+    })
   };
 }
 function inlineDirectorOutputBytes(output) {
@@ -5020,9 +5183,9 @@ function inlineDirectorOutputBytes(output) {
   return Buffer.from(output.data, "base64");
 }
 function directorFileNameFromUri(uri) {
-  const match = uri.match(/\/files\/([^/:?]+)/i);
-  if (!match?.[1]) throw new Error("Director media URI does not contain a file identifier.");
-  return `files/${match[1]}`;
+  const fileName = providerFileName(uri);
+  if (!fileName) throw new Error("Director media URI does not contain a valid provider file identifier.");
+  return fileName;
 }
 async function pollDirectorMediaFile(input) {
   const maximumPolls = Math.max(1, Math.min(input.maximumPolls ?? 60, 120));
@@ -5156,18 +5319,33 @@ async function runDirectorCanarySequence(input) {
     });
   }
   let anchorOutput;
-  let anchorBytes;
   try {
     anchorOutput = extractDirectorMediaOutput(anchorInteraction, "scene_anchor");
+  } catch (error) {
+    return failedResult({
+      plan: input.plan,
+      anchorSuccess: false,
+      failureCategory: error instanceof DirectorMediaOutputError ? error.category : "anchor_output_unrecognized",
+      telemetry
+    });
+  }
+  let anchorBytes;
+  try {
     anchorBytes = await input.dependencies.resolveMediaBytes(anchorOutput);
-    if (!anchorOutput.interactionId || !anchorBytes.byteLength) {
-      throw new Error("Invalid anchor output.");
+    if (!anchorOutput.interactionId) {
+      return failedResult({
+        plan: input.plan,
+        anchorSuccess: false,
+        failureCategory: "anchor_output_unrecognized",
+        telemetry
+      });
     }
+    if (!anchorBytes.byteLength) throw new Error("Missing anchor bytes.");
   } catch {
     return failedResult({
       plan: input.plan,
       anchorSuccess: false,
-      failureCategory: "invalid_anchor_output",
+      failureCategory: "anchor_media_missing",
       telemetry
     });
   }
@@ -6353,12 +6531,12 @@ function sendJson(res, statusCode, payload) {
   res.setHeader("Content-Type", "application/json");
   res.end(JSON.stringify(payload));
 }
-function stringValue(value) {
+function stringValue2(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 function headerValue(req, name) {
   const value = req.headers[name.toLowerCase()];
-  return stringValue(Array.isArray(value) ? value[0] : value);
+  return stringValue2(Array.isArray(value) ? value[0] : value);
 }
 async function authenticatedUserId(req) {
   if (!supabaseAdmin) return null;
@@ -6384,13 +6562,13 @@ function referenceImagesValue(value) {
     }
     if (!reference || typeof reference !== "object") return [];
     const record2 = reference;
-    const url = stringValue(record2.url);
+    const url = stringValue2(record2.url);
     if (!url || !/^https?:\/\//i.test(url)) return [];
     return [{
       url,
-      label: stringValue(record2.label) ?? void 0,
-      role: stringValue(record2.role) ?? void 0,
-      token: stringValue(record2.token) ?? `[Image${index + 1}]`
+      label: stringValue2(record2.label) ?? void 0,
+      role: stringValue2(record2.role) ?? void 0,
+      token: stringValue2(record2.token) ?? `[Image${index + 1}]`
     }];
   }).map((reference, index) => ({
     ...reference,
@@ -6471,7 +6649,7 @@ async function handler(req, res) {
     sendJson(res, 400, { status: "failed", error: "Invalid JSON body.", details: errorMessage(error) });
     return;
   }
-  const prompt = stringValue(body.prompt);
+  const prompt = stringValue2(body.prompt);
   if (!prompt) {
     sendJson(res, 400, { status: "failed", error: "Generation requires a prompt." });
     return;
@@ -6492,8 +6670,8 @@ async function handler(req, res) {
       });
       return;
     }
-    const authorizationId = stringValue(body.authorizationId) ?? headerValue(req, "x-lumora-director-authorization");
-    const idempotencyKey = stringValue(body.idempotencyKey) ?? headerValue(req, "idempotency-key");
+    const authorizationId = stringValue2(body.authorizationId) ?? headerValue(req, "x-lumora-director-authorization");
+    const idempotencyKey = stringValue2(body.idempotencyKey) ?? headerValue(req, "idempotency-key");
     if (!authorizationId || !idempotencyKey) {
       sendJson(res, 409, {
         status: "failed",
@@ -6519,11 +6697,11 @@ Style: ${selectedStyle}` : prompt;
       const result = await createSeedanceGeneration({
         prompt: finalPrompt,
         quality: engine === "seedance-quality" ? "quality" : "fast",
-        userId: stringValue(body.userId),
-        title: stringValue(body.title),
-        characterId: stringValue(body.characterId),
-        characterName: stringValue(body.characterName),
-        characterAvatar: stringValue(body.characterAvatar),
+        userId: stringValue2(body.userId),
+        title: stringValue2(body.title),
+        characterId: stringValue2(body.characterId),
+        characterName: stringValue2(body.characterName),
+        characterAvatar: stringValue2(body.characterAvatar),
         isDefaultSelfCharacter: booleanValue(body.isDefaultSelfCharacter),
         renderPreference: renderPreferenceValue(body.renderPreference),
         referenceImages: referenceImagesValue(body.referenceImages)
@@ -6531,9 +6709,9 @@ Style: ${selectedStyle}` : prompt;
       const { rawOutput: _rawOutput, ...publicResult } = result;
       sendJson(res, 200, {
         ...publicResult,
-        characterId: stringValue(body.characterId),
-        characterName: stringValue(body.characterName),
-        characterAvatar: stringValue(body.characterAvatar),
+        characterId: stringValue2(body.characterId),
+        characterName: stringValue2(body.characterName),
+        characterAvatar: stringValue2(body.characterAvatar),
         isDefaultSelfCharacter: booleanValue(body.isDefaultSelfCharacter),
         displayEngine: engine === "seedance-quality" ? "Seedance Quality" : "Seedance Fast",
         generationMode: publicResult.multimodalReferenceMode ? "seedance-multimodal-reference" : "seedance-text-to-video"
@@ -6541,13 +6719,13 @@ Style: ${selectedStyle}` : prompt;
       return;
     }
     const providerResult = await createVideoGeneration(engine, {
-      userId: stringValue(body.userId) ?? "local",
+      userId: stringValue2(body.userId) ?? "local",
       prompt: finalPrompt,
       durationSeconds: durationValue(body.duration),
       aspectRatio: aspectRatioValue(body.aspectRatio),
       privacy: privacyValue(body.privacy),
-      characterId: stringValue(body.characterId),
-      characterName: stringValue(body.characterName)
+      characterId: stringValue2(body.characterId),
+      characterName: stringValue2(body.characterName)
     });
     if (providerResult.status !== "completed") {
       sendJson(res, 202, {
@@ -6564,18 +6742,18 @@ Style: ${selectedStyle}` : prompt;
       return;
     }
     const persistence = await persistCompletedGeneration({
-      userId: stringValue(body.userId),
+      userId: stringValue2(body.userId),
       id: providerResult.providerJobId,
-      title: stringValue(body.title),
+      title: stringValue2(body.title),
       prompt: finalPrompt,
       finalPrompt: providerResult.prompt,
       provider: engine,
       engine,
       videoUrl: providerResult.resultAssetUrl,
       thumbnailUrl: providerResult.resultAssetUrl,
-      characterId: stringValue(body.characterId),
-      characterName: stringValue(body.characterName),
-      characterAvatar: stringValue(body.characterAvatar),
+      characterId: stringValue2(body.characterId),
+      characterName: stringValue2(body.characterName),
+      characterAvatar: stringValue2(body.characterAvatar),
       isDefaultSelfCharacter: booleanValue(body.isDefaultSelfCharacter),
       durationSeconds: durationValue(body.duration),
       aspectRatio: aspectRatioValue(body.aspectRatio),

@@ -149,6 +149,7 @@ const reference = {
 const anchorPayload = buildNanoBananaPayload({ reference, plan: directorPlan });
 assert.equal(anchorPayload.model, 'gemini-3.1-flash-image');
 assert.equal(anchorPayload.input.filter((item) => item.type === 'image').length, 1);
+assert.deepEqual(anchorPayload.response_modalities, ['image']);
 assert.equal(anchorPayload.response_format && !Array.isArray(anchorPayload.response_format), true);
 assert.match(JSON.stringify(anchorPayload), /Synthetic portrayal/);
 assert.doesNotMatch(JSON.stringify(anchorPayload), /real photograph[^"]*true/i);
