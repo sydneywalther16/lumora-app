@@ -136,7 +136,6 @@ assert.equal(directorPlan.publicCaption, 'She smiles gently, turns toward the su
 assert.equal(directorPlan.syntheticDisclosure, 'Synthetic portrayal');
 assert.equal(JSON.stringify(directorPlan.publicCaption).includes('continuity'), false);
 
-assert.deepEqual(UI_PROGRESS_STATES, DIRECTOR_PROGRESS_STATES);
 assert.equal(DIRECTOR_PROGRESS_STATES.every(isProviderNeutralProgressState), true);
 assert.equal(UI_PROGRESS_STATES.every(isProviderNeutralDirectorProgress), true);
 

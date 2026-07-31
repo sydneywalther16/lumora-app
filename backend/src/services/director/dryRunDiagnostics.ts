@@ -112,6 +112,16 @@ export function buildDirectorProductionDryRun(sceneIdea = DIRECTOR_DRY_RUN_SCENE
     projectedVideoCost +
     DIRECTOR_CANARY_PRICING.maximumInputAllowanceUsd
   ).toFixed(3));
+  const anchorPromptPart = Array.isArray(anchorPayload.input)
+    ? anchorPayload.input[1]
+    : null;
+  const anchorPromptText =
+    anchorPromptPart &&
+    typeof anchorPromptPart === 'object' &&
+    'text' in anchorPromptPart &&
+    typeof anchorPromptPart.text === 'string'
+      ? anchorPromptPart.text
+      : '';
 
   return {
     enabled: true,
@@ -152,7 +162,7 @@ export function buildDirectorProductionDryRun(sceneIdea = DIRECTOR_DRY_RUN_SCENE
     },
     disclosure: plan.syntheticDisclosure,
     publicCaption: plan.publicCaption,
-    publicCaptionSeparated: plan.publicCaption !== anchorPayload.input[1]?.text,
+    publicCaptionSeparated: plan.publicCaption !== anchorPromptText,
     secretsRedacted: true,
     privateUrlsRedacted: true,
   };

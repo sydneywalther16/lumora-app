@@ -3,7 +3,16 @@ import { checkRateLimit, sendRateLimitHeaders } from '../../serverless/_lib/rate
 import { persistCompletedGeneration } from '../../backend/src/services/generationPersistence';
 import { createSeedanceGeneration } from '../../backend/src/services/generationService';
 import { isSeedanceModerationError } from '../../backend/src/services/providers/seedanceProvider';
+import {
+  DIRECTOR_CANARY_SCENE,
+} from '../../backend/src/services/director/canary';
+import {
+  executeProductionDirectorCanary,
+} from '../../backend/src/services/director/productionCanary';
+import { supabaseAdmin } from '../../backend/src/lib/supabaseAdmin';
 import { createVideoGeneration } from '../../backend/src/video';
+
+export const maxDuration = 300;
 
 type GenerationRequest = IncomingMessage & {
   body?: unknown;
@@ -24,9 +33,12 @@ type GenerationRequestBody = {
   isDefaultSelfCharacter?: unknown;
   renderPreference?: unknown;
   referenceImages?: unknown;
+  authorizationId?: unknown;
+  idempotencyKey?: unknown;
 };
 
 const supportedEngines = ['seedance-2.0', 'seedance-quality', 'veo', 'runway', 'mock', 'openai'] as const;
+const DIRECTOR_CANARY_ENGINE = 'lumora-director-v1-canary';
 type SupportedEngine = typeof supportedEngines[number];
 
 function sendJson(res: ServerResponse, statusCode: number, payload: unknown) {
@@ -37,6 +49,20 @@ function sendJson(res: ServerResponse, statusCode: number, payload: unknown) {
 
 function stringValue(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function headerValue(req: GenerationRequest, name: string): string | null {
+  const value = req.headers[name.toLowerCase()];
+  return stringValue(Array.isArray(value) ? value[0] : value);
+}
+
+async function authenticatedUserId(req: GenerationRequest): Promise<string | null> {
+  if (!supabaseAdmin) return null;
+  const authorization = headerValue(req, 'authorization');
+  const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+  if (!token) return null;
+  const { data, error } = await supabaseAdmin.auth.getUser(token);
+  return error ? null : data.user?.id ?? null;
 }
 
 function booleanValue(value: unknown): boolean | null {
@@ -170,6 +196,44 @@ export default async function handler(req: GenerationRequest, res: ServerRespons
   const prompt = stringValue(body.prompt);
   if (!prompt) {
     sendJson(res, 400, { status: 'failed', error: 'Generation requires a prompt.' });
+    return;
+  }
+
+  if (body.engine === DIRECTOR_CANARY_ENGINE) {
+    if (prompt !== DIRECTOR_CANARY_SCENE) {
+      sendJson(res, 409, {
+        status: 'failed',
+        error: 'This Lumora Director request is not authorized.',
+      });
+      return;
+    }
+    const userId = await authenticatedUserId(req);
+    if (!userId) {
+      sendJson(res, 401, {
+        status: 'failed',
+        error: 'Sign in to continue.',
+      });
+      return;
+    }
+    const authorizationId =
+      stringValue(body.authorizationId) ??
+      headerValue(req, 'x-lumora-director-authorization');
+    const idempotencyKey =
+      stringValue(body.idempotencyKey) ??
+      headerValue(req, 'idempotency-key');
+    if (!authorizationId || !idempotencyKey) {
+      sendJson(res, 409, {
+        status: 'failed',
+        error: 'This Lumora Director request is not authorized.',
+      });
+      return;
+    }
+    const result = await executeProductionDirectorCanary({
+      userId,
+      authorizationId,
+      idempotencyKey,
+    });
+    sendJson(res, result.httpStatus, result.publicResult);
     return;
   }
 

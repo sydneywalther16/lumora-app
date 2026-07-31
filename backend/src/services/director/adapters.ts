@@ -73,6 +73,7 @@ export function buildOmniFlashPayload(input: {
   shot?: DirectorShot;
   durationSeconds?: 3 | 4 | 5;
   aspectRatio?: '9:16' | '16:9';
+  store?: boolean;
 }): GoogleInteractionPayload {
   const shot = input.shot ?? input.plan.shots[0];
   if (!shot) throw new Error('Director primary video requires one planned shot.');
@@ -80,7 +81,7 @@ export function buildOmniFlashPayload(input: {
 
   return {
     model: GEMINI_OMNI_FLASH_MODEL,
-    store: true,
+    store: input.store ?? true,
     background: false,
     input: [
       {

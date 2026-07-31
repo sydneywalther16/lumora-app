@@ -176,7 +176,7 @@ function buildOmniFlashPayload(input) {
   const durationSeconds = input.durationSeconds ?? 4;
   return {
     model: GEMINI_OMNI_FLASH_MODEL,
-    store: true,
+    store: input.store ?? true,
     background: false,
     input: [
       {
@@ -242,9 +242,9 @@ function assertProviderNeutralPublicCaption(value) {
 
 // backend/src/services/director/progress.ts
 var DIRECTOR_PROGRESS_STATES = [
-  "Planning your story",
-  "Building your cast and setting",
-  "Creating your scene",
+  "Planning your scene",
+  "Building the cast and setting",
+  "Creating the shot",
   "Checking movement and continuity",
   "Polishing the result",
   "Saving to Drafts"
@@ -371,6 +371,8 @@ function buildDirectorProductionDryRun(sceneIdea = DIRECTOR_DRY_RUN_SCENE) {
   }));
   const projectedVideoCost = DIRECTOR_CANARY_PRICING.primaryVideo720pPerSecondUsd * DIRECTOR_CANARY_PRICING.primaryVideoDurationSeconds;
   const projectedMaximumCostUsd = Number((DIRECTOR_CANARY_PRICING.sceneAnchor1kOutputUsd + projectedVideoCost + DIRECTOR_CANARY_PRICING.maximumInputAllowanceUsd).toFixed(3));
+  const anchorPromptPart = Array.isArray(anchorPayload.input) ? anchorPayload.input[1] : null;
+  const anchorPromptText = anchorPromptPart && typeof anchorPromptPart === "object" && "text" in anchorPromptPart && typeof anchorPromptPart.text === "string" ? anchorPromptPart.text : "";
   return {
     enabled: true,
     mode: "dry_run",
@@ -410,7 +412,7 @@ function buildDirectorProductionDryRun(sceneIdea = DIRECTOR_DRY_RUN_SCENE) {
     },
     disclosure: plan.syntheticDisclosure,
     publicCaption: plan.publicCaption,
-    publicCaptionSeparated: plan.publicCaption !== anchorPayload.input[1]?.text,
+    publicCaptionSeparated: plan.publicCaption !== anchorPromptText,
     secretsRedacted: true,
     privateUrlsRedacted: true
   };

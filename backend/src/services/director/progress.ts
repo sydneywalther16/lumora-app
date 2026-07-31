@@ -1,7 +1,7 @@
 export const DIRECTOR_PROGRESS_STATES = [
-  'Planning your story',
-  'Building your cast and setting',
-  'Creating your scene',
+  'Planning your scene',
+  'Building the cast and setting',
+  'Creating the shot',
   'Checking movement and continuity',
   'Polishing the result',
   'Saving to Drafts',
