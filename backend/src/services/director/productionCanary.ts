@@ -30,7 +30,7 @@ import {
   directorFileNameFromUri,
   inlineDirectorOutputBytes,
   pollDirectorMediaFile,
-  type DirectorMediaOutput,
+  type DirectorMediaCandidate,
 } from './output';
 
 const REFERENCE_BUCKET = 'character-reference-images';
@@ -602,11 +602,25 @@ async function uploadBytes(input: {
       contentType: input.contentType,
       upsert: false,
     });
-  if (error) throw new Error('persistence_failed');
+  if (error && !isIdempotentStorageObjectAlreadyExists(error)) {
+    throw new Error('persistence_failed');
+  }
   return supabaseAdmin.storage.from(input.bucket).getPublicUrl(input.path).data.publicUrl;
 }
 
-async function resolveProviderMediaBytes(output: DirectorMediaOutput, apiKey: string) {
+export function isIdempotentStorageObjectAlreadyExists(error: unknown) {
+  if (!error || typeof error !== 'object') return false;
+  const value = error as Record<string, unknown>;
+  const status = Number(value.statusCode ?? value.status ?? 0);
+  const code = text(value.error ?? value.code)?.toLowerCase() ?? '';
+  const message = text(value.message)?.toLowerCase() ?? '';
+  return status === 409 ||
+    code === 'duplicate' ||
+    message === 'the resource already exists' ||
+    message === 'resource already exists';
+}
+
+async function resolveProviderMediaBytes(output: DirectorMediaCandidate, apiKey: string) {
   if (output.data) return inlineDirectorOutputBytes(output);
   if (!output.uri) throw new Error('Provider media is unavailable.');
   const client = createGoogleMediaClient(apiKey);
@@ -1015,9 +1029,9 @@ export async function executeProductionDirectorCanary(input: {
       runAnchor: nanoBananaAdapter.execute,
       runVideo: omniFlashAdapter.execute,
       resolveMediaBytes: (output) => resolveProviderMediaBytes(output, env.GOOGLE_API_KEY as string),
-      persistAnchor: async ({ interactionId, bytes, mimeType }) => {
+      persistAnchor: async ({ mediaArtifactId, bytes, mimeType }) => {
         const path =
-          `${input.userId}/director/${authorization.id}/${interactionId}.` +
+          `${input.userId}/director/${authorization.id}/${mediaArtifactId}.` +
           extensionForMime(mimeType, 'image');
         anchorUrl = await uploadBytes({
           bucket: ANCHOR_BUCKET,
@@ -1063,7 +1077,7 @@ export async function executeProductionDirectorCanary(input: {
   try {
     if (!anchorUrl) throw new Error('persistence_failed');
     const videoPath =
-      `${input.userId}/director/${authorization.id}/${sequence.videoInteractionId}.` +
+      `${input.userId}/director/${authorization.id}/${sequence.videoMediaArtifactId}.` +
       extensionForMime(sequence.videoMimeType, 'video');
     const videoUrl = await uploadBytes({
       bucket: VIDEO_BUCKET,
@@ -1071,6 +1085,9 @@ export async function executeProductionDirectorCanary(input: {
       bytes: sequence.videoBytes,
       contentType: sequence.videoMimeType,
     });
+    if (sequence.interactionSummaries.primaryVideo) {
+      sequence.interactionSummaries.primaryVideo.storageSucceeded = true;
+    }
     const projectId = await persistProject({
       userId: input.userId,
       character: frontReference.character,

@@ -296,7 +296,7 @@ const extractedOutput = extractDirectorMediaOutput({
     data: Buffer.from('local-video-placeholder').toString('base64'),
   },
 }, 'primary_video');
-assert.equal(extractedOutput.interactionId, 'interaction-local-placeholder');
+assert.equal(extractedOutput.providerInteractionId, 'interaction-local-placeholder');
 assert.equal(extractedOutput.mimeType, 'video/mp4');
 assert.equal(extractedOutput.uri, null);
 assert.deepEqual(await pollDirectorMediaFile({

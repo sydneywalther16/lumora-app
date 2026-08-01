@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import {
+  directorMediaSafeTelemetry,
   DirectorMediaOutputError,
   directorFileNameFromUri,
   extractDirectorMediaOutput,
+  identifyDirectorMediaArtifact,
+  persistDirectorOutputBytes,
 } from '../src/services/director/output';
 
 const legacyBytes = Buffer.from('legacy-image-fixture').toString('base64');
@@ -21,7 +25,7 @@ const legacy = extractDirectorMediaOutput({
     mime_type: 'image/png',
   },
 }, 'scene_anchor');
-assert.equal(legacy.interactionId, 'interaction-1');
+assert.equal(legacy.providerInteractionId, 'interaction-1');
 assert.equal(legacy.data, legacyBytes);
 assert.equal(legacy.mimeType, 'image/png');
 assert.equal(legacy.safeSummary.selectedSource, 'output_image');
@@ -149,6 +153,89 @@ const video = extractDirectorMediaOutput({
 assert.equal(video.data, videoBytes);
 assert.equal(video.mimeType, 'video/mp4');
 assert.equal(video.safeSummary.selectedSource, 'output_video');
+
+const idlessBytes = Buffer.from('completed-idless-anchor-fixture');
+const idlessData = idlessBytes.toString('base64');
+const idlessCandidate = extractDirectorMediaOutput({
+  status: 'completed',
+  output_image: { type: 'image', data: idlessData, mime_type: 'image/jpeg' },
+}, 'scene_anchor');
+assert.equal(idlessCandidate.providerInteractionId, null);
+const artifactContext = {
+  authorizationId: 'authorization-private-fixture',
+  idempotencyKey: 'idempotency-private-fixture',
+};
+const idlessArtifact = identifyDirectorMediaArtifact({
+  candidate: idlessCandidate,
+  bytes: idlessBytes,
+  context: artifactContext,
+});
+const repeatedArtifact = identifyDirectorMediaArtifact({
+  candidate: idlessCandidate,
+  bytes: idlessBytes,
+  context: artifactContext,
+});
+assert.equal(idlessArtifact.mediaIdentitySource, 'content_hash');
+assert.equal(idlessArtifact.mediaArtifactId, repeatedArtifact.mediaArtifactId);
+assert.match(idlessArtifact.mediaArtifactId, /^scene_anchor-content-[a-f0-9]{32}$/);
+
+const differentBytes = Buffer.from('different-completed-idless-anchor');
+const differentCandidate = extractDirectorMediaOutput({
+  status: 'completed',
+  outputs: [{ type: 'image', data: differentBytes.toString('base64'), mime_type: 'image/jpeg' }],
+}, 'scene_anchor');
+const differentArtifact = identifyDirectorMediaArtifact({
+  candidate: differentCandidate,
+  bytes: differentBytes,
+  context: artifactContext,
+});
+assert.notEqual(idlessArtifact.mediaArtifactId, differentArtifact.mediaArtifactId);
+
+const providerIdentity = identifyDirectorMediaArtifact({
+  candidate: legacy,
+  bytes: Buffer.from(legacyBytes, 'base64'),
+  context: artifactContext,
+});
+assert.equal(providerIdentity.mediaIdentitySource, 'provider_interaction');
+assert.equal(providerIdentity.mediaArtifactId, 'interaction-1');
+
+const fullContentHash = createHash('sha256').update(idlessBytes).digest('hex');
+const safeTelemetry = directorMediaSafeTelemetry({
+  output: idlessArtifact,
+  storageSucceeded: true,
+});
+const safeTelemetryJson = JSON.stringify(safeTelemetry);
+assert.equal(safeTelemetry.acceptedCompletedResponseWithoutId, true);
+assert.equal(safeTelemetry.mediaIdentitySource, 'content_hash');
+assert.equal(safeTelemetry.storageSucceeded, true);
+assert.equal(safeTelemetry.inlineDataCharacterLength, idlessData.length);
+for (const privateValue of [
+  fullContentHash,
+  idlessData,
+  artifactContext.authorizationId,
+  artifactContext.idempotencyKey,
+  idlessArtifact.mediaArtifactId,
+]) {
+  assert.equal(safeTelemetryJson.includes(privateValue), false);
+}
+
+const persistedArtifacts = new Map<string, { controlledUrl: string; byteSize: number }>();
+const persistence = {
+  async save(input: { mediaArtifactId: string; bytes: Uint8Array }) {
+    const existing = persistedArtifacts.get(input.mediaArtifactId);
+    if (existing) return existing;
+    const saved = {
+      controlledUrl: '/controlled/director-artifact',
+      byteSize: input.bytes.byteLength,
+    };
+    persistedArtifacts.set(input.mediaArtifactId, saved);
+    return saved;
+  },
+};
+const firstPersistence = await persistDirectorOutputBytes(idlessArtifact, idlessBytes, persistence);
+const repeatedPersistence = await persistDirectorOutputBytes(idlessArtifact, idlessBytes, persistence);
+assert.deepEqual(repeatedPersistence, firstPersistence);
+assert.equal(persistedArtifacts.size, 1);
 
 for (const summary of [
   legacy.safeSummary,

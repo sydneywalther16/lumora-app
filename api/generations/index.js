@@ -4602,7 +4602,7 @@ async function createSeedanceGeneration(input) {
 }
 
 // backend/src/services/director/canary.ts
-import { createHash as createHash4 } from "node:crypto";
+import { createHash as createHash5 } from "node:crypto";
 
 // backend/src/services/director/googleMedia.ts
 import { GoogleGenAI } from "@google/genai";
@@ -4668,6 +4668,282 @@ function recordDirectorCostOutcome(telemetry, input) {
       estimatedCostUsd: input.estimatedCostUsd ?? null
     }]
   };
+}
+
+// backend/src/services/director/output.ts
+import { createHash as createHash4 } from "node:crypto";
+var DirectorMediaOutputError = class extends Error {
+  category;
+  safeSummary;
+  constructor(category, safeSummary2) {
+    super("Director scene anchor output did not include a usable final image.");
+    this.name = "DirectorMediaOutputError";
+    this.category = category;
+    this.safeSummary = safeSummary2;
+  }
+};
+function record(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+function stringValue(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+function safeType(value) {
+  const type = stringValue(record(value)?.type);
+  return type ? type.slice(0, 48) : "unknown";
+}
+function safeSummary(items, input = {}) {
+  return {
+    outputCount: items.length,
+    outputTypes: items.map(safeType),
+    selectedSource: input.selectedSource ?? null,
+    selectedMimeType: input.selectedMimeType ?? null,
+    selectedHasData: input.selectedHasData ?? false,
+    selectedInlineDataCharacterLength: input.selectedInlineDataCharacterLength ?? null,
+    selectedHasUri: input.selectedHasUri ?? false
+  };
+}
+function base64Value(value) {
+  const text2 = stringValue(value)?.replace(/\s+/g, "") ?? null;
+  if (!text2 || !/^[A-Za-z0-9+/]+={0,2}$/.test(text2)) return null;
+  try {
+    return Buffer.from(text2, "base64").byteLength > 0 ? text2 : null;
+  } catch {
+    return null;
+  }
+}
+function providerFileName(uri) {
+  const trimmed = uri.trim();
+  const direct = trimmed.match(/^files\/([^/:?]+)$/i);
+  if (direct?.[1]) return `files/${direct[1]}`;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "https:" || !parsed.hostname.endsWith("googleapis.com")) return null;
+    const match = parsed.pathname.match(/\/files\/([^/:?]+)/i);
+    return match?.[1] ? `files/${match[1]}` : null;
+  } catch {
+    return null;
+  }
+}
+function validProviderUri(value) {
+  const uri = stringValue(value);
+  return uri && providerFileName(uri) ? uri : null;
+}
+function explicitlyThought(value) {
+  const candidate = record(value);
+  return candidate?.thought === true || candidate?.is_thought === true || candidate?.isThought === true;
+}
+function validImageCandidate(value, source, requireImageType) {
+  const candidate = record(value);
+  if (!candidate || explicitlyThought(candidate)) return null;
+  if (requireImageType && candidate.type !== "image") return null;
+  if (!requireImageType && candidate.type != null && candidate.type !== "image") return null;
+  const mimeType = stringValue(candidate.mime_type) ?? stringValue(candidate.mimeType);
+  if (!mimeType?.toLowerCase().startsWith("image/")) return null;
+  const data = base64Value(candidate.data);
+  const uri = validProviderUri(candidate.uri);
+  if (!data && !uri) return null;
+  return { source, mimeType, data, uri };
+}
+function modelOutputItems(root) {
+  if (!Array.isArray(root.steps)) return [];
+  return root.steps.flatMap((step) => {
+    const value = record(step);
+    return value?.type === "model_output" && Array.isArray(value.content) ? value.content : [];
+  });
+}
+function safeModerationText(value, depth = 0) {
+  if (depth > 5) return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => safeModerationText(item, depth + 1));
+  }
+  const valueRecord = record(value);
+  if (!valueRecord) return [];
+  return Object.entries(valueRecord).flatMap(([key, nested]) => {
+    if (/^(?:data|uri|input|system_instruction)$/i.test(key)) return [];
+    if (typeof nested === "string") {
+      return /(?:error|message|reason|status|block|safety|moderation|text|type)/i.test(key) ? [nested.slice(0, 240)] : [];
+    }
+    return safeModerationText(nested, depth + 1);
+  });
+}
+function hasModerationSignal(root) {
+  return safeModerationText(root).some((value) => /\b(?:safety|moderation|blocked|policy|prohibited|responsible ai)\b/i.test(value));
+}
+function hasTextOutput(root, outputItems, stepItems) {
+  if (stringValue(root.output_text) || stringValue(root.outputText)) return true;
+  return [...outputItems, ...stepItems].some((item) => {
+    const value = record(item);
+    return value?.type === "text" && Boolean(stringValue(value.text));
+  });
+}
+function hasUnrecognizedImageShape(root) {
+  const known = /* @__PURE__ */ new Set(["output_image", "outputImage", "outputs", "steps"]);
+  return Object.entries(root).some(([key, value]) => !known.has(key) && /image/i.test(key) && Boolean(record(value)));
+}
+function extractSceneAnchorOutput(root) {
+  const outputItems = Array.isArray(root.outputs) ? root.outputs : [];
+  const stepItems = modelOutputItems(root);
+  const groups = [
+    { source: "output_image", items: root.output_image == null ? [] : [root.output_image], requireImageType: false },
+    { source: "outputImage", items: root.outputImage == null ? [] : [root.outputImage], requireImageType: false },
+    { source: "outputs", items: outputItems, requireImageType: true },
+    { source: "model_output_step", items: stepItems, requireImageType: true }
+  ];
+  let mostRelevantItems = [];
+  for (const group of groups) {
+    if (!group.items.length) continue;
+    mostRelevantItems = group.items;
+    const candidates = group.items.map((item) => validImageCandidate(item, group.source, group.requireImageType)).filter((candidate2) => Boolean(candidate2));
+    const candidate = candidates.at(-1);
+    if (candidate) {
+      return {
+        candidate,
+        summary: safeSummary(group.items, {
+          selectedSource: candidate.source,
+          selectedMimeType: candidate.mimeType,
+          selectedHasData: Boolean(candidate.data),
+          selectedInlineDataCharacterLength: candidate.data?.length ?? null,
+          selectedHasUri: Boolean(candidate.uri)
+        })
+      };
+    }
+  }
+  const recognizedImageCount = groups.reduce((count, group) => count + group.items.filter((item) => record(item)?.type === "image" || !group.requireImageType).length, 0);
+  const summary = safeSummary(mostRelevantItems);
+  const category = hasModerationSignal(root) ? "anchor_moderated" : hasTextOutput(root, outputItems, stepItems) && recognizedImageCount === 0 ? "anchor_text_only" : hasUnrecognizedImageShape(root) || root.outputs != null && !Array.isArray(root.outputs) ? "anchor_output_unrecognized" : "anchor_media_missing";
+  throw new DirectorMediaOutputError(category, summary);
+}
+function extractDirectorMediaOutput(interaction, kind) {
+  const root = record(interaction);
+  if (!root) {
+    throw new Error("Director interaction completed without the expected media output.");
+  }
+  if (kind === "scene_anchor") {
+    const { candidate, summary } = extractSceneAnchorOutput(root);
+    return {
+      providerInteractionId: stringValue(root.id),
+      kind,
+      mimeType: candidate.mimeType,
+      data: candidate.data,
+      uri: candidate.uri,
+      status: stringValue(root.status) ?? "unknown",
+      safeSummary: summary
+    };
+  }
+  const source = record(root.output_video) ? "output_video" : "outputVideo";
+  const preferred = record(root.output_video) ?? record(root.outputVideo);
+  if (!preferred) {
+    throw new Error("Director interaction completed without the expected media output.");
+  }
+  const data = stringValue(preferred.data);
+  const uri = stringValue(preferred.uri);
+  const mimeType = stringValue(preferred.mime_type) ?? stringValue(preferred.mimeType) ?? "video/mp4";
+  return {
+    providerInteractionId: stringValue(root.id),
+    kind,
+    mimeType,
+    data,
+    uri,
+    status: stringValue(root.status) ?? "unknown",
+    safeSummary: safeSummary([preferred], {
+      selectedSource: source,
+      selectedMimeType: mimeType,
+      selectedHasData: Boolean(data),
+      selectedInlineDataCharacterLength: data?.length ?? null,
+      selectedHasUri: Boolean(uri)
+    })
+  };
+}
+function inlineDirectorOutputBytes(output) {
+  if (!output.data) throw new Error("Director media is not available inline.");
+  return Buffer.from(output.data, "base64");
+}
+function artifactContextValue(value) {
+  return value.trim();
+}
+function identifyDirectorMediaArtifact(input) {
+  if (!input.bytes.byteLength) {
+    throw new Error("Completed Director media bytes are required for artifact identity.");
+  }
+  if (input.candidate.data) {
+    const inlineBytes = Buffer.from(input.candidate.data, "base64");
+    if (!inlineBytes.byteLength || !inlineBytes.equals(Buffer.from(input.bytes))) {
+      throw new Error("Resolved Director media bytes do not match the verified inline output.");
+    }
+  }
+  if (input.candidate.providerInteractionId) {
+    return {
+      ...input.candidate,
+      mediaArtifactId: input.candidate.providerInteractionId,
+      mediaIdentitySource: "provider_interaction"
+    };
+  }
+  if (input.candidate.kind !== "scene_anchor" || input.candidate.status !== "completed" || !input.candidate.data && !input.candidate.uri) {
+    throw new Error("Only completed verified scene-anchor media can use content-derived identity.");
+  }
+  const authorizationId = artifactContextValue(input.context.authorizationId);
+  const idempotencyKey = artifactContextValue(input.context.idempotencyKey);
+  if (!authorizationId || !idempotencyKey) {
+    throw new Error("One-time authorization context is required for content-derived media identity.");
+  }
+  const contentHash = createHash4("sha256").update(input.bytes).digest("hex");
+  const artifactHash = createHash4("sha256").update("lumora-director-media-v1\0", "utf8").update(input.candidate.kind, "utf8").update("\0", "utf8").update(contentHash, "utf8").update("\0", "utf8").update(authorizationId, "utf8").update("\0", "utf8").update(idempotencyKey, "utf8").digest("hex");
+  return {
+    ...input.candidate,
+    mediaArtifactId: `${input.candidate.kind}-content-${artifactHash.slice(0, 32)}`,
+    mediaIdentitySource: "content_hash"
+  };
+}
+function hasValidCompletedIdlessSceneAnchorMedia(value) {
+  const root = record(value);
+  if (!root || stringValue(root.id) || stringValue(root.status) !== "completed") return false;
+  try {
+    const candidate = extractDirectorMediaOutput(root, "scene_anchor");
+    return Boolean(
+      candidate.mimeType.toLowerCase().startsWith("image/") && (candidate.data || candidate.uri)
+    );
+  } catch {
+    return false;
+  }
+}
+function directorMediaSafeTelemetry(input) {
+  const media = input.output ?? input.candidate ?? null;
+  return {
+    hasProviderInteractionId: Boolean(
+      media?.providerInteractionId ?? input.structuralSummary?.hasInteractionId
+    ),
+    acceptedCompletedResponseWithoutId: Boolean(
+      input.structuralSummary?.acceptedCompletedResponseWithoutId ?? (media && !media.providerInteractionId && media.status === "completed")
+    ),
+    mediaIdentitySource: input.output?.mediaIdentitySource ?? null,
+    normalizedStatus: media?.status ?? input.structuralSummary?.status ?? null,
+    selectedOutputShape: media?.safeSummary.selectedSource ?? null,
+    mimeType: media?.mimeType ?? null,
+    inlineDataPresent: Boolean(media?.data),
+    inlineDataCharacterLength: media?.safeSummary.selectedInlineDataCharacterLength ?? null,
+    uriPresent: Boolean(media?.uri),
+    storageSucceeded: input.storageSucceeded ?? false
+  };
+}
+function directorFileNameFromUri(uri) {
+  const fileName = providerFileName(uri);
+  if (!fileName) throw new Error("Director media URI does not contain a valid provider file identifier.");
+  return fileName;
+}
+async function pollDirectorMediaFile(input) {
+  const maximumPolls = Math.max(1, Math.min(input.maximumPolls ?? 60, 120));
+  const intervalMs = Math.max(250, Math.min(input.intervalMs ?? 5e3, 3e4));
+  for (let poll = 1; poll <= maximumPolls; poll += 1) {
+    const file = await input.getFile(input.fileName);
+    const state = typeof file.state === "string" ? file.state : file.state?.name ?? "UNKNOWN";
+    if (state === "ACTIVE") return { state, polls: poll };
+    if (state === "FAILED") throw new Error("Director media processing failed.");
+    if (poll < maximumPolls) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  }
+  throw new Error("Director media processing timed out.");
 }
 
 // backend/src/services/director/googleMedia.ts
@@ -4831,7 +5107,7 @@ function safeFieldNames(record2) {
   if (!record2) return [];
   return [...new Set(Object.keys(record2).filter((field) => !/(?:authorization|idempotency|session|token|secret|password|api.?key|prompt)/i.test(field)).map((field) => /^[a-z_][a-z0-9_.-]{0,79}$/i.test(field) ? field : "unrecognized_field"))].sort().slice(0, 80);
 }
-function safeType(value) {
+function safeType2(value) {
   const record2 = interactionRecord(value);
   const type = typeof record2?.type === "string" ? record2.type.trim() : "";
   return /^[a-z_][a-z0-9_.-]{0,79}$/i.test(type) ? type : "unknown";
@@ -4870,12 +5146,15 @@ function structuralSummary(input) {
     wrapperPath: [...input.wrapperPath],
     normalizedFields: safeFieldNames(input.normalized),
     hasInteractionId: Boolean(interactionId(input.normalized?.id)),
+    acceptedCompletedResponseWithoutId: Boolean(
+      !interactionId(input.normalized?.id) && status === "completed" && hasValidCompletedIdlessSceneAnchorMedia(input.normalized)
+    ),
     status,
     stepCount: steps.length,
-    stepTypes: steps.map(safeType).slice(0, 80),
-    modelOutputContentTypes: modelOutputContent.map(safeType).slice(0, 80),
+    stepTypes: steps.map(safeType2).slice(0, 80),
+    modelOutputContentTypes: modelOutputContent.map(safeType2).slice(0, 80),
     outputsCount: outputs.length,
-    outputsTypes: outputs.map(safeType).slice(0, 80),
+    outputsTypes: outputs.map(safeType2).slice(0, 80),
     outputImagePresent: Boolean(
       interactionRecord(input.normalized?.output_image) ?? interactionRecord(input.normalized?.outputImage)
     ),
@@ -4904,7 +5183,10 @@ function normalizeGoogleInteractionEnvelope(value) {
     const id = interactionId(current.id);
     const status = interactionStatus(current.status);
     if (id || status || Array.isArray(current.steps)) {
-      const valid = Boolean(id && status);
+      const acceptedCompletedResponseWithoutId = Boolean(
+        !id && status === "completed" && hasValidCompletedIdlessSceneAnchorMedia(current)
+      );
+      const valid = Boolean(status && (id || acceptedCompletedResponseWithoutId));
       return {
         interaction: valid ? current : null,
         interactionId: id,
@@ -5169,211 +5451,6 @@ var omniFlashAdapter = {
   execute: (payload, context) => executeGoogleMediaInteraction(payload, context)
 };
 
-// backend/src/services/director/output.ts
-var DirectorMediaOutputError = class extends Error {
-  category;
-  safeSummary;
-  constructor(category, safeSummary2) {
-    super("Director scene anchor output did not include a usable final image.");
-    this.name = "DirectorMediaOutputError";
-    this.category = category;
-    this.safeSummary = safeSummary2;
-  }
-};
-function record(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
-}
-function stringValue(value) {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-function safeType2(value) {
-  const type = stringValue(record(value)?.type);
-  return type ? type.slice(0, 48) : "unknown";
-}
-function safeSummary(items, input = {}) {
-  return {
-    outputCount: items.length,
-    outputTypes: items.map(safeType2),
-    selectedSource: input.selectedSource ?? null,
-    selectedMimeType: input.selectedMimeType ?? null,
-    selectedHasData: input.selectedHasData ?? false,
-    selectedHasUri: input.selectedHasUri ?? false
-  };
-}
-function base64Value(value) {
-  const text2 = stringValue(value)?.replace(/\s+/g, "") ?? null;
-  if (!text2 || !/^[A-Za-z0-9+/]+={0,2}$/.test(text2)) return null;
-  try {
-    return Buffer.from(text2, "base64").byteLength > 0 ? text2 : null;
-  } catch {
-    return null;
-  }
-}
-function providerFileName(uri) {
-  const trimmed = uri.trim();
-  const direct = trimmed.match(/^files\/([^/:?]+)$/i);
-  if (direct?.[1]) return `files/${direct[1]}`;
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== "https:" || !parsed.hostname.endsWith("googleapis.com")) return null;
-    const match = parsed.pathname.match(/\/files\/([^/:?]+)/i);
-    return match?.[1] ? `files/${match[1]}` : null;
-  } catch {
-    return null;
-  }
-}
-function validProviderUri(value) {
-  const uri = stringValue(value);
-  return uri && providerFileName(uri) ? uri : null;
-}
-function explicitlyThought(value) {
-  const candidate = record(value);
-  return candidate?.thought === true || candidate?.is_thought === true || candidate?.isThought === true;
-}
-function validImageCandidate(value, source, requireImageType) {
-  const candidate = record(value);
-  if (!candidate || explicitlyThought(candidate)) return null;
-  if (requireImageType && candidate.type !== "image") return null;
-  if (!requireImageType && candidate.type != null && candidate.type !== "image") return null;
-  const mimeType = stringValue(candidate.mime_type) ?? stringValue(candidate.mimeType);
-  if (!mimeType?.toLowerCase().startsWith("image/")) return null;
-  const data = base64Value(candidate.data);
-  const uri = validProviderUri(candidate.uri);
-  if (!data && !uri) return null;
-  return { source, mimeType, data, uri };
-}
-function modelOutputItems(root) {
-  if (!Array.isArray(root.steps)) return [];
-  return root.steps.flatMap((step) => {
-    const value = record(step);
-    return value?.type === "model_output" && Array.isArray(value.content) ? value.content : [];
-  });
-}
-function safeModerationText(value, depth = 0) {
-  if (depth > 5) return [];
-  if (Array.isArray(value)) {
-    return value.flatMap((item) => safeModerationText(item, depth + 1));
-  }
-  const valueRecord = record(value);
-  if (!valueRecord) return [];
-  return Object.entries(valueRecord).flatMap(([key, nested]) => {
-    if (/^(?:data|uri|input|system_instruction)$/i.test(key)) return [];
-    if (typeof nested === "string") {
-      return /(?:error|message|reason|status|block|safety|moderation|text|type)/i.test(key) ? [nested.slice(0, 240)] : [];
-    }
-    return safeModerationText(nested, depth + 1);
-  });
-}
-function hasModerationSignal(root) {
-  return safeModerationText(root).some((value) => /\b(?:safety|moderation|blocked|policy|prohibited|responsible ai)\b/i.test(value));
-}
-function hasTextOutput(root, outputItems, stepItems) {
-  if (stringValue(root.output_text) || stringValue(root.outputText)) return true;
-  return [...outputItems, ...stepItems].some((item) => {
-    const value = record(item);
-    return value?.type === "text" && Boolean(stringValue(value.text));
-  });
-}
-function hasUnrecognizedImageShape(root) {
-  const known = /* @__PURE__ */ new Set(["output_image", "outputImage", "outputs", "steps"]);
-  return Object.entries(root).some(([key, value]) => !known.has(key) && /image/i.test(key) && Boolean(record(value)));
-}
-function extractSceneAnchorOutput(root) {
-  const outputItems = Array.isArray(root.outputs) ? root.outputs : [];
-  const stepItems = modelOutputItems(root);
-  const groups = [
-    { source: "output_image", items: root.output_image == null ? [] : [root.output_image], requireImageType: false },
-    { source: "outputImage", items: root.outputImage == null ? [] : [root.outputImage], requireImageType: false },
-    { source: "outputs", items: outputItems, requireImageType: true },
-    { source: "model_output_step", items: stepItems, requireImageType: true }
-  ];
-  let mostRelevantItems = [];
-  for (const group of groups) {
-    if (!group.items.length) continue;
-    mostRelevantItems = group.items;
-    const candidates = group.items.map((item) => validImageCandidate(item, group.source, group.requireImageType)).filter((candidate2) => Boolean(candidate2));
-    const candidate = candidates.at(-1);
-    if (candidate) {
-      return {
-        candidate,
-        summary: safeSummary(group.items, {
-          selectedSource: candidate.source,
-          selectedMimeType: candidate.mimeType,
-          selectedHasData: Boolean(candidate.data),
-          selectedHasUri: Boolean(candidate.uri)
-        })
-      };
-    }
-  }
-  const recognizedImageCount = groups.reduce((count, group) => count + group.items.filter((item) => record(item)?.type === "image" || !group.requireImageType).length, 0);
-  const summary = safeSummary(mostRelevantItems);
-  const category = hasModerationSignal(root) ? "anchor_moderated" : hasTextOutput(root, outputItems, stepItems) && recognizedImageCount === 0 ? "anchor_text_only" : hasUnrecognizedImageShape(root) || root.outputs != null && !Array.isArray(root.outputs) ? "anchor_output_unrecognized" : "anchor_media_missing";
-  throw new DirectorMediaOutputError(category, summary);
-}
-function extractDirectorMediaOutput(interaction, kind) {
-  const root = record(interaction);
-  if (!root) {
-    throw new Error("Director interaction completed without the expected media output.");
-  }
-  if (kind === "scene_anchor") {
-    const { candidate, summary } = extractSceneAnchorOutput(root);
-    return {
-      interactionId: stringValue(root.id) ?? "",
-      kind,
-      mimeType: candidate.mimeType,
-      data: candidate.data,
-      uri: candidate.uri,
-      status: stringValue(root.status) ?? "unknown",
-      safeSummary: summary
-    };
-  }
-  const source = record(root.output_video) ? "output_video" : "outputVideo";
-  const preferred = record(root.output_video) ?? record(root.outputVideo);
-  if (!preferred) {
-    throw new Error("Director interaction completed without the expected media output.");
-  }
-  const data = stringValue(preferred.data);
-  const uri = stringValue(preferred.uri);
-  const mimeType = stringValue(preferred.mime_type) ?? stringValue(preferred.mimeType) ?? "video/mp4";
-  return {
-    interactionId: stringValue(root.id) ?? "",
-    kind,
-    mimeType,
-    data,
-    uri,
-    status: stringValue(root.status) ?? "unknown",
-    safeSummary: safeSummary([preferred], {
-      selectedSource: source,
-      selectedMimeType: mimeType,
-      selectedHasData: Boolean(data),
-      selectedHasUri: Boolean(uri)
-    })
-  };
-}
-function inlineDirectorOutputBytes(output) {
-  if (!output.data) throw new Error("Director media is not available inline.");
-  return Buffer.from(output.data, "base64");
-}
-function directorFileNameFromUri(uri) {
-  const fileName = providerFileName(uri);
-  if (!fileName) throw new Error("Director media URI does not contain a valid provider file identifier.");
-  return fileName;
-}
-async function pollDirectorMediaFile(input) {
-  const maximumPolls = Math.max(1, Math.min(input.maximumPolls ?? 60, 120));
-  const intervalMs = Math.max(250, Math.min(input.intervalMs ?? 5e3, 3e4));
-  for (let poll = 1; poll <= maximumPolls; poll += 1) {
-    const file = await input.getFile(input.fileName);
-    const state = typeof file.state === "string" ? file.state : file.state?.name ?? "UNKNOWN";
-    if (state === "ACTIVE") return { state, polls: poll };
-    if (state === "FAILED") throw new Error("Director media processing failed.");
-    if (poll < maximumPolls) {
-      await new Promise((resolve) => setTimeout(resolve, intervalMs));
-    }
-  }
-  throw new Error("Director media processing timed out.");
-}
-
 // backend/src/services/director/canary.ts
 var DIRECTOR_CANARY_SCENE = "She walks through a candlelit mansion and pauses after hearing a sound behind her.";
 var DIRECTOR_CANARY_MAXIMUM_COST_USD = 2;
@@ -5383,7 +5460,7 @@ function compact(value) {
   return value.replace(/\s+/g, " ").trim();
 }
 function directorCanarySceneHash(scene = DIRECTOR_CANARY_SCENE) {
-  return createHash4("sha256").update(compact(scene), "utf8").digest("hex");
+  return createHash5("sha256").update(compact(scene), "utf8").digest("hex");
 }
 function assertDirectorCanaryAuthorization(authorization, now = /* @__PURE__ */ new Date()) {
   if (authorization.status !== "running" || !authorization.consumedAt) {
@@ -5474,6 +5551,7 @@ async function runDirectorCanarySequence(input) {
     aspectRatio: "9:16"
   });
   let anchorInteraction;
+  let anchorStructuralSummary = null;
   try {
     const anchorResult = await input.dependencies.runAnchor(anchorPayload, {
       apiKey: input.apiKey,
@@ -5484,12 +5562,17 @@ async function runDirectorCanarySequence(input) {
     anchorInteraction = anchorResult.interaction;
     telemetry = anchorResult.telemetry;
     if (anchorResult.interactionSummary) {
-      interactionSummaries.sceneAnchor = anchorResult.interactionSummary;
+      anchorStructuralSummary = anchorResult.interactionSummary;
+      interactionSummaries.sceneAnchor = directorMediaSafeTelemetry({
+        structuralSummary: anchorStructuralSummary
+      });
     }
   } catch (error) {
     const providerError = error instanceof DirectorProviderExecutionError ? error : null;
     if (providerError?.interactionSummary) {
-      interactionSummaries.sceneAnchor = providerError.interactionSummary;
+      interactionSummaries.sceneAnchor = directorMediaSafeTelemetry({
+        structuralSummary: providerError.interactionSummary
+      });
     }
     return failedResult({
       plan: input.plan,
@@ -5500,9 +5583,13 @@ async function runDirectorCanarySequence(input) {
       interactionSummaries
     });
   }
-  let anchorOutput;
+  let anchorCandidate;
   try {
-    anchorOutput = extractDirectorMediaOutput(anchorInteraction, "scene_anchor");
+    anchorCandidate = extractDirectorMediaOutput(anchorInteraction, "scene_anchor");
+    interactionSummaries.sceneAnchor = directorMediaSafeTelemetry({
+      structuralSummary: anchorStructuralSummary,
+      candidate: anchorCandidate
+    });
   } catch (error) {
     return failedResult({
       plan: input.plan,
@@ -5513,18 +5600,22 @@ async function runDirectorCanarySequence(input) {
     });
   }
   let anchorBytes;
+  let anchorOutput;
   try {
-    anchorBytes = await input.dependencies.resolveMediaBytes(anchorOutput);
-    if (!anchorOutput.interactionId) {
-      return failedResult({
-        plan: input.plan,
-        anchorSuccess: false,
-        failureCategory: "anchor_output_unrecognized",
-        telemetry,
-        interactionSummaries
-      });
-    }
+    anchorBytes = await input.dependencies.resolveMediaBytes(anchorCandidate);
     if (!anchorBytes.byteLength) throw new Error("Missing anchor bytes.");
+    anchorOutput = identifyDirectorMediaArtifact({
+      candidate: anchorCandidate,
+      bytes: anchorBytes,
+      context: {
+        authorizationId: input.authorization.id,
+        idempotencyKey: input.authorization.idempotencyKey
+      }
+    });
+    interactionSummaries.sceneAnchor = directorMediaSafeTelemetry({
+      structuralSummary: anchorStructuralSummary,
+      output: anchorOutput
+    });
   } catch {
     return failedResult({
       plan: input.plan,
@@ -5537,9 +5628,16 @@ async function runDirectorCanarySequence(input) {
   const anchorCost = estimateDirectorInteractionCost(anchorInteraction, "scene_anchor");
   try {
     await input.dependencies.persistAnchor?.({
-      interactionId: anchorOutput.interactionId,
+      providerInteractionId: anchorOutput.providerInteractionId,
+      mediaArtifactId: anchorOutput.mediaArtifactId,
+      mediaIdentitySource: anchorOutput.mediaIdentitySource,
       bytes: anchorBytes,
       mimeType: anchorOutput.mimeType
+    });
+    interactionSummaries.sceneAnchor = directorMediaSafeTelemetry({
+      structuralSummary: anchorStructuralSummary,
+      output: anchorOutput,
+      storageSucceeded: Boolean(input.dependencies.persistAnchor)
     });
   } catch {
     return failedResult({
@@ -5575,6 +5673,7 @@ async function runDirectorCanarySequence(input) {
     store: false
   });
   let videoInteraction;
+  let videoStructuralSummary = null;
   try {
     const videoResult = await input.dependencies.runVideo(videoPayload, {
       apiKey: input.apiKey,
@@ -5585,12 +5684,17 @@ async function runDirectorCanarySequence(input) {
     videoInteraction = videoResult.interaction;
     telemetry = videoResult.telemetry;
     if (videoResult.interactionSummary) {
-      interactionSummaries.primaryVideo = videoResult.interactionSummary;
+      videoStructuralSummary = videoResult.interactionSummary;
+      interactionSummaries.primaryVideo = directorMediaSafeTelemetry({
+        structuralSummary: videoStructuralSummary
+      });
     }
   } catch (error) {
     const providerError = error instanceof DirectorProviderExecutionError ? error : null;
     if (providerError?.interactionSummary) {
-      interactionSummaries.primaryVideo = providerError.interactionSummary;
+      interactionSummaries.primaryVideo = directorMediaSafeTelemetry({
+        structuralSummary: providerError.interactionSummary
+      });
     }
     return failedResult({
       plan: input.plan,
@@ -5603,14 +5707,27 @@ async function runDirectorCanarySequence(input) {
       interactionSummaries
     });
   }
+  let videoCandidate;
   let videoOutput;
   let videoBytes;
   try {
-    videoOutput = extractDirectorMediaOutput(videoInteraction, "primary_video");
-    videoBytes = await input.dependencies.resolveMediaBytes(videoOutput);
-    if (!videoOutput.interactionId || !videoBytes.byteLength) {
+    videoCandidate = extractDirectorMediaOutput(videoInteraction, "primary_video");
+    videoBytes = await input.dependencies.resolveMediaBytes(videoCandidate);
+    if (!videoCandidate.providerInteractionId || !videoBytes.byteLength) {
       throw new Error("Invalid video output.");
     }
+    videoOutput = identifyDirectorMediaArtifact({
+      candidate: videoCandidate,
+      bytes: videoBytes,
+      context: {
+        authorizationId: input.authorization.id,
+        idempotencyKey: input.authorization.idempotencyKey
+      }
+    });
+    interactionSummaries.primaryVideo = directorMediaSafeTelemetry({
+      structuralSummary: videoStructuralSummary,
+      output: videoOutput
+    });
   } catch {
     return failedResult({
       plan: input.plan,
@@ -5628,8 +5745,10 @@ async function runDirectorCanarySequence(input) {
     ok: true,
     anchorSuccess: true,
     videoSuccess: true,
-    anchorInteractionId: anchorOutput.interactionId,
-    videoInteractionId: videoOutput.interactionId,
+    anchorProviderInteractionId: anchorOutput.providerInteractionId,
+    videoProviderInteractionId: videoOutput.providerInteractionId,
+    anchorMediaArtifactId: anchorOutput.mediaArtifactId,
+    videoMediaArtifactId: videoOutput.mediaArtifactId,
     anchorBytes,
     videoBytes,
     anchorMimeType: anchorOutput.mimeType,
@@ -5644,7 +5763,7 @@ async function runDirectorCanarySequence(input) {
 }
 
 // backend/src/services/director/productionCanary.ts
-import { createHash as createHash5, randomUUID as randomUUID4 } from "node:crypto";
+import { createHash as createHash6, randomUUID as randomUUID4 } from "node:crypto";
 import { readFile as readFile2, unlink } from "node:fs/promises";
 import { tmpdir as tmpdir2 } from "node:os";
 import { join as join2 } from "node:path";
@@ -6125,7 +6244,7 @@ async function loadFrontReference(userId) {
     urls,
     bytes,
     mimeType,
-    hashPrefix: createHash5("sha256").update(bytes).digest("hex").slice(0, 12)
+    hashPrefix: createHash6("sha256").update(bytes).digest("hex").slice(0, 12)
   };
 }
 function extensionForMime(mimeType, kind) {
@@ -6140,8 +6259,18 @@ async function uploadBytes(input) {
     contentType: input.contentType,
     upsert: false
   });
-  if (error) throw new Error("persistence_failed");
+  if (error && !isIdempotentStorageObjectAlreadyExists(error)) {
+    throw new Error("persistence_failed");
+  }
   return supabaseAdmin.storage.from(input.bucket).getPublicUrl(input.path).data.publicUrl;
+}
+function isIdempotentStorageObjectAlreadyExists(error) {
+  if (!error || typeof error !== "object") return false;
+  const value = error;
+  const status = Number(value.statusCode ?? value.status ?? 0);
+  const code = text(value.error ?? value.code)?.toLowerCase() ?? "";
+  const message = text(value.message)?.toLowerCase() ?? "";
+  return status === 409 || code === "duplicate" || message === "the resource already exists" || message === "resource already exists";
 }
 async function resolveProviderMediaBytes(output, apiKey) {
   if (output.data) return inlineDirectorOutputBytes(output);
@@ -6459,8 +6588,8 @@ async function executeProductionDirectorCanary(input) {
       runAnchor: nanoBananaAdapter.execute,
       runVideo: omniFlashAdapter.execute,
       resolveMediaBytes: (output) => resolveProviderMediaBytes(output, env.GOOGLE_API_KEY),
-      persistAnchor: async ({ interactionId: interactionId2, bytes, mimeType }) => {
-        const path = `${input.userId}/director/${authorization.id}/${interactionId2}.` + extensionForMime(mimeType, "image");
+      persistAnchor: async ({ mediaArtifactId, bytes, mimeType }) => {
+        const path = `${input.userId}/director/${authorization.id}/${mediaArtifactId}.` + extensionForMime(mimeType, "image");
         anchorUrl = await uploadBytes({
           bucket: ANCHOR_BUCKET,
           path,
@@ -6502,13 +6631,16 @@ async function executeProductionDirectorCanary(input) {
   }
   try {
     if (!anchorUrl) throw new Error("persistence_failed");
-    const videoPath = `${input.userId}/director/${authorization.id}/${sequence.videoInteractionId}.` + extensionForMime(sequence.videoMimeType, "video");
+    const videoPath = `${input.userId}/director/${authorization.id}/${sequence.videoMediaArtifactId}.` + extensionForMime(sequence.videoMimeType, "video");
     const videoUrl = await uploadBytes({
       bucket: VIDEO_BUCKET,
       path: videoPath,
       bytes: sequence.videoBytes,
       contentType: sequence.videoMimeType
     });
+    if (sequence.interactionSummaries.primaryVideo) {
+      sequence.interactionSummaries.primaryVideo.storageSucceeded = true;
+    }
     const projectId = await persistProject({
       userId: input.userId,
       character: frontReference.character,

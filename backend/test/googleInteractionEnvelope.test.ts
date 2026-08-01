@@ -55,6 +55,50 @@ const missingId = normalizeGoogleInteractionEnvelope({ status: 'completed', step
 assert.equal(missingId.valid, false);
 assert.equal(missingId.interactionId, null);
 
+const idlessFixtures = [
+  {
+    status: 'completed',
+    output_image: { type: 'image', data: privateImageData, mime_type: 'image/jpeg' },
+  },
+  {
+    status: 'completed',
+    outputs: [
+      { type: 'image', data: Buffer.from('thought-only').toString('base64'), mime_type: 'image/png', thought: true },
+      { type: 'image', data: privateImageData, mime_type: 'image/png' },
+    ],
+  },
+  {
+    status: 'completed',
+    steps: [{
+      type: 'model_output',
+      content: [
+        { type: 'image', data: Buffer.from('interim-thought').toString('base64'), mime_type: 'image/png', thought: true },
+        { type: 'image', data: privateImageData, mime_type: 'image/png' },
+      ],
+    }],
+  },
+];
+let idlessPollCount = 0;
+for (const fixture of idlessFixtures) {
+  const normalized = normalizeGoogleInteractionEnvelope(fixture);
+  assert.equal(normalized.valid, true);
+  assert.equal(normalized.status, 'completed');
+  assert.equal(normalized.interactionId, null);
+  assert.equal(normalized.structuralSummary.acceptedCompletedResponseWithoutId, true);
+  const completed = await waitForGoogleInteraction({
+    initialInteraction: fixture,
+    maximumPolls: 1,
+    intervalMs: 0,
+    async getInteraction() {
+      idlessPollCount += 1;
+      throw new Error('must not poll completed ID-less media');
+    },
+  });
+  assert.equal((completed as { status?: string }).status, 'completed');
+  assert.equal(extractDirectorMediaOutput(completed, 'scene_anchor').providerInteractionId, null);
+}
+assert.equal(idlessPollCount, 0);
+
 assert.equal(
   normalizeGoogleInteractionEnvelope({ arbitrary: directInteraction }).valid,
   false,
@@ -93,6 +137,39 @@ await assert.rejects(
   }),
   (error) => error instanceof GoogleInteractionEnvelopeError,
 );
+
+for (const invalidIdless of [
+  {
+    status: 'running',
+    output_image: { type: 'image', data: privateImageData, mime_type: 'image/jpeg' },
+  },
+  {
+    output_image: { type: 'image', data: privateImageData, mime_type: 'image/jpeg' },
+  },
+  {
+    status: 'completed',
+    outputs: [{ type: 'text', text: 'No image was produced.' }],
+  },
+  {
+    status: 'completed',
+    output_image: { type: 'image', data: '', mime_type: 'image/jpeg' },
+  },
+]) {
+  let invalidPollCount = 0;
+  await assert.rejects(
+    waitForGoogleInteraction({
+      initialInteraction: invalidIdless,
+      maximumPolls: 1,
+      intervalMs: 0,
+      async getInteraction() {
+        invalidPollCount += 1;
+        throw new Error('must not poll without a provider interaction ID');
+      },
+    }),
+    (error) => error instanceof GoogleInteractionEnvelopeError,
+  );
+  assert.equal(invalidPollCount, 0);
+}
 
 await assert.rejects(
   waitForGoogleInteraction({
@@ -163,6 +240,7 @@ const structural = normalizeGoogleInteractionEnvelope({
   sessionToken: 'must-not-be-retained',
 }).structuralSummary;
 assert.equal(structural.hasInteractionId, true);
+assert.equal(structural.acceptedCompletedResponseWithoutId, false);
 assert.equal(structural.outputImagePresent, true);
 assert.equal(structural.imageMimeType, 'image/jpeg');
 assert.equal(structural.imageDataPresent, true);

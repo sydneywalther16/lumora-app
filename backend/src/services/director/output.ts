@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 export type DirectorMediaKind = 'scene_anchor' | 'primary_video' | 'repair_video';
 
 export type DirectorMediaOutputSource =
@@ -14,6 +16,7 @@ export type DirectorMediaOutputSafeSummary = {
   selectedSource: DirectorMediaOutputSource | null;
   selectedMimeType: string | null;
   selectedHasData: boolean;
+  selectedInlineDataCharacterLength: number | null;
   selectedHasUri: boolean;
 };
 
@@ -38,8 +41,8 @@ export class DirectorMediaOutputError extends Error {
   }
 }
 
-export type DirectorMediaOutput = {
-  interactionId: string;
+export type DirectorMediaCandidate = {
+  providerInteractionId: string | null;
   kind: DirectorMediaKind;
   mimeType: string;
   data: string | null;
@@ -48,9 +51,36 @@ export type DirectorMediaOutput = {
   safeSummary: DirectorMediaOutputSafeSummary;
 };
 
+export type DirectorMediaIdentitySource = 'provider_interaction' | 'content_hash';
+
+export type DirectorMediaOutput = DirectorMediaCandidate & {
+  mediaArtifactId: string;
+  mediaIdentitySource: DirectorMediaIdentitySource;
+};
+
+export type DirectorMediaArtifactContext = {
+  authorizationId: string;
+  idempotencyKey: string;
+};
+
+export type DirectorMediaSafeTelemetry = {
+  hasProviderInteractionId: boolean;
+  acceptedCompletedResponseWithoutId: boolean;
+  mediaIdentitySource: DirectorMediaIdentitySource | null;
+  normalizedStatus: string | null;
+  selectedOutputShape: DirectorMediaOutputSource | null;
+  mimeType: string | null;
+  inlineDataPresent: boolean;
+  inlineDataCharacterLength: number | null;
+  uriPresent: boolean;
+  storageSucceeded: boolean;
+};
+
 export type DirectorOutputPersistence = {
   save(input: {
-    interactionId: string;
+    providerInteractionId: string | null;
+    mediaArtifactId: string;
+    mediaIdentitySource: DirectorMediaIdentitySource;
     kind: DirectorMediaKind;
     mimeType: string;
     bytes: Uint8Array;
@@ -86,6 +116,7 @@ function safeSummary(
     selectedSource: input.selectedSource ?? null,
     selectedMimeType: input.selectedMimeType ?? null,
     selectedHasData: input.selectedHasData ?? false,
+    selectedInlineDataCharacterLength: input.selectedInlineDataCharacterLength ?? null,
     selectedHasUri: input.selectedHasUri ?? false,
   };
 }
@@ -229,6 +260,7 @@ function extractSceneAnchorOutput(root: Record<string, unknown>): {
           selectedSource: candidate.source,
           selectedMimeType: candidate.mimeType,
           selectedHasData: Boolean(candidate.data),
+          selectedInlineDataCharacterLength: candidate.data?.length ?? null,
           selectedHasUri: Boolean(candidate.uri),
         }),
       };
@@ -251,7 +283,7 @@ function extractSceneAnchorOutput(root: Record<string, unknown>): {
 export function extractDirectorMediaOutput(
   interaction: unknown,
   kind: DirectorMediaKind,
-): DirectorMediaOutput {
+): DirectorMediaCandidate {
   const root = record(interaction);
   if (!root) {
     throw new Error('Director interaction completed without the expected media output.');
@@ -260,7 +292,7 @@ export function extractDirectorMediaOutput(
   if (kind === 'scene_anchor') {
     const { candidate, summary } = extractSceneAnchorOutput(root);
     return {
-      interactionId: stringValue(root.id) ?? '',
+      providerInteractionId: stringValue(root.id),
       kind,
       mimeType: candidate.mimeType,
       data: candidate.data,
@@ -283,7 +315,7 @@ export function extractDirectorMediaOutput(
   const mimeType = stringValue(preferred.mime_type) ?? stringValue(preferred.mimeType) ?? 'video/mp4';
 
   return {
-    interactionId: stringValue(root.id) ?? '',
+    providerInteractionId: stringValue(root.id),
     kind,
     mimeType,
     data,
@@ -293,6 +325,7 @@ export function extractDirectorMediaOutput(
       selectedSource: source,
       selectedMimeType: mimeType,
       selectedHasData: Boolean(data),
+      selectedInlineDataCharacterLength: data?.length ?? null,
       selectedHasUri: Boolean(uri),
     }),
   };
@@ -303,11 +336,13 @@ export async function persistDirectorOutputBytes(
   bytes: Uint8Array,
   persistence: DirectorOutputPersistence,
 ) {
-  if (!output.interactionId || !bytes.byteLength) {
+  if (!output.mediaArtifactId || !bytes.byteLength) {
     throw new Error('Completed Director media bytes are required for persistence.');
   }
   return persistence.save({
-    interactionId: output.interactionId,
+    providerInteractionId: output.providerInteractionId,
+    mediaArtifactId: output.mediaArtifactId,
+    mediaIdentitySource: output.mediaIdentitySource,
     kind: output.kind,
     mimeType: output.mimeType,
     bytes,
@@ -315,9 +350,108 @@ export async function persistDirectorOutputBytes(
   });
 }
 
-export function inlineDirectorOutputBytes(output: DirectorMediaOutput): Uint8Array {
+export function inlineDirectorOutputBytes(output: DirectorMediaCandidate): Uint8Array {
   if (!output.data) throw new Error('Director media is not available inline.');
   return Buffer.from(output.data, 'base64');
+}
+
+function artifactContextValue(value: string) {
+  return value.trim();
+}
+
+export function identifyDirectorMediaArtifact(input: {
+  candidate: DirectorMediaCandidate;
+  bytes: Uint8Array;
+  context: DirectorMediaArtifactContext;
+}): DirectorMediaOutput {
+  if (!input.bytes.byteLength) {
+    throw new Error('Completed Director media bytes are required for artifact identity.');
+  }
+  if (input.candidate.data) {
+    const inlineBytes = Buffer.from(input.candidate.data, 'base64');
+    if (!inlineBytes.byteLength || !inlineBytes.equals(Buffer.from(input.bytes))) {
+      throw new Error('Resolved Director media bytes do not match the verified inline output.');
+    }
+  }
+  if (input.candidate.providerInteractionId) {
+    return {
+      ...input.candidate,
+      mediaArtifactId: input.candidate.providerInteractionId,
+      mediaIdentitySource: 'provider_interaction',
+    };
+  }
+  if (
+    input.candidate.kind !== 'scene_anchor' ||
+    input.candidate.status !== 'completed' ||
+    (!input.candidate.data && !input.candidate.uri)
+  ) {
+    throw new Error('Only completed verified scene-anchor media can use content-derived identity.');
+  }
+  const authorizationId = artifactContextValue(input.context.authorizationId);
+  const idempotencyKey = artifactContextValue(input.context.idempotencyKey);
+  if (!authorizationId || !idempotencyKey) {
+    throw new Error('One-time authorization context is required for content-derived media identity.');
+  }
+  const contentHash = createHash('sha256').update(input.bytes).digest('hex');
+  const artifactHash = createHash('sha256')
+    .update('lumora-director-media-v1\0', 'utf8')
+    .update(input.candidate.kind, 'utf8')
+    .update('\0', 'utf8')
+    .update(contentHash, 'utf8')
+    .update('\0', 'utf8')
+    .update(authorizationId, 'utf8')
+    .update('\0', 'utf8')
+    .update(idempotencyKey, 'utf8')
+    .digest('hex');
+  return {
+    ...input.candidate,
+    mediaArtifactId: `${input.candidate.kind}-content-${artifactHash.slice(0, 32)}`,
+    mediaIdentitySource: 'content_hash',
+  };
+}
+
+export function hasValidCompletedIdlessSceneAnchorMedia(value: unknown) {
+  const root = record(value);
+  if (!root || stringValue(root.id) || stringValue(root.status) !== 'completed') return false;
+  try {
+    const candidate = extractDirectorMediaOutput(root, 'scene_anchor');
+    return Boolean(
+      candidate.mimeType.toLowerCase().startsWith('image/') &&
+      (candidate.data || candidate.uri),
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function directorMediaSafeTelemetry(input: {
+  structuralSummary?: {
+    hasInteractionId?: boolean;
+    acceptedCompletedResponseWithoutId?: boolean;
+    status?: string | null;
+  } | null;
+  candidate?: DirectorMediaCandidate | null;
+  output?: DirectorMediaOutput | null;
+  storageSucceeded?: boolean;
+}): DirectorMediaSafeTelemetry {
+  const media = input.output ?? input.candidate ?? null;
+  return {
+    hasProviderInteractionId: Boolean(
+      media?.providerInteractionId ?? input.structuralSummary?.hasInteractionId,
+    ),
+    acceptedCompletedResponseWithoutId: Boolean(
+      input.structuralSummary?.acceptedCompletedResponseWithoutId ??
+      (media && !media.providerInteractionId && media.status === 'completed'),
+    ),
+    mediaIdentitySource: input.output?.mediaIdentitySource ?? null,
+    normalizedStatus: media?.status ?? input.structuralSummary?.status ?? null,
+    selectedOutputShape: media?.safeSummary.selectedSource ?? null,
+    mimeType: media?.mimeType ?? null,
+    inlineDataPresent: Boolean(media?.data),
+    inlineDataCharacterLength: media?.safeSummary.selectedInlineDataCharacterLength ?? null,
+    uriPresent: Boolean(media?.uri),
+    storageSucceeded: input.storageSucceeded ?? false,
+  };
 }
 
 export function directorFileNameFromUri(uri: string) {

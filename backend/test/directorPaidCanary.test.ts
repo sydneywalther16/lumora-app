@@ -27,6 +27,7 @@ import {
 import {
   directorOperationalTelemetry,
   mergeDirectorCanaryJobInteractionTelemetry,
+  isIdempotentStorageObjectAlreadyExists,
   resolveDirectorCanaryAuthorizationClaim,
   resolveDirectorCanaryAuthorizationStatus,
   resolveDirectorCanaryStoredAuthorization,
@@ -35,6 +36,7 @@ import {
   type DirectorAuthorizationRow,
   type DirectorAuthorizationStatusStore,
 } from '../src/services/director/productionCanary';
+import { directorMediaSafeTelemetry } from '../src/services/director/output';
 
 const repositoryRoot = process.cwd();
 const now = new Date();
@@ -412,6 +414,71 @@ assert.equal(success.telemetry.requestsByOperation.scene_anchor, 1);
 assert.equal(success.telemetry.requestsByOperation.primary_video, 1);
 assert.equal(success.publicCaption, DIRECTOR_CANARY_SCENE);
 assert.equal(success.syntheticDisclosure, 'Synthetic portrayal');
+if (success.ok) {
+  assert.equal(success.anchorProviderInteractionId, 'anchor-interaction');
+  assert.equal(success.anchorMediaArtifactId, 'anchor-interaction');
+  assert.equal(success.videoProviderInteractionId, 'video-interaction');
+  assert.equal(success.videoMediaArtifactId, 'video-interaction');
+}
+
+const idlessAnchorBytes = Buffer.from('idless-anchor');
+const idlessAnchorInteraction = {
+  status: 'completed',
+  output_image: {
+    type: 'image',
+    mime_type: 'image/jpeg',
+    data: idlessAnchorBytes.toString('base64'),
+  },
+};
+let idlessPersistedArtifactId = '';
+let idlessVideoCalls = 0;
+const idlessAnchorSuccess = await runDirectorCanarySequence({
+  apiKey: 'test-only-placeholder',
+  authorization,
+  plan,
+  frontReference: reference,
+  dependencies: {
+    async runAnchor(_payload, context) {
+      return {
+        interaction: idlessAnchorInteraction,
+        interactionSummary: normalizeGoogleInteractionEnvelope(idlessAnchorInteraction).structuralSummary,
+        telemetry: recordPaidRequest(context.telemetry, context.decision, context.operation),
+      };
+    },
+    async runVideo(_payload, context) {
+      idlessVideoCalls += 1;
+      return {
+        interaction: videoInteraction,
+        interactionSummary: normalizeGoogleInteractionEnvelope(videoInteraction).structuralSummary,
+        telemetry: recordPaidRequest(context.telemetry, context.decision, context.operation),
+      };
+    },
+    async resolveMediaBytes(output) {
+      return Buffer.from(output.data ?? '', 'base64');
+    },
+    async persistAnchor(input) {
+      assert.equal(input.providerInteractionId, null);
+      assert.equal(input.mediaIdentitySource, 'content_hash');
+      idlessPersistedArtifactId = input.mediaArtifactId;
+    },
+  },
+});
+assert.equal(idlessAnchorSuccess.ok, true);
+assert.equal(idlessVideoCalls, 1);
+assert.match(idlessPersistedArtifactId, /^scene_anchor-content-[a-f0-9]{32}$/);
+assert.equal(idlessAnchorSuccess.telemetry.providerRequestCount, 2);
+assert.equal(idlessAnchorSuccess.telemetry.providerRetryCount, 0);
+assert.equal(idlessAnchorSuccess.telemetry.providerFallbackCount, 0);
+assert.equal(idlessAnchorSuccess.telemetry.repairRequestCount, 0);
+if (idlessAnchorSuccess.ok) {
+  assert.equal(idlessAnchorSuccess.anchorProviderInteractionId, null);
+  assert.equal(idlessAnchorSuccess.anchorMediaArtifactId, idlessPersistedArtifactId);
+  assert.equal(
+    idlessAnchorSuccess.interactionSummaries.sceneAnchor?.acceptedCompletedResponseWithoutId,
+    true,
+  );
+  assert.equal(idlessAnchorSuccess.interactionSummaries.sceneAnchor?.storageSucceeded, true);
+}
 
 let budgetGuardCalls = 0;
 const budgetGuard = await runDirectorCanarySequence({
@@ -498,7 +565,10 @@ assert.equal(textOnlyAnchor.ok, false);
 assert.equal(textOnlyAnchor.failureCategory, 'anchor_text_only');
 assert.equal(textOnlyAnchor.telemetry.providerRequestCount, 1);
 assert.equal(textOnlyVideoCalls, 0);
-assert.deepEqual(textOnlyAnchor.interactionSummaries.sceneAnchor, textOnlyInteractionSummary);
+const textOnlySafeSummary = directorMediaSafeTelemetry({
+  structuralSummary: textOnlyInteractionSummary,
+});
+assert.deepEqual(textOnlyAnchor.interactionSummaries.sceneAnchor, textOnlySafeSummary);
 const persistedAuthorizationTelemetry = directorOperationalTelemetry(
   textOnlyAnchor.telemetry,
   null,
@@ -510,13 +580,17 @@ const persistedJobTelemetry = mergeDirectorCanaryJobInteractionTelemetry(
 );
 assert.deepEqual(
   persistedAuthorizationTelemetry.interactionResponses.sceneAnchor,
-  textOnlyInteractionSummary,
+  textOnlySafeSummary,
 );
 assert.deepEqual(
   persistedJobTelemetry.interactionResponses.sceneAnchor,
-  textOnlyInteractionSummary,
+  textOnlySafeSummary,
 );
 assert.deepEqual(persistedJobTelemetry.directorPlan, { private: true });
+
+assert.equal(isIdempotentStorageObjectAlreadyExists({ statusCode: 409 }), true);
+assert.equal(isIdempotentStorageObjectAlreadyExists({ message: 'The resource already exists' }), true);
+assert.equal(isIdempotentStorageObjectAlreadyExists({ message: 'Permission denied' }), false);
 
 let failedVideoCalls = 0;
 const videoFailure = await runDirectorCanarySequence({

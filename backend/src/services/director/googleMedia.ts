@@ -5,6 +5,7 @@ import {
   recordDirectorCostOutcome,
   recordPaidRequest,
 } from './budget';
+import { hasValidCompletedIdlessSceneAnchorMedia } from './output';
 
 export type GoogleInteractionPayload = Interactions.CreateModelInteractionParamsNonStreaming;
 
@@ -41,6 +42,7 @@ export type GoogleInteractionStructuralSummary = {
   wrapperPath: string[];
   normalizedFields: string[];
   hasInteractionId: boolean;
+  acceptedCompletedResponseWithoutId: boolean;
   status: GoogleInteractionStatus | null;
   stepCount: number;
   stepTypes: string[];
@@ -354,6 +356,11 @@ function structuralSummary(input: {
     wrapperPath: [...input.wrapperPath],
     normalizedFields: safeFieldNames(input.normalized),
     hasInteractionId: Boolean(interactionId(input.normalized?.id)),
+    acceptedCompletedResponseWithoutId: Boolean(
+      !interactionId(input.normalized?.id) &&
+      status === 'completed' &&
+      hasValidCompletedIdlessSceneAnchorMedia(input.normalized),
+    ),
     status,
     stepCount: steps.length,
     stepTypes: steps.map(safeType).slice(0, 80),
@@ -397,7 +404,12 @@ export function normalizeGoogleInteractionEnvelope(
     const id = interactionId(current.id);
     const status = interactionStatus(current.status);
     if (id || status || Array.isArray(current.steps)) {
-      const valid = Boolean(id && status);
+      const acceptedCompletedResponseWithoutId = Boolean(
+        !id &&
+        status === 'completed' &&
+        hasValidCompletedIdlessSceneAnchorMedia(current),
+      );
+      const valid = Boolean(status && (id || acceptedCompletedResponseWithoutId));
       return {
         interaction: valid ? current : null,
         interactionId: id,

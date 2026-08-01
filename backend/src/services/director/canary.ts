@@ -18,10 +18,14 @@ import {
   type GoogleMediaExecutionContext,
 } from './googleMedia';
 import {
+  directorMediaSafeTelemetry,
   DirectorMediaOutputError,
   extractDirectorMediaOutput,
+  identifyDirectorMediaArtifact,
   type DirectorAnchorOutputFailureCategory,
+  type DirectorMediaCandidate,
   type DirectorMediaOutput,
+  type DirectorMediaSafeTelemetry,
 } from './output';
 
 export const DIRECTOR_CANARY_SCENE =
@@ -69,8 +73,8 @@ type GoogleInteractionResult = {
 };
 
 export type DirectorInteractionSummaries = {
-  sceneAnchor?: GoogleInteractionStructuralSummary;
-  primaryVideo?: GoogleInteractionStructuralSummary;
+  sceneAnchor?: DirectorMediaSafeTelemetry;
+  primaryVideo?: DirectorMediaSafeTelemetry;
 };
 
 export type DirectorCanaryExecutionDependencies = {
@@ -82,9 +86,11 @@ export type DirectorCanaryExecutionDependencies = {
     payload: GoogleInteractionPayload,
     context: GoogleMediaExecutionContext,
   ): Promise<GoogleInteractionResult>;
-  resolveMediaBytes(output: DirectorMediaOutput): Promise<Uint8Array>;
+  resolveMediaBytes(output: DirectorMediaCandidate): Promise<Uint8Array>;
   persistAnchor?(input: {
-    interactionId: string;
+    providerInteractionId: string | null;
+    mediaArtifactId: string;
+    mediaIdentitySource: DirectorMediaOutput['mediaIdentitySource'];
     bytes: Uint8Array;
     mimeType: string;
   }): Promise<void>;
@@ -95,8 +101,10 @@ export type DirectorCanarySequenceResult =
       ok: true;
       anchorSuccess: true;
       videoSuccess: true;
-      anchorInteractionId: string;
-      videoInteractionId: string;
+      anchorProviderInteractionId: string | null;
+      videoProviderInteractionId: string;
+      anchorMediaArtifactId: string;
+      videoMediaArtifactId: string;
       anchorBytes: Uint8Array;
       videoBytes: Uint8Array;
       anchorMimeType: string;
@@ -276,6 +284,7 @@ export async function runDirectorCanarySequence(input: {
   });
 
   let anchorInteraction: unknown;
+  let anchorStructuralSummary: GoogleInteractionStructuralSummary | null = null;
   try {
     const anchorResult = await input.dependencies.runAnchor(anchorPayload, {
       apiKey: input.apiKey,
@@ -286,12 +295,17 @@ export async function runDirectorCanarySequence(input: {
     anchorInteraction = anchorResult.interaction;
     telemetry = anchorResult.telemetry;
     if (anchorResult.interactionSummary) {
-      interactionSummaries.sceneAnchor = anchorResult.interactionSummary;
+      anchorStructuralSummary = anchorResult.interactionSummary;
+      interactionSummaries.sceneAnchor = directorMediaSafeTelemetry({
+        structuralSummary: anchorStructuralSummary,
+      });
     }
   } catch (error) {
     const providerError = error instanceof DirectorProviderExecutionError ? error : null;
     if (providerError?.interactionSummary) {
-      interactionSummaries.sceneAnchor = providerError.interactionSummary;
+      interactionSummaries.sceneAnchor = directorMediaSafeTelemetry({
+        structuralSummary: providerError.interactionSummary,
+      });
     }
     return failedResult({
       plan: input.plan,
@@ -303,9 +317,13 @@ export async function runDirectorCanarySequence(input: {
     });
   }
 
-  let anchorOutput: DirectorMediaOutput;
+  let anchorCandidate: DirectorMediaCandidate;
   try {
-    anchorOutput = extractDirectorMediaOutput(anchorInteraction, 'scene_anchor');
+    anchorCandidate = extractDirectorMediaOutput(anchorInteraction, 'scene_anchor');
+    interactionSummaries.sceneAnchor = directorMediaSafeTelemetry({
+      structuralSummary: anchorStructuralSummary,
+      candidate: anchorCandidate,
+    });
   } catch (error) {
     return failedResult({
       plan: input.plan,
@@ -319,18 +337,22 @@ export async function runDirectorCanarySequence(input: {
   }
 
   let anchorBytes: Uint8Array;
+  let anchorOutput: DirectorMediaOutput;
   try {
-    anchorBytes = await input.dependencies.resolveMediaBytes(anchorOutput);
-    if (!anchorOutput.interactionId) {
-      return failedResult({
-        plan: input.plan,
-        anchorSuccess: false,
-        failureCategory: 'anchor_output_unrecognized',
-        telemetry,
-        interactionSummaries,
-      });
-    }
+    anchorBytes = await input.dependencies.resolveMediaBytes(anchorCandidate);
     if (!anchorBytes.byteLength) throw new Error('Missing anchor bytes.');
+    anchorOutput = identifyDirectorMediaArtifact({
+      candidate: anchorCandidate,
+      bytes: anchorBytes,
+      context: {
+        authorizationId: input.authorization.id,
+        idempotencyKey: input.authorization.idempotencyKey,
+      },
+    });
+    interactionSummaries.sceneAnchor = directorMediaSafeTelemetry({
+      structuralSummary: anchorStructuralSummary,
+      output: anchorOutput,
+    });
   } catch {
     return failedResult({
       plan: input.plan,
@@ -344,9 +366,16 @@ export async function runDirectorCanarySequence(input: {
   const anchorCost = estimateDirectorInteractionCost(anchorInteraction, 'scene_anchor');
   try {
     await input.dependencies.persistAnchor?.({
-      interactionId: anchorOutput.interactionId,
+      providerInteractionId: anchorOutput.providerInteractionId,
+      mediaArtifactId: anchorOutput.mediaArtifactId,
+      mediaIdentitySource: anchorOutput.mediaIdentitySource,
       bytes: anchorBytes,
       mimeType: anchorOutput.mimeType,
+    });
+    interactionSummaries.sceneAnchor = directorMediaSafeTelemetry({
+      structuralSummary: anchorStructuralSummary,
+      output: anchorOutput,
+      storageSucceeded: Boolean(input.dependencies.persistAnchor),
     });
   } catch {
     return failedResult({
@@ -388,6 +417,7 @@ export async function runDirectorCanarySequence(input: {
   });
 
   let videoInteraction: unknown;
+  let videoStructuralSummary: GoogleInteractionStructuralSummary | null = null;
   try {
     const videoResult = await input.dependencies.runVideo(videoPayload, {
       apiKey: input.apiKey,
@@ -398,12 +428,17 @@ export async function runDirectorCanarySequence(input: {
     videoInteraction = videoResult.interaction;
     telemetry = videoResult.telemetry;
     if (videoResult.interactionSummary) {
-      interactionSummaries.primaryVideo = videoResult.interactionSummary;
+      videoStructuralSummary = videoResult.interactionSummary;
+      interactionSummaries.primaryVideo = directorMediaSafeTelemetry({
+        structuralSummary: videoStructuralSummary,
+      });
     }
   } catch (error) {
     const providerError = error instanceof DirectorProviderExecutionError ? error : null;
     if (providerError?.interactionSummary) {
-      interactionSummaries.primaryVideo = providerError.interactionSummary;
+      interactionSummaries.primaryVideo = directorMediaSafeTelemetry({
+        structuralSummary: providerError.interactionSummary,
+      });
     }
     return failedResult({
       plan: input.plan,
@@ -417,14 +452,27 @@ export async function runDirectorCanarySequence(input: {
     });
   }
 
+  let videoCandidate: DirectorMediaCandidate;
   let videoOutput: DirectorMediaOutput;
   let videoBytes: Uint8Array;
   try {
-    videoOutput = extractDirectorMediaOutput(videoInteraction, 'primary_video');
-    videoBytes = await input.dependencies.resolveMediaBytes(videoOutput);
-    if (!videoOutput.interactionId || !videoBytes.byteLength) {
+    videoCandidate = extractDirectorMediaOutput(videoInteraction, 'primary_video');
+    videoBytes = await input.dependencies.resolveMediaBytes(videoCandidate);
+    if (!videoCandidate.providerInteractionId || !videoBytes.byteLength) {
       throw new Error('Invalid video output.');
     }
+    videoOutput = identifyDirectorMediaArtifact({
+      candidate: videoCandidate,
+      bytes: videoBytes,
+      context: {
+        authorizationId: input.authorization.id,
+        idempotencyKey: input.authorization.idempotencyKey,
+      },
+    });
+    interactionSummaries.primaryVideo = directorMediaSafeTelemetry({
+      structuralSummary: videoStructuralSummary,
+      output: videoOutput,
+    });
   } catch {
     return failedResult({
       plan: input.plan,
@@ -446,8 +494,10 @@ export async function runDirectorCanarySequence(input: {
     ok: true,
     anchorSuccess: true,
     videoSuccess: true,
-    anchorInteractionId: anchorOutput.interactionId,
-    videoInteractionId: videoOutput.interactionId,
+    anchorProviderInteractionId: anchorOutput.providerInteractionId,
+    videoProviderInteractionId: videoOutput.providerInteractionId,
+    anchorMediaArtifactId: anchorOutput.mediaArtifactId,
+    videoMediaArtifactId: videoOutput.mediaArtifactId,
     anchorBytes,
     videoBytes,
     anchorMimeType: anchorOutput.mimeType,
