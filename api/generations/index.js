@@ -5880,6 +5880,50 @@ function numeric(value) {
 function hasExactCanaryLimits(row) {
   return Number(row.maximum_cost_usd) === DIRECTOR_CANARY_MAXIMUM_COST_USD && row.maximum_anchor_requests === 1 && row.maximum_video_requests === 1 && row.maximum_retry_requests === 0 && row.maximum_fallback_requests === 0 && row.maximum_repair_requests === 0;
 }
+function safeAuthorizationStatus(state, expiresInSeconds = 0) {
+  return {
+    state,
+    expiresInSeconds: Math.max(0, Math.floor(expiresInSeconds)),
+    maximumBudget: 2,
+    anchorRequestLimit: 1,
+    videoRequestLimit: 1,
+    retriesAllowed: 0
+  };
+}
+async function resolveDirectorCanaryAuthorizationStatus(store, input, now = /* @__PURE__ */ new Date()) {
+  const rows = await store.findRecent(input);
+  if (rows === null) return safeAuthorizationStatus("failed");
+  if (rows.length === 0) return safeAuthorizationStatus("missing");
+  const nowMs = now.getTime();
+  const activeRows = rows.filter((row) => {
+    if (row.status === "running") return true;
+    return row.status === "authorized" && new Date(row.expires_at).getTime() > nowMs;
+  });
+  if (activeRows.length > 1) return safeAuthorizationStatus("blocked_multiple");
+  const activeRow = activeRows[0];
+  if (activeRow?.status === "running") {
+    return safeAuthorizationStatus(
+      "running",
+      (new Date(activeRow.expires_at).getTime() - nowMs) / 1e3
+    );
+  }
+  if (activeRow) {
+    const createdAt = new Date(activeRow.created_at).getTime();
+    if (activeRow.user_id !== input.userId || activeRow.scene_hash !== input.sceneHash || activeRow.consumed_at !== null || !text(activeRow.id) || !text(activeRow.idempotency_key) || !hasExactCanaryLimits(activeRow) || !Number.isFinite(createdAt) || createdAt <= nowMs - 30 * 6e4) {
+      return safeAuthorizationStatus("failed");
+    }
+    return safeAuthorizationStatus(
+      "ready",
+      (new Date(activeRow.expires_at).getTime() - nowMs) / 1e3
+    );
+  }
+  const latestRow = rows[0];
+  if (latestRow.status === "completed") return safeAuthorizationStatus("completed");
+  if (latestRow.status === "failed") return safeAuthorizationStatus("failed");
+  if (latestRow.status === "running") return safeAuthorizationStatus("running");
+  if (latestRow.status === "authorized") return safeAuthorizationStatus("expired");
+  return safeAuthorizationStatus("missing");
+}
 async function resolveDirectorCanaryStoredAuthorization(store, input, now = /* @__PURE__ */ new Date()) {
   const rows = await store.findEligible({ ...input, now });
   if (rows.length === 0) return { kind: "missing", row: null };
@@ -5960,9 +6004,27 @@ var supabaseAuthorizationLookupStore = {
     return data;
   }
 };
+var supabaseAuthorizationStatusStore = {
+  async findRecent(input) {
+    if (!supabaseAdmin) return null;
+    const { data, error } = await supabaseAdmin.from(CANARY_AUTHORIZATION_TABLE).select("id,user_id,scene_hash,status,maximum_cost_usd,maximum_anchor_requests,maximum_video_requests,maximum_retry_requests,maximum_fallback_requests,maximum_repair_requests,idempotency_key,expires_at,consumed_at,started_at,completed_at,created_at").eq("user_id", input.userId).eq("scene_hash", input.sceneHash).order("created_at", { ascending: false }).limit(20);
+    if (error || !Array.isArray(data)) return null;
+    return data;
+  }
+};
 async function resolveProductionDirectorCanaryAuthorization(input) {
   return resolveDirectorCanaryStoredAuthorization(
     supabaseAuthorizationLookupStore,
+    {
+      userId: input.userId,
+      sceneHash: directorCanarySceneHash()
+    },
+    input.now
+  );
+}
+async function resolveProductionDirectorCanaryStatus(input) {
+  return resolveDirectorCanaryAuthorizationStatus(
+    supabaseAuthorizationStatusStore,
     {
       userId: input.userId,
       sceneHash: directorCanarySceneHash()
@@ -6916,6 +6978,8 @@ async function handler(req, res) {
     return;
   }
   if (body.engine === DIRECTOR_CANARY_ENGINE) {
+    const isStatusRequest = body.action === "status";
+    if (isStatusRequest) res.setHeader("Cache-Control", "no-store");
     if (prompt !== DIRECTOR_CANARY_SCENE) {
       sendJson(res, 409, {
         status: "failed",
@@ -6928,6 +6992,18 @@ async function handler(req, res) {
       sendJson(res, 401, {
         status: "failed",
         error: "Sign in to continue."
+      });
+      return;
+    }
+    if (isStatusRequest) {
+      const authorizationStatus = await resolveProductionDirectorCanaryStatus({ userId });
+      sendJson(res, 200, authorizationStatus);
+      return;
+    }
+    if (body.action !== void 0 && body.action !== "execute") {
+      sendJson(res, 409, {
+        status: "failed",
+        error: "This Lumora Director request is not authorized."
       });
       return;
     }

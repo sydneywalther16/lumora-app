@@ -137,6 +137,31 @@ export type DirectorAuthorizationLookupResolution =
   | { kind: 'expired'; row: DirectorAuthorizationRow }
   | { kind: 'invalid'; row: DirectorAuthorizationRow };
 
+export type DirectorCanaryAuthorizationStatusState =
+  | 'ready'
+  | 'missing'
+  | 'expired'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'blocked_multiple';
+
+export type DirectorCanaryAuthorizationStatus = {
+  state: DirectorCanaryAuthorizationStatusState;
+  expiresInSeconds: number;
+  maximumBudget: 2;
+  anchorRequestLimit: 1;
+  videoRequestLimit: 1;
+  retriesAllowed: 0;
+};
+
+export type DirectorAuthorizationStatusStore = {
+  findRecent(input: {
+    userId: string;
+    sceneHash: string;
+  }): Promise<DirectorAuthorizationRow[] | null>;
+};
+
 function text(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
@@ -155,6 +180,74 @@ function hasExactCanaryLimits(row: DirectorAuthorizationRow) {
     row.maximum_fallback_requests === 0 &&
     row.maximum_repair_requests === 0
   );
+}
+
+function safeAuthorizationStatus(
+  state: DirectorCanaryAuthorizationStatusState,
+  expiresInSeconds = 0,
+): DirectorCanaryAuthorizationStatus {
+  return {
+    state,
+    expiresInSeconds: Math.max(0, Math.floor(expiresInSeconds)),
+    maximumBudget: 2,
+    anchorRequestLimit: 1,
+    videoRequestLimit: 1,
+    retriesAllowed: 0,
+  };
+}
+
+export async function resolveDirectorCanaryAuthorizationStatus(
+  store: DirectorAuthorizationStatusStore,
+  input: {
+    userId: string;
+    sceneHash: string;
+  },
+  now = new Date(),
+): Promise<DirectorCanaryAuthorizationStatus> {
+  const rows = await store.findRecent(input);
+  if (rows === null) return safeAuthorizationStatus('failed');
+  if (rows.length === 0) return safeAuthorizationStatus('missing');
+
+  const nowMs = now.getTime();
+  const activeRows = rows.filter((row) => {
+    if (row.status === 'running') return true;
+    return row.status === 'authorized' && new Date(row.expires_at).getTime() > nowMs;
+  });
+  if (activeRows.length > 1) return safeAuthorizationStatus('blocked_multiple');
+
+  const activeRow = activeRows[0];
+  if (activeRow?.status === 'running') {
+    return safeAuthorizationStatus(
+      'running',
+      (new Date(activeRow.expires_at).getTime() - nowMs) / 1_000,
+    );
+  }
+  if (activeRow) {
+    const createdAt = new Date(activeRow.created_at).getTime();
+    if (
+      activeRow.user_id !== input.userId ||
+      activeRow.scene_hash !== input.sceneHash ||
+      activeRow.consumed_at !== null ||
+      !text(activeRow.id) ||
+      !text(activeRow.idempotency_key) ||
+      !hasExactCanaryLimits(activeRow) ||
+      !Number.isFinite(createdAt) ||
+      createdAt <= nowMs - 30 * 60_000
+    ) {
+      return safeAuthorizationStatus('failed');
+    }
+    return safeAuthorizationStatus(
+      'ready',
+      (new Date(activeRow.expires_at).getTime() - nowMs) / 1_000,
+    );
+  }
+
+  const latestRow = rows[0];
+  if (latestRow.status === 'completed') return safeAuthorizationStatus('completed');
+  if (latestRow.status === 'failed') return safeAuthorizationStatus('failed');
+  if (latestRow.status === 'running') return safeAuthorizationStatus('running');
+  if (latestRow.status === 'authorized') return safeAuthorizationStatus('expired');
+  return safeAuthorizationStatus('missing');
 }
 
 export async function resolveDirectorCanaryStoredAuthorization(
@@ -298,12 +391,41 @@ const supabaseAuthorizationLookupStore: DirectorAuthorizationLookupStore = {
   },
 };
 
+const supabaseAuthorizationStatusStore: DirectorAuthorizationStatusStore = {
+  async findRecent(input) {
+    if (!supabaseAdmin) return null;
+    const { data, error } = await supabaseAdmin
+      .from(CANARY_AUTHORIZATION_TABLE)
+      .select('id,user_id,scene_hash,status,maximum_cost_usd,maximum_anchor_requests,maximum_video_requests,maximum_retry_requests,maximum_fallback_requests,maximum_repair_requests,idempotency_key,expires_at,consumed_at,started_at,completed_at,created_at')
+      .eq('user_id', input.userId)
+      .eq('scene_hash', input.sceneHash)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if (error || !Array.isArray(data)) return null;
+    return data as DirectorAuthorizationRow[];
+  },
+};
+
 export async function resolveProductionDirectorCanaryAuthorization(input: {
   userId: string;
   now?: Date;
 }) {
   return resolveDirectorCanaryStoredAuthorization(
     supabaseAuthorizationLookupStore,
+    {
+      userId: input.userId,
+      sceneHash: directorCanarySceneHash(),
+    },
+    input.now,
+  );
+}
+
+export async function resolveProductionDirectorCanaryStatus(input: {
+  userId: string;
+  now?: Date;
+}) {
+  return resolveDirectorCanaryAuthorizationStatus(
+    supabaseAuthorizationStatusStore,
     {
       userId: input.userId,
       sceneHash: directorCanarySceneHash(),

@@ -13,6 +13,12 @@ import {
 import { recordPaidRequest } from '../src/services/director/budget';
 import { buildDirectorProductionDryRun } from '../src/services/director/dryRunDiagnostics';
 import {
+  canStartDirectorCanary,
+  formatDirectorCanaryCountdown,
+  remainingDirectorCanarySeconds,
+  synchronizedDirectorCanaryRunState,
+} from '../../src/lib/directorCanaryStatus';
+import {
   classifyDirectorProviderFailure,
   DirectorProviderExecutionError,
   extractDirectorProviderSafeFailureMetadata,
@@ -22,10 +28,12 @@ import {
   directorOperationalTelemetry,
   mergeDirectorCanaryJobInteractionTelemetry,
   resolveDirectorCanaryAuthorizationClaim,
+  resolveDirectorCanaryAuthorizationStatus,
   resolveDirectorCanaryStoredAuthorization,
   type DirectorAuthorizationClaimStore,
   type DirectorAuthorizationLookupStore,
   type DirectorAuthorizationRow,
+  type DirectorAuthorizationStatusStore,
 } from '../src/services/director/productionCanary';
 
 const repositoryRoot = process.cwd();
@@ -214,6 +222,111 @@ const storedAuthorization = await resolveDirectorCanaryStoredAuthorization(
 assert.equal(storedAuthorization.kind, 'resolved');
 assert.equal(storedAuthorization.row?.id, authorization.id);
 assert.equal(storedAuthorization.row?.idempotency_key, authorization.idempotencyKey);
+
+let statusReadCount = 0;
+function statusStore(rows: DirectorAuthorizationRow[] | null): DirectorAuthorizationStatusStore {
+  return {
+    async findRecent(input) {
+      statusReadCount += 1;
+      assert.equal(input.userId, authorization.userId);
+      assert.equal(input.sceneHash, authorization.sceneHash);
+      return rows;
+    },
+  };
+}
+
+const safeStatusKeys = [
+  'anchorRequestLimit',
+  'expiresInSeconds',
+  'maximumBudget',
+  'retriesAllowed',
+  'state',
+  'videoRequestLimit',
+];
+const readyStatus = await resolveDirectorCanaryAuthorizationStatus(
+  statusStore([eligibleRow]),
+  lookupInput,
+  now,
+);
+assert.equal(readyStatus.state, 'ready');
+assert.ok(readyStatus.expiresInSeconds > 0);
+assert.equal(readyStatus.maximumBudget, 2);
+assert.equal(readyStatus.anchorRequestLimit, 1);
+assert.equal(readyStatus.videoRequestLimit, 1);
+assert.equal(readyStatus.retriesAllowed, 0);
+assert.deepEqual(Object.keys(readyStatus).sort(), safeStatusKeys);
+assert.equal(synchronizedDirectorCanaryRunState('failed', readyStatus), 'ready');
+assert.equal(canStartDirectorCanary('ready', readyStatus.expiresInSeconds), true);
+assert.equal(canStartDirectorCanary('missing', readyStatus.expiresInSeconds), false);
+assert.equal(canStartDirectorCanary('expired', readyStatus.expiresInSeconds), false);
+assert.equal(remainingDirectorCanarySeconds(now.getTime(), now.getTime()), 0);
+assert.equal(remainingDirectorCanarySeconds(now.getTime() + 1_001, now.getTime()), 2);
+assert.equal(formatDirectorCanaryCountdown(1_602), '26:42');
+assert.equal(formatDirectorCanaryCountdown(-1), '0:00');
+assert.doesNotMatch(
+  JSON.stringify(readyStatus),
+  /authorizationId|idempotencyKey|userId|access_token|bearer|https?:\/\//i,
+);
+assert.equal(
+  (await resolveDirectorCanaryAuthorizationStatus(statusStore([]), lookupInput, now)).state,
+  'missing',
+);
+assert.equal(
+  (await resolveDirectorCanaryAuthorizationStatus(statusStore([expiredRow]), lookupInput, now)).state,
+  'expired',
+);
+assert.equal(
+  (await resolveDirectorCanaryAuthorizationStatus(
+    statusStore([authorizationRow('running')]),
+    lookupInput,
+    now,
+  )).state,
+  'running',
+);
+assert.equal(
+  (await resolveDirectorCanaryAuthorizationStatus(
+    statusStore([authorizationRow('completed')]),
+    lookupInput,
+    now,
+  )).state,
+  'completed',
+);
+assert.equal(
+  (await resolveDirectorCanaryAuthorizationStatus(
+    statusStore([authorizationRow('failed')]),
+    lookupInput,
+    now,
+  )).state,
+  'failed',
+);
+assert.equal(
+  (await resolveDirectorCanaryAuthorizationStatus(
+    statusStore([
+      eligibleRow,
+      {
+        ...eligibleRow,
+        id: '64900f04-09cf-478f-ae89-e167b7177f12',
+        idempotency_key: 'second-test-key',
+      },
+    ]),
+    lookupInput,
+    now,
+  )).state,
+  'blocked_multiple',
+);
+assert.equal(
+  (await resolveDirectorCanaryAuthorizationStatus(
+    statusStore([{ ...eligibleRow, maximum_retry_requests: 1 }]),
+    lookupInput,
+    now,
+  )).state,
+  'failed',
+);
+assert.equal(
+  (await resolveDirectorCanaryAuthorizationStatus(statusStore(null), lookupInput, now)).state,
+  'failed',
+);
+assert.equal(statusReadCount, 9);
 
 const plan = buildDirectorProductionDryRun(DIRECTOR_CANARY_SCENE).plan;
 const reference = {
@@ -501,10 +614,17 @@ const endpointSource = readFileSync(
 );
 assert.match(endpointSource, /lumora-director-v1-canary/);
 assert.match(endpointSource, /authenticatedUserId/);
+assert.match(endpointSource, /body\.action === 'status'/);
+assert.match(endpointSource, /resolveProductionDirectorCanaryStatus\(\{ userId \}\)/);
+assert.match(endpointSource, /Cache-Control', 'no-store'/);
 assert.match(endpointSource, /resolveProductionDirectorCanaryAuthorization\(\{ userId \}\)/);
 assert.match(endpointSource, /storedAuthorization\.row\.idempotency_key/);
 assert.match(endpointSource, /idempotency-key/);
 assert.match(endpointSource, /x-lumora-director-authorization/);
+assert.ok(
+  endpointSource.indexOf("body.action === 'status'") <
+    endpointSource.indexOf('resolveProductionDirectorCanaryAuthorization({ userId })'),
+);
 assert.doesNotMatch(endpointSource, /service[_ -]?role[_ -]?key\s*[:=]\s*['"`][^'"`]+/i);
 const endpointBundleSource = readFileSync(
   join(repositoryRoot, 'api/generations/index.js'),
@@ -523,20 +643,46 @@ const internalPageSource = readFileSync(
 assert.match(internalPageSource, /Run one Director canary/);
 assert.match(internalPageSource, /Capacitor\.isNativePlatform\(\)/);
 assert.match(internalPageSource, /startedRef\.current = true/);
+assert.match(internalPageSource, /startedRef\.current = false/);
 assert.match(internalPageSource, /disabled=\{!canRun\}/);
+assert.match(internalPageSource, /useState<DirectorCanaryRunState>\('checking'\)/);
+assert.match(internalPageSource, /Checking one-time authorization…/);
+assert.match(internalPageSource, /Ready for one signed-in, one-time Director canary\./);
+assert.match(internalPageSource, /No active one-time authorization\./);
+assert.match(internalPageSource, /This one-time authorization expired\./);
+assert.match(internalPageSource, /Authorization expires in \{formatDirectorCanaryCountdown\(remainingSeconds\)\}/);
+assert.match(internalPageSource, /window\.addEventListener\('focus', refreshIfIdle\)/);
+assert.match(internalPageSource, /document\.addEventListener\('visibilitychange', refreshWhenVisible\)/);
+assert.match(internalPageSource, /window\.setInterval\(refreshIfIdle, 10_000\)/);
+assert.match(internalPageSource, /if \(nextRemaining === 0\)[\s\S]*updateRunState\('expired'\)/);
+assert.match(
+  internalPageSource,
+  /startedRef\.current = true;[\s\S]*requestAuthorizationStatus\(true\)[\s\S]*api\.runDirectorCanary\(\)/,
+);
 assert.equal((internalPageSource.match(/<button/g) ?? []).length, 1);
 assert.doesNotMatch(
   internalPageSource,
-  /access_token|authorizationId|idempotencyKey|Authorization|Bearer|console\.|localStorage|sessionStorage|indexedDB|Web Inspector|Safari/i,
+  /access_token|authorizationId|idempotencyKey|Bearer|console\.|localStorage|sessionStorage|indexedDB|Web Inspector|Safari/i,
 );
 assert.doesNotMatch(internalPageSource, /https?:\/\//);
 assert.doesNotMatch(internalPageSource, /gemini|nano banana|provider|model[_ -]?id/i);
 
 const clientApiSource = readFileSync(join(repositoryRoot, 'src/lib/api.ts'), 'utf8');
+const canaryStatusClientMethod = clientApiSource.match(
+  /getDirectorCanaryStatus:[\s\S]*?timeoutMs: 15_000,[\s\S]*?\}\),/,
+)?.[0] ?? '';
+assert.match(canaryStatusClientMethod, /action: 'status'/);
+assert.match(canaryStatusClientMethod, /cache: 'no-store'/);
+assert.match(canaryStatusClientMethod, /lumora-director-v1-canary/);
+assert.doesNotMatch(
+  canaryStatusClientMethod,
+  /authorizationId|idempotencyKey|access_token|Bearer|[?&](?:authorization|idempotency|token)=/i,
+);
 const canaryClientMethod = clientApiSource.match(
   /runDirectorCanary:[\s\S]*?timeoutMs: 300_000,[\s\S]*?\}\),/,
 )?.[0] ?? '';
 assert.match(canaryClientMethod, /lumora-director-v1-canary/);
+assert.match(canaryClientMethod, /action: 'execute'/);
 assert.match(canaryClientMethod, /She walks through a candlelit mansion/);
 assert.doesNotMatch(canaryClientMethod, /authorizationId|idempotencyKey|access_token|Bearer|[?&](?:authorization|idempotency|token)=/i);
 assert.doesNotMatch(clientApiSource, /console\.log\([^\n]*(?:accessToken|Authorization)/i);

@@ -9,6 +9,7 @@ import {
 import {
   executeProductionDirectorCanary,
   resolveProductionDirectorCanaryAuthorization,
+  resolveProductionDirectorCanaryStatus,
 } from '../../backend/src/services/director/productionCanary';
 import { supabaseAdmin } from '../../backend/src/lib/supabaseAdmin';
 import { createVideoGeneration } from '../../backend/src/video';
@@ -34,6 +35,7 @@ type GenerationRequestBody = {
   isDefaultSelfCharacter?: unknown;
   renderPreference?: unknown;
   referenceImages?: unknown;
+  action?: unknown;
   authorizationId?: unknown;
   idempotencyKey?: unknown;
 };
@@ -201,6 +203,8 @@ export default async function handler(req: GenerationRequest, res: ServerRespons
   }
 
   if (body.engine === DIRECTOR_CANARY_ENGINE) {
+    const isStatusRequest = body.action === 'status';
+    if (isStatusRequest) res.setHeader('Cache-Control', 'no-store');
     if (prompt !== DIRECTOR_CANARY_SCENE) {
       sendJson(res, 409, {
         status: 'failed',
@@ -213,6 +217,18 @@ export default async function handler(req: GenerationRequest, res: ServerRespons
       sendJson(res, 401, {
         status: 'failed',
         error: 'Sign in to continue.',
+      });
+      return;
+    }
+    if (isStatusRequest) {
+      const authorizationStatus = await resolveProductionDirectorCanaryStatus({ userId });
+      sendJson(res, 200, authorizationStatus);
+      return;
+    }
+    if (body.action !== undefined && body.action !== 'execute') {
+      sendJson(res, 409, {
+        status: 'failed',
+        error: 'This Lumora Director request is not authorized.',
       });
       return;
     }
