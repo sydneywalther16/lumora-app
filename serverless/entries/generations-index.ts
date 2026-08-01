@@ -8,6 +8,7 @@ import {
 } from '../../backend/src/services/director/canary';
 import {
   executeProductionDirectorCanary,
+  resolveProductionDirectorCanaryAuthorization,
 } from '../../backend/src/services/director/productionCanary';
 import { supabaseAdmin } from '../../backend/src/lib/supabaseAdmin';
 import { createVideoGeneration } from '../../backend/src/video';
@@ -215,12 +216,31 @@ export default async function handler(req: GenerationRequest, res: ServerRespons
       });
       return;
     }
-    const authorizationId =
+    let authorizationId =
       stringValue(body.authorizationId) ??
       headerValue(req, 'x-lumora-director-authorization');
-    const idempotencyKey =
+    let idempotencyKey =
       stringValue(body.idempotencyKey) ??
       headerValue(req, 'idempotency-key');
+    if (Boolean(authorizationId) !== Boolean(idempotencyKey)) {
+      sendJson(res, 409, {
+        status: 'failed',
+        error: 'This Lumora Director request is not authorized.',
+      });
+      return;
+    }
+    if (!authorizationId && !idempotencyKey) {
+      const storedAuthorization = await resolveProductionDirectorCanaryAuthorization({ userId });
+      if (storedAuthorization.kind !== 'resolved') {
+        sendJson(res, 409, {
+          status: 'failed',
+          error: 'This Lumora Director request is not authorized.',
+        });
+        return;
+      }
+      authorizationId = storedAuthorization.row.id;
+      idempotencyKey = storedAuthorization.row.idempotency_key;
+    }
     if (!authorizationId || !idempotencyKey) {
       sendJson(res, 409, {
         status: 'failed',

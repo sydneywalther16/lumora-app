@@ -22,12 +22,14 @@ const routeTitles: Record<string, string> = {
   '/account/delete': 'Account & Data',
   '/install': 'Install',
   '/auth/callback': 'Signing in',
+  '/internal/director-canary': 'Director canary',
 };
 
 export default function AppShell() {
   const location = useLocation();
   const pageOwnsHeading = ['/home', '/for-you', '/trends', '/create', '/drafts', '/studio', '/profile']
     .includes(location.pathname);
+  const isInternalDirectorCanary = location.pathname === '/internal/director-canary';
 
   useEffect(() => {
     console.info('NAV OK');
@@ -40,7 +42,7 @@ export default function AppShell() {
         <main className="screen-scroll">
           <Outlet />
         </main>
-        <BottomNav />
+        {isInternalDirectorCanary ? null : <BottomNav />}
       </div>
     </div>
   );

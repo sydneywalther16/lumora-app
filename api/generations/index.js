@@ -5877,6 +5877,24 @@ function numeric(value) {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
+function hasExactCanaryLimits(row) {
+  return Number(row.maximum_cost_usd) === DIRECTOR_CANARY_MAXIMUM_COST_USD && row.maximum_anchor_requests === 1 && row.maximum_video_requests === 1 && row.maximum_retry_requests === 0 && row.maximum_fallback_requests === 0 && row.maximum_repair_requests === 0;
+}
+async function resolveDirectorCanaryStoredAuthorization(store, input, now = /* @__PURE__ */ new Date()) {
+  const rows = await store.findEligible({ ...input, now });
+  if (rows.length === 0) return { kind: "missing", row: null };
+  if (rows.length !== 1) return { kind: "multiple", row: null };
+  const row = rows[0];
+  const expiresAt = new Date(row.expires_at).getTime();
+  const createdAt = new Date(row.created_at).getTime();
+  if (!Number.isFinite(expiresAt) || !Number.isFinite(createdAt) || expiresAt <= now.getTime() || createdAt <= now.getTime() - 30 * 6e4) {
+    return { kind: "expired", row };
+  }
+  if (row.user_id !== input.userId || row.scene_hash !== input.sceneHash || row.status !== "authorized" || row.consumed_at !== null || !text(row.id) || !text(row.idempotency_key) || !hasExactCanaryLimits(row)) {
+    return { kind: "invalid", row };
+  }
+  return { kind: "resolved", row };
+}
 function telemetryFromUnknown(value) {
   const empty = createDirectorCostTelemetry();
   if (!value || typeof value !== "object") return empty;
@@ -5934,6 +5952,24 @@ var supabaseAuthorizationStore = {
     return data;
   }
 };
+var supabaseAuthorizationLookupStore = {
+  async findEligible(input) {
+    if (!supabaseAdmin) return [];
+    const { data, error } = await supabaseAdmin.from(CANARY_AUTHORIZATION_TABLE).select("*").eq("user_id", input.userId).eq("scene_hash", input.sceneHash).eq("status", "authorized").is("consumed_at", null).gt("expires_at", input.now.toISOString()).gt("created_at", new Date(input.now.getTime() - 30 * 6e4).toISOString()).order("created_at", { ascending: false }).limit(2);
+    if (error || !Array.isArray(data)) return [];
+    return data;
+  }
+};
+async function resolveProductionDirectorCanaryAuthorization(input) {
+  return resolveDirectorCanaryStoredAuthorization(
+    supabaseAuthorizationLookupStore,
+    {
+      userId: input.userId,
+      sceneHash: directorCanarySceneHash()
+    },
+    input.now
+  );
+}
 function authorizationFromRow(row) {
   if (row.status !== "running" || !row.consumed_at || Number(row.maximum_cost_usd) !== 2 || row.maximum_anchor_requests !== 1 || row.maximum_video_requests !== 1 || row.maximum_retry_requests !== 0 || row.maximum_fallback_requests !== 0 || row.maximum_repair_requests !== 0) {
     return null;
@@ -6895,8 +6931,27 @@ async function handler(req, res) {
       });
       return;
     }
-    const authorizationId = stringValue2(body.authorizationId) ?? headerValue(req, "x-lumora-director-authorization");
-    const idempotencyKey = stringValue2(body.idempotencyKey) ?? headerValue(req, "idempotency-key");
+    let authorizationId = stringValue2(body.authorizationId) ?? headerValue(req, "x-lumora-director-authorization");
+    let idempotencyKey = stringValue2(body.idempotencyKey) ?? headerValue(req, "idempotency-key");
+    if (Boolean(authorizationId) !== Boolean(idempotencyKey)) {
+      sendJson(res, 409, {
+        status: "failed",
+        error: "This Lumora Director request is not authorized."
+      });
+      return;
+    }
+    if (!authorizationId && !idempotencyKey) {
+      const storedAuthorization = await resolveProductionDirectorCanaryAuthorization({ userId });
+      if (storedAuthorization.kind !== "resolved") {
+        sendJson(res, 409, {
+          status: "failed",
+          error: "This Lumora Director request is not authorized."
+        });
+        return;
+      }
+      authorizationId = storedAuthorization.row.id;
+      idempotencyKey = storedAuthorization.row.idempotency_key;
+    }
     if (!authorizationId || !idempotencyKey) {
       sendJson(res, 409, {
         status: "failed",

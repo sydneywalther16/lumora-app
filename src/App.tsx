@@ -17,6 +17,7 @@ import AccountDeletionPage from './pages/AccountDeletionPage';
 import CommunityGuidelinesPage from './pages/CommunityGuidelinesPage';
 import SupportPage from './pages/SupportPage';
 import InstallPage from './pages/InstallPage';
+import DirectorCanaryPage from './pages/DirectorCanaryPage';
 import CreatorOnboarding from './components/CreatorOnboarding';
 import { useSession } from './hooks/useSession';
 
@@ -55,6 +56,7 @@ export default function App() {
         <Route path="/support" element={<SupportPage />} />
         <Route path="/account/delete" element={<AccountDeletionPage />} />
         <Route path="/install" element={<InstallPage />} />
+        <Route path="/internal/director-canary" element={<DirectorCanaryPage />} />
         <Route path="/auth/callback" element={<AuthCallbackPage />} />
         <Route path="/auth/reset-confirm" element={<AuthResetConfirmPage />} />
         <Route path="/auth/update-password" element={<AuthUpdatePasswordPage />} />

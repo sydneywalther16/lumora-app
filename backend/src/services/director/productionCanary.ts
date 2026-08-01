@@ -122,6 +122,21 @@ export type DirectorAuthorizationClaimResolution =
   | { kind: 'idempotent_running'; row: DirectorAuthorizationRow }
   | { kind: 'idempotent_terminal'; row: DirectorAuthorizationRow };
 
+export type DirectorAuthorizationLookupStore = {
+  findEligible(input: {
+    userId: string;
+    sceneHash: string;
+    now: Date;
+  }): Promise<DirectorAuthorizationRow[]>;
+};
+
+export type DirectorAuthorizationLookupResolution =
+  | { kind: 'resolved'; row: DirectorAuthorizationRow }
+  | { kind: 'missing'; row: null }
+  | { kind: 'multiple'; row: null }
+  | { kind: 'expired'; row: DirectorAuthorizationRow }
+  | { kind: 'invalid'; row: DirectorAuthorizationRow };
+
 function text(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
@@ -129,6 +144,54 @@ function text(value: unknown) {
 function numeric(value: unknown) {
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function hasExactCanaryLimits(row: DirectorAuthorizationRow) {
+  return (
+    Number(row.maximum_cost_usd) === DIRECTOR_CANARY_MAXIMUM_COST_USD &&
+    row.maximum_anchor_requests === 1 &&
+    row.maximum_video_requests === 1 &&
+    row.maximum_retry_requests === 0 &&
+    row.maximum_fallback_requests === 0 &&
+    row.maximum_repair_requests === 0
+  );
+}
+
+export async function resolveDirectorCanaryStoredAuthorization(
+  store: DirectorAuthorizationLookupStore,
+  input: {
+    userId: string;
+    sceneHash: string;
+  },
+  now = new Date(),
+): Promise<DirectorAuthorizationLookupResolution> {
+  const rows = await store.findEligible({ ...input, now });
+  if (rows.length === 0) return { kind: 'missing', row: null };
+  if (rows.length !== 1) return { kind: 'multiple', row: null };
+
+  const row = rows[0];
+  const expiresAt = new Date(row.expires_at).getTime();
+  const createdAt = new Date(row.created_at).getTime();
+  if (
+    !Number.isFinite(expiresAt) ||
+    !Number.isFinite(createdAt) ||
+    expiresAt <= now.getTime() ||
+    createdAt <= now.getTime() - 30 * 60_000
+  ) {
+    return { kind: 'expired', row };
+  }
+  if (
+    row.user_id !== input.userId ||
+    row.scene_hash !== input.sceneHash ||
+    row.status !== 'authorized' ||
+    row.consumed_at !== null ||
+    !text(row.id) ||
+    !text(row.idempotency_key) ||
+    !hasExactCanaryLimits(row)
+  ) {
+    return { kind: 'invalid', row };
+  }
+  return { kind: 'resolved', row };
 }
 
 function telemetryFromUnknown(value: unknown): DirectorCostTelemetry {
@@ -215,6 +278,39 @@ const supabaseAuthorizationStore: DirectorAuthorizationClaimStore = {
     return data as DirectorAuthorizationRow;
   },
 };
+
+const supabaseAuthorizationLookupStore: DirectorAuthorizationLookupStore = {
+  async findEligible(input) {
+    if (!supabaseAdmin) return [];
+    const { data, error } = await supabaseAdmin
+      .from(CANARY_AUTHORIZATION_TABLE)
+      .select('*')
+      .eq('user_id', input.userId)
+      .eq('scene_hash', input.sceneHash)
+      .eq('status', 'authorized')
+      .is('consumed_at', null)
+      .gt('expires_at', input.now.toISOString())
+      .gt('created_at', new Date(input.now.getTime() - 30 * 60_000).toISOString())
+      .order('created_at', { ascending: false })
+      .limit(2);
+    if (error || !Array.isArray(data)) return [];
+    return data as DirectorAuthorizationRow[];
+  },
+};
+
+export async function resolveProductionDirectorCanaryAuthorization(input: {
+  userId: string;
+  now?: Date;
+}) {
+  return resolveDirectorCanaryStoredAuthorization(
+    supabaseAuthorizationLookupStore,
+    {
+      userId: input.userId,
+      sceneHash: directorCanarySceneHash(),
+    },
+    input.now,
+  );
+}
 
 function authorizationFromRow(row: DirectorAuthorizationRow): DirectorCanaryAuthorization | null {
   if (

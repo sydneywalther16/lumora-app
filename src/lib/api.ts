@@ -563,6 +563,12 @@ export type GenerationJob = {
   updatedAt: string;
 };
 
+export type DirectorCanaryTriggerResponse = {
+  status: 'processing' | 'completed' | 'failed';
+  message: string;
+  draftSaved: boolean;
+};
+
 export type CharacterStatus = 'draft' | 'processing' | 'ready' | 'failed';
 export type PrivacySetting = 'private' | 'approved_only' | 'public';
 export type VideoEngine =
@@ -1451,6 +1457,16 @@ async function requestHealthDiagnostics(): Promise<ApiHealthDiagnostics> {
 
 export const api = {
   health: requestHealthDiagnostics,
+
+  runDirectorCanary: () =>
+    request<DirectorCanaryTriggerResponse>('/api/generations', {
+      method: 'POST',
+      body: JSON.stringify({
+        engine: 'lumora-director-v1-canary',
+        prompt: 'She walks through a candlelit mansion and pauses after hearing a sound behind her.',
+      }),
+      timeoutMs: 300_000,
+    }),
 
   createGeneration: (payload: GenerationPayload) =>
     request<GenerationResponse>('/api/generations', {

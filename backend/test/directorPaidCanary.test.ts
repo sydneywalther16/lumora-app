@@ -22,7 +22,9 @@ import {
   directorOperationalTelemetry,
   mergeDirectorCanaryJobInteractionTelemetry,
   resolveDirectorCanaryAuthorizationClaim,
+  resolveDirectorCanaryStoredAuthorization,
   type DirectorAuthorizationClaimStore,
+  type DirectorAuthorizationLookupStore,
   type DirectorAuthorizationRow,
 } from '../src/services/director/productionCanary';
 
@@ -152,6 +154,66 @@ assert.equal(
   (await resolveDirectorCanaryAuthorizationClaim(expiredStore, claimInput, now)).kind,
   'expired',
 );
+
+function lookupStore(rows: DirectorAuthorizationRow[]): DirectorAuthorizationLookupStore {
+  return {
+    async findEligible(input) {
+      assert.equal(input.userId, authorization.userId);
+      assert.equal(input.sceneHash, authorization.sceneHash);
+      assert.equal(input.now, now);
+      return rows;
+    },
+  };
+}
+
+const eligibleRow = authorizationRow('authorized');
+const lookupInput = {
+  userId: authorization.userId,
+  sceneHash: authorization.sceneHash,
+};
+assert.equal(
+  (await resolveDirectorCanaryStoredAuthorization(lookupStore([]), lookupInput, now)).kind,
+  'missing',
+);
+assert.equal(
+  (await resolveDirectorCanaryStoredAuthorization(
+    lookupStore([{ ...eligibleRow, user_id: 'd512cc83-025c-436c-b198-6342020cd248' }]),
+    lookupInput,
+    now,
+  )).kind,
+  'invalid',
+);
+assert.equal(
+  (await resolveDirectorCanaryStoredAuthorization(
+    lookupStore([
+      eligibleRow,
+      {
+        ...eligibleRow,
+        id: '64900f04-09cf-478f-ae89-e167b7177f12',
+        idempotency_key: 'second-test-key',
+      },
+    ]),
+    lookupInput,
+    now,
+  )).kind,
+  'multiple',
+);
+assert.equal(
+  (await resolveDirectorCanaryStoredAuthorization(
+    lookupStore([expiredRow]),
+    lookupInput,
+    now,
+  )).kind,
+  'expired',
+);
+const storedAuthorization = await resolveDirectorCanaryStoredAuthorization(
+  lookupStore([eligibleRow]),
+  lookupInput,
+  now,
+);
+assert.equal(storedAuthorization.kind, 'resolved');
+assert.equal(storedAuthorization.row?.id, authorization.id);
+assert.equal(storedAuthorization.row?.idempotency_key, authorization.idempotencyKey);
 
 const plan = buildDirectorProductionDryRun(DIRECTOR_CANARY_SCENE).plan;
 const reference = {
@@ -439,6 +501,8 @@ const endpointSource = readFileSync(
 );
 assert.match(endpointSource, /lumora-director-v1-canary/);
 assert.match(endpointSource, /authenticatedUserId/);
+assert.match(endpointSource, /resolveProductionDirectorCanaryAuthorization\(\{ userId \}\)/);
+assert.match(endpointSource, /storedAuthorization\.row\.idempotency_key/);
 assert.match(endpointSource, /idempotency-key/);
 assert.match(endpointSource, /x-lumora-director-authorization/);
 assert.doesNotMatch(endpointSource, /service[_ -]?role[_ -]?key\s*[:=]\s*['"`][^'"`]+/i);
@@ -451,6 +515,44 @@ assert.doesNotMatch(
   endpointBundleSource,
   /from\s+['"][^'"]*serverless\/_lib\/rateLimit['"]/,
 );
+
+const internalPageSource = readFileSync(
+  join(repositoryRoot, 'src/pages/DirectorCanaryPage.tsx'),
+  'utf8',
+);
+assert.match(internalPageSource, /Run one Director canary/);
+assert.match(internalPageSource, /Capacitor\.isNativePlatform\(\)/);
+assert.match(internalPageSource, /startedRef\.current = true/);
+assert.match(internalPageSource, /disabled=\{!canRun\}/);
+assert.equal((internalPageSource.match(/<button/g) ?? []).length, 1);
+assert.doesNotMatch(
+  internalPageSource,
+  /access_token|authorizationId|idempotencyKey|Authorization|Bearer|console\.|localStorage|sessionStorage|indexedDB|Web Inspector|Safari/i,
+);
+assert.doesNotMatch(internalPageSource, /https?:\/\//);
+assert.doesNotMatch(internalPageSource, /gemini|nano banana|provider|model[_ -]?id/i);
+
+const clientApiSource = readFileSync(join(repositoryRoot, 'src/lib/api.ts'), 'utf8');
+const canaryClientMethod = clientApiSource.match(
+  /runDirectorCanary:[\s\S]*?timeoutMs: 300_000,[\s\S]*?\}\),/,
+)?.[0] ?? '';
+assert.match(canaryClientMethod, /lumora-director-v1-canary/);
+assert.match(canaryClientMethod, /She walks through a candlelit mansion/);
+assert.doesNotMatch(canaryClientMethod, /authorizationId|idempotencyKey|access_token|Bearer|[?&](?:authorization|idempotency|token)=/i);
+assert.doesNotMatch(clientApiSource, /console\.log\([^\n]*(?:accessToken|Authorization)/i);
+
+for (const hiddenNavigationSource of [
+  'src/components/BottomNav.tsx',
+  'src/pages/HomePage.tsx',
+  'src/pages/TrendsPage.tsx',
+  'src/pages/ProfilePage.tsx',
+  'src/pages/SupportPage.tsx',
+]) {
+  assert.doesNotMatch(
+    readFileSync(join(repositoryRoot, hiddenNavigationSource), 'utf8'),
+    /internal\/director-canary/,
+  );
+}
 
 const googleMediaSource = readFileSync(
   join(repositoryRoot, 'backend/src/services/director/googleMedia.ts'),
