@@ -4679,12 +4679,14 @@ var DirectorProviderExecutionError = class extends Error {
   telemetry;
   safeCategory;
   safeMetadata;
-  constructor(telemetry, safeCategory, safeMetadata = emptySafeFailureMetadata()) {
+  interactionSummary;
+  constructor(telemetry, safeCategory, safeMetadata = emptySafeFailureMetadata(), interactionSummary = null) {
     super("The Director provider request did not complete.");
     this.name = "DirectorProviderExecutionError";
     this.telemetry = telemetry;
     this.safeCategory = safeCategory;
     this.safeMetadata = safeMetadata;
+    this.interactionSummary = interactionSummary;
   }
 };
 function emptySafeFailureMetadata() {
@@ -4780,6 +4782,9 @@ function extractDirectorProviderSafeFailureMetadata(error, fallbackModelName) {
   return metadata;
 }
 function classifyDirectorProviderFailure(error) {
+  if (error instanceof GoogleInteractionEnvelopeError) {
+    return "interaction_envelope_unrecognized";
+  }
   const record2 = error && typeof error === "object" ? error : {};
   const status = typeof record2.status === "number" ? record2.status : typeof record2.statusCode === "number" ? record2.statusCode : null;
   const message = error instanceof Error ? error.message.toLowerCase() : "";
@@ -4793,28 +4798,189 @@ function classifyDirectorProviderFailure(error) {
   return "provider_request_failed";
 }
 function interactionRecord(value) {
-  return value && typeof value === "object" ? value : null;
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+var GOOGLE_INTERACTION_STATUSES = /* @__PURE__ */ new Set([
+  "queued",
+  "in_progress",
+  "running",
+  "requires_action",
+  "completed",
+  "failed",
+  "cancelled",
+  "incomplete",
+  "budget_exceeded"
+]);
+var GOOGLE_INTERACTION_WRAPPER_KEYS = [
+  "interaction",
+  "data",
+  "result",
+  "value",
+  "response"
+];
+var GOOGLE_INTERACTION_MAXIMUM_WRAPPER_DEPTH = 3;
+function interactionStatus(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  return GOOGLE_INTERACTION_STATUSES.has(normalized) ? normalized : null;
+}
+function interactionId(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+function safeFieldNames(record2) {
+  if (!record2) return [];
+  return [...new Set(Object.keys(record2).filter((field) => !/(?:authorization|idempotency|session|token|secret|password|api.?key|prompt)/i.test(field)).map((field) => /^[a-z_][a-z0-9_.-]{0,79}$/i.test(field) ? field : "unrecognized_field"))].sort().slice(0, 80);
+}
+function safeType(value) {
+  const record2 = interactionRecord(value);
+  const type = typeof record2?.type === "string" ? record2.type.trim() : "";
+  return /^[a-z_][a-z0-9_.-]{0,79}$/i.test(type) ? type : "unknown";
+}
+function imageCandidate(record2) {
+  if (!record2) return null;
+  const direct = interactionRecord(record2.output_image) ?? interactionRecord(record2.outputImage);
+  if (direct) return direct;
+  const outputs = Array.isArray(record2.outputs) ? record2.outputs : [];
+  const outputImage = outputs.filter((item) => interactionRecord(item)?.type === "image" && interactionRecord(item)?.thought !== true).at(-1);
+  if (outputImage) return interactionRecord(outputImage);
+  const steps = Array.isArray(record2.steps) ? record2.steps : [];
+  const stepContent = steps.flatMap((step) => {
+    const stepRecord = interactionRecord(step);
+    return stepRecord?.type === "model_output" && Array.isArray(stepRecord.content) ? stepRecord.content : [];
+  });
+  const stepImage = stepContent.filter((item) => interactionRecord(item)?.type === "image" && interactionRecord(item)?.thought !== true).at(-1);
+  return interactionRecord(stepImage);
+}
+function structuralSummary(input) {
+  const steps = Array.isArray(input.normalized?.steps) ? input.normalized.steps : [];
+  const outputs = Array.isArray(input.normalized?.outputs) ? input.normalized.outputs : [];
+  const modelOutputContent = steps.flatMap((step) => {
+    const stepRecord = interactionRecord(step);
+    return stepRecord?.type === "model_output" && Array.isArray(stepRecord.content) ? stepRecord.content : [];
+  });
+  const image = imageCandidate(input.normalized);
+  const mimeType = typeof image?.mime_type === "string" ? image.mime_type : typeof image?.mimeType === "string" ? image.mimeType : null;
+  const data = typeof image?.data === "string" ? image.data : null;
+  const uri = typeof image?.uri === "string" ? image.uri : null;
+  const uriScheme = uri?.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase() ?? null;
+  const status = interactionStatus(input.normalized?.status);
+  return {
+    runtimeConstructor: input.runtimeConstructor,
+    rootFields: safeFieldNames(input.root),
+    wrapperPath: [...input.wrapperPath],
+    normalizedFields: safeFieldNames(input.normalized),
+    hasInteractionId: Boolean(interactionId(input.normalized?.id)),
+    status,
+    stepCount: steps.length,
+    stepTypes: steps.map(safeType).slice(0, 80),
+    modelOutputContentTypes: modelOutputContent.map(safeType).slice(0, 80),
+    outputsCount: outputs.length,
+    outputsTypes: outputs.map(safeType).slice(0, 80),
+    outputImagePresent: Boolean(
+      interactionRecord(input.normalized?.output_image) ?? interactionRecord(input.normalized?.outputImage)
+    ),
+    outputVideoPresent: Boolean(
+      interactionRecord(input.normalized?.output_video) ?? interactionRecord(input.normalized?.outputVideo)
+    ),
+    imageMimeType: mimeType && /^image\/[a-z0-9.+-]+$/i.test(mimeType) ? mimeType : null,
+    imageDataPresent: Boolean(data),
+    imageDataCharacterLength: data ? data.length : null,
+    imageUriPresent: Boolean(uri),
+    imageUriScheme: uriScheme,
+    usagePresent: Boolean(interactionRecord(input.normalized?.usage))
+  };
+}
+function runtimeConstructorName(value) {
+  if (!value || typeof value !== "object") return null;
+  const name = value.constructor?.name;
+  return typeof name === "string" && /^[a-z_$][a-z0-9_$]{0,79}$/i.test(name) ? name : null;
+}
+function normalizeGoogleInteractionEnvelope(value) {
+  const root = interactionRecord(value);
+  const runtimeConstructor = runtimeConstructorName(value);
+  let current = root;
+  const wrapperPath = [];
+  for (let depth = 0; current && depth <= GOOGLE_INTERACTION_MAXIMUM_WRAPPER_DEPTH; depth += 1) {
+    const id = interactionId(current.id);
+    const status = interactionStatus(current.status);
+    if (id || status || Array.isArray(current.steps)) {
+      const valid = Boolean(id && status);
+      return {
+        interaction: valid ? current : null,
+        interactionId: id,
+        status,
+        valid,
+        partial: Boolean(id && !status),
+        wrapperPath,
+        structuralSummary: structuralSummary({
+          root,
+          normalized: current,
+          wrapperPath,
+          runtimeConstructor
+        })
+      };
+    }
+    if (depth === GOOGLE_INTERACTION_MAXIMUM_WRAPPER_DEPTH) break;
+    const wrapperKey = GOOGLE_INTERACTION_WRAPPER_KEYS.find((key) => interactionRecord(current?.[key]));
+    if (!wrapperKey) break;
+    current = interactionRecord(current[wrapperKey]);
+    wrapperPath.push(wrapperKey);
+  }
+  return {
+    interaction: null,
+    interactionId: null,
+    status: null,
+    valid: false,
+    partial: false,
+    wrapperPath,
+    structuralSummary: structuralSummary({
+      root,
+      normalized: current,
+      wrapperPath,
+      runtimeConstructor
+    })
+  };
+}
+var GoogleInteractionEnvelopeError = class extends Error {
+  structuralSummary;
+  constructor(structuralSummary2) {
+    super("The Director provider interaction envelope was not recognized.");
+    this.name = "GoogleInteractionEnvelopeError";
+    this.structuralSummary = structuralSummary2;
+  }
+};
+function terminalInteractionFailure(status) {
+  return status === "failed" || status === "cancelled" || status === "incomplete" || status === "budget_exceeded";
 }
 async function waitForGoogleInteraction(input) {
-  let interaction = input.initialInteraction;
+  let envelope = normalizeGoogleInteractionEnvelope(input.initialInteraction);
+  input.onStructuralSummary?.(envelope.structuralSummary);
   const maximumPolls = Math.max(1, Math.min(input.maximumPolls ?? 52, 60));
-  const intervalMs = Math.max(250, Math.min(input.intervalMs ?? 5e3, 1e4));
+  const intervalMs = input.intervalMs === 0 ? 0 : Math.max(250, Math.min(input.intervalMs ?? 5e3, 1e4));
   for (let poll = 0; poll < maximumPolls; poll += 1) {
-    const current = interactionRecord(interaction);
-    const status = typeof current?.status === "string" ? current.status : "completed";
-    if (status === "completed") return interaction;
-    if (status === "failed" || status === "cancelled") {
-      const safeFailure = /\b(?:safety|moderation|blocked|policy|prohibited|responsible ai)\b/i.test(JSON.stringify(current)) ? "The Director provider interaction was blocked by safety moderation." : "The Director provider interaction did not complete.";
+    if (envelope.valid && envelope.status === "completed" && envelope.interaction) {
+      return envelope.interaction;
+    }
+    if (envelope.valid && envelope.status && terminalInteractionFailure(envelope.status)) {
+      const safeFailure = /\b(?:safety|moderation|blocked|policy|prohibited|responsible ai)\b/i.test(JSON.stringify(envelope.interaction)) ? "The Director provider interaction was blocked by safety moderation." : "The Director provider interaction did not complete.";
       const error = new Error(safeFailure);
       error.status = 400;
       throw error;
     }
-    const interactionId = typeof current?.id === "string" ? current.id : "";
-    if (!interactionId) throw new Error("The Director provider interaction has no identifier.");
-    if (poll + 1 < maximumPolls) {
-      await new Promise((resolve) => setTimeout(resolve, intervalMs));
-      interaction = await input.getInteraction(interactionId);
+    if (!envelope.interactionId) {
+      throw new GoogleInteractionEnvelopeError(envelope.structuralSummary);
     }
+    if (poll + 1 < maximumPolls) {
+      if (!envelope.partial && intervalMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      }
+      const polled = await input.getInteraction(envelope.interactionId);
+      envelope = normalizeGoogleInteractionEnvelope(polled);
+      input.onStructuralSummary?.(envelope.structuralSummary);
+    }
+  }
+  if (!envelope.valid) {
+    throw new GoogleInteractionEnvelopeError(envelope.structuralSummary);
   }
   const timeout = new Error("The Director provider interaction timed out.");
   timeout.status = 408;
@@ -4828,16 +4994,21 @@ async function executeGoogleMediaInteraction(payload, context) {
   });
   const client = createGoogleMediaClient(context.apiKey);
   const requestTelemetry = recordPaidRequest(context.telemetry, decision2, context.operation);
+  let interactionSummary = null;
   try {
     const initialInteraction = await client.interactions.create(payload, {
       maxRetries: 0
     });
     const interaction = await waitForGoogleInteraction({
       initialInteraction,
-      getInteraction: (id) => client.interactions.get(id)
+      getInteraction: (id) => client.interactions.get(id, void 0, { maxRetries: 0 }),
+      onStructuralSummary: (summary) => {
+        interactionSummary = summary;
+      }
     });
     return {
       interaction,
+      interactionSummary,
       telemetry: recordDirectorCostOutcome(requestTelemetry, {
         operation: context.operation,
         status: "completed"
@@ -4850,7 +5021,8 @@ async function executeGoogleMediaInteraction(payload, context) {
         status: "failed"
       }),
       classifyDirectorProviderFailure(error),
-      extractDirectorProviderSafeFailureMetadata(error, String(payload.model ?? ""))
+      extractDirectorProviderSafeFailureMetadata(error, String(payload.model ?? "")),
+      error instanceof GoogleInteractionEnvelopeError ? error.structuralSummary : interactionSummary
     );
   }
 }
@@ -5014,14 +5186,14 @@ function record(value) {
 function stringValue(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
-function safeType(value) {
+function safeType2(value) {
   const type = stringValue(record(value)?.type);
   return type ? type.slice(0, 48) : "unknown";
 }
 function safeSummary(items, input = {}) {
   return {
     outputCount: items.length,
-    outputTypes: items.map(safeType),
+    outputTypes: items.map(safeType2),
     selectedSource: input.selectedSource ?? null,
     selectedMimeType: input.selectedMimeType ?? null,
     selectedHasData: input.selectedHasData ?? false,
@@ -5277,12 +5449,14 @@ function failedResult(input) {
     estimatedCostUsd: input.estimatedCostUsd ?? null,
     actualCostUsd: input.actualCostUsd ?? null,
     publicCaption: input.plan.publicCaption,
-    syntheticDisclosure: input.plan.syntheticDisclosure
+    syntheticDisclosure: input.plan.syntheticDisclosure,
+    interactionSummaries: input.interactionSummaries ?? {}
   };
 }
 async function runDirectorCanarySequence(input) {
   assertDirectorCanaryAuthorization(input.authorization);
   let telemetry = createDirectorCostTelemetry();
+  const interactionSummaries = {};
   const projectedMaximumCostUsd = input.projectedMaximumCostUsd ?? DIRECTOR_CANARY_PROJECTED_MAXIMUM_COST_USD;
   if (projectedMaximumCostUsd > input.authorization.maximumCostUsd || projectedMaximumCostUsd > DIRECTOR_CANARY_MAXIMUM_COST_USD) {
     return failedResult({
@@ -5290,7 +5464,8 @@ async function runDirectorCanarySequence(input) {
       anchorSuccess: false,
       failureCategory: "budget_guard",
       telemetry,
-      estimatedCostUsd: projectedMaximumCostUsd
+      estimatedCostUsd: projectedMaximumCostUsd,
+      interactionSummaries
     });
   }
   const anchorPayload = buildNanoBananaPayload({
@@ -5308,14 +5483,21 @@ async function runDirectorCanarySequence(input) {
     });
     anchorInteraction = anchorResult.interaction;
     telemetry = anchorResult.telemetry;
+    if (anchorResult.interactionSummary) {
+      interactionSummaries.sceneAnchor = anchorResult.interactionSummary;
+    }
   } catch (error) {
     const providerError = error instanceof DirectorProviderExecutionError ? error : null;
+    if (providerError?.interactionSummary) {
+      interactionSummaries.sceneAnchor = providerError.interactionSummary;
+    }
     return failedResult({
       plan: input.plan,
       anchorSuccess: false,
       failureCategory: providerError?.safeCategory ?? "provider_request_failed",
       providerFailureMetadata: providerError?.safeMetadata ?? null,
-      telemetry: providerError?.telemetry ?? telemetry
+      telemetry: providerError?.telemetry ?? telemetry,
+      interactionSummaries
     });
   }
   let anchorOutput;
@@ -5326,7 +5508,8 @@ async function runDirectorCanarySequence(input) {
       plan: input.plan,
       anchorSuccess: false,
       failureCategory: error instanceof DirectorMediaOutputError ? error.category : "anchor_output_unrecognized",
-      telemetry
+      telemetry,
+      interactionSummaries
     });
   }
   let anchorBytes;
@@ -5337,7 +5520,8 @@ async function runDirectorCanarySequence(input) {
         plan: input.plan,
         anchorSuccess: false,
         failureCategory: "anchor_output_unrecognized",
-        telemetry
+        telemetry,
+        interactionSummaries
       });
     }
     if (!anchorBytes.byteLength) throw new Error("Missing anchor bytes.");
@@ -5346,7 +5530,8 @@ async function runDirectorCanarySequence(input) {
       plan: input.plan,
       anchorSuccess: false,
       failureCategory: "anchor_media_missing",
-      telemetry
+      telemetry,
+      interactionSummaries
     });
   }
   const anchorCost = estimateDirectorInteractionCost(anchorInteraction, "scene_anchor");
@@ -5362,7 +5547,8 @@ async function runDirectorCanarySequence(input) {
       anchorSuccess: true,
       failureCategory: "persistence_failed",
       telemetry,
-      actualCostUsd: anchorCost
+      actualCostUsd: anchorCost,
+      interactionSummaries
     });
   }
   const projectedTotalAfterAnchor = Number(((anchorCost ?? DIRECTOR_CANARY_PROJECTED_MAXIMUM_COST_USD - DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD) + DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD).toFixed(5));
@@ -5373,7 +5559,8 @@ async function runDirectorCanarySequence(input) {
       failureCategory: "budget_guard",
       telemetry,
       estimatedCostUsd: projectedTotalAfterAnchor,
-      actualCostUsd: anchorCost
+      actualCostUsd: anchorCost,
+      interactionSummaries
     });
   }
   const videoPayload = buildOmniFlashPayload({
@@ -5397,8 +5584,14 @@ async function runDirectorCanarySequence(input) {
     });
     videoInteraction = videoResult.interaction;
     telemetry = videoResult.telemetry;
+    if (videoResult.interactionSummary) {
+      interactionSummaries.primaryVideo = videoResult.interactionSummary;
+    }
   } catch (error) {
     const providerError = error instanceof DirectorProviderExecutionError ? error : null;
+    if (providerError?.interactionSummary) {
+      interactionSummaries.primaryVideo = providerError.interactionSummary;
+    }
     return failedResult({
       plan: input.plan,
       anchorSuccess: true,
@@ -5406,7 +5599,8 @@ async function runDirectorCanarySequence(input) {
       providerFailureMetadata: providerError?.safeMetadata ?? null,
       telemetry: providerError?.telemetry ?? telemetry,
       estimatedCostUsd: projectedTotalAfterAnchor,
-      actualCostUsd: anchorCost
+      actualCostUsd: anchorCost,
+      interactionSummaries
     });
   }
   let videoOutput;
@@ -5424,7 +5618,8 @@ async function runDirectorCanarySequence(input) {
       failureCategory: "invalid_video_output",
       telemetry,
       estimatedCostUsd: projectedTotalAfterAnchor,
-      actualCostUsd: anchorCost
+      actualCostUsd: anchorCost,
+      interactionSummaries
     });
   }
   const videoCost = estimateDirectorInteractionCost(videoInteraction, "primary_video");
@@ -5443,7 +5638,8 @@ async function runDirectorCanarySequence(input) {
     estimatedCostUsd: actualCostUsd ?? projectedTotalAfterAnchor,
     actualCostUsd,
     publicCaption: input.plan.publicCaption,
-    syntheticDisclosure: input.plan.syntheticDisclosure
+    syntheticDisclosure: input.plan.syntheticDisclosure,
+    interactionSummaries
   };
 }
 
@@ -5871,7 +6067,7 @@ async function resolveProviderMediaBytes(output, apiKey) {
     await unlink(downloadPath).catch(() => void 0);
   }
 }
-function operationalTelemetry(telemetry, providerFailureMetadata) {
+function directorOperationalTelemetry(telemetry, providerFailureMetadata, interactionSummaries) {
   return {
     providerRequestCount: telemetry.providerRequestCount,
     providerRetryCount: telemetry.providerRetryCount,
@@ -5879,7 +6075,15 @@ function operationalTelemetry(telemetry, providerFailureMetadata) {
     repairRequestCount: telemetry.repairRequestCount,
     requestsByOperation: telemetry.requestsByOperation,
     events: telemetry.events,
-    ...providerFailureMetadata ? { providerFailure: providerFailureMetadata } : {}
+    ...providerFailureMetadata ? { providerFailure: providerFailureMetadata } : {},
+    ...interactionSummaries && Object.keys(interactionSummaries).length ? { interactionResponses: interactionSummaries } : {}
+  };
+}
+function mergeDirectorCanaryJobInteractionTelemetry(sceneMetadata, interactionSummaries) {
+  const existing = sceneMetadata && typeof sceneMetadata === "object" ? sceneMetadata : {};
+  return {
+    ...existing,
+    interactionResponses: interactionSummaries
   };
 }
 async function createExecutionJob(authorization, plan) {
@@ -5909,6 +6113,16 @@ async function createExecutionJob(authorization, plan) {
 }
 async function updateExecutionJob(input) {
   if (!supabaseAdmin) return;
+  let sceneMetadata = null;
+  if (input.interactionSummaries && Object.keys(input.interactionSummaries).length) {
+    const { data, error } = await supabaseAdmin.from("generation_jobs").select("scene_metadata").eq("id", input.authorizationId).maybeSingle();
+    if (!error && data) {
+      sceneMetadata = mergeDirectorCanaryJobInteractionTelemetry(
+        data.scene_metadata,
+        input.interactionSummaries
+      );
+    }
+  }
   await supabaseAdmin.from("generation_jobs").update({
     status: input.status,
     project_id: input.projectId ?? null,
@@ -5916,6 +6130,7 @@ async function updateExecutionJob(input) {
     output_url: input.videoUrl ?? null,
     video_url: input.videoUrl ?? null,
     error_category: input.failureCategory ?? null,
+    ...sceneMetadata ? { scene_metadata: sceneMetadata } : {},
     completed_at: (/* @__PURE__ */ new Date()).toISOString(),
     updated_at: (/* @__PURE__ */ new Date()).toISOString()
   }).eq("id", input.authorizationId);
@@ -5924,7 +6139,11 @@ async function updateAuthorization(input) {
   if (!supabaseAdmin) return;
   await supabaseAdmin.from(CANARY_AUTHORIZATION_TABLE).update({
     status: input.status,
-    telemetry: operationalTelemetry(input.telemetry, input.providerFailureMetadata),
+    telemetry: directorOperationalTelemetry(
+      input.telemetry,
+      input.providerFailureMetadata,
+      input.interactionSummaries
+    ),
     failure_category: input.failureCategory ?? null,
     result_project_id: input.projectId ?? null,
     estimated_cost_usd: input.estimatedCostUsd ?? null,
@@ -6142,8 +6361,8 @@ async function executeProductionDirectorCanary(input) {
       runAnchor: nanoBananaAdapter.execute,
       runVideo: omniFlashAdapter.execute,
       resolveMediaBytes: (output) => resolveProviderMediaBytes(output, env.GOOGLE_API_KEY),
-      persistAnchor: async ({ interactionId, bytes, mimeType }) => {
-        const path = `${input.userId}/director/${authorization.id}/${interactionId}.` + extensionForMime(mimeType, "image");
+      persistAnchor: async ({ interactionId: interactionId2, bytes, mimeType }) => {
+        const path = `${input.userId}/director/${authorization.id}/${interactionId2}.` + extensionForMime(mimeType, "image");
         anchorUrl = await uploadBytes({
           bucket: ANCHOR_BUCKET,
           path,
@@ -6160,6 +6379,7 @@ async function executeProductionDirectorCanary(input) {
         status: "failed",
         telemetry: sequence.telemetry,
         providerFailureMetadata: sequence.providerFailureMetadata,
+        interactionSummaries: sequence.interactionSummaries,
         failureCategory: sequence.failureCategory,
         estimatedCostUsd: sequence.estimatedCostUsd,
         actualCostUsd: sequence.actualCostUsd
@@ -6168,6 +6388,7 @@ async function executeProductionDirectorCanary(input) {
         authorizationId: authorization.id,
         status: "failed",
         telemetry: sequence.telemetry,
+        interactionSummaries: sequence.interactionSummaries,
         failureCategory: sequence.failureCategory
       })
     ]);
@@ -6203,6 +6424,7 @@ async function executeProductionDirectorCanary(input) {
         authorizationId: authorization.id,
         status: "completed",
         telemetry: sequence.telemetry,
+        interactionSummaries: sequence.interactionSummaries,
         projectId,
         estimatedCostUsd: sequence.estimatedCostUsd,
         actualCostUsd: sequence.actualCostUsd
@@ -6211,6 +6433,7 @@ async function executeProductionDirectorCanary(input) {
         authorizationId: authorization.id,
         status: "completed",
         telemetry: sequence.telemetry,
+        interactionSummaries: sequence.interactionSummaries,
         projectId,
         videoUrl
       })
@@ -6237,6 +6460,7 @@ async function executeProductionDirectorCanary(input) {
         authorizationId: authorization.id,
         status: "failed",
         telemetry: sequence.telemetry,
+        interactionSummaries: sequence.interactionSummaries,
         failureCategory: "persistence_failed",
         estimatedCostUsd: sequence.estimatedCostUsd,
         actualCostUsd: sequence.actualCostUsd
@@ -6245,6 +6469,7 @@ async function executeProductionDirectorCanary(input) {
         authorizationId: authorization.id,
         status: "failed",
         telemetry: sequence.telemetry,
+        interactionSummaries: sequence.interactionSummaries,
         failureCategory: "persistence_failed"
       })
     ]);

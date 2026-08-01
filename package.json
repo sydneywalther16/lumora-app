@@ -11,6 +11,8 @@
     "test:canary-regression": "tsx backend/test/realRenderCanaryRegression.test.ts",
     "test:director": "tsx backend/test/directorV1.test.ts",
     "test:director-canary": "tsx backend/test/directorPaidCanary.test.ts",
+    "test:director-interactions": "tsx backend/test/googleInteractionEnvelope.test.ts",
+    "director:canary:execute-admin": "node scripts/run-director-paid-canary.mjs",
     "test:creator-experience": "tsx backend/test/createExperience.test.ts && node scripts/audit-production-copy.mjs",
     "preview": "vite preview",
     "dev:api": "tsx backend/src/index.ts",

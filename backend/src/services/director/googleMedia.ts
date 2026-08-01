@@ -21,7 +21,51 @@ export type DirectorProviderFailureCategory =
   | 'provider_rate_limit'
   | 'provider_timeout'
   | 'provider_configuration'
+  | 'interaction_envelope_unrecognized'
   | 'provider_request_failed';
+
+export type GoogleInteractionStatus =
+  | 'queued'
+  | 'in_progress'
+  | 'running'
+  | 'requires_action'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'incomplete'
+  | 'budget_exceeded';
+
+export type GoogleInteractionStructuralSummary = {
+  runtimeConstructor: string | null;
+  rootFields: string[];
+  wrapperPath: string[];
+  normalizedFields: string[];
+  hasInteractionId: boolean;
+  status: GoogleInteractionStatus | null;
+  stepCount: number;
+  stepTypes: string[];
+  modelOutputContentTypes: string[];
+  outputsCount: number;
+  outputsTypes: string[];
+  outputImagePresent: boolean;
+  outputVideoPresent: boolean;
+  imageMimeType: string | null;
+  imageDataPresent: boolean;
+  imageDataCharacterLength: number | null;
+  imageUriPresent: boolean;
+  imageUriScheme: string | null;
+  usagePresent: boolean;
+};
+
+export type NormalizedGoogleInteractionEnvelope = {
+  interaction: Record<string, unknown> | null;
+  interactionId: string | null;
+  status: GoogleInteractionStatus | null;
+  valid: boolean;
+  partial: boolean;
+  wrapperPath: string[];
+  structuralSummary: GoogleInteractionStructuralSummary;
+};
 
 export type DirectorProviderSafeFailureMetadata = {
   httpStatus: number | null;
@@ -42,17 +86,20 @@ export class DirectorProviderExecutionError extends Error {
   readonly telemetry: DirectorCostTelemetry;
   readonly safeCategory: DirectorProviderFailureCategory;
   readonly safeMetadata: DirectorProviderSafeFailureMetadata;
+  readonly interactionSummary: GoogleInteractionStructuralSummary | null;
 
   constructor(
     telemetry: DirectorCostTelemetry,
     safeCategory: DirectorProviderFailureCategory,
     safeMetadata: DirectorProviderSafeFailureMetadata = emptySafeFailureMetadata(),
+    interactionSummary: GoogleInteractionStructuralSummary | null = null,
   ) {
     super('The Director provider request did not complete.');
     this.name = 'DirectorProviderExecutionError';
     this.telemetry = telemetry;
     this.safeCategory = safeCategory;
     this.safeMetadata = safeMetadata;
+    this.interactionSummary = interactionSummary;
   }
 }
 
@@ -177,6 +224,9 @@ export function extractDirectorProviderSafeFailureMetadata(
 }
 
 export function classifyDirectorProviderFailure(error: unknown): DirectorProviderFailureCategory {
+  if (error instanceof GoogleInteractionEnvelopeError) {
+    return 'interaction_envelope_unrecognized';
+  }
   const record = error && typeof error === 'object' ? error as Record<string, unknown> : {};
   const status = typeof record.status === 'number'
     ? record.status
@@ -199,9 +249,208 @@ export function classifyDirectorProviderFailure(error: unknown): DirectorProvide
 }
 
 function interactionRecord(value: unknown) {
-  return value && typeof value === 'object'
+  return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+const GOOGLE_INTERACTION_STATUSES = new Set<GoogleInteractionStatus>([
+  'queued',
+  'in_progress',
+  'running',
+  'requires_action',
+  'completed',
+  'failed',
+  'cancelled',
+  'incomplete',
+  'budget_exceeded',
+]);
+
+const GOOGLE_INTERACTION_WRAPPER_KEYS = [
+  'interaction',
+  'data',
+  'result',
+  'value',
+  'response',
+] as const;
+const GOOGLE_INTERACTION_MAXIMUM_WRAPPER_DEPTH = 3;
+
+function interactionStatus(value: unknown): GoogleInteractionStatus | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase() as GoogleInteractionStatus;
+  return GOOGLE_INTERACTION_STATUSES.has(normalized) ? normalized : null;
+}
+
+function interactionId(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function safeFieldNames(record: Record<string, unknown> | null) {
+  if (!record) return [];
+  return [...new Set(Object.keys(record)
+    .filter((field) => !/(?:authorization|idempotency|session|token|secret|password|api.?key|prompt)/i.test(field))
+    .map((field) => /^[a-z_][a-z0-9_.-]{0,79}$/i.test(field) ? field : 'unrecognized_field'))]
+    .sort()
+    .slice(0, 80);
+}
+
+function safeType(value: unknown) {
+  const record = interactionRecord(value);
+  const type = typeof record?.type === 'string' ? record.type.trim() : '';
+  return /^[a-z_][a-z0-9_.-]{0,79}$/i.test(type) ? type : 'unknown';
+}
+
+function imageCandidate(record: Record<string, unknown> | null) {
+  if (!record) return null;
+  const direct = interactionRecord(record.output_image) ?? interactionRecord(record.outputImage);
+  if (direct) return direct;
+
+  const outputs = Array.isArray(record.outputs) ? record.outputs : [];
+  const outputImage = outputs
+    .filter((item) => interactionRecord(item)?.type === 'image' && interactionRecord(item)?.thought !== true)
+    .at(-1);
+  if (outputImage) return interactionRecord(outputImage);
+
+  const steps = Array.isArray(record.steps) ? record.steps : [];
+  const stepContent = steps.flatMap((step) => {
+    const stepRecord = interactionRecord(step);
+    return stepRecord?.type === 'model_output' && Array.isArray(stepRecord.content)
+      ? stepRecord.content
+      : [];
+  });
+  const stepImage = stepContent
+    .filter((item) => interactionRecord(item)?.type === 'image' && interactionRecord(item)?.thought !== true)
+    .at(-1);
+  return interactionRecord(stepImage);
+}
+
+function structuralSummary(input: {
+  root: Record<string, unknown> | null;
+  normalized: Record<string, unknown> | null;
+  wrapperPath: string[];
+  runtimeConstructor: string | null;
+}): GoogleInteractionStructuralSummary {
+  const steps = Array.isArray(input.normalized?.steps) ? input.normalized.steps : [];
+  const outputs = Array.isArray(input.normalized?.outputs) ? input.normalized.outputs : [];
+  const modelOutputContent = steps.flatMap((step) => {
+    const stepRecord = interactionRecord(step);
+    return stepRecord?.type === 'model_output' && Array.isArray(stepRecord.content)
+      ? stepRecord.content
+      : [];
+  });
+  const image = imageCandidate(input.normalized);
+  const mimeType = typeof image?.mime_type === 'string'
+    ? image.mime_type
+    : typeof image?.mimeType === 'string'
+      ? image.mimeType
+      : null;
+  const data = typeof image?.data === 'string' ? image.data : null;
+  const uri = typeof image?.uri === 'string' ? image.uri : null;
+  const uriScheme = uri?.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase() ?? null;
+  const status = interactionStatus(input.normalized?.status);
+  return {
+    runtimeConstructor: input.runtimeConstructor,
+    rootFields: safeFieldNames(input.root),
+    wrapperPath: [...input.wrapperPath],
+    normalizedFields: safeFieldNames(input.normalized),
+    hasInteractionId: Boolean(interactionId(input.normalized?.id)),
+    status,
+    stepCount: steps.length,
+    stepTypes: steps.map(safeType).slice(0, 80),
+    modelOutputContentTypes: modelOutputContent.map(safeType).slice(0, 80),
+    outputsCount: outputs.length,
+    outputsTypes: outputs.map(safeType).slice(0, 80),
+    outputImagePresent: Boolean(
+      interactionRecord(input.normalized?.output_image) ??
+      interactionRecord(input.normalized?.outputImage),
+    ),
+    outputVideoPresent: Boolean(
+      interactionRecord(input.normalized?.output_video) ??
+      interactionRecord(input.normalized?.outputVideo),
+    ),
+    imageMimeType: mimeType && /^image\/[a-z0-9.+-]+$/i.test(mimeType) ? mimeType : null,
+    imageDataPresent: Boolean(data),
+    imageDataCharacterLength: data ? data.length : null,
+    imageUriPresent: Boolean(uri),
+    imageUriScheme: uriScheme,
+    usagePresent: Boolean(interactionRecord(input.normalized?.usage)),
+  };
+}
+
+function runtimeConstructorName(value: unknown) {
+  if (!value || typeof value !== 'object') return null;
+  const name = (value as { constructor?: { name?: unknown } }).constructor?.name;
+  return typeof name === 'string' && /^[a-z_$][a-z0-9_$]{0,79}$/i.test(name)
+    ? name
+    : null;
+}
+
+export function normalizeGoogleInteractionEnvelope(
+  value: unknown,
+): NormalizedGoogleInteractionEnvelope {
+  const root = interactionRecord(value);
+  const runtimeConstructor = runtimeConstructorName(value);
+  let current = root;
+  const wrapperPath: string[] = [];
+
+  for (let depth = 0; current && depth <= GOOGLE_INTERACTION_MAXIMUM_WRAPPER_DEPTH; depth += 1) {
+    const id = interactionId(current.id);
+    const status = interactionStatus(current.status);
+    if (id || status || Array.isArray(current.steps)) {
+      const valid = Boolean(id && status);
+      return {
+        interaction: valid ? current : null,
+        interactionId: id,
+        status,
+        valid,
+        partial: Boolean(id && !status),
+        wrapperPath,
+        structuralSummary: structuralSummary({
+          root,
+          normalized: current,
+          wrapperPath,
+          runtimeConstructor,
+        }),
+      };
+    }
+    if (depth === GOOGLE_INTERACTION_MAXIMUM_WRAPPER_DEPTH) break;
+    const wrapperKey = GOOGLE_INTERACTION_WRAPPER_KEYS.find((key) => interactionRecord(current?.[key]));
+    if (!wrapperKey) break;
+    current = interactionRecord(current[wrapperKey]);
+    wrapperPath.push(wrapperKey);
+  }
+
+  return {
+    interaction: null,
+    interactionId: null,
+    status: null,
+    valid: false,
+    partial: false,
+    wrapperPath,
+    structuralSummary: structuralSummary({
+      root,
+      normalized: current,
+      wrapperPath,
+      runtimeConstructor,
+    }),
+  };
+}
+
+export class GoogleInteractionEnvelopeError extends Error {
+  readonly structuralSummary: GoogleInteractionStructuralSummary;
+
+  constructor(structuralSummary: GoogleInteractionStructuralSummary) {
+    super('The Director provider interaction envelope was not recognized.');
+    this.name = 'GoogleInteractionEnvelopeError';
+    this.structuralSummary = structuralSummary;
+  }
+}
+
+function terminalInteractionFailure(status: GoogleInteractionStatus) {
+  return status === 'failed' ||
+    status === 'cancelled' ||
+    status === 'incomplete' ||
+    status === 'budget_exceeded';
 }
 
 export async function waitForGoogleInteraction(input: {
@@ -209,29 +458,41 @@ export async function waitForGoogleInteraction(input: {
   getInteraction: (id: string) => Promise<unknown>;
   maximumPolls?: number;
   intervalMs?: number;
+  onStructuralSummary?: (summary: GoogleInteractionStructuralSummary) => void;
 }) {
-  let interaction = input.initialInteraction;
+  let envelope = normalizeGoogleInteractionEnvelope(input.initialInteraction);
+  input.onStructuralSummary?.(envelope.structuralSummary);
   const maximumPolls = Math.max(1, Math.min(input.maximumPolls ?? 52, 60));
-  const intervalMs = Math.max(250, Math.min(input.intervalMs ?? 5_000, 10_000));
+  const intervalMs = input.intervalMs === 0
+    ? 0
+    : Math.max(250, Math.min(input.intervalMs ?? 5_000, 10_000));
   for (let poll = 0; poll < maximumPolls; poll += 1) {
-    const current = interactionRecord(interaction);
-    const status = typeof current?.status === 'string' ? current.status : 'completed';
-    if (status === 'completed') return interaction;
-    if (status === 'failed' || status === 'cancelled') {
+    if (envelope.valid && envelope.status === 'completed' && envelope.interaction) {
+      return envelope.interaction;
+    }
+    if (envelope.valid && envelope.status && terminalInteractionFailure(envelope.status)) {
       const safeFailure = /\b(?:safety|moderation|blocked|policy|prohibited|responsible ai)\b/i
-        .test(JSON.stringify(current))
+        .test(JSON.stringify(envelope.interaction))
         ? 'The Director provider interaction was blocked by safety moderation.'
         : 'The Director provider interaction did not complete.';
       const error = new Error(safeFailure);
       (error as Error & { status?: number }).status = 400;
       throw error;
     }
-    const interactionId = typeof current?.id === 'string' ? current.id : '';
-    if (!interactionId) throw new Error('The Director provider interaction has no identifier.');
-    if (poll + 1 < maximumPolls) {
-      await new Promise((resolve) => setTimeout(resolve, intervalMs));
-      interaction = await input.getInteraction(interactionId);
+    if (!envelope.interactionId) {
+      throw new GoogleInteractionEnvelopeError(envelope.structuralSummary);
     }
+    if (poll + 1 < maximumPolls) {
+      if (!envelope.partial && intervalMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      }
+      const polled = await input.getInteraction(envelope.interactionId);
+      envelope = normalizeGoogleInteractionEnvelope(polled);
+      input.onStructuralSummary?.(envelope.structuralSummary);
+    }
+  }
+  if (!envelope.valid) {
+    throw new GoogleInteractionEnvelopeError(envelope.structuralSummary);
   }
   const timeout = new Error('The Director provider interaction timed out.');
   (timeout as Error & { status?: number }).status = 408;
@@ -249,16 +510,21 @@ export async function executeGoogleMediaInteraction(
   });
   const client = createGoogleMediaClient(context.apiKey);
   const requestTelemetry = recordPaidRequest(context.telemetry, decision, context.operation);
+  let interactionSummary: GoogleInteractionStructuralSummary | null = null;
   try {
     const initialInteraction = await client.interactions.create(payload, {
       maxRetries: 0,
     });
     const interaction = await waitForGoogleInteraction({
       initialInteraction,
-      getInteraction: (id) => client.interactions.get(id),
+      getInteraction: (id) => client.interactions.get(id, undefined, { maxRetries: 0 }),
+      onStructuralSummary: (summary) => {
+        interactionSummary = summary;
+      },
     });
     return {
       interaction,
+      interactionSummary,
       telemetry: recordDirectorCostOutcome(requestTelemetry, {
         operation: context.operation,
         status: 'completed',
@@ -272,6 +538,9 @@ export async function executeGoogleMediaInteraction(
       }),
       classifyDirectorProviderFailure(error),
       extractDirectorProviderSafeFailureMetadata(error, String(payload.model ?? '')),
+      error instanceof GoogleInteractionEnvelopeError
+        ? error.structuralSummary
+        : interactionSummary,
     );
   }
 }

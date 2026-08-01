@@ -17,6 +17,7 @@ import {
   runDirectorCanarySequence,
   type DirectorCanaryAuthorization,
   type DirectorCanaryFailureCategory,
+  type DirectorInteractionSummaries,
 } from './canary';
 import { createDirectorCostTelemetry, type DirectorCostTelemetry } from './budget';
 import { buildDirectorProductionDryRun } from './dryRunDiagnostics';
@@ -410,9 +411,10 @@ async function resolveProviderMediaBytes(output: DirectorMediaOutput, apiKey: st
   }
 }
 
-function operationalTelemetry(
+export function directorOperationalTelemetry(
   telemetry: DirectorCostTelemetry,
   providerFailureMetadata?: DirectorProviderSafeFailureMetadata | null,
+  interactionSummaries?: DirectorInteractionSummaries,
 ) {
   return {
     providerRequestCount: telemetry.providerRequestCount,
@@ -422,6 +424,22 @@ function operationalTelemetry(
     requestsByOperation: telemetry.requestsByOperation,
     events: telemetry.events,
     ...(providerFailureMetadata ? { providerFailure: providerFailureMetadata } : {}),
+    ...(interactionSummaries && Object.keys(interactionSummaries).length
+      ? { interactionResponses: interactionSummaries }
+      : {}),
+  };
+}
+
+export function mergeDirectorCanaryJobInteractionTelemetry(
+  sceneMetadata: unknown,
+  interactionSummaries: DirectorInteractionSummaries,
+) {
+  const existing = sceneMetadata && typeof sceneMetadata === 'object'
+    ? sceneMetadata as Record<string, unknown>
+    : {};
+  return {
+    ...existing,
+    interactionResponses: interactionSummaries,
   };
 }
 
@@ -463,8 +481,23 @@ async function updateExecutionJob(input: {
   videoUrl?: string | null;
   failureCategory?: DirectorCanaryFailureCategory | null;
   telemetry: DirectorCostTelemetry;
+  interactionSummaries?: DirectorInteractionSummaries;
 }) {
   if (!supabaseAdmin) return;
+  let sceneMetadata: Record<string, unknown> | null = null;
+  if (input.interactionSummaries && Object.keys(input.interactionSummaries).length) {
+    const { data, error } = await supabaseAdmin
+      .from('generation_jobs')
+      .select('scene_metadata')
+      .eq('id', input.authorizationId)
+      .maybeSingle();
+    if (!error && data) {
+      sceneMetadata = mergeDirectorCanaryJobInteractionTelemetry(
+        data.scene_metadata,
+        input.interactionSummaries,
+      );
+    }
+  }
   await supabaseAdmin
     .from('generation_jobs')
     .update({
@@ -474,6 +507,7 @@ async function updateExecutionJob(input: {
       output_url: input.videoUrl ?? null,
       video_url: input.videoUrl ?? null,
       error_category: input.failureCategory ?? null,
+      ...(sceneMetadata ? { scene_metadata: sceneMetadata } : {}),
       completed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
@@ -485,6 +519,7 @@ async function updateAuthorization(input: {
   status: 'completed' | 'failed';
   telemetry: DirectorCostTelemetry;
   providerFailureMetadata?: DirectorProviderSafeFailureMetadata | null;
+  interactionSummaries?: DirectorInteractionSummaries;
   failureCategory?: DirectorCanaryFailureCategory | null;
   projectId?: string | null;
   estimatedCostUsd?: number | null;
@@ -495,7 +530,11 @@ async function updateAuthorization(input: {
     .from(CANARY_AUTHORIZATION_TABLE)
     .update({
       status: input.status,
-      telemetry: operationalTelemetry(input.telemetry, input.providerFailureMetadata),
+      telemetry: directorOperationalTelemetry(
+        input.telemetry,
+        input.providerFailureMetadata,
+        input.interactionSummaries,
+      ),
       failure_category: input.failureCategory ?? null,
       result_project_id: input.projectId ?? null,
       estimated_cost_usd: input.estimatedCostUsd ?? null,
@@ -779,6 +818,7 @@ export async function executeProductionDirectorCanary(input: {
         status: 'failed',
         telemetry: sequence.telemetry,
         providerFailureMetadata: sequence.providerFailureMetadata,
+        interactionSummaries: sequence.interactionSummaries,
         failureCategory: sequence.failureCategory,
         estimatedCostUsd: sequence.estimatedCostUsd,
         actualCostUsd: sequence.actualCostUsd,
@@ -787,6 +827,7 @@ export async function executeProductionDirectorCanary(input: {
         authorizationId: authorization.id,
         status: 'failed',
         telemetry: sequence.telemetry,
+        interactionSummaries: sequence.interactionSummaries,
         failureCategory: sequence.failureCategory,
       }),
     ]);
@@ -825,6 +866,7 @@ export async function executeProductionDirectorCanary(input: {
         authorizationId: authorization.id,
         status: 'completed',
         telemetry: sequence.telemetry,
+        interactionSummaries: sequence.interactionSummaries,
         projectId,
         estimatedCostUsd: sequence.estimatedCostUsd,
         actualCostUsd: sequence.actualCostUsd,
@@ -833,6 +875,7 @@ export async function executeProductionDirectorCanary(input: {
         authorizationId: authorization.id,
         status: 'completed',
         telemetry: sequence.telemetry,
+        interactionSummaries: sequence.interactionSummaries,
         projectId,
         videoUrl,
       }),
@@ -859,6 +902,7 @@ export async function executeProductionDirectorCanary(input: {
         authorizationId: authorization.id,
         status: 'failed',
         telemetry: sequence.telemetry,
+        interactionSummaries: sequence.interactionSummaries,
         failureCategory: 'persistence_failed',
         estimatedCostUsd: sequence.estimatedCostUsd,
         actualCostUsd: sequence.actualCostUsd,
@@ -867,6 +911,7 @@ export async function executeProductionDirectorCanary(input: {
         authorizationId: authorization.id,
         status: 'failed',
         telemetry: sequence.telemetry,
+        interactionSummaries: sequence.interactionSummaries,
         failureCategory: 'persistence_failed',
       }),
     ]);

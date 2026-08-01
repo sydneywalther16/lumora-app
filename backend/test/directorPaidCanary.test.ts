@@ -16,8 +16,11 @@ import {
   classifyDirectorProviderFailure,
   DirectorProviderExecutionError,
   extractDirectorProviderSafeFailureMetadata,
+  normalizeGoogleInteractionEnvelope,
 } from '../src/services/director/googleMedia';
 import {
+  directorOperationalTelemetry,
+  mergeDirectorCanaryJobInteractionTelemetry,
   resolveDirectorCanaryAuthorizationClaim,
   type DirectorAuthorizationClaimStore,
   type DirectorAuthorizationRow,
@@ -286,6 +289,14 @@ assert.equal(anchorFailure.telemetry.providerRequestCount, 1);
 assert.equal(anchorFailureVideoCalls, 0);
 
 let textOnlyVideoCalls = 0;
+const textOnlyInteraction = {
+  id: 'text-only-anchor-interaction',
+  status: 'completed',
+  outputs: [{ type: 'text', text: 'Created the scene.' }],
+};
+const textOnlyInteractionSummary = normalizeGoogleInteractionEnvelope(
+  textOnlyInteraction,
+).structuralSummary;
 const textOnlyAnchor = await runDirectorCanarySequence({
   apiKey: 'test-only-placeholder',
   authorization,
@@ -294,11 +305,8 @@ const textOnlyAnchor = await runDirectorCanarySequence({
   dependencies: {
     async runAnchor(_payload, context) {
       return {
-        interaction: {
-          id: 'text-only-anchor-interaction',
-          status: 'completed',
-          outputs: [{ type: 'text', text: 'Created the scene.' }],
-        },
+        interaction: textOnlyInteraction,
+        interactionSummary: textOnlyInteractionSummary,
         telemetry: recordPaidRequest(context.telemetry, context.decision, context.operation),
       };
     },
@@ -315,6 +323,25 @@ assert.equal(textOnlyAnchor.ok, false);
 assert.equal(textOnlyAnchor.failureCategory, 'anchor_text_only');
 assert.equal(textOnlyAnchor.telemetry.providerRequestCount, 1);
 assert.equal(textOnlyVideoCalls, 0);
+assert.deepEqual(textOnlyAnchor.interactionSummaries.sceneAnchor, textOnlyInteractionSummary);
+const persistedAuthorizationTelemetry = directorOperationalTelemetry(
+  textOnlyAnchor.telemetry,
+  null,
+  textOnlyAnchor.interactionSummaries,
+);
+const persistedJobTelemetry = mergeDirectorCanaryJobInteractionTelemetry(
+  { directorPlan: { private: true } },
+  textOnlyAnchor.interactionSummaries,
+);
+assert.deepEqual(
+  persistedAuthorizationTelemetry.interactionResponses.sceneAnchor,
+  textOnlyInteractionSummary,
+);
+assert.deepEqual(
+  persistedJobTelemetry.interactionResponses.sceneAnchor,
+  textOnlyInteractionSummary,
+);
+assert.deepEqual(persistedJobTelemetry.directorPlan, { private: true });
 
 let failedVideoCalls = 0;
 const videoFailure = await runDirectorCanarySequence({
@@ -424,6 +451,26 @@ assert.doesNotMatch(
   endpointBundleSource,
   /from\s+['"][^'"]*serverless\/_lib\/rateLimit['"]/,
 );
+
+const googleMediaSource = readFileSync(
+  join(repositoryRoot, 'backend/src/services/director/googleMedia.ts'),
+  'utf8',
+);
+assert.match(googleMediaSource, /interactions\.create\(payload,[\s\S]*maxRetries: 0/);
+assert.match(googleMediaSource, /interactions\.get\(id, undefined, \{ maxRetries: 0 \}\)/);
+assert.doesNotMatch(googleMediaSource, /current\?\.status === 'string' \? current\.status : 'completed'/);
+
+const adminRunnerSource = readFileSync(
+  join(repositoryRoot, 'scripts/run-director-paid-canary.mjs'),
+  'utf8',
+);
+assert.match(adminRunnerSource, /I AUTHORIZE EXACTLY ONE GUARDED PAID CANARY/);
+assert.match(adminRunnerSource, /'idempotency-key': idempotencyKey/);
+assert.match(adminRunnerSource, /'x-lumora-director-authorization': authorizationId/);
+assert.match(adminRunnerSource, /authorization: `Bearer \$\{accessToken\}`/);
+assert.match(adminRunnerSource, /clearSensitiveEnvironment\(\)/);
+assert.doesNotMatch(adminRunnerSource, /[?&](?:authorization|idempotency|token)=/i);
+assert.doesNotMatch(adminRunnerSource, /console\.log\([^\n]*(?:accessToken|privateProviderUri|videoUrl)/i);
 
 const creatorExperienceSource = readFileSync(
   join(repositoryRoot, 'src/lib/createExperience.ts'),

@@ -14,6 +14,7 @@ import {
   type DirectorProviderFailureCategory,
   type DirectorProviderSafeFailureMetadata,
   type GoogleInteractionPayload,
+  type GoogleInteractionStructuralSummary,
   type GoogleMediaExecutionContext,
 } from './googleMedia';
 import {
@@ -64,6 +65,12 @@ export type DirectorCanaryAuthorization = {
 type GoogleInteractionResult = {
   interaction: unknown;
   telemetry: DirectorCostTelemetry;
+  interactionSummary?: GoogleInteractionStructuralSummary | null;
+};
+
+export type DirectorInteractionSummaries = {
+  sceneAnchor?: GoogleInteractionStructuralSummary;
+  primaryVideo?: GoogleInteractionStructuralSummary;
 };
 
 export type DirectorCanaryExecutionDependencies = {
@@ -99,6 +106,7 @@ export type DirectorCanarySequenceResult =
       actualCostUsd: number | null;
       publicCaption: string;
       syntheticDisclosure: 'Synthetic portrayal';
+      interactionSummaries: DirectorInteractionSummaries;
     }
   | {
       ok: false;
@@ -111,6 +119,7 @@ export type DirectorCanarySequenceResult =
       actualCostUsd: number | null;
       publicCaption: string;
       syntheticDisclosure: 'Synthetic portrayal';
+      interactionSummaries: DirectorInteractionSummaries;
     };
 
 function compact(value: string) {
@@ -215,6 +224,7 @@ function failedResult(input: {
   providerFailureMetadata?: DirectorProviderSafeFailureMetadata | null;
   estimatedCostUsd?: number | null;
   actualCostUsd?: number | null;
+  interactionSummaries?: DirectorInteractionSummaries;
 }): DirectorCanarySequenceResult {
   return {
     ok: false,
@@ -227,6 +237,7 @@ function failedResult(input: {
     actualCostUsd: input.actualCostUsd ?? null,
     publicCaption: input.plan.publicCaption,
     syntheticDisclosure: input.plan.syntheticDisclosure,
+    interactionSummaries: input.interactionSummaries ?? {},
   };
 }
 
@@ -240,6 +251,7 @@ export async function runDirectorCanarySequence(input: {
 }): Promise<DirectorCanarySequenceResult> {
   assertDirectorCanaryAuthorization(input.authorization);
   let telemetry = createDirectorCostTelemetry();
+  const interactionSummaries: DirectorInteractionSummaries = {};
   const projectedMaximumCostUsd =
     input.projectedMaximumCostUsd ?? DIRECTOR_CANARY_PROJECTED_MAXIMUM_COST_USD;
 
@@ -253,6 +265,7 @@ export async function runDirectorCanarySequence(input: {
       failureCategory: 'budget_guard',
       telemetry,
       estimatedCostUsd: projectedMaximumCostUsd,
+      interactionSummaries,
     });
   }
 
@@ -272,14 +285,21 @@ export async function runDirectorCanarySequence(input: {
     });
     anchorInteraction = anchorResult.interaction;
     telemetry = anchorResult.telemetry;
+    if (anchorResult.interactionSummary) {
+      interactionSummaries.sceneAnchor = anchorResult.interactionSummary;
+    }
   } catch (error) {
     const providerError = error instanceof DirectorProviderExecutionError ? error : null;
+    if (providerError?.interactionSummary) {
+      interactionSummaries.sceneAnchor = providerError.interactionSummary;
+    }
     return failedResult({
       plan: input.plan,
       anchorSuccess: false,
       failureCategory: providerError?.safeCategory ?? 'provider_request_failed',
       providerFailureMetadata: providerError?.safeMetadata ?? null,
       telemetry: providerError?.telemetry ?? telemetry,
+      interactionSummaries,
     });
   }
 
@@ -294,6 +314,7 @@ export async function runDirectorCanarySequence(input: {
         ? error.category
         : 'anchor_output_unrecognized',
       telemetry,
+      interactionSummaries,
     });
   }
 
@@ -306,6 +327,7 @@ export async function runDirectorCanarySequence(input: {
         anchorSuccess: false,
         failureCategory: 'anchor_output_unrecognized',
         telemetry,
+        interactionSummaries,
       });
     }
     if (!anchorBytes.byteLength) throw new Error('Missing anchor bytes.');
@@ -315,6 +337,7 @@ export async function runDirectorCanarySequence(input: {
       anchorSuccess: false,
       failureCategory: 'anchor_media_missing',
       telemetry,
+      interactionSummaries,
     });
   }
 
@@ -332,6 +355,7 @@ export async function runDirectorCanarySequence(input: {
       failureCategory: 'persistence_failed',
       telemetry,
       actualCostUsd: anchorCost,
+      interactionSummaries,
     });
   }
 
@@ -347,6 +371,7 @@ export async function runDirectorCanarySequence(input: {
       telemetry,
       estimatedCostUsd: projectedTotalAfterAnchor,
       actualCostUsd: anchorCost,
+      interactionSummaries,
     });
   }
 
@@ -372,8 +397,14 @@ export async function runDirectorCanarySequence(input: {
     });
     videoInteraction = videoResult.interaction;
     telemetry = videoResult.telemetry;
+    if (videoResult.interactionSummary) {
+      interactionSummaries.primaryVideo = videoResult.interactionSummary;
+    }
   } catch (error) {
     const providerError = error instanceof DirectorProviderExecutionError ? error : null;
+    if (providerError?.interactionSummary) {
+      interactionSummaries.primaryVideo = providerError.interactionSummary;
+    }
     return failedResult({
       plan: input.plan,
       anchorSuccess: true,
@@ -382,6 +413,7 @@ export async function runDirectorCanarySequence(input: {
       telemetry: providerError?.telemetry ?? telemetry,
       estimatedCostUsd: projectedTotalAfterAnchor,
       actualCostUsd: anchorCost,
+      interactionSummaries,
     });
   }
 
@@ -401,6 +433,7 @@ export async function runDirectorCanarySequence(input: {
       telemetry,
       estimatedCostUsd: projectedTotalAfterAnchor,
       actualCostUsd: anchorCost,
+      interactionSummaries,
     });
   }
 
@@ -424,5 +457,6 @@ export async function runDirectorCanarySequence(input: {
     actualCostUsd,
     publicCaption: input.plan.publicCaption,
     syntheticDisclosure: input.plan.syntheticDisclosure,
+    interactionSummaries,
   };
 }
