@@ -51,3 +51,4 @@ export * from './assembly';
 export * from './output';
 export * from './diagnostics';
 export * from './dryRunDiagnostics';
+export * from './xaiRouting';
