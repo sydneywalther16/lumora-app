@@ -711,9 +711,9 @@ async function persistSeedanceReferenceImages(input) {
   };
 }
 function referenceCanBeSkipped(references, failedIndex) {
-  const failed = references[failedIndex];
-  if (!failed) return false;
-  if (failed.role === "front_angle" || failed.role === "side_angle") return false;
+  const failed2 = references[failedIndex];
+  if (!failed2) return false;
+  if (failed2.role === "front_angle" || failed2.role === "side_angle") return false;
   return references.length > 1;
 }
 async function persistOptionalAssetUrl(input) {
@@ -4968,13 +4968,35 @@ var DirectorProviderExecutionError = class extends Error {
 function emptySafeFailureMetadata() {
   return {
     httpStatus: null,
+    providerCode: null,
+    providerStatusName: null,
+    message: null,
+    fieldViolationPaths: [],
     reason: null,
     retryAfterSeconds: null,
     retryInfoSeconds: null,
     quotaMetric: null,
     quotaLimitName: null,
-    modelName: null
+    modelName: null,
+    request: null
   };
+}
+var DIAGNOSTIC_MESSAGE_LIMIT = 500;
+var DIAGNOSTIC_PATH_LIMIT = 160;
+var DIAGNOSTIC_DETAIL_LIMIT = 10;
+function sanitizeDirectorProviderDiagnosticText(value, limit = DIAGNOSTIC_MESSAGE_LIMIT) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const sanitized = value.replace(/\b(?:https?|gs|s3):\/\/[^\s,;)}\]]+/gi, "[redacted-url]").replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, "[redacted-token]").replace(/\b(?:AIza[0-9A-Za-z_-]{30,}|sk-[0-9A-Za-z_-]{20,})\b/g, "[redacted-key]").replace(/\bdata:[^;,\s]+;base64,[A-Za-z0-9+/=_-]+/gi, "[redacted-data]").replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, "[redacted-id]").replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]").replace(/(["'`])(?:\\.|(?!\1).){8,}\1/g, "$1[redacted-text]$1").replace(/(?:^|\s)(?:\.{0,2}\/|~\/)(?:[^\s,;:()]+\/)+[^\s,;:()]*/g, " [redacted-path]").replace(/\b(?:authorization|idempotency|session|user|artifact|storage)[-_ ]?(?:id|key|token|path)\s*[:=]\s*[^\s,;]+/gi, "[redacted-private-id]").replace(/\b[A-Za-z0-9+/_=-]{40,}\b/g, "[redacted-encoded]").replace(/\s+/g, " ").trim();
+  return sanitized ? sanitized.slice(0, Math.max(1, limit)) : null;
+}
+function safeDiagnosticFieldPath(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const normalized = value.trim().slice(0, DIAGNOSTIC_PATH_LIMIT);
+  if (!/^[a-z0-9_[\].-]+$/i.test(normalized)) return "[redacted-path]";
+  if (/authorization|idempotency|session|token|secret|password|api.?key|user.?id|storage/i.test(normalized)) {
+    return "[redacted-path]";
+  }
+  return normalized;
 }
 function safeString(value) {
   return typeof value === "string" && value.trim() ? value.trim().slice(0, 160) : null;
@@ -5007,7 +5029,10 @@ function safeDetails(error) {
   const candidates = [
     record2?.details,
     nestedError?.details,
-    nestedRecord(record2?.response)?.data
+    nestedRecord(nestedRecord(record2?.response)?.data)?.error,
+    nestedRecord(record2?.response)?.data,
+    nestedRecord(record2?.cause)?.error,
+    record2?.cause
   ];
   for (const candidate of candidates) {
     if (Array.isArray(candidate)) return candidate;
@@ -5016,23 +5041,98 @@ function safeDetails(error) {
   }
   return [];
 }
-function extractDirectorProviderSafeFailureMetadata(error, fallbackModelName) {
+function errorRecords(error) {
+  const record2 = nestedRecord(error);
+  const response = nestedRecord(record2?.response);
+  const responseData = nestedRecord(response?.data);
+  const cause = nestedRecord(record2?.cause);
+  return [
+    record2,
+    nestedRecord(record2?.error),
+    nestedRecord(responseData?.error),
+    responseData,
+    cause,
+    nestedRecord(cause?.error)
+  ].filter((candidate) => Boolean(candidate));
+}
+function collectFieldViolationPaths(error) {
+  const paths = [];
+  const add = (value) => {
+    const safe = safeDiagnosticFieldPath(value);
+    if (safe && !paths.includes(safe) && paths.length < DIAGNOSTIC_DETAIL_LIMIT) paths.push(safe);
+  };
+  const inspect = (value, depth = 0) => {
+    if (depth > 4 || paths.length >= DIAGNOSTIC_DETAIL_LIMIT) return;
+    if (Array.isArray(value)) {
+      for (const item of value.slice(0, DIAGNOSTIC_DETAIL_LIMIT)) inspect(item, depth + 1);
+      return;
+    }
+    const record2 = nestedRecord(value);
+    if (!record2) return;
+    add(record2.field ?? record2.fieldPath ?? record2.field_path ?? record2.path);
+    for (const key of ["fieldViolations", "field_violations", "violations", "badRequest", "bad_request", "details"]) {
+      if (record2[key] !== void 0) inspect(record2[key], depth + 1);
+    }
+  };
+  for (const record2 of errorRecords(error)) inspect(record2);
+  for (const detail of safeDetails(error).slice(0, DIAGNOSTIC_DETAIL_LIMIT)) inspect(detail);
+  return paths;
+}
+function safeRequestField(value) {
+  return typeof value === "string" && /^[a-z_][a-z0-9_]{0,79}$/i.test(value) && !/(authorization|idempotency|session|token|secret|password|api.?key|prompt)/i.test(value) ? value : null;
+}
+function decodedBase64Length(value) {
+  if (typeof value !== "string" || !value) return null;
+  try {
+    return Buffer.from(value, "base64").byteLength;
+  } catch {
+    return null;
+  }
+}
+function summarizeGoogleInteractionRequest(payload) {
+  const record2 = payload;
+  const input = Array.isArray(record2.input) ? record2.input : [];
+  const image = input.map(nestedRecord).find((block) => block?.type === "image") ?? null;
+  const responseFormat = nestedRecord(record2.response_format ?? record2.responseFormat);
+  const generationConfig = nestedRecord(record2.generation_config ?? record2.generationConfig);
+  const videoConfig = nestedRecord(generationConfig?.video_config ?? generationConfig?.videoConfig);
+  const safeModel = sanitizeDirectorProviderDiagnosticText(record2.model, 120);
+  return {
+    schemaVersion: "google-interactions-video-v1",
+    topLevelFields: Object.keys(record2).map(safeRequestField).filter((field) => Boolean(field)).sort().slice(0, 20),
+    inputBlockTypes: input.map((block) => safeRequestField(nestedRecord(block)?.type)).filter((type) => Boolean(type)).slice(0, 10),
+    imageMimeType: /^image\/[a-z0-9.+-]+$/i.test(String(image?.mime_type ?? image?.mimeType ?? "")) ? String(image?.mime_type ?? image?.mimeType) : null,
+    imageByteLength: decodedBase64Length(image?.data),
+    responseFormatType: safeRequestField(responseFormat?.type),
+    aspectRatio: sanitizeDirectorProviderDiagnosticText(
+      responseFormat?.aspect_ratio ?? responseFormat?.aspectRatio,
+      20
+    ),
+    deliveryMode: safeRequestField(responseFormat?.delivery),
+    videoTask: safeRequestField(videoConfig?.task),
+    sdkVersion: "2.13.0",
+    modelIdentifier: safeModel
+  };
+}
+function extractDirectorProviderSafeFailureMetadata(error, fallbackModelName, request) {
   const record2 = nestedRecord(error);
   const nestedError = nestedRecord(record2?.error);
   const response = nestedRecord(record2?.response);
   const responseData = nestedRecord(response?.data);
   const metadata = emptySafeFailureMetadata();
-  metadata.httpStatus = safeNumber(
-    record2?.statusCode ?? record2?.status ?? record2?.code ?? nestedError?.code ?? response?.status
-  );
-  metadata.reason = safeString(
-    nestedError?.status ?? responseData?.status ?? record2?.reason
-  );
+  const records = errorRecords(error);
+  metadata.httpStatus = safeNumber(response?.status) ?? records.map((candidate) => safeNumber(candidate.statusCode ?? candidate.status ?? candidate.code)).find((value) => value !== null) ?? null;
+  metadata.providerCode = records.map((candidate) => candidate.code == null ? null : sanitizeDirectorProviderDiagnosticText(String(candidate.code), 80)).find(Boolean) ?? null;
+  metadata.providerStatusName = records.map((candidate) => typeof candidate.status === "string" ? sanitizeDirectorProviderDiagnosticText(candidate.status, 80) : null).find(Boolean) ?? null;
+  metadata.message = records.map((candidate) => sanitizeDirectorProviderDiagnosticText(candidate.message)).find(Boolean) ?? null;
+  metadata.fieldViolationPaths = collectFieldViolationPaths(error);
+  metadata.reason = records.slice(0, 4).map((candidate) => sanitizeDirectorProviderDiagnosticText(candidate.reason, 160)).find(Boolean) ?? null;
   metadata.retryAfterSeconds = durationSeconds(
     readHeader(record2?.headers ?? response?.headers, "retry-after")
   );
   metadata.modelName = safeString(fallbackModelName);
-  for (const detail of safeDetails(error)) {
+  metadata.request = request ?? null;
+  for (const detail of safeDetails(error).slice(0, DIAGNOSTIC_DETAIL_LIMIT)) {
     const detailRecord = nestedRecord(detail);
     if (!detailRecord) continue;
     const type = safeString(detailRecord["@type"])?.toLowerCase() ?? "";
@@ -5044,7 +5144,7 @@ function extractDirectorProviderSafeFailureMetadata(error, fallbackModelName) {
     const errorMetadata = nestedRecord(detailRecord.metadata);
     const violation = Array.isArray(detailRecord.violations) ? nestedRecord(detailRecord.violations[0]) : null;
     const quotaDimensions = nestedRecord(violation?.quotaDimensions ?? violation?.quota_dimensions);
-    metadata.reason ??= safeString(detailRecord.reason);
+    metadata.reason ??= sanitizeDirectorProviderDiagnosticText(detailRecord.reason, 160);
     metadata.quotaMetric ??= safeString(
       violation?.quotaMetric ?? violation?.quota_metric ?? errorMetadata?.quotaMetric ?? errorMetadata?.quota_metric
     );
@@ -5055,6 +5155,7 @@ function extractDirectorProviderSafeFailureMetadata(error, fallbackModelName) {
       quotaDimensions?.model ?? errorMetadata?.model
     );
   }
+  metadata.reason ??= records.slice(4).map((candidate) => sanitizeDirectorProviderDiagnosticText(candidate.reason, 160)).find(Boolean) ?? metadata.providerStatusName;
   return metadata;
 }
 function classifyDirectorProviderFailure(error) {
@@ -5276,6 +5377,7 @@ async function executeGoogleMediaInteraction(payload, context) {
   });
   const client = createGoogleMediaClient(context.apiKey);
   const requestTelemetry = recordPaidRequest(context.telemetry, decision2, context.operation);
+  const safeRequestMetadata = summarizeGoogleInteractionRequest(payload);
   let interactionSummary = null;
   try {
     const initialInteraction = await client.interactions.create(payload, {
@@ -5303,7 +5405,11 @@ async function executeGoogleMediaInteraction(payload, context) {
         status: "failed"
       }),
       classifyDirectorProviderFailure(error),
-      extractDirectorProviderSafeFailureMetadata(error, String(payload.model ?? "")),
+      extractDirectorProviderSafeFailureMetadata(
+        error,
+        String(payload.model ?? ""),
+        safeRequestMetadata
+      ),
       error instanceof GoogleInteractionEnvelopeError ? error.structuralSummary : interactionSummary
     );
   }
@@ -5455,7 +5561,7 @@ var omniFlashAdapter = {
 var DIRECTOR_CANARY_SCENE = "She walks through a candlelit mansion and pauses after hearing a sound behind her.";
 var DIRECTOR_CANARY_MAXIMUM_COST_USD = 2;
 var DIRECTOR_CANARY_PROJECTED_MAXIMUM_COST_USD = 0.477;
-var DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD = 0.4;
+var DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD2 = 0.4;
 function compact(value) {
   return value.replace(/\s+/g, " ").trim();
 }
@@ -5649,7 +5755,7 @@ async function runDirectorCanarySequence(input) {
       interactionSummaries
     });
   }
-  const projectedTotalAfterAnchor = Number(((anchorCost ?? DIRECTOR_CANARY_PROJECTED_MAXIMUM_COST_USD - DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD) + DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD).toFixed(5));
+  const projectedTotalAfterAnchor = Number(((anchorCost ?? DIRECTOR_CANARY_PROJECTED_MAXIMUM_COST_USD - DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD2) + DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD2).toFixed(5));
   if (projectedTotalAfterAnchor > input.authorization.maximumCostUsd) {
     return failedResult({
       plan: input.plan,
@@ -5763,7 +5869,7 @@ async function runDirectorCanarySequence(input) {
 }
 
 // backend/src/services/director/productionCanary.ts
-import { createHash as createHash6, randomUUID as randomUUID4 } from "node:crypto";
+import { createHash as createHash7, randomUUID as randomUUID4 } from "node:crypto";
 import { readFile as readFile2, unlink } from "node:fs/promises";
 import { tmpdir as tmpdir2 } from "node:os";
 import { join as join2 } from "node:path";
@@ -5984,6 +6090,226 @@ function buildDirectorProductionDryRun(sceneIdea = DIRECTOR_DRY_RUN_SCENE) {
   };
 }
 
+// backend/src/services/director/recoveryCanary.ts
+import { createHash as createHash6 } from "node:crypto";
+var DIRECTOR_VIDEO_RECOVERY_MODE = "director_video_recovery_canary";
+var DIRECTOR_VIDEO_RECOVERY_MAXIMUM_COST_USD = 1;
+var StoredDirectorAnchorError = class extends Error {
+  category;
+  constructor(category) {
+    super("The stored Director scene anchor is unavailable for recovery.");
+    this.name = "StoredDirectorAnchorError";
+    this.category = category;
+  }
+};
+function assertDirectorVideoRecoveryAuthorization(authorization, now = /* @__PURE__ */ new Date()) {
+  if (authorization.mode !== DIRECTOR_VIDEO_RECOVERY_MODE) {
+    throw new Error("The Director authorization has the wrong internal mode.");
+  }
+  if (authorization.status !== "running" || !authorization.consumedAt) {
+    throw new Error("The Director recovery authorization was not atomically consumed.");
+  }
+  if (authorization.sceneHash !== directorCanarySceneHash()) {
+    throw new Error("The Director recovery authorization has the wrong scene.");
+  }
+  if (authorization.maximumCostUsd !== DIRECTOR_VIDEO_RECOVERY_MAXIMUM_COST_USD || authorization.maximumAnchorRequests !== 0 || authorization.maximumVideoRequests !== 1 || authorization.maximumRetryRequests !== 0 || authorization.maximumFallbackRequests !== 0 || authorization.maximumRepairRequests !== 0) {
+    throw new Error("The Director recovery authorization has invalid limits.");
+  }
+  if (!authorization.idempotencyKey.trim() || !authorization.sourceAuthorizationId.trim() || !authorization.anchorMediaArtifactId.trim() || !authorization.anchorStorageObject.trim() || !/^[a-f0-9]{64}$/i.test(authorization.anchorContentSha256) || authorization.anchorByteLength <= 0) {
+    throw new Error("The Director recovery authorization is incomplete.");
+  }
+  if (new Date(authorization.expiresAt).getTime() <= now.getTime()) {
+    throw new Error("The Director recovery authorization has expired.");
+  }
+}
+function verifyStoredDirectorAnchor(input) {
+  const { authorization, stored } = input;
+  if (stored.ownerUserId !== authorization.userId) {
+    throw new StoredDirectorAnchorError("stored_anchor_not_owned");
+  }
+  if (stored.sourceAuthorizationId !== authorization.sourceAuthorizationId || stored.storageBucket !== authorization.anchorStorageBucket || stored.storageObject !== authorization.anchorStorageObject || stored.mediaArtifactId !== authorization.anchorMediaArtifactId) {
+    throw new StoredDirectorAnchorError("stored_anchor_artifact_mismatch");
+  }
+  if (!stored.bytes.byteLength || stored.bytes.byteLength !== stored.byteLength || stored.byteLength !== authorization.anchorByteLength || !["image/jpeg", "image/png", "image/webp"].includes(stored.mimeType) || stored.mimeType !== authorization.anchorMimeType || stored.storageBucket !== "lumora-assets" || !stored.storageObject.startsWith(
+    `${authorization.userId}/director/${authorization.sourceAuthorizationId}/`
+  )) {
+    throw new StoredDirectorAnchorError("stored_anchor_invalid");
+  }
+  const contentHash = createHash6("sha256").update(stored.bytes).digest("hex");
+  if (contentHash !== stored.contentSha256 || contentHash !== authorization.anchorContentSha256) {
+    throw new StoredDirectorAnchorError("stored_anchor_hash_mismatch");
+  }
+  const identified = identifyDirectorMediaArtifact({
+    candidate: {
+      providerInteractionId: null,
+      kind: "scene_anchor",
+      mimeType: stored.mimeType,
+      data: Buffer.from(stored.bytes).toString("base64"),
+      uri: null,
+      status: "completed",
+      safeSummary: {
+        outputCount: 1,
+        outputTypes: ["image"],
+        selectedSource: "output_image",
+        selectedMimeType: stored.mimeType,
+        selectedHasData: true,
+        selectedInlineDataCharacterLength: null,
+        selectedHasUri: false
+      }
+    },
+    bytes: stored.bytes,
+    context: {
+      authorizationId: stored.sourceAuthorizationId,
+      idempotencyKey: stored.sourceIdempotencyKey
+    }
+  });
+  if (identified.mediaArtifactId !== authorization.anchorMediaArtifactId) {
+    throw new StoredDirectorAnchorError("stored_anchor_artifact_mismatch");
+  }
+  return stored;
+}
+function oneCandidateShot2(plan) {
+  return {
+    id: "director-recovery-candidate",
+    summary: plan.sceneSummary,
+    action: plan.action,
+    cameraPlan: plan.cameraPlan,
+    durationSeconds: 4
+  };
+}
+function videoDecision(authorization) {
+  return {
+    id: `${authorization.id}:primary_video`,
+    operation: "primary_video",
+    authorizedBy: "user",
+    maximumRequests: 1,
+    recordedAt: authorization.recordedAt
+  };
+}
+function failed(input) {
+  return {
+    ok: false,
+    anchorSuccess: Boolean(input.anchorSuccess),
+    videoSuccess: false,
+    failureCategory: input.category,
+    providerFailureMetadata: input.providerFailureMetadata ?? null,
+    telemetry: input.telemetry,
+    estimatedCostUsd: input.anchorSuccess ? DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD2 : null,
+    actualCostUsd: null,
+    interactionSummaries: input.interactionSummaries ?? {}
+  };
+}
+async function runDirectorVideoRecoverySequence(input) {
+  assertDirectorVideoRecoveryAuthorization(input.authorization);
+  let telemetry = createDirectorCostTelemetry();
+  const interactionSummaries = {};
+  if (DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD2 > input.authorization.maximumCostUsd) {
+    return failed({ category: "budget_guard", telemetry });
+  }
+  let storedAnchor;
+  try {
+    storedAnchor = verifyStoredDirectorAnchor({
+      authorization: input.authorization,
+      stored: await input.dependencies.loadStoredAnchor()
+    });
+    interactionSummaries.sceneAnchor = {
+      hasProviderInteractionId: false,
+      acceptedCompletedResponseWithoutId: true,
+      mediaIdentitySource: "content_hash",
+      normalizedStatus: "completed",
+      selectedOutputShape: "output_image",
+      mimeType: storedAnchor.mimeType,
+      inlineDataPresent: false,
+      inlineDataCharacterLength: null,
+      uriPresent: false,
+      storageSucceeded: true
+    };
+  } catch (error) {
+    return failed({
+      category: error instanceof StoredDirectorAnchorError ? error.category : "stored_anchor_missing",
+      telemetry,
+      interactionSummaries
+    });
+  }
+  const payload = buildOmniFlashPayload({
+    anchor: {
+      data: Buffer.from(storedAnchor.bytes).toString("base64"),
+      mimeType: storedAnchor.mimeType
+    },
+    plan: input.plan,
+    shot: oneCandidateShot2(input.plan),
+    durationSeconds: 4,
+    aspectRatio: "9:16",
+    store: false
+  });
+  let interaction;
+  let structuralSummary2 = null;
+  try {
+    const result = await input.dependencies.runVideo(payload, {
+      apiKey: input.apiKey,
+      operation: "primary_video",
+      decision: videoDecision(input.authorization),
+      telemetry
+    });
+    interaction = result.interaction;
+    telemetry = result.telemetry;
+    structuralSummary2 = result.interactionSummary ?? null;
+  } catch (error) {
+    const providerError = error instanceof DirectorProviderExecutionError ? error : null;
+    if (providerError?.interactionSummary) {
+      interactionSummaries.primaryVideo = directorMediaSafeTelemetry({
+        structuralSummary: providerError.interactionSummary
+      });
+    }
+    return failed({
+      category: providerError?.safeCategory ?? "provider_request_failed",
+      telemetry: providerError?.telemetry ?? telemetry,
+      anchorSuccess: true,
+      providerFailureMetadata: providerError?.safeMetadata ?? null,
+      interactionSummaries
+    });
+  }
+  try {
+    const candidate = extractDirectorMediaOutput(interaction, "primary_video");
+    const bytes = await input.dependencies.resolveMediaBytes(candidate);
+    if (!candidate.providerInteractionId || !bytes.byteLength) throw new Error("invalid video");
+    const output = identifyDirectorMediaArtifact({
+      candidate,
+      bytes,
+      context: {
+        authorizationId: input.authorization.id,
+        idempotencyKey: input.authorization.idempotencyKey
+      }
+    });
+    interactionSummaries.primaryVideo = directorMediaSafeTelemetry({
+      structuralSummary: structuralSummary2,
+      output
+    });
+    const cost = estimateDirectorInteractionCost(interaction, "primary_video");
+    return {
+      ok: true,
+      anchorSuccess: true,
+      videoSuccess: true,
+      storedAnchor,
+      videoProviderInteractionId: output.providerInteractionId,
+      videoMediaArtifactId: output.mediaArtifactId,
+      videoBytes: bytes,
+      videoMimeType: output.mimeType,
+      telemetry,
+      estimatedCostUsd: cost ?? DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD2,
+      actualCostUsd: cost,
+      interactionSummaries
+    };
+  } catch {
+    return failed({
+      category: "invalid_video_output",
+      telemetry,
+      anchorSuccess: true,
+      interactionSummaries
+    });
+  }
+}
+
 // backend/src/services/director/productionCanary.ts
 var REFERENCE_BUCKET = "character-reference-images";
 var ANCHOR_BUCKET = "lumora-assets";
@@ -5997,16 +6323,20 @@ function numeric(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 function hasExactCanaryLimits(row) {
-  return Number(row.maximum_cost_usd) === DIRECTOR_CANARY_MAXIMUM_COST_USD && row.maximum_anchor_requests === 1 && row.maximum_video_requests === 1 && row.maximum_retry_requests === 0 && row.maximum_fallback_requests === 0 && row.maximum_repair_requests === 0;
+  if (row.authorization_mode === DIRECTOR_VIDEO_RECOVERY_MODE) {
+    return Number(row.maximum_cost_usd) === DIRECTOR_VIDEO_RECOVERY_MAXIMUM_COST_USD && row.maximum_anchor_requests === 0 && row.maximum_video_requests === 1 && row.maximum_retry_requests === 0 && row.maximum_fallback_requests === 0 && row.maximum_repair_requests === 0 && Boolean(text(row.source_authorization_id)) && Boolean(text(row.anchor_media_artifact_id)) && row.anchor_storage_bucket === ANCHOR_BUCKET && Boolean(text(row.anchor_storage_object)) && /^[a-f0-9]{64}$/i.test(text(row.anchor_content_sha256) ?? "") && /^image\/(?:jpeg|png|webp)$/i.test(text(row.anchor_mime_type) ?? "") && Number(row.anchor_byte_length) > 0;
+  }
+  return (row.authorization_mode ?? "director_full_canary") === "director_full_canary" && Number(row.maximum_cost_usd) === DIRECTOR_CANARY_MAXIMUM_COST_USD && row.maximum_anchor_requests === 1 && row.maximum_video_requests === 1 && row.maximum_retry_requests === 0 && row.maximum_fallback_requests === 0 && row.maximum_repair_requests === 0;
 }
-function safeAuthorizationStatus(state, expiresInSeconds = 0) {
+function safeAuthorizationStatus(state, expiresInSeconds = 0, recovery = false) {
   return {
     state,
     expiresInSeconds: Math.max(0, Math.floor(expiresInSeconds)),
-    maximumBudget: 2,
-    anchorRequestLimit: 1,
+    maximumBudget: recovery ? 1 : 2,
+    anchorRequestLimit: recovery ? 0 : 1,
     videoRequestLimit: 1,
-    retriesAllowed: 0
+    retriesAllowed: 0,
+    recovery
   };
 }
 async function resolveDirectorCanaryAuthorizationStatus(store, input, now = /* @__PURE__ */ new Date()) {
@@ -6020,10 +6350,12 @@ async function resolveDirectorCanaryAuthorizationStatus(store, input, now = /* @
   });
   if (activeRows.length > 1) return safeAuthorizationStatus("blocked_multiple");
   const activeRow = activeRows[0];
+  const activeRecovery = activeRow?.authorization_mode === DIRECTOR_VIDEO_RECOVERY_MODE;
   if (activeRow?.status === "running") {
     return safeAuthorizationStatus(
       "running",
-      (new Date(activeRow.expires_at).getTime() - nowMs) / 1e3
+      (new Date(activeRow.expires_at).getTime() - nowMs) / 1e3,
+      activeRecovery
     );
   }
   if (activeRow) {
@@ -6033,14 +6365,16 @@ async function resolveDirectorCanaryAuthorizationStatus(store, input, now = /* @
     }
     return safeAuthorizationStatus(
       "ready",
-      (new Date(activeRow.expires_at).getTime() - nowMs) / 1e3
+      (new Date(activeRow.expires_at).getTime() - nowMs) / 1e3,
+      activeRecovery
     );
   }
   const latestRow = rows[0];
-  if (latestRow.status === "completed") return safeAuthorizationStatus("completed");
-  if (latestRow.status === "failed") return safeAuthorizationStatus("failed");
-  if (latestRow.status === "running") return safeAuthorizationStatus("running");
-  if (latestRow.status === "authorized") return safeAuthorizationStatus("expired");
+  const latestRecovery = latestRow.authorization_mode === DIRECTOR_VIDEO_RECOVERY_MODE;
+  if (latestRow.status === "completed") return safeAuthorizationStatus("completed", 0, latestRecovery);
+  if (latestRow.status === "failed") return safeAuthorizationStatus("failed", 0, latestRecovery);
+  if (latestRow.status === "running") return safeAuthorizationStatus("running", 0, latestRecovery);
+  if (latestRow.status === "authorized") return safeAuthorizationStatus("expired", 0, latestRecovery);
   return safeAuthorizationStatus("missing");
 }
 async function resolveDirectorCanaryStoredAuthorization(store, input, now = /* @__PURE__ */ new Date()) {
@@ -6115,6 +6449,20 @@ var supabaseAuthorizationStore = {
     return data;
   }
 };
+var supabaseVideoRecoveryAuthorizationStore = {
+  async claim(input) {
+    if (!supabaseAdmin) return null;
+    const { data, error } = await supabaseAdmin.rpc("claim_director_video_recovery_authorization", {
+      p_authorization_id: input.authorizationId,
+      p_user_id: input.userId,
+      p_scene_hash: input.sceneHash,
+      p_idempotency_key: input.idempotencyKey
+    });
+    if (error) return null;
+    return firstRow(data);
+  },
+  find: supabaseAuthorizationStore.find
+};
 var supabaseAuthorizationLookupStore = {
   async findEligible(input) {
     if (!supabaseAdmin) return [];
@@ -6126,7 +6474,7 @@ var supabaseAuthorizationLookupStore = {
 var supabaseAuthorizationStatusStore = {
   async findRecent(input) {
     if (!supabaseAdmin) return null;
-    const { data, error } = await supabaseAdmin.from(CANARY_AUTHORIZATION_TABLE).select("id,user_id,scene_hash,status,maximum_cost_usd,maximum_anchor_requests,maximum_video_requests,maximum_retry_requests,maximum_fallback_requests,maximum_repair_requests,idempotency_key,expires_at,consumed_at,started_at,completed_at,created_at").eq("user_id", input.userId).eq("scene_hash", input.sceneHash).order("created_at", { ascending: false }).limit(20);
+    const { data, error } = await supabaseAdmin.from(CANARY_AUTHORIZATION_TABLE).select("id,user_id,scene_hash,status,authorization_mode,maximum_cost_usd,maximum_anchor_requests,maximum_video_requests,maximum_retry_requests,maximum_fallback_requests,maximum_repair_requests,idempotency_key,expires_at,consumed_at,started_at,completed_at,created_at,source_authorization_id,anchor_media_artifact_id,anchor_storage_bucket,anchor_storage_object,anchor_content_sha256,anchor_mime_type,anchor_byte_length").eq("user_id", input.userId).eq("scene_hash", input.sceneHash).order("created_at", { ascending: false }).limit(20);
     if (error || !Array.isArray(data)) return null;
     return data;
   }
@@ -6152,7 +6500,7 @@ async function resolveProductionDirectorCanaryStatus(input) {
   );
 }
 function authorizationFromRow(row) {
-  if (row.status !== "running" || !row.consumed_at || Number(row.maximum_cost_usd) !== 2 || row.maximum_anchor_requests !== 1 || row.maximum_video_requests !== 1 || row.maximum_retry_requests !== 0 || row.maximum_fallback_requests !== 0 || row.maximum_repair_requests !== 0) {
+  if ((row.authorization_mode ?? "director_full_canary") !== "director_full_canary" || row.status !== "running" || !row.consumed_at || Number(row.maximum_cost_usd) !== 2 || row.maximum_anchor_requests !== 1 || row.maximum_video_requests !== 1 || row.maximum_retry_requests !== 0 || row.maximum_fallback_requests !== 0 || row.maximum_repair_requests !== 0) {
     return null;
   }
   return {
@@ -6170,6 +6518,35 @@ function authorizationFromRow(row) {
     recordedAt: row.created_at,
     expiresAt: row.expires_at,
     consumedAt: row.consumed_at
+  };
+}
+function recoveryAuthorizationFromRow(row) {
+  if (row.authorization_mode !== DIRECTOR_VIDEO_RECOVERY_MODE || row.status !== "running" || !row.consumed_at || Number(row.maximum_cost_usd) !== DIRECTOR_VIDEO_RECOVERY_MAXIMUM_COST_USD || row.maximum_anchor_requests !== 0 || row.maximum_video_requests !== 1 || row.maximum_retry_requests !== 0 || row.maximum_fallback_requests !== 0 || row.maximum_repair_requests !== 0 || !text(row.source_authorization_id) || !text(row.anchor_media_artifact_id) || row.anchor_storage_bucket !== ANCHOR_BUCKET || !text(row.anchor_storage_object) || !/^[a-f0-9]{64}$/i.test(text(row.anchor_content_sha256) ?? "") || !/^image\/(?:jpeg|png|webp)$/i.test(text(row.anchor_mime_type) ?? "") || Number(row.anchor_byte_length) <= 0) {
+    return null;
+  }
+  return {
+    id: row.id,
+    userId: row.user_id,
+    sceneHash: row.scene_hash,
+    mode: DIRECTOR_VIDEO_RECOVERY_MODE,
+    status: "running",
+    maximumCostUsd: 1,
+    maximumAnchorRequests: 0,
+    maximumVideoRequests: 1,
+    maximumRetryRequests: 0,
+    maximumFallbackRequests: 0,
+    maximumRepairRequests: 0,
+    idempotencyKey: row.idempotency_key,
+    recordedAt: row.created_at,
+    expiresAt: row.expires_at,
+    consumedAt: row.consumed_at,
+    sourceAuthorizationId: row.source_authorization_id,
+    anchorMediaArtifactId: row.anchor_media_artifact_id,
+    anchorStorageBucket: row.anchor_storage_bucket,
+    anchorStorageObject: row.anchor_storage_object,
+    anchorContentSha256: row.anchor_content_sha256,
+    anchorMimeType: row.anchor_mime_type,
+    anchorByteLength: Number(row.anchor_byte_length)
   };
 }
 function internalDiagnostics(authorizationState, telemetry, input = {}) {
@@ -6244,7 +6621,7 @@ async function loadFrontReference(userId) {
     urls,
     bytes,
     mimeType,
-    hashPrefix: createHash6("sha256").update(bytes).digest("hex").slice(0, 12)
+    hashPrefix: createHash7("sha256").update(bytes).digest("hex").slice(0, 12)
   };
 }
 function extensionForMime(mimeType, kind) {
@@ -6306,11 +6683,18 @@ function directorOperationalTelemetry(telemetry, providerFailureMetadata, intera
     ...interactionSummaries && Object.keys(interactionSummaries).length ? { interactionResponses: interactionSummaries } : {}
   };
 }
-function mergeDirectorCanaryJobInteractionTelemetry(sceneMetadata, interactionSummaries) {
+function mergeDirectorCanaryJobInteractionTelemetry(sceneMetadata, interactionSummaries, telemetry, providerFailureMetadata) {
   const existing = sceneMetadata && typeof sceneMetadata === "object" ? sceneMetadata : {};
   return {
     ...existing,
-    interactionResponses: interactionSummaries
+    interactionResponses: interactionSummaries,
+    ...telemetry ? {
+      directorTelemetry: directorOperationalTelemetry(
+        telemetry,
+        providerFailureMetadata,
+        interactionSummaries
+      )
+    } : {}
   };
 }
 async function createExecutionJob(authorization, plan) {
@@ -6327,13 +6711,13 @@ async function createExecutionJob(authorization, plan) {
     duration_seconds: 4,
     aspect_ratio: "9:16",
     privacy: "private",
-    render_mode: "lumora-director-v1-canary",
+    render_mode: authorization.maximumAnchorRequests === 0 ? "lumora-director-video-recovery-canary" : "lumora-director-v1-canary",
     retry_count: 0,
     started_at: authorization.consumedAt,
     scene_metadata: {
       directorPlan: plan,
       syntheticDisclosure: plan.syntheticDisclosure,
-      authorizationId: authorization.id
+      recoveryMode: authorization.maximumAnchorRequests === 0
     }
   });
   if (error) throw new Error("persistence_failed");
@@ -6341,12 +6725,14 @@ async function createExecutionJob(authorization, plan) {
 async function updateExecutionJob(input) {
   if (!supabaseAdmin) return;
   let sceneMetadata = null;
-  if (input.interactionSummaries && Object.keys(input.interactionSummaries).length) {
+  if (input.interactionSummaries && Object.keys(input.interactionSummaries).length || input.providerFailureMetadata) {
     const { data, error } = await supabaseAdmin.from("generation_jobs").select("scene_metadata").eq("id", input.authorizationId).maybeSingle();
     if (!error && data) {
       sceneMetadata = mergeDirectorCanaryJobInteractionTelemetry(
         data.scene_metadata,
-        input.interactionSummaries
+        input.interactionSummaries ?? {},
+        input.telemetry,
+        input.providerFailureMetadata
       );
     }
   }
@@ -6615,6 +7001,7 @@ async function executeProductionDirectorCanary(input) {
         authorizationId: authorization.id,
         status: "failed",
         telemetry: sequence.telemetry,
+        providerFailureMetadata: sequence.providerFailureMetadata,
         interactionSummaries: sequence.interactionSummaries,
         failureCategory: sequence.failureCategory
       })
@@ -6677,6 +7064,232 @@ async function executeProductionDirectorCanary(input) {
         projectId,
         videoUrl,
         publicCaption: sequence.publicCaption,
+        syntheticDisclosure: "Synthetic portrayal"
+      },
+      internalDiagnostics: internalDiagnostics("claimed", sequence.telemetry, {
+        estimatedCostUsd: sequence.estimatedCostUsd,
+        actualCostUsd: sequence.actualCostUsd
+      })
+    };
+  } catch {
+    await Promise.all([
+      updateAuthorization({
+        authorizationId: authorization.id,
+        status: "failed",
+        telemetry: sequence.telemetry,
+        interactionSummaries: sequence.interactionSummaries,
+        failureCategory: "persistence_failed",
+        estimatedCostUsd: sequence.estimatedCostUsd,
+        actualCostUsd: sequence.actualCostUsd
+      }),
+      updateExecutionJob({
+        authorizationId: authorization.id,
+        status: "failed",
+        telemetry: sequence.telemetry,
+        interactionSummaries: sequence.interactionSummaries,
+        failureCategory: "persistence_failed"
+      })
+    ]);
+    return failedExecution({
+      authorizationState: "claimed",
+      failureCategory: "persistence_failed",
+      telemetry: sequence.telemetry,
+      plan,
+      anchorSucceeded: true,
+      estimatedCostUsd: sequence.estimatedCostUsd,
+      actualCostUsd: sequence.actualCostUsd
+    });
+  }
+}
+async function loadStoredRecoveryAnchor(authorization) {
+  if (!supabaseAdmin) throw new Error("stored_anchor_missing");
+  const { data: source, error: sourceError } = await supabaseAdmin.from(CANARY_AUTHORIZATION_TABLE).select("id,user_id,scene_hash,idempotency_key").eq("id", authorization.sourceAuthorizationId).eq("user_id", authorization.userId).eq("scene_hash", authorization.sceneHash).maybeSingle();
+  if (sourceError || !source || !text(source.idempotency_key)) {
+    throw new Error("stored_anchor_missing");
+  }
+  const { data: blob, error: downloadError } = await supabaseAdmin.storage.from(authorization.anchorStorageBucket).download(authorization.anchorStorageObject);
+  if (downloadError || !blob) throw new Error("stored_anchor_missing");
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  if (blob.type && blob.type !== authorization.anchorMimeType) {
+    throw new Error("stored_anchor_invalid");
+  }
+  return {
+    ownerUserId: String(source.user_id),
+    sourceAuthorizationId: String(source.id),
+    sourceIdempotencyKey: String(source.idempotency_key),
+    mediaArtifactId: authorization.anchorMediaArtifactId,
+    storageBucket: authorization.anchorStorageBucket,
+    storageObject: authorization.anchorStorageObject,
+    contentSha256: authorization.anchorContentSha256,
+    mimeType: authorization.anchorMimeType,
+    byteLength: authorization.anchorByteLength,
+    bytes
+  };
+}
+async function executeProductionDirectorVideoRecoveryCanary(input) {
+  const plan = buildDirectorProductionDryRun(DIRECTOR_CANARY_SCENE).plan;
+  const emptyTelemetry = createDirectorCostTelemetry();
+  if (!supabaseAdmin || !env.GOOGLE_API_KEY || !input.authorizationId.trim() || !input.idempotencyKey.trim()) {
+    return failedExecution({
+      authorizationState: "missing",
+      failureCategory: "authorization_invalid",
+      plan
+    });
+  }
+  const claim = await resolveDirectorCanaryAuthorizationClaim(
+    input.authorizationStore ?? supabaseVideoRecoveryAuthorizationStore,
+    {
+      authorizationId: input.authorizationId,
+      userId: input.userId,
+      sceneHash: directorCanarySceneHash(),
+      idempotencyKey: input.idempotencyKey
+    }
+  );
+  if (claim.kind === "missing") {
+    return failedExecution({ authorizationState: "missing", failureCategory: "authorization_missing", plan });
+  }
+  if (claim.kind === "expired") {
+    return failedExecution({ authorizationState: "expired", failureCategory: "authorization_expired", plan });
+  }
+  if (claim.kind === "idempotent_running") {
+    return {
+      httpStatus: 202,
+      publicResult: {
+        status: "processing",
+        message: "Lumora is continuing your stored scene",
+        draftSaved: false,
+        projectId: null,
+        videoUrl: null,
+        publicCaption: plan.publicCaption,
+        syntheticDisclosure: "Synthetic portrayal"
+      },
+      internalDiagnostics: internalDiagnostics(
+        "idempotent_running",
+        telemetryFromUnknown(claim.row.telemetry)
+      )
+    };
+  }
+  if (claim.kind === "idempotent_terminal") return replayTerminal(claim.row, plan);
+  const authorization = recoveryAuthorizationFromRow(claim.row);
+  if (!authorization) {
+    return failedExecution({ authorizationState: "claimed", failureCategory: "authorization_invalid", plan });
+  }
+  if (DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD > authorization.maximumCostUsd) {
+    await updateAuthorization({
+      authorizationId: authorization.id,
+      status: "failed",
+      telemetry: emptyTelemetry,
+      failureCategory: "budget_guard",
+      estimatedCostUsd: DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD
+    });
+    return failedExecution({
+      authorizationState: "claimed",
+      failureCategory: "budget_guard",
+      plan,
+      estimatedCostUsd: DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD
+    });
+  }
+  try {
+    await createExecutionJob(authorization, plan);
+  } catch {
+    await updateAuthorization({
+      authorizationId: authorization.id,
+      status: "failed",
+      telemetry: emptyTelemetry,
+      failureCategory: "persistence_failed"
+    });
+    return failedExecution({ authorizationState: "claimed", failureCategory: "persistence_failed", plan });
+  }
+  const sequence = await runDirectorVideoRecoverySequence({
+    apiKey: env.GOOGLE_API_KEY,
+    authorization,
+    plan,
+    dependencies: {
+      loadStoredAnchor: () => loadStoredRecoveryAnchor(authorization),
+      runVideo: omniFlashAdapter.execute,
+      resolveMediaBytes: (output) => resolveProviderMediaBytes(output, env.GOOGLE_API_KEY)
+    }
+  });
+  if (sequence.ok === false) {
+    await Promise.all([
+      updateAuthorization({
+        authorizationId: authorization.id,
+        status: "failed",
+        telemetry: sequence.telemetry,
+        providerFailureMetadata: sequence.providerFailureMetadata,
+        interactionSummaries: sequence.interactionSummaries,
+        failureCategory: sequence.failureCategory,
+        estimatedCostUsd: sequence.estimatedCostUsd,
+        actualCostUsd: sequence.actualCostUsd
+      }),
+      updateExecutionJob({
+        authorizationId: authorization.id,
+        status: "failed",
+        telemetry: sequence.telemetry,
+        providerFailureMetadata: sequence.providerFailureMetadata,
+        interactionSummaries: sequence.interactionSummaries,
+        failureCategory: sequence.failureCategory
+      })
+    ]);
+    return failedExecution({
+      authorizationState: "claimed",
+      failureCategory: sequence.failureCategory,
+      telemetry: sequence.telemetry,
+      plan,
+      anchorSucceeded: sequence.anchorSuccess,
+      estimatedCostUsd: sequence.estimatedCostUsd,
+      actualCostUsd: sequence.actualCostUsd
+    });
+  }
+  try {
+    const frontReference = await loadFrontReference(input.userId);
+    const anchorUrl = supabaseAdmin.storage.from(sequence.storedAnchor.storageBucket).getPublicUrl(sequence.storedAnchor.storageObject).data.publicUrl;
+    const videoPath = `${input.userId}/director/${authorization.id}/${sequence.videoMediaArtifactId}.` + extensionForMime(sequence.videoMimeType, "video");
+    const videoUrl = await uploadBytes({
+      bucket: VIDEO_BUCKET,
+      path: videoPath,
+      bytes: sequence.videoBytes,
+      contentType: sequence.videoMimeType
+    });
+    if (sequence.interactionSummaries.primaryVideo) {
+      sequence.interactionSummaries.primaryVideo.storageSucceeded = true;
+    }
+    const projectId = await persistProject({
+      userId: input.userId,
+      character: frontReference.character,
+      referenceImageUrls: frontReference.urls,
+      publicCaption: plan.publicCaption,
+      anchorUrl,
+      videoUrl
+    });
+    await Promise.all([
+      updateAuthorization({
+        authorizationId: authorization.id,
+        status: "completed",
+        telemetry: sequence.telemetry,
+        interactionSummaries: sequence.interactionSummaries,
+        projectId,
+        estimatedCostUsd: sequence.estimatedCostUsd,
+        actualCostUsd: sequence.actualCostUsd
+      }),
+      updateExecutionJob({
+        authorizationId: authorization.id,
+        status: "completed",
+        telemetry: sequence.telemetry,
+        interactionSummaries: sequence.interactionSummaries,
+        projectId,
+        videoUrl
+      })
+    ]);
+    return {
+      httpStatus: 200,
+      publicResult: {
+        status: "completed",
+        message: "Your scene is ready in Drafts.",
+        draftSaved: true,
+        projectId,
+        videoUrl,
+        publicCaption: plan.publicCaption,
         syntheticDisclosure: "Synthetic portrayal"
       },
       internalDiagnostics: internalDiagnostics("claimed", sequence.telemetry, {
@@ -7141,6 +7754,7 @@ async function handler(req, res) {
     }
     let authorizationId = stringValue2(body.authorizationId) ?? headerValue(req, "x-lumora-director-authorization");
     let idempotencyKey = stringValue2(body.idempotencyKey) ?? headerValue(req, "idempotency-key");
+    let videoRecovery = false;
     if (Boolean(authorizationId) !== Boolean(idempotencyKey)) {
       sendJson(res, 409, {
         status: "failed",
@@ -7159,6 +7773,7 @@ async function handler(req, res) {
       }
       authorizationId = storedAuthorization.row.id;
       idempotencyKey = storedAuthorization.row.idempotency_key;
+      videoRecovery = storedAuthorization.row.authorization_mode === DIRECTOR_VIDEO_RECOVERY_MODE;
     }
     if (!authorizationId || !idempotencyKey) {
       sendJson(res, 409, {
@@ -7167,7 +7782,11 @@ async function handler(req, res) {
       });
       return;
     }
-    const result = await executeProductionDirectorCanary({
+    const result = videoRecovery ? await executeProductionDirectorVideoRecoveryCanary({
+      userId,
+      authorizationId,
+      idempotencyKey
+    }) : await executeProductionDirectorCanary({
       userId,
       authorizationId,
       idempotencyKey

@@ -16,7 +16,6 @@ import {
   directorCanarySceneHash,
   runDirectorCanarySequence,
   type DirectorCanaryAuthorization,
-  type DirectorCanaryFailureCategory,
   type DirectorInteractionSummaries,
 } from './canary';
 import { createDirectorCostTelemetry, type DirectorCostTelemetry } from './budget';
@@ -32,6 +31,14 @@ import {
   pollDirectorMediaFile,
   type DirectorMediaCandidate,
 } from './output';
+import {
+  DIRECTOR_VIDEO_RECOVERY_MAXIMUM_COST_USD,
+  DIRECTOR_VIDEO_RECOVERY_MODE,
+  runDirectorVideoRecoverySequence,
+  type DirectorVideoRecoveryAuthorization,
+  type DirectorVideoRecoveryFailureCategory,
+  type StoredDirectorAnchor,
+} from './recoveryCanary';
 
 const REFERENCE_BUCKET = 'character-reference-images';
 const ANCHOR_BUCKET = 'lumora-assets';
@@ -60,6 +67,14 @@ export type DirectorAuthorizationRow = {
   result_project_id?: string | null;
   estimated_cost_usd?: number | string | null;
   actual_cost_usd?: number | string | null;
+  authorization_mode?: 'director_full_canary' | typeof DIRECTOR_VIDEO_RECOVERY_MODE;
+  source_authorization_id?: string | null;
+  anchor_media_artifact_id?: string | null;
+  anchor_storage_bucket?: string | null;
+  anchor_storage_object?: string | null;
+  anchor_content_sha256?: string | null;
+  anchor_mime_type?: string | null;
+  anchor_byte_length?: number | null;
 };
 
 type SelfCharacterRow = {
@@ -90,7 +105,7 @@ export type ProductionDirectorCanaryExecution = {
       | 'expired'
       | 'idempotent_running'
       | 'idempotent_terminal';
-    failureCategory: DirectorCanaryFailureCategory | null;
+    failureCategory: DirectorVideoRecoveryFailureCategory | null;
     providerRequestCount: number;
     providerRetryCount: number;
     providerFallbackCount: number;
@@ -149,10 +164,11 @@ export type DirectorCanaryAuthorizationStatusState =
 export type DirectorCanaryAuthorizationStatus = {
   state: DirectorCanaryAuthorizationStatusState;
   expiresInSeconds: number;
-  maximumBudget: 2;
-  anchorRequestLimit: 1;
+  maximumBudget: 1 | 2;
+  anchorRequestLimit: 0 | 1;
   videoRequestLimit: 1;
   retriesAllowed: 0;
+  recovery: boolean;
 };
 
 export type DirectorAuthorizationStatusStore = {
@@ -172,7 +188,25 @@ function numeric(value: unknown) {
 }
 
 function hasExactCanaryLimits(row: DirectorAuthorizationRow) {
+  if (row.authorization_mode === DIRECTOR_VIDEO_RECOVERY_MODE) {
+    return (
+      Number(row.maximum_cost_usd) === DIRECTOR_VIDEO_RECOVERY_MAXIMUM_COST_USD &&
+      row.maximum_anchor_requests === 0 &&
+      row.maximum_video_requests === 1 &&
+      row.maximum_retry_requests === 0 &&
+      row.maximum_fallback_requests === 0 &&
+      row.maximum_repair_requests === 0 &&
+      Boolean(text(row.source_authorization_id)) &&
+      Boolean(text(row.anchor_media_artifact_id)) &&
+      row.anchor_storage_bucket === ANCHOR_BUCKET &&
+      Boolean(text(row.anchor_storage_object)) &&
+      /^[a-f0-9]{64}$/i.test(text(row.anchor_content_sha256) ?? '') &&
+      /^image\/(?:jpeg|png|webp)$/i.test(text(row.anchor_mime_type) ?? '') &&
+      Number(row.anchor_byte_length) > 0
+    );
+  }
   return (
+    (row.authorization_mode ?? 'director_full_canary') === 'director_full_canary' &&
     Number(row.maximum_cost_usd) === DIRECTOR_CANARY_MAXIMUM_COST_USD &&
     row.maximum_anchor_requests === 1 &&
     row.maximum_video_requests === 1 &&
@@ -185,14 +219,16 @@ function hasExactCanaryLimits(row: DirectorAuthorizationRow) {
 function safeAuthorizationStatus(
   state: DirectorCanaryAuthorizationStatusState,
   expiresInSeconds = 0,
+  recovery = false,
 ): DirectorCanaryAuthorizationStatus {
   return {
     state,
     expiresInSeconds: Math.max(0, Math.floor(expiresInSeconds)),
-    maximumBudget: 2,
-    anchorRequestLimit: 1,
+    maximumBudget: recovery ? 1 : 2,
+    anchorRequestLimit: recovery ? 0 : 1,
     videoRequestLimit: 1,
     retriesAllowed: 0,
+    recovery,
   };
 }
 
@@ -216,10 +252,12 @@ export async function resolveDirectorCanaryAuthorizationStatus(
   if (activeRows.length > 1) return safeAuthorizationStatus('blocked_multiple');
 
   const activeRow = activeRows[0];
+  const activeRecovery = activeRow?.authorization_mode === DIRECTOR_VIDEO_RECOVERY_MODE;
   if (activeRow?.status === 'running') {
     return safeAuthorizationStatus(
       'running',
       (new Date(activeRow.expires_at).getTime() - nowMs) / 1_000,
+      activeRecovery,
     );
   }
   if (activeRow) {
@@ -239,14 +277,16 @@ export async function resolveDirectorCanaryAuthorizationStatus(
     return safeAuthorizationStatus(
       'ready',
       (new Date(activeRow.expires_at).getTime() - nowMs) / 1_000,
+      activeRecovery,
     );
   }
 
   const latestRow = rows[0];
-  if (latestRow.status === 'completed') return safeAuthorizationStatus('completed');
-  if (latestRow.status === 'failed') return safeAuthorizationStatus('failed');
-  if (latestRow.status === 'running') return safeAuthorizationStatus('running');
-  if (latestRow.status === 'authorized') return safeAuthorizationStatus('expired');
+  const latestRecovery = latestRow.authorization_mode === DIRECTOR_VIDEO_RECOVERY_MODE;
+  if (latestRow.status === 'completed') return safeAuthorizationStatus('completed', 0, latestRecovery);
+  if (latestRow.status === 'failed') return safeAuthorizationStatus('failed', 0, latestRecovery);
+  if (latestRow.status === 'running') return safeAuthorizationStatus('running', 0, latestRecovery);
+  if (latestRow.status === 'authorized') return safeAuthorizationStatus('expired', 0, latestRecovery);
   return safeAuthorizationStatus('missing');
 }
 
@@ -372,6 +412,21 @@ const supabaseAuthorizationStore: DirectorAuthorizationClaimStore = {
   },
 };
 
+const supabaseVideoRecoveryAuthorizationStore: DirectorAuthorizationClaimStore = {
+  async claim(input) {
+    if (!supabaseAdmin) return null;
+    const { data, error } = await supabaseAdmin.rpc('claim_director_video_recovery_authorization', {
+      p_authorization_id: input.authorizationId,
+      p_user_id: input.userId,
+      p_scene_hash: input.sceneHash,
+      p_idempotency_key: input.idempotencyKey,
+    });
+    if (error) return null;
+    return firstRow(data);
+  },
+  find: supabaseAuthorizationStore.find,
+};
+
 const supabaseAuthorizationLookupStore: DirectorAuthorizationLookupStore = {
   async findEligible(input) {
     if (!supabaseAdmin) return [];
@@ -396,7 +451,7 @@ const supabaseAuthorizationStatusStore: DirectorAuthorizationStatusStore = {
     if (!supabaseAdmin) return null;
     const { data, error } = await supabaseAdmin
       .from(CANARY_AUTHORIZATION_TABLE)
-      .select('id,user_id,scene_hash,status,maximum_cost_usd,maximum_anchor_requests,maximum_video_requests,maximum_retry_requests,maximum_fallback_requests,maximum_repair_requests,idempotency_key,expires_at,consumed_at,started_at,completed_at,created_at')
+      .select('id,user_id,scene_hash,status,authorization_mode,maximum_cost_usd,maximum_anchor_requests,maximum_video_requests,maximum_retry_requests,maximum_fallback_requests,maximum_repair_requests,idempotency_key,expires_at,consumed_at,started_at,completed_at,created_at,source_authorization_id,anchor_media_artifact_id,anchor_storage_bucket,anchor_storage_object,anchor_content_sha256,anchor_mime_type,anchor_byte_length')
       .eq('user_id', input.userId)
       .eq('scene_hash', input.sceneHash)
       .order('created_at', { ascending: false })
@@ -436,6 +491,7 @@ export async function resolveProductionDirectorCanaryStatus(input: {
 
 function authorizationFromRow(row: DirectorAuthorizationRow): DirectorCanaryAuthorization | null {
   if (
+    (row.authorization_mode ?? 'director_full_canary') !== 'director_full_canary' ||
     row.status !== 'running' ||
     !row.consumed_at ||
     Number(row.maximum_cost_usd) !== 2 ||
@@ -465,11 +521,60 @@ function authorizationFromRow(row: DirectorAuthorizationRow): DirectorCanaryAuth
   };
 }
 
+function recoveryAuthorizationFromRow(
+  row: DirectorAuthorizationRow,
+): DirectorVideoRecoveryAuthorization | null {
+  if (
+    row.authorization_mode !== DIRECTOR_VIDEO_RECOVERY_MODE ||
+    row.status !== 'running' ||
+    !row.consumed_at ||
+    Number(row.maximum_cost_usd) !== DIRECTOR_VIDEO_RECOVERY_MAXIMUM_COST_USD ||
+    row.maximum_anchor_requests !== 0 ||
+    row.maximum_video_requests !== 1 ||
+    row.maximum_retry_requests !== 0 ||
+    row.maximum_fallback_requests !== 0 ||
+    row.maximum_repair_requests !== 0 ||
+    !text(row.source_authorization_id) ||
+    !text(row.anchor_media_artifact_id) ||
+    row.anchor_storage_bucket !== ANCHOR_BUCKET ||
+    !text(row.anchor_storage_object) ||
+    !/^[a-f0-9]{64}$/i.test(text(row.anchor_content_sha256) ?? '') ||
+    !/^image\/(?:jpeg|png|webp)$/i.test(text(row.anchor_mime_type) ?? '') ||
+    Number(row.anchor_byte_length) <= 0
+  ) {
+    return null;
+  }
+  return {
+    id: row.id,
+    userId: row.user_id,
+    sceneHash: row.scene_hash,
+    mode: DIRECTOR_VIDEO_RECOVERY_MODE,
+    status: 'running',
+    maximumCostUsd: 1,
+    maximumAnchorRequests: 0,
+    maximumVideoRequests: 1,
+    maximumRetryRequests: 0,
+    maximumFallbackRequests: 0,
+    maximumRepairRequests: 0,
+    idempotencyKey: row.idempotency_key,
+    recordedAt: row.created_at,
+    expiresAt: row.expires_at,
+    consumedAt: row.consumed_at,
+    sourceAuthorizationId: row.source_authorization_id as string,
+    anchorMediaArtifactId: row.anchor_media_artifact_id as string,
+    anchorStorageBucket: row.anchor_storage_bucket,
+    anchorStorageObject: row.anchor_storage_object as string,
+    anchorContentSha256: row.anchor_content_sha256 as string,
+    anchorMimeType: row.anchor_mime_type as string,
+    anchorByteLength: Number(row.anchor_byte_length),
+  };
+}
+
 function internalDiagnostics(
   authorizationState: ProductionDirectorCanaryExecution['internalDiagnostics']['authorizationState'],
   telemetry: DirectorCostTelemetry,
   input: {
-    failureCategory?: DirectorCanaryFailureCategory | null;
+    failureCategory?: DirectorVideoRecoveryFailureCategory | null;
     estimatedCostUsd?: number | null;
     actualCostUsd?: number | null;
   } = {},
@@ -486,7 +591,7 @@ function internalDiagnostics(
   };
 }
 
-function publicFailureMessage(category: DirectorCanaryFailureCategory, anchorSucceeded: boolean) {
+function publicFailureMessage(category: DirectorVideoRecoveryFailureCategory, anchorSucceeded: boolean) {
   if (category === 'provider_rate_limit') {
     return 'Lumora’s studio is busy right now. Your scene is safely preserved.';
   }
@@ -509,7 +614,7 @@ function publicFailureMessage(category: DirectorCanaryFailureCategory, anchorSuc
 
 function failedExecution(input: {
   authorizationState: ProductionDirectorCanaryExecution['internalDiagnostics']['authorizationState'];
-  failureCategory: DirectorCanaryFailureCategory;
+  failureCategory: DirectorVideoRecoveryFailureCategory;
   telemetry?: DirectorCostTelemetry;
   plan: DirectorPlan;
   anchorSucceeded?: boolean;
@@ -665,6 +770,8 @@ export function directorOperationalTelemetry(
 export function mergeDirectorCanaryJobInteractionTelemetry(
   sceneMetadata: unknown,
   interactionSummaries: DirectorInteractionSummaries,
+  telemetry?: DirectorCostTelemetry,
+  providerFailureMetadata?: DirectorProviderSafeFailureMetadata | null,
 ) {
   const existing = sceneMetadata && typeof sceneMetadata === 'object'
     ? sceneMetadata as Record<string, unknown>
@@ -672,11 +779,20 @@ export function mergeDirectorCanaryJobInteractionTelemetry(
   return {
     ...existing,
     interactionResponses: interactionSummaries,
+    ...(telemetry
+      ? {
+          directorTelemetry: directorOperationalTelemetry(
+            telemetry,
+            providerFailureMetadata,
+            interactionSummaries,
+          ),
+        }
+      : {}),
   };
 }
 
 async function createExecutionJob(
-  authorization: DirectorCanaryAuthorization,
+  authorization: DirectorCanaryAuthorization | DirectorVideoRecoveryAuthorization,
   plan: DirectorPlan,
 ) {
   if (!supabaseAdmin) throw new Error('persistence_failed');
@@ -694,13 +810,15 @@ async function createExecutionJob(
       duration_seconds: 4,
       aspect_ratio: '9:16',
       privacy: 'private',
-      render_mode: 'lumora-director-v1-canary',
+      render_mode: authorization.maximumAnchorRequests === 0
+        ? 'lumora-director-video-recovery-canary'
+        : 'lumora-director-v1-canary',
       retry_count: 0,
       started_at: authorization.consumedAt,
       scene_metadata: {
         directorPlan: plan,
         syntheticDisclosure: plan.syntheticDisclosure,
-        authorizationId: authorization.id,
+        recoveryMode: authorization.maximumAnchorRequests === 0,
       },
     });
   if (error) throw new Error('persistence_failed');
@@ -711,13 +829,17 @@ async function updateExecutionJob(input: {
   status: 'completed' | 'failed';
   projectId?: string | null;
   videoUrl?: string | null;
-  failureCategory?: DirectorCanaryFailureCategory | null;
+  failureCategory?: DirectorVideoRecoveryFailureCategory | null;
   telemetry: DirectorCostTelemetry;
   interactionSummaries?: DirectorInteractionSummaries;
+  providerFailureMetadata?: DirectorProviderSafeFailureMetadata | null;
 }) {
   if (!supabaseAdmin) return;
   let sceneMetadata: Record<string, unknown> | null = null;
-  if (input.interactionSummaries && Object.keys(input.interactionSummaries).length) {
+  if (
+    (input.interactionSummaries && Object.keys(input.interactionSummaries).length) ||
+    input.providerFailureMetadata
+  ) {
     const { data, error } = await supabaseAdmin
       .from('generation_jobs')
       .select('scene_metadata')
@@ -726,7 +848,9 @@ async function updateExecutionJob(input: {
     if (!error && data) {
       sceneMetadata = mergeDirectorCanaryJobInteractionTelemetry(
         data.scene_metadata,
-        input.interactionSummaries,
+        input.interactionSummaries ?? {},
+        input.telemetry,
+        input.providerFailureMetadata,
       );
     }
   }
@@ -752,7 +876,7 @@ async function updateAuthorization(input: {
   telemetry: DirectorCostTelemetry;
   providerFailureMetadata?: DirectorProviderSafeFailureMetadata | null;
   interactionSummaries?: DirectorInteractionSummaries;
-  failureCategory?: DirectorCanaryFailureCategory | null;
+  failureCategory?: DirectorVideoRecoveryFailureCategory | null;
   projectId?: string | null;
   estimatedCostUsd?: number | null;
   actualCostUsd?: number | null;
@@ -863,7 +987,7 @@ async function replayTerminal(
       };
     }
   }
-  const category = (text(row.failure_category) ?? 'authorization_consumed') as DirectorCanaryFailureCategory;
+  const category = (text(row.failure_category) ?? 'authorization_consumed') as DirectorVideoRecoveryFailureCategory;
   return failedExecution({
     authorizationState: 'idempotent_terminal',
     failureCategory: category,
@@ -1059,6 +1183,7 @@ export async function executeProductionDirectorCanary(input: {
         authorizationId: authorization.id,
         status: 'failed',
         telemetry: sequence.telemetry,
+        providerFailureMetadata: sequence.providerFailureMetadata,
         interactionSummaries: sequence.interactionSummaries,
         failureCategory: sequence.failureCategory,
       }),
@@ -1124,6 +1249,264 @@ export async function executeProductionDirectorCanary(input: {
         projectId,
         videoUrl,
         publicCaption: sequence.publicCaption,
+        syntheticDisclosure: 'Synthetic portrayal',
+      },
+      internalDiagnostics: internalDiagnostics('claimed', sequence.telemetry, {
+        estimatedCostUsd: sequence.estimatedCostUsd,
+        actualCostUsd: sequence.actualCostUsd,
+      }),
+    };
+  } catch {
+    await Promise.all([
+      updateAuthorization({
+        authorizationId: authorization.id,
+        status: 'failed',
+        telemetry: sequence.telemetry,
+        interactionSummaries: sequence.interactionSummaries,
+        failureCategory: 'persistence_failed',
+        estimatedCostUsd: sequence.estimatedCostUsd,
+        actualCostUsd: sequence.actualCostUsd,
+      }),
+      updateExecutionJob({
+        authorizationId: authorization.id,
+        status: 'failed',
+        telemetry: sequence.telemetry,
+        interactionSummaries: sequence.interactionSummaries,
+        failureCategory: 'persistence_failed',
+      }),
+    ]);
+    return failedExecution({
+      authorizationState: 'claimed',
+      failureCategory: 'persistence_failed',
+      telemetry: sequence.telemetry,
+      plan,
+      anchorSucceeded: true,
+      estimatedCostUsd: sequence.estimatedCostUsd,
+      actualCostUsd: sequence.actualCostUsd,
+    });
+  }
+}
+
+async function loadStoredRecoveryAnchor(
+  authorization: DirectorVideoRecoveryAuthorization,
+): Promise<StoredDirectorAnchor> {
+  if (!supabaseAdmin) throw new Error('stored_anchor_missing');
+  const { data: source, error: sourceError } = await supabaseAdmin
+    .from(CANARY_AUTHORIZATION_TABLE)
+    .select('id,user_id,scene_hash,idempotency_key')
+    .eq('id', authorization.sourceAuthorizationId)
+    .eq('user_id', authorization.userId)
+    .eq('scene_hash', authorization.sceneHash)
+    .maybeSingle();
+  if (sourceError || !source || !text(source.idempotency_key)) {
+    throw new Error('stored_anchor_missing');
+  }
+  const { data: blob, error: downloadError } = await supabaseAdmin.storage
+    .from(authorization.anchorStorageBucket)
+    .download(authorization.anchorStorageObject);
+  if (downloadError || !blob) throw new Error('stored_anchor_missing');
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  if (blob.type && blob.type !== authorization.anchorMimeType) {
+    throw new Error('stored_anchor_invalid');
+  }
+  return {
+    ownerUserId: String(source.user_id),
+    sourceAuthorizationId: String(source.id),
+    sourceIdempotencyKey: String(source.idempotency_key),
+    mediaArtifactId: authorization.anchorMediaArtifactId,
+    storageBucket: authorization.anchorStorageBucket,
+    storageObject: authorization.anchorStorageObject,
+    contentSha256: authorization.anchorContentSha256,
+    mimeType: authorization.anchorMimeType,
+    byteLength: authorization.anchorByteLength,
+    bytes,
+  };
+}
+
+export async function executeProductionDirectorVideoRecoveryCanary(input: {
+  userId: string;
+  authorizationId: string;
+  idempotencyKey: string;
+  authorizationStore?: DirectorAuthorizationClaimStore;
+}): Promise<ProductionDirectorCanaryExecution> {
+  const plan = buildDirectorProductionDryRun(DIRECTOR_CANARY_SCENE).plan;
+  const emptyTelemetry = createDirectorCostTelemetry();
+  if (
+    !supabaseAdmin ||
+    !env.GOOGLE_API_KEY ||
+    !input.authorizationId.trim() ||
+    !input.idempotencyKey.trim()
+  ) {
+    return failedExecution({
+      authorizationState: 'missing',
+      failureCategory: 'authorization_invalid',
+      plan,
+    });
+  }
+
+  const claim = await resolveDirectorCanaryAuthorizationClaim(
+    input.authorizationStore ?? supabaseVideoRecoveryAuthorizationStore,
+    {
+      authorizationId: input.authorizationId,
+      userId: input.userId,
+      sceneHash: directorCanarySceneHash(),
+      idempotencyKey: input.idempotencyKey,
+    },
+  );
+  if (claim.kind === 'missing') {
+    return failedExecution({ authorizationState: 'missing', failureCategory: 'authorization_missing', plan });
+  }
+  if (claim.kind === 'expired') {
+    return failedExecution({ authorizationState: 'expired', failureCategory: 'authorization_expired', plan });
+  }
+  if (claim.kind === 'idempotent_running') {
+    return {
+      httpStatus: 202,
+      publicResult: {
+        status: 'processing',
+        message: 'Lumora is continuing your stored scene',
+        draftSaved: false,
+        projectId: null,
+        videoUrl: null,
+        publicCaption: plan.publicCaption,
+        syntheticDisclosure: 'Synthetic portrayal',
+      },
+      internalDiagnostics: internalDiagnostics(
+        'idempotent_running',
+        telemetryFromUnknown(claim.row.telemetry),
+      ),
+    };
+  }
+  if (claim.kind === 'idempotent_terminal') return replayTerminal(claim.row, plan);
+
+  const authorization = recoveryAuthorizationFromRow(claim.row);
+  if (!authorization) {
+    return failedExecution({ authorizationState: 'claimed', failureCategory: 'authorization_invalid', plan });
+  }
+  if (DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD > authorization.maximumCostUsd) {
+    await updateAuthorization({
+      authorizationId: authorization.id,
+      status: 'failed',
+      telemetry: emptyTelemetry,
+      failureCategory: 'budget_guard',
+      estimatedCostUsd: DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD,
+    });
+    return failedExecution({
+      authorizationState: 'claimed',
+      failureCategory: 'budget_guard',
+      plan,
+      estimatedCostUsd: DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD,
+    });
+  }
+
+  try {
+    await createExecutionJob(authorization, plan);
+  } catch {
+    await updateAuthorization({
+      authorizationId: authorization.id,
+      status: 'failed',
+      telemetry: emptyTelemetry,
+      failureCategory: 'persistence_failed',
+    });
+    return failedExecution({ authorizationState: 'claimed', failureCategory: 'persistence_failed', plan });
+  }
+
+  const sequence = await runDirectorVideoRecoverySequence({
+    apiKey: env.GOOGLE_API_KEY,
+    authorization,
+    plan,
+    dependencies: {
+      loadStoredAnchor: () => loadStoredRecoveryAnchor(authorization),
+      runVideo: omniFlashAdapter.execute,
+      resolveMediaBytes: (output) => resolveProviderMediaBytes(output, env.GOOGLE_API_KEY as string),
+    },
+  });
+
+  if (sequence.ok === false) {
+    await Promise.all([
+      updateAuthorization({
+        authorizationId: authorization.id,
+        status: 'failed',
+        telemetry: sequence.telemetry,
+        providerFailureMetadata: sequence.providerFailureMetadata,
+        interactionSummaries: sequence.interactionSummaries,
+        failureCategory: sequence.failureCategory,
+        estimatedCostUsd: sequence.estimatedCostUsd,
+        actualCostUsd: sequence.actualCostUsd,
+      }),
+      updateExecutionJob({
+        authorizationId: authorization.id,
+        status: 'failed',
+        telemetry: sequence.telemetry,
+        providerFailureMetadata: sequence.providerFailureMetadata,
+        interactionSummaries: sequence.interactionSummaries,
+        failureCategory: sequence.failureCategory,
+      }),
+    ]);
+    return failedExecution({
+      authorizationState: 'claimed',
+      failureCategory: sequence.failureCategory,
+      telemetry: sequence.telemetry,
+      plan,
+      anchorSucceeded: sequence.anchorSuccess,
+      estimatedCostUsd: sequence.estimatedCostUsd,
+      actualCostUsd: sequence.actualCostUsd,
+    });
+  }
+
+  try {
+    const frontReference = await loadFrontReference(input.userId);
+    const anchorUrl = supabaseAdmin.storage
+      .from(sequence.storedAnchor.storageBucket)
+      .getPublicUrl(sequence.storedAnchor.storageObject).data.publicUrl;
+    const videoPath =
+      `${input.userId}/director/${authorization.id}/${sequence.videoMediaArtifactId}.` +
+      extensionForMime(sequence.videoMimeType, 'video');
+    const videoUrl = await uploadBytes({
+      bucket: VIDEO_BUCKET,
+      path: videoPath,
+      bytes: sequence.videoBytes,
+      contentType: sequence.videoMimeType,
+    });
+    if (sequence.interactionSummaries.primaryVideo) {
+      sequence.interactionSummaries.primaryVideo.storageSucceeded = true;
+    }
+    const projectId = await persistProject({
+      userId: input.userId,
+      character: frontReference.character,
+      referenceImageUrls: frontReference.urls,
+      publicCaption: plan.publicCaption,
+      anchorUrl,
+      videoUrl,
+    });
+    await Promise.all([
+      updateAuthorization({
+        authorizationId: authorization.id,
+        status: 'completed',
+        telemetry: sequence.telemetry,
+        interactionSummaries: sequence.interactionSummaries,
+        projectId,
+        estimatedCostUsd: sequence.estimatedCostUsd,
+        actualCostUsd: sequence.actualCostUsd,
+      }),
+      updateExecutionJob({
+        authorizationId: authorization.id,
+        status: 'completed',
+        telemetry: sequence.telemetry,
+        interactionSummaries: sequence.interactionSummaries,
+        projectId,
+        videoUrl,
+      }),
+    ]);
+    return {
+      httpStatus: 200,
+      publicResult: {
+        status: 'completed',
+        message: 'Your scene is ready in Drafts.',
+        draftSaved: true,
+        projectId,
+        videoUrl,
+        publicCaption: plan.publicCaption,
         syntheticDisclosure: 'Synthetic portrayal',
       },
       internalDiagnostics: internalDiagnostics('claimed', sequence.telemetry, {

@@ -581,10 +581,11 @@ export type DirectorCanaryAuthorizationState =
 export type DirectorCanaryStatusResponse = {
   state: DirectorCanaryAuthorizationState;
   expiresInSeconds: number;
-  maximumBudget: 2;
-  anchorRequestLimit: 1;
+  maximumBudget: 1 | 2;
+  anchorRequestLimit: 0 | 1;
   videoRequestLimit: 1;
   retriesAllowed: 0;
+  recovery: boolean;
 };
 
 export type CharacterStatus = 'draft' | 'processing' | 'ready' | 'failed';

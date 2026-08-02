@@ -8,9 +8,11 @@ import {
 } from '../../backend/src/services/director/canary';
 import {
   executeProductionDirectorCanary,
+  executeProductionDirectorVideoRecoveryCanary,
   resolveProductionDirectorCanaryAuthorization,
   resolveProductionDirectorCanaryStatus,
 } from '../../backend/src/services/director/productionCanary';
+import { DIRECTOR_VIDEO_RECOVERY_MODE } from '../../backend/src/services/director/recoveryCanary';
 import { supabaseAdmin } from '../../backend/src/lib/supabaseAdmin';
 import { createVideoGeneration } from '../../backend/src/video';
 
@@ -238,6 +240,7 @@ export default async function handler(req: GenerationRequest, res: ServerRespons
     let idempotencyKey =
       stringValue(body.idempotencyKey) ??
       headerValue(req, 'idempotency-key');
+    let videoRecovery = false;
     if (Boolean(authorizationId) !== Boolean(idempotencyKey)) {
       sendJson(res, 409, {
         status: 'failed',
@@ -256,6 +259,7 @@ export default async function handler(req: GenerationRequest, res: ServerRespons
       }
       authorizationId = storedAuthorization.row.id;
       idempotencyKey = storedAuthorization.row.idempotency_key;
+      videoRecovery = storedAuthorization.row.authorization_mode === DIRECTOR_VIDEO_RECOVERY_MODE;
     }
     if (!authorizationId || !idempotencyKey) {
       sendJson(res, 409, {
@@ -264,11 +268,17 @@ export default async function handler(req: GenerationRequest, res: ServerRespons
       });
       return;
     }
-    const result = await executeProductionDirectorCanary({
-      userId,
-      authorizationId,
-      idempotencyKey,
-    });
+    const result = videoRecovery
+      ? await executeProductionDirectorVideoRecoveryCanary({
+          userId,
+          authorizationId,
+          idempotencyKey,
+        })
+      : await executeProductionDirectorCanary({
+          userId,
+          authorizationId,
+          idempotencyKey,
+        });
     sendJson(res, result.httpStatus, result.publicResult);
     return;
   }

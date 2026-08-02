@@ -26,6 +26,7 @@ export default function DirectorCanaryPage() {
   const [progressIndex, setProgressIndex] = useState(0);
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState(0);
+  const [videoRecovery, setVideoRecovery] = useState(false);
 
   const isNative = Capacitor.isNativePlatform();
   const sessionUserId = session?.user.id ?? null;
@@ -57,6 +58,7 @@ export default function DirectorCanaryPage() {
   }, []);
 
   const applyAuthorizationStatus = useCallback((status: DirectorCanaryStatusResponse) => {
+    setVideoRecovery(status.recovery === true);
     if (status.state === 'ready' && status.expiresInSeconds > 0) {
       startedRef.current = false;
       const nextRemaining = Math.max(0, Math.floor(status.expiresInSeconds));
@@ -163,6 +165,7 @@ export default function DirectorCanaryPage() {
   else if (!configured) statusMessage = 'Lumora account services are not configured.';
   else if (!authReady) statusMessage = 'Restoring your Lumora session.';
   else if (!session) statusMessage = 'Sign in to Lumora before opening this page.';
+  else if (runState === 'ready' && videoRecovery) statusMessage = 'Ready to continue the stored scene.';
   else if (runState === 'ready') statusMessage = 'Ready for one signed-in, one-time Director canary.';
   else if (runState === 'missing') statusMessage = 'No active one-time authorization.';
   else if (runState === 'expired') statusMessage = 'This one-time authorization expired.';
@@ -184,7 +187,9 @@ export default function DirectorCanaryPage() {
       <section className="editor-card lumora-card">
         <span className="eyebrow">scene</span>
         <p className="prompt-copy">{DIRECTOR_CANARY_SCENE}</p>
-        <p className="muted">Maximum authorized spend: $2.00 · one attempt · no retries</p>
+        <p className="muted">
+          Maximum authorized spend: ${videoRecovery ? '1.00' : '2.00'} · one attempt · no retries
+        </p>
       </section>
 
       <section className="editor-card lumora-card" aria-live="polite">

@@ -71,12 +71,31 @@ export type NormalizedGoogleInteractionEnvelope = {
 
 export type DirectorProviderSafeFailureMetadata = {
   httpStatus: number | null;
+  providerCode: string | null;
+  providerStatusName: string | null;
+  message: string | null;
+  fieldViolationPaths: string[];
   reason: string | null;
   retryAfterSeconds: number | null;
   retryInfoSeconds: number | null;
   quotaMetric: string | null;
   quotaLimitName: string | null;
   modelName: string | null;
+  request: DirectorProviderSafeRequestMetadata | null;
+};
+
+export type DirectorProviderSafeRequestMetadata = {
+  schemaVersion: 'google-interactions-video-v1';
+  topLevelFields: string[];
+  inputBlockTypes: string[];
+  imageMimeType: string | null;
+  imageByteLength: number | null;
+  responseFormatType: string | null;
+  aspectRatio: string | null;
+  deliveryMode: string | null;
+  videoTask: string | null;
+  sdkVersion: '2.13.0';
+  modelIdentifier: string | null;
 };
 
 export function createGoogleMediaClient(apiKey: string) {
@@ -108,13 +127,50 @@ export class DirectorProviderExecutionError extends Error {
 function emptySafeFailureMetadata(): DirectorProviderSafeFailureMetadata {
   return {
     httpStatus: null,
+    providerCode: null,
+    providerStatusName: null,
+    message: null,
+    fieldViolationPaths: [],
     reason: null,
     retryAfterSeconds: null,
     retryInfoSeconds: null,
     quotaMetric: null,
     quotaLimitName: null,
     modelName: null,
+    request: null,
   };
+}
+
+const DIAGNOSTIC_MESSAGE_LIMIT = 500;
+const DIAGNOSTIC_PATH_LIMIT = 160;
+const DIAGNOSTIC_DETAIL_LIMIT = 10;
+
+export function sanitizeDirectorProviderDiagnosticText(value: unknown, limit = DIAGNOSTIC_MESSAGE_LIMIT) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const sanitized = value
+    .replace(/\b(?:https?|gs|s3):\/\/[^\s,;)}\]]+/gi, '[redacted-url]')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, '[redacted-token]')
+    .replace(/\b(?:AIza[0-9A-Za-z_-]{30,}|sk-[0-9A-Za-z_-]{20,})\b/g, '[redacted-key]')
+    .replace(/\bdata:[^;,\s]+;base64,[A-Za-z0-9+/=_-]+/gi, '[redacted-data]')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, '[redacted-id]')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[redacted-email]')
+    .replace(/(["'`])(?:\\.|(?!\1).){8,}\1/g, '$1[redacted-text]$1')
+    .replace(/(?:^|\s)(?:\.{0,2}\/|~\/)(?:[^\s,;:()]+\/)+[^\s,;:()]*/g, ' [redacted-path]')
+    .replace(/\b(?:authorization|idempotency|session|user|artifact|storage)[-_ ]?(?:id|key|token|path)\s*[:=]\s*[^\s,;]+/gi, '[redacted-private-id]')
+    .replace(/\b[A-Za-z0-9+/_=-]{40,}\b/g, '[redacted-encoded]')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return sanitized ? sanitized.slice(0, Math.max(1, limit)) : null;
+}
+
+function safeDiagnosticFieldPath(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const normalized = value.trim().slice(0, DIAGNOSTIC_PATH_LIMIT);
+  if (!/^[a-z0-9_[\].-]+$/i.test(normalized)) return '[redacted-path]';
+  if (/authorization|idempotency|session|token|secret|password|api.?key|user.?id|storage/i.test(normalized)) {
+    return '[redacted-path]';
+  }
+  return normalized;
 }
 
 function safeString(value: unknown) {
@@ -153,7 +209,10 @@ function safeDetails(error: unknown) {
   const candidates = [
     record?.details,
     nestedError?.details,
+    nestedRecord(nestedRecord(record?.response)?.data)?.error,
     nestedRecord(record?.response)?.data,
+    nestedRecord(record?.cause)?.error,
+    record?.cause,
   ];
   for (const candidate of candidates) {
     if (Array.isArray(candidate)) return candidate;
@@ -163,33 +222,136 @@ function safeDetails(error: unknown) {
   return [] as unknown[];
 }
 
+function errorRecords(error: unknown) {
+  const record = nestedRecord(error);
+  const response = nestedRecord(record?.response);
+  const responseData = nestedRecord(response?.data);
+  const cause = nestedRecord(record?.cause);
+  return [
+    record,
+    nestedRecord(record?.error),
+    nestedRecord(responseData?.error),
+    responseData,
+    cause,
+    nestedRecord(cause?.error),
+  ].filter((candidate): candidate is Record<string, unknown> => Boolean(candidate));
+}
+
+function collectFieldViolationPaths(error: unknown) {
+  const paths: string[] = [];
+  const add = (value: unknown) => {
+    const safe = safeDiagnosticFieldPath(value);
+    if (safe && !paths.includes(safe) && paths.length < DIAGNOSTIC_DETAIL_LIMIT) paths.push(safe);
+  };
+  const inspect = (value: unknown, depth = 0) => {
+    if (depth > 4 || paths.length >= DIAGNOSTIC_DETAIL_LIMIT) return;
+    if (Array.isArray(value)) {
+      for (const item of value.slice(0, DIAGNOSTIC_DETAIL_LIMIT)) inspect(item, depth + 1);
+      return;
+    }
+    const record = nestedRecord(value);
+    if (!record) return;
+    add(record.field ?? record.fieldPath ?? record.field_path ?? record.path);
+    for (const key of ['fieldViolations', 'field_violations', 'violations', 'badRequest', 'bad_request', 'details']) {
+      if (record[key] !== undefined) inspect(record[key], depth + 1);
+    }
+  };
+  for (const record of errorRecords(error)) inspect(record);
+  for (const detail of safeDetails(error).slice(0, DIAGNOSTIC_DETAIL_LIMIT)) inspect(detail);
+  return paths;
+}
+
+function safeRequestField(value: unknown) {
+  return typeof value === 'string' && /^[a-z_][a-z0-9_]{0,79}$/i.test(value) &&
+    !/(authorization|idempotency|session|token|secret|password|api.?key|prompt)/i.test(value)
+    ? value
+    : null;
+}
+
+function decodedBase64Length(value: unknown) {
+  if (typeof value !== 'string' || !value) return null;
+  try {
+    return Buffer.from(value, 'base64').byteLength;
+  } catch {
+    return null;
+  }
+}
+
+export function summarizeGoogleInteractionRequest(
+  payload: GoogleInteractionPayload,
+): DirectorProviderSafeRequestMetadata {
+  const record = payload as unknown as Record<string, unknown>;
+  const input = Array.isArray(record.input) ? record.input : [];
+  const image = input.map(nestedRecord).find((block) => block?.type === 'image') ?? null;
+  const responseFormat = nestedRecord(record.response_format ?? record.responseFormat);
+  const generationConfig = nestedRecord(record.generation_config ?? record.generationConfig);
+  const videoConfig = nestedRecord(generationConfig?.video_config ?? generationConfig?.videoConfig);
+  const safeModel = sanitizeDirectorProviderDiagnosticText(record.model, 120);
+  return {
+    schemaVersion: 'google-interactions-video-v1',
+    topLevelFields: Object.keys(record)
+      .map(safeRequestField)
+      .filter((field): field is string => Boolean(field))
+      .sort()
+      .slice(0, 20),
+    inputBlockTypes: input
+      .map((block) => safeRequestField(nestedRecord(block)?.type))
+      .filter((type): type is string => Boolean(type))
+      .slice(0, 10),
+    imageMimeType: /^image\/[a-z0-9.+-]+$/i.test(String(image?.mime_type ?? image?.mimeType ?? ''))
+      ? String(image?.mime_type ?? image?.mimeType)
+      : null,
+    imageByteLength: decodedBase64Length(image?.data),
+    responseFormatType: safeRequestField(responseFormat?.type),
+    aspectRatio: sanitizeDirectorProviderDiagnosticText(
+      responseFormat?.aspect_ratio ?? responseFormat?.aspectRatio,
+      20,
+    ),
+    deliveryMode: safeRequestField(responseFormat?.delivery),
+    videoTask: safeRequestField(videoConfig?.task),
+    sdkVersion: '2.13.0',
+    modelIdentifier: safeModel,
+  };
+}
+
 export function extractDirectorProviderSafeFailureMetadata(
   error: unknown,
   fallbackModelName?: string,
+  request?: DirectorProviderSafeRequestMetadata | null,
 ): DirectorProviderSafeFailureMetadata {
   const record = nestedRecord(error);
   const nestedError = nestedRecord(record?.error);
   const response = nestedRecord(record?.response);
   const responseData = nestedRecord(response?.data);
   const metadata = emptySafeFailureMetadata();
-  metadata.httpStatus = safeNumber(
-    record?.statusCode ??
-    record?.status ??
-    record?.code ??
-    nestedError?.code ??
-    response?.status,
-  );
-  metadata.reason = safeString(
-    nestedError?.status ??
-    responseData?.status ??
-    record?.reason,
-  );
+  const records = errorRecords(error);
+  metadata.httpStatus = safeNumber(response?.status) ?? records
+    .map((candidate) => safeNumber(candidate.statusCode ?? candidate.status ?? candidate.code))
+    .find((value) => value !== null) ?? null;
+  metadata.providerCode = records
+    .map((candidate) => candidate.code == null
+      ? null
+      : sanitizeDirectorProviderDiagnosticText(String(candidate.code), 80))
+    .find(Boolean) ?? null;
+  metadata.providerStatusName = records
+    .map((candidate) => typeof candidate.status === 'string'
+      ? sanitizeDirectorProviderDiagnosticText(candidate.status, 80)
+      : null)
+    .find(Boolean) ?? null;
+  metadata.message = records
+    .map((candidate) => sanitizeDirectorProviderDiagnosticText(candidate.message))
+    .find(Boolean) ?? null;
+  metadata.fieldViolationPaths = collectFieldViolationPaths(error);
+  metadata.reason = records.slice(0, 4)
+    .map((candidate) => sanitizeDirectorProviderDiagnosticText(candidate.reason, 160))
+    .find(Boolean) ?? null;
   metadata.retryAfterSeconds = durationSeconds(
     readHeader(record?.headers ?? response?.headers, 'retry-after'),
   );
   metadata.modelName = safeString(fallbackModelName);
+  metadata.request = request ?? null;
 
-  for (const detail of safeDetails(error)) {
+  for (const detail of safeDetails(error).slice(0, DIAGNOSTIC_DETAIL_LIMIT)) {
     const detailRecord = nestedRecord(detail);
     if (!detailRecord) continue;
     const type = safeString(detailRecord['@type'])?.toLowerCase() ?? '';
@@ -203,7 +365,7 @@ export function extractDirectorProviderSafeFailureMetadata(
       ? nestedRecord(detailRecord.violations[0])
       : null;
     const quotaDimensions = nestedRecord(violation?.quotaDimensions ?? violation?.quota_dimensions);
-    metadata.reason ??= safeString(detailRecord.reason);
+    metadata.reason ??= sanitizeDirectorProviderDiagnosticText(detailRecord.reason, 160);
     metadata.quotaMetric ??= safeString(
       violation?.quotaMetric ??
       violation?.quota_metric ??
@@ -221,6 +383,10 @@ export function extractDirectorProviderSafeFailureMetadata(
       errorMetadata?.model,
     );
   }
+
+  metadata.reason ??= records.slice(4)
+    .map((candidate) => sanitizeDirectorProviderDiagnosticText(candidate.reason, 160))
+    .find(Boolean) ?? metadata.providerStatusName;
 
   return metadata;
 }
@@ -522,6 +688,7 @@ export async function executeGoogleMediaInteraction(
   });
   const client = createGoogleMediaClient(context.apiKey);
   const requestTelemetry = recordPaidRequest(context.telemetry, decision, context.operation);
+  const safeRequestMetadata = summarizeGoogleInteractionRequest(payload);
   let interactionSummary: GoogleInteractionStructuralSummary | null = null;
   try {
     const initialInteraction = await client.interactions.create(payload, {
@@ -549,7 +716,11 @@ export async function executeGoogleMediaInteraction(
         status: 'failed',
       }),
       classifyDirectorProviderFailure(error),
-      extractDirectorProviderSafeFailureMetadata(error, String(payload.model ?? '')),
+      extractDirectorProviderSafeFailureMetadata(
+        error,
+        String(payload.model ?? ''),
+        safeRequestMetadata,
+      ),
       error instanceof GoogleInteractionEnvelopeError
         ? error.structuralSummary
         : interactionSummary,

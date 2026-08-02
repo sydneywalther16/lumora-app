@@ -241,6 +241,7 @@ const safeStatusKeys = [
   'anchorRequestLimit',
   'expiresInSeconds',
   'maximumBudget',
+  'recovery',
   'retriesAllowed',
   'state',
   'videoRequestLimit',
@@ -256,6 +257,7 @@ assert.equal(readyStatus.maximumBudget, 2);
 assert.equal(readyStatus.anchorRequestLimit, 1);
 assert.equal(readyStatus.videoRequestLimit, 1);
 assert.equal(readyStatus.retriesAllowed, 0);
+assert.equal(readyStatus.recovery, false);
 assert.deepEqual(Object.keys(readyStatus).sort(), safeStatusKeys);
 assert.equal(synchronizedDirectorCanaryRunState('failed', readyStatus), 'ready');
 assert.equal(canStartDirectorCanary('ready', readyStatus.expiresInSeconds), true);
@@ -639,12 +641,17 @@ const safeFailureMetadata = extractDirectorProviderSafeFailureMetadata({
 });
 assert.deepEqual(safeFailureMetadata, {
   httpStatus: 429,
+  providerCode: null,
+  providerStatusName: 'RESOURCE_EXHAUSTED',
+  message: null,
+  fieldViolationPaths: [],
   reason: 'RESOURCE_EXHAUSTED',
   retryAfterSeconds: 12,
   retryInfoSeconds: null,
   quotaMetric: null,
   quotaLimitName: null,
   modelName: null,
+  request: null,
 });
 assert.doesNotMatch(JSON.stringify(safeFailureMetadata), /https?:\/\/|bearer\s|api[_ -]?key/i);
 
