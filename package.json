@@ -13,7 +13,7 @@
     "test:director-canary": "tsx backend/test/directorPaidCanary.test.ts",
     "test:director-interactions": "tsx backend/test/googleInteractionEnvelope.test.ts",
     "test:director-diagnostics": "tsx backend/test/directorProviderDiagnostics.test.ts",
-    "test:director-recovery": "tsx backend/test/directorVideoRecovery.test.ts",
+    "test:director-recovery": "tsx backend/test/directorVideoRecovery.test.ts && npm run bundle:vercel-api && tsx backend/test/directorRecoveryBundle.test.ts",
     "director:canary:execute-admin": "node scripts/run-director-paid-canary.mjs",
     "test:creator-experience": "tsx backend/test/createExperience.test.ts && node scripts/audit-production-copy.mjs",
     "preview": "vite preview",

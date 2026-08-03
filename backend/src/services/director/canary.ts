@@ -5,6 +5,7 @@ import {
 } from './adapters';
 import {
   createDirectorCostTelemetry,
+  projectedDirectorPrimaryVideoCostUsd,
   type DirectorBudgetDecision,
   type DirectorCostTelemetry,
 } from './budget';
@@ -32,7 +33,7 @@ export const DIRECTOR_CANARY_SCENE =
   'She walks through a candlelit mansion and pauses after hearing a sound behind her.';
 export const DIRECTOR_CANARY_MAXIMUM_COST_USD = 2;
 export const DIRECTOR_CANARY_PROJECTED_MAXIMUM_COST_USD = 0.477;
-export const DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD = 0.40;
+export const DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD = projectedDirectorPrimaryVideoCostUsd();
 
 export type DirectorCanaryFailureCategory =
   | DirectorProviderFailureCategory
@@ -47,7 +48,8 @@ export type DirectorCanaryFailureCategory =
   | 'invalid_anchor_output'
   | DirectorAnchorOutputFailureCategory
   | 'invalid_video_output'
-  | 'persistence_failed';
+  | 'persistence_failed'
+  | 'internal_execution_failed';
 
 export type DirectorCanaryAuthorization = {
   id: string;

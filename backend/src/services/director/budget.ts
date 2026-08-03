@@ -34,6 +34,23 @@ export const DEFAULT_DIRECTOR_BUDGET = Object.freeze({
   automaticRepairPasses: 0,
 });
 
+export const DIRECTOR_CANARY_PRICING = Object.freeze({
+  currency: 'USD',
+  effectiveDate: '2026-07-26',
+  sceneAnchor1kOutputUsd: 0.067,
+  primaryVideo720pPerSecondUsd: 0.10,
+  primaryVideoDurationSeconds: 4,
+  maximumInputAllowanceUsd: 0.01,
+  source: 'Google Gemini Developer API standard pricing',
+});
+
+export function projectedDirectorPrimaryVideoCostUsd() {
+  return Number((
+    DIRECTOR_CANARY_PRICING.primaryVideo720pPerSecondUsd *
+    DIRECTOR_CANARY_PRICING.primaryVideoDurationSeconds
+  ).toFixed(3));
+}
+
 export function createDirectorCostTelemetry(): DirectorCostTelemetry {
   return {
     providerRequestCount: 0,

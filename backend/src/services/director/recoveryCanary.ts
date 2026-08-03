@@ -89,6 +89,14 @@ export type DirectorVideoRecoveryDependencies = {
     context: GoogleMediaExecutionContext,
   ): Promise<GoogleInteractionResult>;
   resolveMediaBytes(output: DirectorMediaCandidate): Promise<Uint8Array>;
+  recordCheckpoint?(
+    checkpoint:
+      | 'anchor_validated'
+      | 'video_request_constructed'
+      | 'provider_request_started'
+      | 'provider_response_received',
+    telemetry: DirectorCostTelemetry,
+  ): Promise<void>;
 };
 
 export type DirectorVideoRecoveryResult =
@@ -312,6 +320,7 @@ export async function runDirectorVideoRecoverySequence(input: {
       interactionSummaries,
     });
   }
+  await input.dependencies.recordCheckpoint?.('anchor_validated', telemetry);
 
   const payload = buildOmniFlashPayload({
     anchor: {
@@ -324,9 +333,11 @@ export async function runDirectorVideoRecoverySequence(input: {
     aspectRatio: '9:16',
     store: false,
   });
+  await input.dependencies.recordCheckpoint?.('video_request_constructed', telemetry);
 
   let interaction: unknown;
   let structuralSummary: GoogleInteractionStructuralSummary | null = null;
+  await input.dependencies.recordCheckpoint?.('provider_request_started', telemetry);
   try {
     const result = await input.dependencies.runVideo(payload, {
       apiKey: input.apiKey,
@@ -352,6 +363,7 @@ export async function runDirectorVideoRecoverySequence(input: {
       interactionSummaries,
     });
   }
+  await input.dependencies.recordCheckpoint?.('provider_response_received', telemetry);
 
   try {
     const candidate = extractDirectorMediaOutput(interaction, 'primary_video');

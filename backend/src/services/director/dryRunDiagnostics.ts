@@ -1,5 +1,9 @@
 import { buildNanoBananaPayload, buildOmniFlashPayload } from './adapters';
-import { DEFAULT_DIRECTOR_BUDGET } from './budget';
+import {
+  DEFAULT_DIRECTOR_BUDGET,
+  DIRECTOR_CANARY_PRICING,
+  projectedDirectorPrimaryVideoCostUsd,
+} from './budget';
 import {
   assertProviderNeutralPublicCaption,
   directorPlanSchema,
@@ -12,15 +16,7 @@ import { selectDirectorRoute } from './routing';
 export const DIRECTOR_DRY_RUN_SCENE =
   'She walks through a candlelit mansion and pauses after hearing a sound behind her.';
 
-export const DIRECTOR_CANARY_PRICING = Object.freeze({
-  currency: 'USD',
-  effectiveDate: '2026-07-26',
-  sceneAnchor1kOutputUsd: 0.067,
-  primaryVideo720pPerSecondUsd: 0.10,
-  primaryVideoDurationSeconds: 4,
-  maximumInputAllowanceUsd: 0.01,
-  source: 'Google Gemini Developer API standard pricing',
-});
+export { DIRECTOR_CANARY_PRICING } from './budget';
 
 function buildLocalDryRunPlan(sceneIdea: string): DirectorPlan {
   const scene = sceneIdea.replace(/\s+/g, ' ').trim() || DIRECTOR_DRY_RUN_SCENE;
@@ -104,9 +100,7 @@ export function buildDirectorProductionDryRun(sceneIdea = DIRECTOR_DRY_RUN_SCENE
     durationSeconds: DIRECTOR_CANARY_PRICING.primaryVideoDurationSeconds as 4,
     aspectRatio: '9:16',
   }));
-  const projectedVideoCost =
-    DIRECTOR_CANARY_PRICING.primaryVideo720pPerSecondUsd *
-    DIRECTOR_CANARY_PRICING.primaryVideoDurationSeconds;
+  const projectedVideoCost = projectedDirectorPrimaryVideoCostUsd();
   const projectedMaximumCostUsd = Number((
     DIRECTOR_CANARY_PRICING.sceneAnchor1kOutputUsd +
     projectedVideoCost +

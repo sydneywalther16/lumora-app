@@ -90,6 +90,18 @@ var DEFAULT_DIRECTOR_BUDGET = Object.freeze({
   automaticFallbackVideos: 0,
   automaticRepairPasses: 0
 });
+var DIRECTOR_CANARY_PRICING = Object.freeze({
+  currency: "USD",
+  effectiveDate: "2026-07-26",
+  sceneAnchor1kOutputUsd: 0.067,
+  primaryVideo720pPerSecondUsd: 0.1,
+  primaryVideoDurationSeconds: 4,
+  maximumInputAllowanceUsd: 0.01,
+  source: "Google Gemini Developer API standard pricing"
+});
+function projectedDirectorPrimaryVideoCostUsd() {
+  return Number((DIRECTOR_CANARY_PRICING.primaryVideo720pPerSecondUsd * DIRECTOR_CANARY_PRICING.primaryVideoDurationSeconds).toFixed(3));
+}
 
 // backend/src/services/director/quality.ts
 import { z as z2 } from "zod";
@@ -287,15 +299,6 @@ function selectDirectorRoute(input) {
 
 // backend/src/services/director/dryRunDiagnostics.ts
 var DIRECTOR_DRY_RUN_SCENE = "She walks through a candlelit mansion and pauses after hearing a sound behind her.";
-var DIRECTOR_CANARY_PRICING = Object.freeze({
-  currency: "USD",
-  effectiveDate: "2026-07-26",
-  sceneAnchor1kOutputUsd: 0.067,
-  primaryVideo720pPerSecondUsd: 0.1,
-  primaryVideoDurationSeconds: 4,
-  maximumInputAllowanceUsd: 0.01,
-  source: "Google Gemini Developer API standard pricing"
-});
 function buildLocalDryRunPlan(sceneIdea) {
   const scene = sceneIdea.replace(/\s+/g, " ").trim() || DIRECTOR_DRY_RUN_SCENE;
   return directorPlanSchema.parse({
@@ -370,7 +373,7 @@ function buildDirectorProductionDryRun(sceneIdea = DIRECTOR_DRY_RUN_SCENE) {
     durationSeconds: DIRECTOR_CANARY_PRICING.primaryVideoDurationSeconds,
     aspectRatio: "9:16"
   }));
-  const projectedVideoCost = DIRECTOR_CANARY_PRICING.primaryVideo720pPerSecondUsd * DIRECTOR_CANARY_PRICING.primaryVideoDurationSeconds;
+  const projectedVideoCost = projectedDirectorPrimaryVideoCostUsd();
   const projectedMaximumCostUsd = Number((DIRECTOR_CANARY_PRICING.sceneAnchor1kOutputUsd + projectedVideoCost + DIRECTOR_CANARY_PRICING.maximumInputAllowanceUsd).toFixed(3));
   const anchorPromptPart = Array.isArray(anchorPayload.input) ? anchorPayload.input[1] : null;
   const anchorPromptText = anchorPromptPart && typeof anchorPromptPart === "object" && "text" in anchorPromptPart && typeof anchorPromptPart.text === "string" ? anchorPromptPart.text : "";

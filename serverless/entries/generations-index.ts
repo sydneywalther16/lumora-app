@@ -16,6 +16,8 @@ import { DIRECTOR_VIDEO_RECOVERY_MODE } from '../../backend/src/services/directo
 import { supabaseAdmin } from '../../backend/src/lib/supabaseAdmin';
 import { createVideoGeneration } from '../../backend/src/video';
 
+export { executeProductionDirectorVideoRecoveryCanary };
+
 export const maxDuration = 300;
 
 type GenerationRequest = IncomingMessage & {

@@ -12,6 +12,7 @@ import {
 import {
   DIRECTOR_CANARY_MAXIMUM_COST_USD,
   DIRECTOR_CANARY_PROJECTED_MAXIMUM_COST_USD,
+  DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD,
   DIRECTOR_CANARY_SCENE,
   directorCanarySceneHash,
   runDirectorCanarySequence,
@@ -37,6 +38,7 @@ import {
   runDirectorVideoRecoverySequence,
   type DirectorVideoRecoveryAuthorization,
   type DirectorVideoRecoveryFailureCategory,
+  type DirectorVideoRecoveryResult,
   type StoredDirectorAnchor,
 } from './recoveryCanary';
 
@@ -112,6 +114,33 @@ export type ProductionDirectorCanaryExecution = {
     repairRequestCount: number;
     estimatedCostUsd: number | null;
     actualCostUsd: number | null;
+  };
+};
+
+export type DirectorVideoRecoveryExecutionCheckpoint =
+  | 'authorization_claimed'
+  | 'job_created'
+  | 'budget_validated'
+  | 'anchor_loading'
+  | 'anchor_validated'
+  | 'video_request_constructed'
+  | 'provider_request_started'
+  | 'provider_response_received'
+  | 'video_persisted'
+  | 'draft_saved'
+  | 'budget_validation';
+
+export type DirectorVideoRecoverySafeFailureReason =
+  | 'unexpected_execution_failure'
+  | 'job_creation_failed'
+  | 'checkpoint_persistence_failed'
+  | 'missing_runtime_cost_symbol';
+
+type DirectorVideoRecoveryExecutionMetadata = {
+  checkpoint: DirectorVideoRecoveryExecutionCheckpoint;
+  failure?: {
+    errorClass: string;
+    reason: DirectorVideoRecoverySafeFailureReason;
   };
 };
 
@@ -752,6 +781,7 @@ export function directorOperationalTelemetry(
   telemetry: DirectorCostTelemetry,
   providerFailureMetadata?: DirectorProviderSafeFailureMetadata | null,
   interactionSummaries?: DirectorInteractionSummaries,
+  execution?: DirectorVideoRecoveryExecutionMetadata,
 ) {
   return {
     providerRequestCount: telemetry.providerRequestCount,
@@ -764,7 +794,18 @@ export function directorOperationalTelemetry(
     ...(interactionSummaries && Object.keys(interactionSummaries).length
       ? { interactionResponses: interactionSummaries }
       : {}),
+    ...(execution
+      ? {
+          executionCheckpoint: execution.checkpoint,
+          ...(execution.failure ? { executionFailure: execution.failure } : {}),
+        }
+      : {}),
   };
+}
+
+export function safeDirectorRecoveryErrorClass(error: unknown) {
+  const name = error instanceof Error ? error.constructor.name : 'UnknownError';
+  return /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(name) ? name : 'UnknownError';
 }
 
 export function mergeDirectorCanaryJobInteractionTelemetry(
@@ -819,6 +860,9 @@ async function createExecutionJob(
         directorPlan: plan,
         syntheticDisclosure: plan.syntheticDisclosure,
         recoveryMode: authorization.maximumAnchorRequests === 0,
+        ...(authorization.maximumAnchorRequests === 0
+          ? { executionCheckpoint: 'job_created' }
+          : {}),
       },
     });
   if (error) throw new Error('persistence_failed');
@@ -833,12 +877,14 @@ async function updateExecutionJob(input: {
   telemetry: DirectorCostTelemetry;
   interactionSummaries?: DirectorInteractionSummaries;
   providerFailureMetadata?: DirectorProviderSafeFailureMetadata | null;
+  execution?: DirectorVideoRecoveryExecutionMetadata;
 }) {
   if (!supabaseAdmin) return;
   let sceneMetadata: Record<string, unknown> | null = null;
   if (
     (input.interactionSummaries && Object.keys(input.interactionSummaries).length) ||
-    input.providerFailureMetadata
+    input.providerFailureMetadata ||
+    input.execution
   ) {
     const { data, error } = await supabaseAdmin
       .from('generation_jobs')
@@ -852,6 +898,12 @@ async function updateExecutionJob(input: {
         input.telemetry,
         input.providerFailureMetadata,
       );
+      if (input.execution) {
+        sceneMetadata.executionCheckpoint = input.execution.checkpoint;
+        if (input.execution.failure) {
+          sceneMetadata.executionFailure = input.execution.failure;
+        }
+      }
     }
   }
   await supabaseAdmin
@@ -880,6 +932,7 @@ async function updateAuthorization(input: {
   projectId?: string | null;
   estimatedCostUsd?: number | null;
   actualCostUsd?: number | null;
+  execution?: DirectorVideoRecoveryExecutionMetadata;
 }) {
   if (!supabaseAdmin) return;
   await supabaseAdmin
@@ -890,6 +943,7 @@ async function updateAuthorization(input: {
         input.telemetry,
         input.providerFailureMetadata,
         input.interactionSummaries,
+        input.execution,
       ),
       failure_category: input.failureCategory ?? null,
       result_project_id: input.projectId ?? null,
@@ -900,6 +954,264 @@ async function updateAuthorization(input: {
     })
     .eq('id', input.authorizationId)
     .eq('status', 'running');
+}
+
+async function persistRecoveryExecutionCheckpoint(input: {
+  authorizationId: string;
+  checkpoint: DirectorVideoRecoveryExecutionCheckpoint;
+  telemetry: DirectorCostTelemetry;
+}) {
+  if (!supabaseAdmin) throw new Error('checkpoint_persistence_failed');
+  const updatedAt = new Date().toISOString();
+  const { data: authorizationRows, error: authorizationError } = await supabaseAdmin
+    .from(CANARY_AUTHORIZATION_TABLE)
+    .update({
+      telemetry: directorOperationalTelemetry(input.telemetry, null, undefined, {
+        checkpoint: input.checkpoint,
+      }),
+      updated_at: updatedAt,
+    })
+    .eq('id', input.authorizationId)
+    .eq('authorization_mode', DIRECTOR_VIDEO_RECOVERY_MODE)
+    .eq('status', 'running')
+    .select('id');
+  if (authorizationError || authorizationRows?.length !== 1) {
+    throw new Error('checkpoint_persistence_failed');
+  }
+
+  const { data: job, error: jobReadError } = await supabaseAdmin
+    .from('generation_jobs')
+    .select('scene_metadata')
+    .eq('id', input.authorizationId)
+    .eq('status', 'processing')
+    .maybeSingle();
+  if (jobReadError || !job) throw new Error('checkpoint_persistence_failed');
+  const sceneMetadata = job.scene_metadata && typeof job.scene_metadata === 'object'
+    ? job.scene_metadata as Record<string, unknown>
+    : {};
+  const { data: jobRows, error: jobUpdateError } = await supabaseAdmin
+    .from('generation_jobs')
+    .update({
+      scene_metadata: {
+        ...sceneMetadata,
+        executionCheckpoint: input.checkpoint,
+        directorTelemetry: directorOperationalTelemetry(input.telemetry, null, undefined, {
+          checkpoint: input.checkpoint,
+        }),
+      },
+      updated_at: updatedAt,
+    })
+    .eq('id', input.authorizationId)
+    .eq('status', 'processing')
+    .select('id');
+  if (jobUpdateError || jobRows?.length !== 1) {
+    throw new Error('checkpoint_persistence_failed');
+  }
+}
+
+type DirectorVideoRecoveryTerminalFailureInput = {
+  authorizationId: string;
+  jobCreated: boolean;
+  failureCategory: DirectorVideoRecoveryFailureCategory;
+  checkpoint: DirectorVideoRecoveryExecutionCheckpoint;
+  telemetry: DirectorCostTelemetry;
+  providerFailureMetadata?: DirectorProviderSafeFailureMetadata | null;
+  interactionSummaries?: DirectorInteractionSummaries;
+  estimatedCostUsd?: number | null;
+  actualCostUsd?: number | null;
+  safeFailure?: {
+    errorClass: string;
+    reason: DirectorVideoRecoverySafeFailureReason;
+  };
+};
+
+async function terminalizeRecoveryExecutionFailure(
+  input: DirectorVideoRecoveryTerminalFailureInput,
+) {
+  if (!supabaseAdmin) throw new Error('terminalization_failed');
+  const telemetry = directorOperationalTelemetry(
+    input.telemetry,
+    input.providerFailureMetadata,
+    input.interactionSummaries,
+    {
+      checkpoint: input.checkpoint,
+      ...(input.safeFailure ? { failure: input.safeFailure } : {}),
+    },
+  );
+  const { data, error } = await supabaseAdmin.rpc(
+    'terminalize_director_video_recovery_execution',
+    {
+      p_authorization_id: input.authorizationId,
+      p_failure_category: input.failureCategory,
+      p_checkpoint: input.checkpoint,
+      p_failure_reason: input.safeFailure?.reason ?? null,
+      p_error_class: input.safeFailure?.errorClass ?? null,
+      p_telemetry: telemetry,
+      p_estimated_cost_usd: input.estimatedCostUsd ?? null,
+      p_actual_cost_usd: input.actualCostUsd ?? null,
+      p_job_created: input.jobCreated,
+    },
+  );
+  if (!error && data === true) return;
+
+  const completedAt = new Date().toISOString();
+  const { data: authorizationRows, error: authorizationError } = await supabaseAdmin
+    .from(CANARY_AUTHORIZATION_TABLE)
+    .update({
+      status: 'failed',
+      failure_category: input.failureCategory,
+      telemetry,
+      estimated_cost_usd: input.estimatedCostUsd ?? null,
+      actual_cost_usd: input.actualCostUsd ?? null,
+      completed_at: completedAt,
+      updated_at: completedAt,
+    })
+    .eq('id', input.authorizationId)
+    .eq('authorization_mode', DIRECTOR_VIDEO_RECOVERY_MODE)
+    .eq('status', 'running')
+    .select('id');
+  if (authorizationError || authorizationRows?.length !== 1) {
+    throw new Error('terminalization_failed');
+  }
+  if (!input.jobCreated) return;
+
+  const { data: job, error: jobReadError } = await supabaseAdmin
+    .from('generation_jobs')
+    .select('scene_metadata')
+    .eq('id', input.authorizationId)
+    .in('status', ['processing', 'completed'])
+    .maybeSingle();
+  if (jobReadError || !job) throw new Error('terminalization_failed');
+  const sceneMetadata = job.scene_metadata && typeof job.scene_metadata === 'object'
+    ? job.scene_metadata as Record<string, unknown>
+    : {};
+  const { data: jobRows, error: jobUpdateError } = await supabaseAdmin
+    .from('generation_jobs')
+    .update({
+      status: 'failed',
+      error_category: input.failureCategory,
+      scene_metadata: {
+        ...sceneMetadata,
+        directorTelemetry: telemetry,
+        executionCheckpoint: input.checkpoint,
+        ...(input.safeFailure ? { executionFailure: input.safeFailure } : {}),
+      },
+      completed_at: completedAt,
+      updated_at: completedAt,
+    })
+    .eq('id', input.authorizationId)
+    .in('status', ['processing', 'completed'])
+    .select('id');
+  if (jobUpdateError || jobRows?.length !== 1) throw new Error('terminalization_failed');
+}
+
+export type DirectorVideoRecoveryExecutionRuntime = {
+  projectedVideoCostUsd(): number;
+  createExecutionJob(
+    authorization: DirectorVideoRecoveryAuthorization,
+    plan: DirectorPlan,
+  ): Promise<void>;
+  persistCheckpoint(input: {
+    authorizationId: string;
+    checkpoint: DirectorVideoRecoveryExecutionCheckpoint;
+    telemetry: DirectorCostTelemetry;
+  }): Promise<void>;
+  runSequence(input: {
+    apiKey: string;
+    authorization: DirectorVideoRecoveryAuthorization;
+    plan: DirectorPlan;
+    recordCheckpoint(
+      checkpoint: DirectorVideoRecoveryExecutionCheckpoint,
+      telemetry: DirectorCostTelemetry,
+    ): Promise<void>;
+  }): Promise<DirectorVideoRecoveryResult>;
+  terminalizeFailure(input: DirectorVideoRecoveryTerminalFailureInput): Promise<void>;
+};
+
+const productionVideoRecoveryRuntime: DirectorVideoRecoveryExecutionRuntime = {
+  projectedVideoCostUsd: () => DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD,
+  createExecutionJob,
+  persistCheckpoint: persistRecoveryExecutionCheckpoint,
+  runSequence: (input) => runDirectorVideoRecoverySequence({
+    apiKey: input.apiKey,
+    authorization: input.authorization,
+    plan: input.plan,
+    dependencies: {
+      loadStoredAnchor: () => loadStoredRecoveryAnchor(input.authorization),
+      runVideo: omniFlashAdapter.execute,
+      resolveMediaBytes: (output) => resolveProviderMediaBytes(output, input.apiKey),
+      recordCheckpoint: input.recordCheckpoint,
+    },
+  }),
+  terminalizeFailure: terminalizeRecoveryExecutionFailure,
+};
+
+async function completeRecoveryExecution(input: {
+  authorizationId: string;
+  telemetry: DirectorCostTelemetry;
+  interactionSummaries: DirectorInteractionSummaries;
+  projectId: string;
+  videoUrl: string;
+  estimatedCostUsd: number;
+  actualCostUsd: number | null;
+}) {
+  if (!supabaseAdmin) throw new Error('persistence_failed');
+  const completedAt = new Date().toISOString();
+  const { data: job, error: jobReadError } = await supabaseAdmin
+    .from('generation_jobs')
+    .select('scene_metadata')
+    .eq('id', input.authorizationId)
+    .eq('status', 'processing')
+    .maybeSingle();
+  if (jobReadError || !job) throw new Error('persistence_failed');
+  const sceneMetadata: Record<string, unknown> = mergeDirectorCanaryJobInteractionTelemetry(
+    job.scene_metadata,
+    input.interactionSummaries,
+    input.telemetry,
+  );
+  sceneMetadata.executionCheckpoint = 'draft_saved';
+  const { data: jobRows, error: jobUpdateError } = await supabaseAdmin
+    .from('generation_jobs')
+    .update({
+      status: 'completed',
+      project_id: input.projectId,
+      result_asset_url: input.videoUrl,
+      output_url: input.videoUrl,
+      video_url: input.videoUrl,
+      error_category: null,
+      scene_metadata: sceneMetadata,
+      completed_at: completedAt,
+      updated_at: completedAt,
+    })
+    .eq('id', input.authorizationId)
+    .eq('status', 'processing')
+    .select('id');
+  if (jobUpdateError || jobRows?.length !== 1) throw new Error('persistence_failed');
+
+  const { data: authorizationRows, error: authorizationError } = await supabaseAdmin
+    .from(CANARY_AUTHORIZATION_TABLE)
+    .update({
+      status: 'completed',
+      telemetry: directorOperationalTelemetry(
+        input.telemetry,
+        null,
+        input.interactionSummaries,
+        { checkpoint: 'draft_saved' },
+      ),
+      failure_category: null,
+      result_project_id: input.projectId,
+      estimated_cost_usd: input.estimatedCostUsd,
+      actual_cost_usd: input.actualCostUsd,
+      completed_at: completedAt,
+      updated_at: completedAt,
+    })
+    .eq('id', input.authorizationId)
+    .eq('authorization_mode', DIRECTOR_VIDEO_RECOVERY_MODE)
+    .eq('status', 'running')
+    .select('id');
+  if (authorizationError || authorizationRows?.length !== 1) {
+    throw new Error('persistence_failed');
+  }
 }
 
 async function persistProject(input: {
@@ -1221,25 +1533,15 @@ export async function executeProductionDirectorCanary(input: {
       anchorUrl,
       videoUrl,
     });
-    await Promise.all([
-      updateAuthorization({
-        authorizationId: authorization.id,
-        status: 'completed',
-        telemetry: sequence.telemetry,
-        interactionSummaries: sequence.interactionSummaries,
-        projectId,
-        estimatedCostUsd: sequence.estimatedCostUsd,
-        actualCostUsd: sequence.actualCostUsd,
-      }),
-      updateExecutionJob({
-        authorizationId: authorization.id,
-        status: 'completed',
-        telemetry: sequence.telemetry,
-        interactionSummaries: sequence.interactionSummaries,
-        projectId,
-        videoUrl,
-      }),
-    ]);
+    await completeRecoveryExecution({
+      authorizationId: authorization.id,
+      telemetry: sequence.telemetry,
+      interactionSummaries: sequence.interactionSummaries,
+      projectId,
+      videoUrl,
+      estimatedCostUsd: sequence.estimatedCostUsd,
+      actualCostUsd: sequence.actualCostUsd,
+    });
     return {
       httpStatus: 200,
       publicResult: {
@@ -1328,12 +1630,14 @@ export async function executeProductionDirectorVideoRecoveryCanary(input: {
   authorizationId: string;
   idempotencyKey: string;
   authorizationStore?: DirectorAuthorizationClaimStore;
+  runtime?: DirectorVideoRecoveryExecutionRuntime;
 }): Promise<ProductionDirectorCanaryExecution> {
   const plan = buildDirectorProductionDryRun(DIRECTOR_CANARY_SCENE).plan;
-  const emptyTelemetry = createDirectorCostTelemetry();
+  let telemetry = createDirectorCostTelemetry();
+  const runtime = input.runtime ?? productionVideoRecoveryRuntime;
   if (
-    !supabaseAdmin ||
-    !env.GOOGLE_API_KEY ||
+    (!supabaseAdmin && !input.runtime) ||
+    (!env.GOOGLE_API_KEY && !input.runtime) ||
     !input.authorizationId.trim() ||
     !input.idempotencyKey.trim()
   ) {
@@ -1381,80 +1685,101 @@ export async function executeProductionDirectorVideoRecoveryCanary(input: {
 
   const authorization = recoveryAuthorizationFromRow(claim.row);
   if (!authorization) {
+    await runtime.terminalizeFailure({
+      authorizationId: claim.row.id,
+      jobCreated: false,
+      failureCategory: 'authorization_invalid',
+      checkpoint: 'authorization_claimed',
+      telemetry,
+    }).catch(() => undefined);
     return failedExecution({ authorizationState: 'claimed', failureCategory: 'authorization_invalid', plan });
   }
-  if (DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD > authorization.maximumCostUsd) {
-    await updateAuthorization({
-      authorizationId: authorization.id,
-      status: 'failed',
-      telemetry: emptyTelemetry,
-      failureCategory: 'budget_guard',
-      estimatedCostUsd: DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD,
-    });
-    return failedExecution({
-      authorizationState: 'claimed',
-      failureCategory: 'budget_guard',
-      plan,
-      estimatedCostUsd: DIRECTOR_CANARY_PROJECTED_VIDEO_COST_USD,
-    });
-  }
-
+  let checkpoint: DirectorVideoRecoveryExecutionCheckpoint = 'authorization_claimed';
+  let jobCreated = false;
   try {
-    await createExecutionJob(authorization, plan);
-  } catch {
-    await updateAuthorization({
+    await runtime.createExecutionJob(authorization, plan);
+    jobCreated = true;
+    checkpoint = 'job_created';
+    await runtime.persistCheckpoint({
       authorizationId: authorization.id,
-      status: 'failed',
-      telemetry: emptyTelemetry,
-      failureCategory: 'persistence_failed',
+      checkpoint,
+      telemetry,
     });
-    return failedExecution({ authorizationState: 'claimed', failureCategory: 'persistence_failed', plan });
-  }
 
-  const sequence = await runDirectorVideoRecoverySequence({
-    apiKey: env.GOOGLE_API_KEY,
-    authorization,
-    plan,
-    dependencies: {
-      loadStoredAnchor: () => loadStoredRecoveryAnchor(authorization),
-      runVideo: omniFlashAdapter.execute,
-      resolveMediaBytes: (output) => resolveProviderMediaBytes(output, env.GOOGLE_API_KEY as string),
-    },
-  });
-
-  if (sequence.ok === false) {
-    await Promise.all([
-      updateAuthorization({
+    const projectedVideoCostUsd = runtime.projectedVideoCostUsd();
+    if (!Number.isFinite(projectedVideoCostUsd) || projectedVideoCostUsd < 0) {
+      throw new ReferenceError('invalid_runtime_cost_symbol');
+    }
+    if (projectedVideoCostUsd > authorization.maximumCostUsd) {
+      await runtime.terminalizeFailure({
         authorizationId: authorization.id,
-        status: 'failed',
-        telemetry: sequence.telemetry,
+        jobCreated,
+        failureCategory: 'budget_guard',
+        checkpoint,
+        telemetry,
+        estimatedCostUsd: projectedVideoCostUsd,
+      });
+      return failedExecution({
+        authorizationState: 'claimed',
+        failureCategory: 'budget_guard',
+        telemetry,
+        plan,
+        estimatedCostUsd: projectedVideoCostUsd,
+      });
+    }
+
+    checkpoint = 'budget_validated';
+    await runtime.persistCheckpoint({
+      authorizationId: authorization.id,
+      checkpoint,
+      telemetry,
+    });
+    checkpoint = 'anchor_loading';
+    await runtime.persistCheckpoint({
+      authorizationId: authorization.id,
+      checkpoint,
+      telemetry,
+    });
+
+    const sequence = await runtime.runSequence({
+      apiKey: env.GOOGLE_API_KEY ?? 'local-runtime-test-placeholder',
+      authorization,
+      plan,
+      recordCheckpoint: async (nextCheckpoint, nextTelemetry) => {
+        checkpoint = nextCheckpoint;
+        telemetry = nextTelemetry;
+        await runtime.persistCheckpoint({
+          authorizationId: authorization.id,
+          checkpoint,
+          telemetry,
+        });
+      },
+    });
+    telemetry = sequence.telemetry;
+
+    if (sequence.ok === false) {
+      await runtime.terminalizeFailure({
+        authorizationId: authorization.id,
+        jobCreated,
+        failureCategory: sequence.failureCategory,
+        checkpoint,
+        telemetry,
         providerFailureMetadata: sequence.providerFailureMetadata,
         interactionSummaries: sequence.interactionSummaries,
-        failureCategory: sequence.failureCategory,
         estimatedCostUsd: sequence.estimatedCostUsd,
         actualCostUsd: sequence.actualCostUsd,
-      }),
-      updateExecutionJob({
-        authorizationId: authorization.id,
-        status: 'failed',
-        telemetry: sequence.telemetry,
-        providerFailureMetadata: sequence.providerFailureMetadata,
-        interactionSummaries: sequence.interactionSummaries,
+      });
+      return failedExecution({
+        authorizationState: 'claimed',
         failureCategory: sequence.failureCategory,
-      }),
-    ]);
-    return failedExecution({
-      authorizationState: 'claimed',
-      failureCategory: sequence.failureCategory,
-      telemetry: sequence.telemetry,
-      plan,
-      anchorSucceeded: sequence.anchorSuccess,
-      estimatedCostUsd: sequence.estimatedCostUsd,
-      actualCostUsd: sequence.actualCostUsd,
-    });
-  }
+        telemetry,
+        plan,
+        anchorSucceeded: sequence.anchorSuccess,
+        estimatedCostUsd: sequence.estimatedCostUsd,
+        actualCostUsd: sequence.actualCostUsd,
+      });
+    }
 
-  try {
     const frontReference = await loadFrontReference(input.userId);
     const anchorUrl = supabaseAdmin.storage
       .from(sequence.storedAnchor.storageBucket)
@@ -1468,6 +1793,12 @@ export async function executeProductionDirectorVideoRecoveryCanary(input: {
       bytes: sequence.videoBytes,
       contentType: sequence.videoMimeType,
     });
+    checkpoint = 'video_persisted';
+    await runtime.persistCheckpoint({
+      authorizationId: authorization.id,
+      checkpoint,
+      telemetry,
+    });
     if (sequence.interactionSummaries.primaryVideo) {
       sequence.interactionSummaries.primaryVideo.storageSucceeded = true;
     }
@@ -1478,6 +1809,12 @@ export async function executeProductionDirectorVideoRecoveryCanary(input: {
       publicCaption: plan.publicCaption,
       anchorUrl,
       videoUrl,
+    });
+    checkpoint = 'draft_saved';
+    await runtime.persistCheckpoint({
+      authorizationId: authorization.id,
+      checkpoint,
+      telemetry,
     });
     await Promise.all([
       updateAuthorization({
@@ -1514,33 +1851,32 @@ export async function executeProductionDirectorVideoRecoveryCanary(input: {
         actualCostUsd: sequence.actualCostUsd,
       }),
     };
-  } catch {
-    await Promise.all([
-      updateAuthorization({
+  } catch (error) {
+    const isPersistenceFailure = error instanceof Error && error.message === 'persistence_failed';
+    const safeReason: DirectorVideoRecoverySafeFailureReason = !jobCreated
+      ? 'job_creation_failed'
+      : error instanceof Error && error.message === 'checkpoint_persistence_failed'
+        ? 'checkpoint_persistence_failed'
+        : 'unexpected_execution_failure';
+    const failureCategory: DirectorVideoRecoveryFailureCategory = isPersistenceFailure
+      ? 'persistence_failed'
+      : 'internal_execution_failed';
+    await runtime.terminalizeFailure({
         authorizationId: authorization.id,
-        status: 'failed',
-        telemetry: sequence.telemetry,
-        interactionSummaries: sequence.interactionSummaries,
-        failureCategory: 'persistence_failed',
-        estimatedCostUsd: sequence.estimatedCostUsd,
-        actualCostUsd: sequence.actualCostUsd,
-      }),
-      updateExecutionJob({
-        authorizationId: authorization.id,
-        status: 'failed',
-        telemetry: sequence.telemetry,
-        interactionSummaries: sequence.interactionSummaries,
-        failureCategory: 'persistence_failed',
-      }),
-    ]);
+        jobCreated,
+        failureCategory,
+        checkpoint,
+        telemetry,
+        safeFailure: {
+          errorClass: safeDirectorRecoveryErrorClass(error),
+          reason: safeReason,
+        },
+      }).catch(() => undefined);
     return failedExecution({
       authorizationState: 'claimed',
-      failureCategory: 'persistence_failed',
-      telemetry: sequence.telemetry,
+      failureCategory,
+      telemetry,
       plan,
-      anchorSucceeded: true,
-      estimatedCostUsd: sequence.estimatedCostUsd,
-      actualCostUsd: sequence.actualCostUsd,
     });
   }
 }
