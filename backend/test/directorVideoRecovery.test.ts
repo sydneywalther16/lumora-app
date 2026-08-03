@@ -615,11 +615,11 @@ assert.match(
   orphanRepairMigration,
   /claim_director_video_recovery_authorization[\s\S]*'executionCheckpoint', 'authorization_claimed'/,
 );
-assert.match(orphanRepairMigration, /where authorization\.id = p_authorization_id/);
+assert.match(orphanRepairMigration, /where target_authorization\.id = p_authorization_id/);
 assert.match(orphanRepairMigration, /authorization_mode = 'director_video_recovery_canary'/);
-assert.match(orphanRepairMigration, /authorization\.status = 'running'/);
-assert.match(orphanRepairMigration, /authorization\.expires_at <= now\(\)/);
-assert.match(orphanRepairMigration, /authorization\.consumed_at is not null/);
+assert.match(orphanRepairMigration, /target_authorization\.status = 'running'/);
+assert.match(orphanRepairMigration, /target_authorization\.expires_at <= now\(\)/);
+assert.match(orphanRepairMigration, /target_authorization\.consumed_at is not null/);
 assert.match(orphanRepairMigration, /maximum_cost_usd = 1/);
 assert.match(orphanRepairMigration, /maximum_anchor_requests = 0/);
 assert.match(orphanRepairMigration, /maximum_video_requests = 1/);

@@ -200,11 +200,11 @@ as $$
 declare
   repaired_count integer := 0;
 begin
-  update public.director_canary_authorizations as authorization
+  update public.director_canary_authorizations as target_authorization
   set
     status = 'failed',
     failure_category = 'internal_execution_failed',
-    telemetry = coalesce(authorization.telemetry, '{}'::jsonb)
+    telemetry = coalesce(target_authorization.telemetry, '{}'::jsonb)
       || jsonb_build_object(
         'providerRequestCount', 0,
         'providerRetryCount', 0,
@@ -220,34 +220,34 @@ begin
     actual_cost_usd = null,
     completed_at = now(),
     updated_at = now()
-  where authorization.id = p_authorization_id
-    and authorization.authorization_mode = 'director_video_recovery_canary'
-    and authorization.status = 'running'
-    and authorization.expires_at <= now()
-    and authorization.consumed_at is not null
-    and authorization.maximum_cost_usd = 1
-    and authorization.maximum_anchor_requests = 0
-    and authorization.maximum_video_requests = 1
-    and authorization.maximum_retry_requests = 0
-    and authorization.maximum_fallback_requests = 0
-    and authorization.maximum_repair_requests = 0
-    and authorization.result_project_id is null
-    and jsonb_typeof(coalesce(authorization.telemetry, '{}'::jsonb)) = 'object'
-    and coalesce(authorization.telemetry ->> 'providerRequestCount', '0') = '0'
-    and coalesce(authorization.telemetry ->> 'providerRetryCount', '0') = '0'
-    and coalesce(authorization.telemetry ->> 'providerFallbackCount', '0') = '0'
-    and coalesce(authorization.telemetry ->> 'repairRequestCount', '0') = '0'
+  where target_authorization.id = p_authorization_id
+    and target_authorization.authorization_mode = 'director_video_recovery_canary'
+    and target_authorization.status = 'running'
+    and target_authorization.expires_at <= now()
+    and target_authorization.consumed_at is not null
+    and target_authorization.maximum_cost_usd = 1
+    and target_authorization.maximum_anchor_requests = 0
+    and target_authorization.maximum_video_requests = 1
+    and target_authorization.maximum_retry_requests = 0
+    and target_authorization.maximum_fallback_requests = 0
+    and target_authorization.maximum_repair_requests = 0
+    and target_authorization.result_project_id is null
+    and jsonb_typeof(coalesce(target_authorization.telemetry, '{}'::jsonb)) = 'object'
+    and coalesce(target_authorization.telemetry ->> 'providerRequestCount', '0') = '0'
+    and coalesce(target_authorization.telemetry ->> 'providerRetryCount', '0') = '0'
+    and coalesce(target_authorization.telemetry ->> 'providerFallbackCount', '0') = '0'
+    and coalesce(target_authorization.telemetry ->> 'repairRequestCount', '0') = '0'
     and not exists (
       select 1
       from public.generation_jobs as job
-      where job.id = authorization.id
+      where job.id = target_authorization.id
     )
     and not exists (
       select 1
       from storage.objects as object
       where object.bucket_id = 'generated-videos'
         and object.name like (
-          authorization.user_id::text || '/director/' || authorization.id::text || '/%'
+          target_authorization.user_id::text || '/director/' || target_authorization.id::text || '/%'
         )
     );
   get diagnostics repaired_count = row_count;
